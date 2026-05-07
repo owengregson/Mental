@@ -26,10 +26,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK 21 (Temurin)
+      - name: Set up JDK 25 (Temurin)
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '25'
           distribution: 'temurin'
           cache: 'maven'
 
@@ -59,7 +59,7 @@ jobs:
             echo 'notes<<EOF'
             echo "## StrikeSync ${{ steps.tag.outputs.name }}"
             echo
-            echo '**Build:** Java 21, Paper 26.1.2, PacketEvents 2.12.1.'
+            echo '**Build:** Java 25, Paper 26.1.2, PacketEvents 2.12.1.'
             echo
             echo '### Install'
             echo

@@ -2,7 +2,7 @@
 
 > Asynchronous, latency-compensated hit-registration and knockback for modern Minecraft.
 
-[![Java](https://img.shields.io/badge/Java-21+-orange?style=flat-square)](https://adoptium.net/)
+[![Java](https://img.shields.io/badge/Java-25+-orange?style=flat-square)](https://adoptium.net/)
 [![Paper](https://img.shields.io/badge/Paper-26.1.2-blue?style=flat-square)](https://papermc.io/)
 [![PacketEvents](https://img.shields.io/badge/PacketEvents-2.12.1-purple?style=flat-square)](https://github.com/retrooper/packetevents)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
@@ -30,7 +30,7 @@ For the byte-level pipeline analysis, see [FAST_PATH.md](FAST_PATH.md).
 | Component    | Version                                 |
 | ------------ | --------------------------------------- |
 | Paper        | `1.21.x` matching `api-version: 26.1.2` |
-| Java         | 21+                                     |
+| Java         | 25+                                     |
 | PacketEvents | `2.12.1` (installed as its own plugin)  |
 
 ## Install
