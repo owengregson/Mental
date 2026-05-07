@@ -10,10 +10,11 @@ import org.bukkit.configuration.ConfigurationSection;
  * @param fastPath             when true, the async listener cancels the vanilla packet and applies the
  *                             hit through the plugin's fast pipeline. When false, validation runs but
  *                             vanilla still owns damage application.
- * @param preSendVelocity      when true (and {@code fastPath} is true), the async listener computes
- *                             the knockback vector from the per-tick state cache and sends a velocity
- *                             packet to the victim directly from the netty thread, before main-thread
- *                             damage runs. This is the headline latency win.
+ * @param preSendFeedback      when true (and {@code fastPath} is true), the async listener computes
+ *                             the knockback vector from the per-tick state cache and sends both the
+ *                             velocity packet and the hurt-animation packet to the relevant clients
+ *                             directly from the netty thread, before main-thread damage runs. This
+ *                             is the headline latency win.
  * @param simulateCrits        when true, the fast-path damage applier multiplies damage by 1.5 when
  *                             the attacker satisfies the 1.8 critical-hit conditions (falling, not
  *                             sprinting, not in water, etc.).
@@ -25,7 +26,7 @@ public record HitRegSettings(
         boolean enabled,
         int maxCps,
         boolean fastPath,
-        boolean preSendVelocity,
+        boolean preSendFeedback,
         boolean simulateCrits,
         boolean resetAttackCooldown) {
 
@@ -33,10 +34,14 @@ public record HitRegSettings(
         boolean enabled = section.getBoolean("enabled", true);
         int maxCps = Math.max(0, section.getInt("max-cps", 20));
         boolean fastPath = section.getBoolean("fast-path.enabled", true);
-        boolean preSendVelocity = section.getBoolean("fast-path.pre-send-velocity", false);
+        // Accept the legacy `pre-send-velocity` key for one release as a fallback,
+        // so users upgrading from the dev v4.0.0 don't lose their tuning.
+        boolean preSendFeedback = section.getBoolean(
+                "fast-path.pre-send-feedback",
+                section.getBoolean("fast-path.pre-send-velocity", false));
         boolean simulateCrits = section.getBoolean("fast-path.simulate-crits", true);
         boolean resetAttackCooldown = section.getBoolean("fast-path.reset-attack-cooldown", true);
-        return new HitRegSettings(enabled, maxCps, fastPath, preSendVelocity, simulateCrits, resetAttackCooldown);
+        return new HitRegSettings(enabled, maxCps, fastPath, preSendFeedback, simulateCrits, resetAttackCooldown);
     }
 
     public boolean rateLimited() {

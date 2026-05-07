@@ -39,26 +39,34 @@ async-hitreg:
         enabled: true
 
         # When true (and fast-path is on), the async listener computes the
-        # knockback vector from the per-tick player state cache and ships a
-        # WrapperPlayServerEntityVelocity packet to the victim DIRECTLY from
-        # the netty thread, before main-thread damage runs.
+        # knockback vector from the per-tick player state cache and ships
+        # BOTH the velocity packet and the hurt-animation packet directly
+        # from the netty thread, before main-thread damage runs.
         #
-        # This is the headline latency win. Vanilla bundles outbound velocity
-        # to the next entity-tracker pulse (default: every 2 ticks for
-        # players), so a victim normally sees their knockback ~50–100 ms
-        # after the click hits the server. Pre-sending shaves that to ~RTT.
+        # Specifically:
+        #   - WrapperPlayServerEntityVelocity → sent to the victim
+        #   - WrapperPlayServerHurtAnimation  → sent to victim + attacker
+        #
+        # This is the headline latency win. Vanilla bundles both to the next
+        # entity-tracker pulse (default: every 2 ticks for players), so a
+        # victim normally sees their knockback and the red-flash/screen-shake
+        # ~50–100 ms after the click hits the server. Pre-sending shaves that
+        # to ~RTT.
         #
         # Caveat: the async vector is computed from tick-stale state (≤ 50 ms
         # old). When the main-thread vanilla path then computes its own
-        # knockback, the entity tracker emits a second velocity packet on the
-        # next tick. If the two values match (the common case), the second
-        # packet is a visual no-op. If they diverge (rare; happens mostly
-        # when latency compensation kicks in late), the client sees a small
-        # corrective movement.
+        # knockback, the entity tracker emits a second velocity packet on
+        # the next tick. If the two values match (the common case), the
+        # second packet is a visual no-op. If they diverge (rare; happens
+        # mostly when latency compensation kicks in late), the client sees
+        # a small corrective movement.
         #
         # Off by default. Turn on for competitive PvP servers where the
         # latency win matters and the tiny correction risk is acceptable.
-        pre-send-velocity: false
+        #
+        # Note: the legacy key `pre-send-velocity` is still read as a
+        # fallback for one release — `pre-send-feedback` takes precedence.
+        pre-send-feedback: false
 
         # When true, the fast-path damage applier multiplies damage by 1.5
         # if the attacker satisfies the 1.8 critical-hit conditions

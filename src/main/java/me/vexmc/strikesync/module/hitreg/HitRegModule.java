@@ -115,8 +115,8 @@ public final class HitRegModule implements Module, Listener {
         handle = PacketEvents.getAPI().getEventManager().registerListener(
                 listener, PacketListenerPriority.NORMAL);
         service.log().info("Async hit registration started (fast-path: "
-                + service.config().hitReg().fastPath() + ", pre-send-velocity: "
-                + service.config().hitReg().preSendVelocity() + ").");
+                + service.config().hitReg().fastPath() + ", pre-send-feedback: "
+                + service.config().hitReg().preSendFeedback() + ").");
     }
 
     private void stopHandler() {

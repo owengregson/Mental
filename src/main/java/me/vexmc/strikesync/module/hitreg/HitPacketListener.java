@@ -122,10 +122,12 @@ final class HitPacketListener implements PacketListener {
             if (settings.fastPath()) {
                 event.setCancelled(true);
 
-                // Headline latency win: emit the velocity packet now, from the netty
-                // thread. Skips the next-tick wait + tracker pulse (~50–100 ms saved).
-                if (settings.preSendVelocity() && damageable instanceof Player victim) {
-                    preSendVelocity(attacker, victim);
+                // Headline latency win: emit the velocity AND hurt-animation
+                // packets now, from the netty thread. Skips the next-tick wait
+                // and the tracker pulse (~50–100 ms saved on both feedback
+                // signals).
+                if (settings.preSendFeedback() && damageable instanceof Player victim) {
+                    preSendCombatFeedback(attacker, victim);
                 }
 
                 // Damage is still applied on the target's owning thread for correctness.
@@ -145,12 +147,25 @@ final class HitPacketListener implements PacketListener {
     /* ----------------------------- helpers ----------------------------- */
 
     /**
-     * Compute the knockback vector from cached state and ship the resulting
-     * velocity packet directly to the victim. Skipped if either party is
-     * missing from the cache (just-joined player, etc.) — in that case the
-     * main-thread path will still produce the correct knockback at next tick.
+     * Compute the knockback vector from cached state and ship both the
+     * velocity packet and the hurt-animation packet directly from the netty
+     * thread. Skipped if either party is missing from the cache (just-joined
+     * player, etc.) — in that case the main-thread path will still produce
+     * the correct knockback + animation at the next tracker tick.
+     *
+     * <h2>Recipient choices</h2>
+     * <ul>
+     *   <li>Velocity: sent to the <em>victim</em> only. The victim's client
+     *       drives their own physics; nearby viewers receive the corrected
+     *       position from the next entity-tracker pulse anyway.</li>
+     *   <li>Hurt animation: sent to <em>both</em> the victim (so they see the
+     *       screen-shake / red-flash immediately) and the attacker (so they
+     *       see the target flinch immediately, which is the dominant
+     *       hit-confirmation cue in PvP). Other nearby viewers see it on the
+     *       next tracker pulse, same as today.</li>
+     * </ul>
      */
-    private void preSendVelocity(Player attacker, Player victim) {
+    private void preSendCombatFeedback(Player attacker, Player victim) {
         KnockbackSettings ks = service.config().knockback();
         if (!ks.enabled()) return;
 
@@ -160,6 +175,13 @@ final class HitPacketListener implements PacketListener {
 
         KnockbackVector vector = KnockbackEngine.computeFromCache(attSnap, vicSnap, ks, null);
         AsyncVelocitySender.send(victim, vicSnap.entityId(), vector.toBukkit());
+
+        float hurtYaw = AsyncHurtSender.computeHurtYaw(
+                attSnap.x(), attSnap.z(),
+                vicSnap.x(), vicSnap.z(),
+                vicSnap.yaw());
+        AsyncHurtSender.send(victim, vicSnap.entityId(), hurtYaw);
+        AsyncHurtSender.send(attacker, vicSnap.entityId(), hurtYaw);
     }
 
     private static boolean isAttackable(Player attacker, Damageable target) {
