@@ -7,7 +7,7 @@
 
     <groupId>me.vexmc</groupId>
     <artifactId>StrikeSync</artifactId>
-    <version>3.0.0</version>
+    <version>4.0.0</version>
     <packaging>jar</packaging>
 
     <name>StrikeSync</name>

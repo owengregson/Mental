@@ -5,13 +5,16 @@
 # |       ___) | |_| |  | |   <  __/___) | |_| | | | | (__       |
 # |      |____/ \__|_|  |_|_|\_\___|____/ \__, |_| |_|\___|      |
 # |                                       |___/                  |
-# |           v3.0 — by @owengregson                             |
+# |           v${project.version} — by @owengregson                                |
 # |--------------------------------------------------------------|
 #
-# StrikeSync intercepts player attack packets on an async PacketEvents
-# worker thread, optionally rate-limits them, fires AsyncHitRegisterEvents
-# so other plugins can cancel hits early, and applies an opt-in 1.8-style
-# knockback profile.
+# StrikeSync intercepts player attack packets on a PacketEvents netty
+# event-loop thread. With the fast path enabled (default), the plugin owns
+# the hit pipeline end-to-end: cancellable async event hook, rate limiting,
+# and damage application via the entity scheduler. The optional async
+# velocity pre-send delivers the headline latency win by shipping a
+# WrapperPlayServerEntityVelocity packet directly from the netty thread,
+# skipping the usual next-tick + entity-tracker delay.
 
 async-hitreg:
     # Master switch for the async hit-registration listener.
@@ -21,66 +24,112 @@ async-hitreg:
     # are dropped at the network level. Set 0 to disable the cap.
     max-cps: 20
 
+    fast-path:
+        # When true, the async listener cancels the original attack packet
+        # and runs the hit through the plugin's own pipeline. Vanilla never
+        # invokes Player#attack; instead StrikeSync calls
+        # `victim.damage(amount, attacker)` on the target's owning thread,
+        # which still drives every Bukkit event chain (EntityDamageByEntityEvent,
+        # PlayerVelocityEvent, hurt sound + animation), but skips vanilla's
+        # main-thread re-validation.
+        #
+        # When false, the listener degrades to a passive observer: validates,
+        # fires AsyncHitRegisterEvent, but lets vanilla apply the hit.
+        # Use false if a downstream plugin is incompatible with the fast path.
+        enabled: true
+
+        # When true (and fast-path is on), the async listener computes the
+        # knockback vector from the per-tick player state cache and ships a
+        # WrapperPlayServerEntityVelocity packet to the victim DIRECTLY from
+        # the netty thread, before main-thread damage runs.
+        #
+        # This is the headline latency win. Vanilla bundles outbound velocity
+        # to the next entity-tracker pulse (default: every 2 ticks for
+        # players), so a victim normally sees their knockback ~50–100 ms
+        # after the click hits the server. Pre-sending shaves that to ~RTT.
+        #
+        # Caveat: the async vector is computed from tick-stale state (≤ 50 ms
+        # old). When the main-thread vanilla path then computes its own
+        # knockback, the entity tracker emits a second velocity packet on the
+        # next tick. If the two values match (the common case), the second
+        # packet is a visual no-op. If they diverge (rare; happens mostly
+        # when latency compensation kicks in late), the client sees a small
+        # corrective movement.
+        #
+        # Off by default. Turn on for competitive PvP servers where the
+        # latency win matters and the tiny correction risk is acceptable.
+        pre-send-velocity: false
+
+        # When true, the fast-path damage applier multiplies damage by 1.5
+        # if the attacker satisfies the 1.8 critical-hit conditions
+        # (falling, not sprinting, not in water, not blind, not in a vehicle,
+        # not in creative).
+        simulate-crits: true
+
+        # When true, the fast-path damage applier resets the attacker's
+        # attack-cooldown attribute after a successful hit, replicating the
+        # final step of vanilla Player#attack. Set false to leave whatever
+        # cooldown state the player had — useful for 1.8-pure servers that
+        # want NO cooldown behavior anywhere.
+        reset-attack-cooldown: true
+
 knockback:
     # Master switch for the knockback module. Note: the module computes
-    # custom knockback synchronously on the main thread (this is a feature
-    # — see KnockbackModule.java for why "async knockback" is unsafe).
+    # custom knockback synchronously on the main thread — see
+    # KnockbackModule.java for why "async knockback" is unsafe.
     enabled: true
 
     base:
-        horizontal: 0.4 # Base horizontal knockback magnitude.
-        vertical: 0.4 # Base vertical bump on hit.
+        horizontal: 0.4   # Base horizontal knockback magnitude.
+        vertical:   0.4   # Base vertical bump on hit.
     extra:
-        horizontal: 0.5 # Per-level multiplier for sprint + Knockback enchant.
-        vertical: 0.1 # Vertical bonus when extras apply.
+        horizontal: 0.5   # Per-level multiplier for sprint + Knockback enchant.
+        vertical:   0.1   # Vertical bonus when extras apply.
     limits:
-        vertical: 0.4 # Max Y velocity. Set <= 0 to disable.
-        horizontal: -1 # Max horizontal velocity. Set <= 0 to disable.
+        vertical:    0.4  # Max Y velocity. Set <= 0 to disable.
+        horizontal: -1    # Max horizontal velocity. Set <= 0 to disable.
     friction:
-        x: 0.5 # How much of the victim's pre-hit X velocity is retained.
+        x: 0.5            # How much of the victim's pre-hit X velocity is retained.
         y: 0.5
         z: 0.5
     modifiers:
-        sprint: 1.0 # Extra-knockback level added when attacker is sprinting.
-        armor-resistance: false # Honor the victim's KNOCKBACK_RESISTANCE attribute.
+        sprint: 1.0              # Extra-knockback level added when attacker is sprinting.
+        armor-resistance: false  # Honor the victim's KNOCKBACK_RESISTANCE attribute.
 
 compensation:
-    # Master switch for latency compensation. When enabled, StrikeSync measures
-    # each combat-tagged player's true RTT via KEEP_ALIVE probes, predicts the
-    # client's vertical state at the moment of impact, and supplies a corrected
-    # victim-Y to the knockback engine BEFORE the engine runs the 1.8 formula.
+    # Master switch for latency compensation. When enabled, RTT is measured
+    # via KEEP_ALIVE probes for combat-tagged players, the client's vertical
+    # state at hit time is predicted, and a corrected victim-Y is supplied
+    # to the knockback engine BEFORE the engine runs the 1.8 formula.
     #
-    # The compensation module never overwrites the engine's output, so your
-    # configured 1.8 feel is preserved 1:1 — high-ping players just stop being
-    # accidentally protected from vertical knockback.
+    # Compensation never overwrites the engine's output; it only corrects
+    # the input, so the configured 1.8 feel is preserved 1:1.
     enabled: true
 
     # Hard offset subtracted from measured RTT before computing compensation
-    # ticks. KnockbackSync's tournament-tested default is 25 ms; lower values
-    # err on the side of trusting the server, higher values err toward trusting
-    # the client.
+    # ticks. KnockbackSync's tournament-tested default is 25 ms.
     ping-offset-ms: 25
 
-    # If (current ping − previous ping) exceeds this, the previous reading is
-    # used. Stops one-shot lag spikes from poisoning a calculation.
+    # If (current ping − previous ping) exceeds this, the previous reading
+    # is used. Stops one-shot lag spikes from poisoning the calculation.
     spike-threshold-ms: 20
 
     # How often to send a ping probe to combat-tagged players, in ticks.
     probe-interval-ticks: 5
 
-    # How long after the last hit a player remains "in combat" (and therefore
-    # gets fast-cadence pings), in ticks.
+    # How long after the last hit a player remains "in combat" (and gets
+    # fast-cadence pings), in ticks.
     combat-timeout-ticks: 30
 
     # Experimental: when the client thinks the victim is airborne, simulate
-    # forward in time from the server's last-known vy to estimate the client's
-    # current vy and use that as the engine override. Off-ground prediction is
-    # heuristic — disable if your server sees odd mid-air bumps.
+    # forward in time from the server's last-known vy and use that as the
+    # engine override. Heuristic — disable if odd mid-air bumps appear.
     off-ground-sync: true
 
 debug:
-    # Enables verbose logs to the server console (and nowhere else).
+    # Verbose logs to the server console (and nowhere else).
     enabled: false
+
 # -----------------------------------------------------------------
 # Knockback math (in order of evaluation):
 #
