@@ -1,6 +1,6 @@
 # StrikeSync
 
-> Asynchronous, latency-compensated 1.8.x PvP for Paper / Minecraft 26.1.
+> Asynchronous, latency-compensated hit-registration and knockback for modern Minecraft.
 
 [![Java](https://img.shields.io/badge/Java-21+-orange?style=flat-square)](https://adoptium.net/)
 [![Paper](https://img.shields.io/badge/Paper-26.1.2-blue?style=flat-square)](https://papermc.io/)
@@ -9,27 +9,29 @@
 
 ---
 
-## Headline feature
+## About
 
 StrikeSync intercepts attack packets on PacketEvents' netty event loop and
 ships the velocity + hurt-animation packets directly from there to the
 relevant clients — skipping the 25–100 ms vanilla normally spends queueing
 the hit through the main thread and waiting for the next entity-tracker
-pulse. Damage itself still flows through Bukkit's normal event chain so
+pulse.
+
+Damage itself still flows through Bukkit's normal event chain so
 existing plugins keep working.
 
-Round it out with a configurable 1.8-style knockback engine and per-player
-ping-aware vertical-knockback compensation, and that's the plugin.
+Also includes a ported version of 1.8-style knockback calculations and per-player
+ping-aware vertical-knockback compensation.
 
 For the byte-level pipeline analysis, see [FAST_PATH.md](FAST_PATH.md).
 
 ## Requirements
 
-| Component    | Version                                |
-| ------------ | -------------------------------------- |
-| Paper        | `1.21.x` matching `api-version: 26.1.2`|
-| Java         | 21+                                    |
-| PacketEvents | `2.12.1` (installed as its own plugin) |
+| Component    | Version                                 |
+| ------------ | --------------------------------------- |
+| Paper        | `1.21.x` matching `api-version: 26.1.2` |
+| Java         | 21+                                     |
+| PacketEvents | `2.12.1` (installed as its own plugin)  |
 
 ## Install
 
@@ -47,15 +49,15 @@ mvn clean package    # → target/StrikeSync-4.0.0.jar
 
 ## Commands
 
-| Command                                      | Permission                        | Description                                |
-| -------------------------------------------- | --------------------------------- | ------------------------------------------ |
-| `/ss help`                                   | `strikesync.command.use`          | Show command list                          |
-| `/ss authors`                                | `strikesync.command.use`          | Plugin authors                             |
-| `/ss reload`                                 | `strikesync.command.reload`       | Reload config & bounce modules             |
-| `/ss toggle`                                 | `strikesync.command.toggle`       | Toggle async hit registration              |
-| `/ss knockback <enable\|disable\|status>`    | `strikesync.command.knockback`    | Manage 1.8-style knockback module          |
-| `/ss compensation <enable\|disable\|status>` | `strikesync.command.compensation` | Manage latency compensation                |
-| `/ss ping [player]`                          | `strikesync.command.ping`         | RTT, jitter, spike state                   |
+| Command                                      | Permission                        | Description                       |
+| -------------------------------------------- | --------------------------------- | --------------------------------- |
+| `/ss help`                                   | `strikesync.command.use`          | Show command list                 |
+| `/ss authors`                                | `strikesync.command.use`          | Plugin authors                    |
+| `/ss reload`                                 | `strikesync.command.reload`       | Reload config & bounce modules    |
+| `/ss toggle`                                 | `strikesync.command.toggle`       | Toggle async hit registration     |
+| `/ss knockback <enable\|disable\|status>`    | `strikesync.command.knockback`    | Manage 1.8-style knockback module |
+| `/ss compensation <enable\|disable\|status>` | `strikesync.command.compensation` | Manage latency compensation       |
+| `/ss ping [player]`                          | `strikesync.command.ping`         | RTT, jitter, spike state          |
 
 Alias: `/strikesync` ↔ `/ss`. Tab completion is permission-filtered.
 
@@ -69,17 +71,17 @@ async-hitreg:
     enabled: true
     max-cps: 20
     fast-path:
-        enabled: true              # cancel vanilla packet, run plugin pipeline
-        pre-send-feedback: true    # ship velocity + hurt animation from netty
-        simulate-crits: true       # 1.8-style crit multiplier
+        enabled: true # cancel vanilla packet, run plugin pipeline
+        pre-send-feedback: true # ship velocity + hurt animation from netty
+        simulate-crits: true # 1.8-style crit multiplier
         reset-attack-cooldown: true
 
 knockback:
     enabled: true
-    base:      { horizontal: 0.4, vertical: 0.4 }
-    extra:     { horizontal: 0.5, vertical: 0.1 }
-    limits:    { vertical: 0.4, horizontal: -1 }
-    friction:  { x: 0.5, y: 0.5, z: 0.5 }
+    base: { horizontal: 0.4, vertical: 0.4 }
+    extra: { horizontal: 0.5, vertical: 0.1 }
+    limits: { vertical: 0.4, horizontal: -1 }
+    friction: { x: 0.5, y: 0.5, z: 0.5 }
     modifiers: { sprint: 1.0, armor-resistance: false }
 
 compensation:
