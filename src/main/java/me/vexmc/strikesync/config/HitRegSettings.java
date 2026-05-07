@@ -38,7 +38,7 @@ public record HitRegSettings(
         // so users upgrading from the dev v4.0.0 don't lose their tuning.
         boolean preSendFeedback = section.getBoolean(
                 "fast-path.pre-send-feedback",
-                section.getBoolean("fast-path.pre-send-velocity", false));
+                section.getBoolean("fast-path.pre-send-velocity", true));
         boolean simulateCrits = section.getBoolean("fast-path.simulate-crits", true);
         boolean resetAttackCooldown = section.getBoolean("fast-path.reset-attack-cooldown", true);
         return new HitRegSettings(enabled, maxCps, fastPath, preSendFeedback, simulateCrits, resetAttackCooldown);

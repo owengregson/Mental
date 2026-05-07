@@ -95,7 +95,7 @@ T+0     click
 
 ---
 
-## Fast path, `pre-send-velocity: false` (v4.0.0 default)
+## Fast path, `pre-send-feedback: false` (opt-out mode)
 
 ### Phase 1 (modified)
 
@@ -150,7 +150,7 @@ cancellable async event runs earlier, and `Player#attack` post-processing
 
 ---
 
-## Fast path, `pre-send-feedback: true` (headline feature)
+## Fast path, `pre-send-feedback: true` (default — headline feature)
 
 ### Phases 1–2 — same as off-pre-send.
 

@@ -61,12 +61,14 @@ async-hitreg:
         # mostly when latency compensation kicks in late), the client sees
         # a small corrective movement.
         #
-        # Off by default. Turn on for competitive PvP servers where the
-        # latency win matters and the tiny correction risk is acceptable.
+        # On by default — this is StrikeSync's headline feature. Set to
+        # false on servers with heavy region / safezone plugins that
+        # frequently cancel EntityDamageByEntityEvent on the main thread
+        # (the pre-sent feedback would already be on the wire).
         #
         # Note: the legacy key `pre-send-velocity` is still read as a
         # fallback for one release — `pre-send-feedback` takes precedence.
-        pre-send-feedback: false
+        pre-send-feedback: true
 
         # When true, the fast-path damage applier multiplies damage by 1.5
         # if the attacker satisfies the 1.8 critical-hit conditions
