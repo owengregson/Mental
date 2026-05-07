@@ -1,169 +1,102 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>me.vexmc</groupId>
     <artifactId>StrikeSync</artifactId>
-    <version>1.0</version>
+    <version>3.0.0</version>
     <packaging>jar</packaging>
 
     <name>StrikeSync</name>
-
-    <description>Asynchronous hit registration for modern Minecraft.</description>
-    <properties>
-        <java.version>1.8</java.version>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
+    <description>Asynchronous hit registration and customizable knockback for modern Minecraft.</description>
     <url>https://github.com/owengregson/StrikeSync</url>
 
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <paper.version>26.1.2.build.60-stable</paper.version>
+        <packetevents.version>2.12.1</packetevents.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>papermc-repo</id>
+            <url>https://repo.papermc.io/repository/maven-public/</url>
+        </repository>
+        <repository>
+            <id>codemc-releases</id>
+            <url>https://repo.codemc.io/repository/maven-releases/</url>
+        </repository>
+        <repository>
+            <id>codemc-snapshots</id>
+            <url>https://repo.codemc.io/repository/maven-snapshots/</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <!-- Paper API for Minecraft 26.1; provided by the server at runtime. -->
+        <dependency>
+            <groupId>io.papermc.paper</groupId>
+            <artifactId>paper-api</artifactId>
+            <version>${paper.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- PacketEvents (Spigot platform) — packets, listeners, KEEP_ALIVE wrappers.
+             We declare it `provided`: production servers install PacketEvents as
+             its own plugin (per its README), and `depend: [packetevents]` in
+             plugin.yml ensures load order. We don't shade it. -->
+        <dependency>
+            <groupId>com.github.retrooper</groupId>
+            <artifactId>packetevents-spigot</artifactId>
+            <version>${packetevents.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- JetBrains annotations: nullability hints, compile-time only. -->
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>24.1.0</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
     <build>
-        <plugins>
-            <plugin>
-                <groupId>net.md-5</groupId>
-                <artifactId>specialsource-maven-plugin</artifactId>
-                <version>1.2.4</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>remap</goal>
-                        </goals>
-                        <id>remap-obf</id>
-                        <configuration>
-                            <srgIn>org.spigotmc:minecraft-server:1.20.4-R0.1-SNAPSHOT:txt:maps-mojang</srgIn>
-                            <reverse>true</reverse>
-                            <remappedDependencies>org.spigotmc:spigot:1.20.4-R0.1-SNAPSHOT:jar:remapped-mojang</remappedDependencies>
-                            <remappedArtifactAttached>true</remappedArtifactAttached>
-                            <remappedClassifierName>remapped-obf</remappedClassifierName>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>remap</goal>
-                        </goals>
-                        <id>remap-spigot</id>
-                        <configuration>
-                            <inputFile>${project.build.directory}/${project.artifactId}-${project.version}-remapped-obf.jar</inputFile>
-                            <srgIn>org.spigotmc:minecraft-server:1.20.4-R0.1-SNAPSHOT:csrg:maps-spigot</srgIn>
-                            <remappedDependencies>org.spigotmc:spigot:1.20.4-R0.1-SNAPSHOT:jar:remapped-obf</remappedDependencies>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
-                <configuration>
-                    <source>14</source>
-                    <target>14</target>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.2.4</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <minimizeJar>false</minimizeJar>
-                            <artifactSet>
-                                <includes>
-                                    <include>org.spigotmc:spigot</include>
-                                    <include>org.spigotmc:spigot-api</include>
-                                    <include>org.bukkit:craftbukkit</include>
-                                </includes>
-                            </artifactSet>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>me.vexmc.strikesync.StrikeSyncPlugin</mainClass>
-                                </transformer>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
+        <defaultGoal>clean package</defaultGoal>
+        <finalName>${project.artifactId}-${project.version}</finalName>
+
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
                 <filtering>true</filtering>
             </resource>
         </resources>
-    </build>
 
-    <repositories>
-        <repository>
-            <id>dmulloy2-repo</id>
-            <url>https://repo.dmulloy2.net/repository/public/</url>
-        </repository>
-        <repository>
-            <id>jpenilla-releases</id>
-            <url>https://repo.jpenilla.xyz/releases</url>
-        </repository>
-        <repository>
-            <id>papermc-repo</id>
-            <url>https://repo.papermc.io/repository/maven-public/</url>
-        </repository>
-        <repository>
-            <id>sonatype</id>
-            <url>https://oss.sonatype.org/content/groups/public/</url>
-        </repository>
-        <repository>
-            <id>spigotmc-repo</id>
-            <url>https://hub.spigotmc.org/nexus/content/repositories/snapshots/</url>
-        </repository>
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
-        <repository>
-            <id>mojang-repository</id>
-            <url>https://libraries.minecraft.net/</url>
-        </repository>
-    </repositories>
-    <dependencies>
-        <dependency>
-            <groupId>io.papermc.paper</groupId>
-            <artifactId>paper-api</artifactId>
-            <version>1.20.4-R0.1-SNAPSHOT</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.comphenix.protocol</groupId>
-            <artifactId>ProtocolLib</artifactId>
-            <version>5.2.0-SNAPSHOT</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>net.kyori</groupId>
-            <artifactId>adventure-platform-bukkit</artifactId>
-            <version>4.3.3</version>
-        </dependency>
-        <dependency>
-            <groupId>org.spigotmc</groupId>
-            <artifactId>spigot</artifactId>
-            <version>1.20.4-R0.1-SNAPSHOT</version>
-            <classifier>remapped-obf</classifier>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.bukkit</groupId>
-            <artifactId>craftbukkit</artifactId>
-            <version>1.20.4-R0.1-SNAPSHOT</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>xyz.jpenilla</groupId>
-            <artifactId>reflection-remapper</artifactId>
-            <version>0.1.0</version>
-        </dependency>
-    </dependencies>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>${java.version}</release>
+                </configuration>
+            </plugin>
+
+            <!--
+              No shade plugin. Every runtime dep is `provided`:
+                - paper-api  → bundled with the server
+                - packetevents-spigot → installed as a server plugin, declared in plugin.yml
+                - jetbrains-annotations → compile-only
+              The output jar is a pure StrikeSync, no embedded libraries.
+            -->
+        </plugins>
+    </build>
 </project>

@@ -1,89 +1,110 @@
-# |------------------------------------------------------------|
-# |      ____  _        _ _        ____                        |
-# |     / ___|| |_ _ __(_) | _____/ ___| _   _ _ __   ___      |
-# |     \___ \| __| '__| | |/ / _ \___ \| | | | '_ \ / __|     |
-# |      ___) | |_| |  | |   <  __/___) | |_| | | | | (__      |
-# |     |____/ \__|_|  |_|_|\_\___|____/ \__, |_| |_|\___|     |
-# |                                      |___/                 |
-# |            v1.0 by @owengregson                            |
-# |------------------------------------------------------------|
+# |--------------------------------------------------------------|
+# |       ____  _        _ _        ____                         |
+# |      / ___|| |_ _ __(_) | _____/ ___| _   _ _ __   ___       |
+# |      \___ \| __| '__| | |/ / _ \___ \| | | | '_ \ / __|      |
+# |       ___) | |_| |  | |   <  __/___) | |_| | | | | (__       |
+# |      |____/ \__|_|  |_|_|\_\___|____/ \__, |_| |_|\___|      |
+# |                                       |___/                  |
+# |           v3.0 — by @owengregson                             |
+# |--------------------------------------------------------------|
+#
+# StrikeSync intercepts player attack packets on an async PacketEvents
+# worker thread, optionally rate-limits them, fires AsyncHitRegisterEvents
+# so other plugins can cancel hits early, and applies an opt-in 1.8-style
+# knockback profile.
 
-async-hitreg:               # Register hits asynchronously to improve responsiveness in combat.
-  enabled: true             # Enable or disable asynchronous hit registration.
-  max-cps: 20               # Maximum clicks per second for hit registration.
+async-hitreg:
+    # Master switch for the async hit-registration listener.
+    enabled: true
 
-knockback:                  # The values provided here are the defaults for MC 1.8.8 knockback.
-  enabled: true             # Enable or disable the knockback module.
-  async: false              # Whether to handle knockback asynchronously.
-  base:
-    horizontal: 0.4         # Base horizontal knockback applied to the victim.
-    vertical: 0.4           # Base vertical knockback applied to the victim.
-  extra:
-    horizontal: 0.5         # Extra horizontal knockback for sprinting or enchantments.
-    vertical: 0.1           # Extra vertical knockback for sprinting or enchantments.
-  limits:
-    vertical: 0.4           # Maximum vertical knockback (set to -1 for no limit).
-    horizontal: -1          # Maximum horizontal knockback (set to -1 for no limit).
-  friction:
-    x: 0.5                  # Friction coefficient for X-axis velocity.
-    y: 0.5                  # Friction coefficient for Y-axis velocity.
-    z: 0.5                  # Friction coefficient for Z-axis velocity.
-  modifiers:
-    sprint: 1.0             # Sprinting multiplier for knockback.
-    armor-resistance: false # Enable or disable armor knockback resistance.
+    # Maximum sustained clicks-per-second per player. Excess attack packets
+    # are dropped at the network level. Set 0 to disable the cap.
+    max-cps: 20
 
-debug:                      # Chat logging that is useful when creating custom knockback profiles.
-  enabled: false            # Enable or disable debug mode.
+knockback:
+    # Master switch for the knockback module. Note: the module computes
+    # custom knockback synchronously on the main thread (this is a feature
+    # — see KnockbackModule.java for why "async knockback" is unsafe).
+    enabled: true
 
-# Knockback Formula Explanation (In order of calculation):
-# The knockback module calculates the velocity of the victim when hit by an attack
-# using an improved version of the formula used in Minecraft 1.8.8. The knockback
-# is determined by several factors, explained in significant detail below.
+    base:
+        horizontal: 0.4 # Base horizontal knockback magnitude.
+        vertical: 0.4 # Base vertical bump on hit.
+    extra:
+        horizontal: 0.5 # Per-level multiplier for sprint + Knockback enchant.
+        vertical: 0.1 # Vertical bonus when extras apply.
+    limits:
+        vertical: 0.4 # Max Y velocity. Set <= 0 to disable.
+        horizontal: -1 # Max horizontal velocity. Set <= 0 to disable.
+    friction:
+        x: 0.5 # How much of the victim's pre-hit X velocity is retained.
+        y: 0.5
+        z: 0.5
+    modifiers:
+        sprint: 1.0 # Extra-knockback level added when attacker is sprinting.
+        armor-resistance: false # Honor the victim's KNOCKBACK_RESISTANCE attribute.
 
-# Direction:
-# The knockback direction is determined by the relative positions of the attacker and the victim.
-# Specifically, it is calculated using the difference in X and Z coordinates (deltaX and deltaZ).
-# If the direction is too small (such as players being on top of each other),
-# a small random adjustment ensures a valid knockback direction.
+compensation:
+    # Master switch for latency compensation. When enabled, StrikeSync measures
+    # each combat-tagged player's true RTT via KEEP_ALIVE probes, predicts the
+    # client's vertical state at the moment of impact, and supplies a corrected
+    # victim-Y to the knockback engine BEFORE the engine runs the 1.8 formula.
+    #
+    # The compensation module never overwrites the engine's output, so your
+    # configured 1.8 feel is preserved 1:1 — high-ping players just stop being
+    # accidentally protected from vertical knockback.
+    enabled: true
 
-# Magnitude:
-# The magnitude of the knockback is calculated as the
-# Euclidean distance between the attacker and the victim,
-# ignoring the Y (vertical) difference:
-# magnitude = sqrt(deltaX^2 + deltaZ^2)
+    # Hard offset subtracted from measured RTT before computing compensation
+    # ticks. KnockbackSync's tournament-tested default is 25 ms; lower values
+    # err on the side of trusting the server, higher values err toward trusting
+    # the client.
+    ping-offset-ms: 25
 
-# Base Velocity Calculation:
-# The initial velocity components (xVel, yVel, zVel) are calculated as follows:
-# xVel = (current X velocity * frictionX) - (deltaX / magnitude * base horizontal knockback)
-# yVel = (current Y velocity * frictionY) + base vertical knockback
-# zVel = (current Z velocity * frictionZ) - (deltaZ / magnitude * base horizontal knockback)
+    # If (current ping − previous ping) exceeds this, the previous reading is
+    # used. Stops one-shot lag spikes from poisoning a calculation.
+    spike-threshold-ms: 20
 
-# Horizontal Limit:
-# If a horizontal knockback limit is set, it caps the maximum horizontal velocity to the specified limit.
-# This is useful to prevent excessive horizontal knockback.
+    # How often to send a ping probe to combat-tagged players, in ticks.
+    probe-interval-ticks: 5
 
-# Sprinting and Enchantments:
-# Additional knockback is applied if the attacker is sprinting or has a knockback enchantment on their weapon.
-# The extra horizontal knockback is multiplied by the sprint factor and enchantment level:
-# extra horizontal knockback = (sprint factor + knockback enchantment level) * extra horizontal knockback
-# extra vertical knockback is added as a constant:
-# yVel += extra vertical knockback
+    # How long after the last hit a player remains "in combat" (and therefore
+    # gets fast-cadence pings), in ticks.
+    combat-timeout-ticks: 30
 
-# Vertical Limit:
-# The vertical knockback limit ensures that the Y (vertical) velocity does not exceed a specified value.
-# If the calculated Y velocity exceeds this limit, it is capped to the limit.
+    # Experimental: when the client thinks the victim is airborne, simulate
+    # forward in time from the server's last-known vy to estimate the client's
+    # current vy and use that as the engine override. Off-ground prediction is
+    # heuristic — disable if your server sees odd mid-air bumps.
+    off-ground-sync: true
 
-# Armor Resistance:
-# If enabled, armor resistance reduces the knockback effect based on the victim's armor attributes.
-# The resistance is calculated as:
-# resistance = 1 - victim's armor knockback resistance attribute
-# The final velocity is then multiplied by this resistance factor.
-
-# Final Velocity:
-# The final velocity is the combination of the base velocity, horizontal and vertical limits,
-# and any extra knockback due to sprinting or enchantments.
-# The configured friction values also influence the final velocity, retaining some of the victim's current velocity.
-
-# Configuring Knockback Values:
-# Adjust the values in the configuration file to fine-tune the knockback behavior according to your preferences.
-# Higher values generally result in stronger knockback effects, while lower values reduce the knockback.
+debug:
+    # Enables verbose logs to the server console (and nowhere else).
+    enabled: false
+# -----------------------------------------------------------------
+# Knockback math (in order of evaluation):
+#
+#  1. Direction = (attacker.x − victim.x, ·, attacker.z − victim.z),
+#     normalized. If attacker and victim share a horizontal position,
+#     a tiny random direction is picked so knockback never zeroes out.
+#
+#  2. Base velocity:
+#       xVel = victim.vx · friction.x − dx/|d| · base.horizontal
+#       yVel = victim.vy · friction.y + base.vertical
+#       zVel = victim.vz · friction.z − dz/|d| · base.horizontal
+#
+#  3. Horizontal cap (limits.horizontal > 0): rescale (x, z) so
+#     sqrt(x² + z²) ≤ limits.horizontal.
+#
+#  4. Sprint + Knockback enchant bonus:
+#       level   = (sprinting ? modifiers.sprint : 0) + enchantLevel
+#       xVel  += −sin(yaw) · level · extra.horizontal
+#       zVel  += +cos(yaw) · level · extra.horizontal
+#       yVel  += extra.vertical
+#
+#  5. Vertical cap (limits.vertical > 0): yVel = min(yVel, limits.vertical).
+#     Applied AFTER extras so the cap holds even with bonuses.
+#
+#  6. Armor knockback resistance (modifiers.armor-resistance):
+#       horizontal *= (1 − victim.knockbackResistance)
+# -----------------------------------------------------------------

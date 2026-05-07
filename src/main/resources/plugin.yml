@@ -1,15 +1,51 @@
 name: StrikeSync
-version: '${project.version}'
+version: "${project.version}"
 main: me.vexmc.strikesync.StrikeSyncPlugin
-api-version: '1.20'
-load: STARTUP
-depend: [ProtocolLib]
+api-version: "26.1.2"
 authors: [owengregson]
-description: Asynchronous hit registration and knockback for modern Minecraft.
+description: Asynchronous hit registration and customizable knockback for modern Minecraft.
 website: https://github.com/owengregson/StrikeSync
+depend: [packetevents]
+
 commands:
-  strikesync:
-    description: Main command for the StrikeSync plugin
-    aliases: [ss]
-    usage: /ss help
-    permission: strikesync.command.use
+    strikesync:
+        description: Manage StrikeSync (hit registration & knockback).
+        aliases: [ss]
+        usage: /ss help
+        permission: strikesync.command.use
+
+permissions:
+    strikesync.*:
+        description: Grants every StrikeSync permission.
+        default: op
+        children:
+            strikesync.command.use: true
+            strikesync.command.reload: true
+            strikesync.command.toggle: true
+            strikesync.command.knockback: true
+            strikesync.command.compensation: true
+            strikesync.command.ping: true
+
+    strikesync.command.use:
+        description: Lets a player use /ss at all.
+        default: true
+
+    strikesync.command.reload:
+        description: Allows reloading the StrikeSync configuration.
+        default: op
+
+    strikesync.command.toggle:
+        description: Allows toggling async hit registration on the fly.
+        default: op
+
+    strikesync.command.knockback:
+        description: Allows enabling, disabling, and inspecting the knockback module.
+        default: op
+
+    strikesync.command.compensation:
+        description: Allows enabling, disabling, and inspecting latency compensation.
+        default: op
+
+    strikesync.command.ping:
+        description: Allows inspecting measured RTT / jitter for self or others.
+        default: true
