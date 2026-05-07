@@ -1,0 +1,58 @@
+# --- Maven --------------------------------------------------------
+target/
+dependency-reduced-pom.xml
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+buildNumber.properties
+.flattened-pom.xml
+.mvn/wrapper/maven-wrapper.jar
+
+# --- Gradle (in case anyone forks to a Gradle build) -------------
+.gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# --- IDE: IntelliJ IDEA ------------------------------------------
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# --- IDE: Eclipse / VS Code Java -------------------------------
+.classpath
+.project
+.factorypath
+.settings/
+.apt_generated/
+.apt_generated_tests/
+bin/
+
+# --- IDE: VS Code ------------------------------------------------
+.vscode/
+
+# --- IDE: NetBeans ----------------------------------------------
+nb-configuration.xml
+nbproject/private/
+nbbuild/
+nbdist/
+
+# --- OS junk -----------------------------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Logs / runtime junk ----------------------------------------
+*.log
+hs_err_pid*.log
+replay_pid*.log
+
+# --- Editor swap files ------------------------------------------
+*~
+*.swp
+*.swo
