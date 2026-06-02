@@ -124,7 +124,7 @@ directly**. Schedule back to the main / region thread if needed.
 ## Acknowledgements
 
 Latency-compensation algorithm adapted from
-[caseload/knockbacksync](https://github.com/caseload/knockbacksync) (GPL-3.0).
+[CASELOAD7000/knockback-sync](https://github.com/CASELOAD7000/knockback-sync) (GPL-3.0).
 Async-hit-registration concept inspired by
 [frash23/SmashHit](https://github.com/frash23/SmashHit).
 
