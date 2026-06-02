@@ -44,7 +44,7 @@ For the byte-level pipeline analysis, see [FAST_PATH.md](FAST_PATH.md).
 ```bash
 git clone https://github.com/owengregson/StrikeSync.git
 cd StrikeSync
-mvn clean package    # → target/StrikeSync-4.0.0.jar
+mvn clean package    # → target/StrikeSync-4.0.1.jar
 ```
 
 ## Commands
