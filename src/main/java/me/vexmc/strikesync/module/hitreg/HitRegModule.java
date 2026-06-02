@@ -33,6 +33,7 @@ public final class HitRegModule implements Module, Listener {
     private final StrikeSyncService service;
     private final CpsLimiter limiter = new CpsLimiter();
     private final PlayerStateCache stateCache = new PlayerStateCache();
+    private final HitFeedbackGate feedbackGate = new HitFeedbackGate();
     private final HitDispatcher dispatcher;
     private final HitApplier applier;
 
@@ -69,6 +70,7 @@ public final class HitRegModule implements Module, Listener {
         stopCacheTask();
         limiter.clear();
         stateCache.clear();
+        feedbackGate.clear();
         if (registeredAsListener) {
             HandlerList.unregisterAll(this);
             registeredAsListener = false;
@@ -97,6 +99,7 @@ public final class HitRegModule implements Module, Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         limiter.forget(event.getPlayer().getUniqueId());
         stateCache.forget(event.getPlayer().getUniqueId());
+        feedbackGate.forget(event.getPlayer().getUniqueId());
     }
 
     /* ----------------------------- internals ----------------------------- */
@@ -111,7 +114,7 @@ public final class HitRegModule implements Module, Listener {
     }
 
     private void startHandler() {
-        listener = new HitPacketListener(service, limiter, dispatcher, applier, stateCache);
+        listener = new HitPacketListener(service, limiter, dispatcher, applier, stateCache, feedbackGate);
         handle = PacketEvents.getAPI().getEventManager().registerListener(
                 listener, PacketListenerPriority.NORMAL);
         service.log().info("Async hit registration started (fast-path: "

@@ -60,17 +60,20 @@ final class HitPacketListener implements PacketListener {
     private final HitDispatcher dispatcher;
     private final HitApplier applier;
     private final PlayerStateCache stateCache;
+    private final HitFeedbackGate feedbackGate;
 
     HitPacketListener(StrikeSyncService service,
                       CpsLimiter limiter,
                       HitDispatcher dispatcher,
                       HitApplier applier,
-                      PlayerStateCache stateCache) {
+                      PlayerStateCache stateCache,
+                      HitFeedbackGate feedbackGate) {
         this.service = service;
         this.limiter = limiter;
         this.dispatcher = dispatcher;
         this.applier = applier;
         this.stateCache = stateCache;
+        this.feedbackGate = feedbackGate;
     }
 
     @Override
@@ -90,9 +93,10 @@ final class HitPacketListener implements PacketListener {
             HitRegSettings settings = service.config().hitReg();
             if (!settings.enabled()) return;
 
+            long now = System.currentTimeMillis();
             UUID attackerId = attacker.getUniqueId();
             if (settings.rateLimited()
-                    && !limiter.tryAcquire(attackerId, settings.maxCps(), System.currentTimeMillis())) {
+                    && !limiter.tryAcquire(attackerId, settings.maxCps(), now)) {
                 event.setCancelled(true);
                 debug(attacker, () -> "rate-limited at " + settings.maxCps() + " cps");
                 return;
@@ -127,7 +131,7 @@ final class HitPacketListener implements PacketListener {
                 // and the tracker pulse (~50–100 ms saved on both feedback
                 // signals).
                 if (settings.preSendFeedback() && damageable instanceof Player victim) {
-                    preSendCombatFeedback(attacker, victim);
+                    preSendCombatFeedback(attacker, victim, now, settings.feedbackMinIntervalMs());
                 }
 
                 // Damage is still applied on the target's owning thread for correctness.
@@ -165,13 +169,35 @@ final class HitPacketListener implements PacketListener {
      *       next tracker pulse, same as today.</li>
      * </ul>
      */
-    private void preSendCombatFeedback(Player attacker, Player victim) {
+    private void preSendCombatFeedback(Player attacker, Player victim, long now, long minIntervalMs) {
         KnockbackSettings ks = service.config().knockback();
         if (!ks.enabled()) return;
 
         PlayerStateCache.Snapshot attSnap = stateCache.get(attacker.getUniqueId());
         PlayerStateCache.Snapshot vicSnap = stateCache.get(victim.getUniqueId());
         if (attSnap == null || vicSnap == null) return;
+
+        // Respect the victim's damage-invulnerability window. Vanilla (and 1.8)
+        // only apply a knockback-bearing hit about once per window — a hit
+        // inside it deals no knockback unless it out-damages the previous one.
+        // The pre-send runs on the netty thread BEFORE main-thread damage, so
+        // without this it would ship a velocity packet on EVERY spam-click and
+        // the victim's client would re-launch each time ("spam → fly"). Two
+        // guards, both biased toward NOT pre-sending (a skipped pre-send simply
+        // falls back to vanilla's next-tick velocity — never a phantom hit):
+        //   1. cached invulnerability: the victim is already immune (from this
+        //      attacker, another attacker, or e.g. fall damage) as of last tick;
+        //   2. per-victim rate gate: at most one pre-send per window, race-free
+        //      across multiple attackers and sub-tick click bursts.
+        if (vicSnap.isDamageImmune()) {
+            debug(attacker, () -> "pre-send skipped: " + victim.getName() + " still invulnerable");
+            return;
+        }
+        if (!feedbackGate.tryPreSend(victim.getUniqueId(), now, minIntervalMs)) {
+            debug(attacker, () -> "pre-send gated: " + victim.getName()
+                    + " inside " + minIntervalMs + "ms invulnerability window");
+            return;
+        }
 
         KnockbackVector vector = KnockbackEngine.computeFromCache(attSnap, vicSnap, ks, null);
         AsyncVelocitySender.send(victim, vicSnap.entityId(), vector.toBukkit());

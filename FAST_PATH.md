@@ -156,12 +156,35 @@ cancellable async event runs earlier, and `Player#attack` post-processing
 
 ### Phase 3 (modified) — pre-send velocity + hurt animation, then schedule
 
+**Invulnerability gate (runs first).** Vanilla only applies a knockback-bearing
+hit about once per victim *invulnerability window* (~10 ticks): a hit inside the
+window deals no knockback unless it out-damages the previous one. The pre-send
+runs on the netty thread *before* main-thread damage, so it cannot see vanilla's
+invulnerability state directly — it must reproduce the cadence itself, or every
+spam-click that clears `max-cps` ships a fresh velocity packet and the victim's
+client re-launches on each one (a spam-hit player goes flying). Two guards, both
+biased toward *skipping* the pre-send — a skipped pre-send merely falls back to
+vanilla's next-tick velocity, never a phantom:
+
+- **`Snapshot.isDamageImmune()`** — cached `noDamageTicks > maxNoDamageTicks / 2`
+  (vanilla's own `invulnerableTime > 10` test). Catches a victim already
+  invulnerable from this hit, another attacker, or e.g. fall damage.
+- **`HitFeedbackGate.tryPreSend(victimId, now, feedback-min-interval-ms)`** — a
+  per-*victim*, race-free rate gate admitting at most one pre-send per window
+  (default 500 ms = 10 ticks). Keyed by victim, so multiple attackers spamming
+  one target still can't exceed vanilla's knockback rate, and atomic, so a
+  sub-tick burst of clicks resolves to a single admitted pre-send.
+
+The authoritative main-thread path is already gated (vanilla's `hurt`
+invulnerability check), so only the pre-send needed this. If either guard
+rejects, Phase 3 stops here and only the damage dispatch (Phase 4) proceeds.
+
 1. Lookup `PlayerStateCache` snapshots for attacker and victim. The cache is
    refreshed by `HitRegModule`'s period-1 `runTaskTimer` task — every tick,
    every online player gets a fresh `Snapshot{x, y, z, yaw, vx, vy, vz,
    onGround, sprinting, knockbackResistance, mainHandKnockbackLevel,
-   entityId}` published via `ConcurrentHashMap`. Reads from the netty thread
-   are lock-free.
+   noDamageTicks, maxNoDamageTicks, entityId}` published via
+   `ConcurrentHashMap`. Reads from the netty thread are lock-free.
 2. Compute knockback via `KnockbackEngine.computeFromCache(attSnap, vicSnap,
    ks, null)`:
    - Pure function — no Bukkit access, no I/O
@@ -242,6 +265,9 @@ End of tick; same path as vanilla.
 - Server-side velocity (`setDeltaMovement` happens via vanilla's hurt path inside `damage()`)
 - StrikeSync's compensation module input-correction flow
 - StrikeSync's knockback module vector override on `PlayerVelocityEvent`
+- Knockback cadence — the async pre-send is gated to the victim's
+  invulnerability window (Phase 3), so spam-clicks can't exceed vanilla's
+  once-per-~10-ticks knockback the way an ungated pre-send would
 
 ## What's omitted vs vanilla `Player#attack`
 
@@ -293,3 +319,11 @@ End of tick; same path as vanilla.
 8. **Non-player target.** Pre-send is skipped (mobs have no client to
    receive packets); damage path runs through entity scheduler same as for
    players.
+9. **Spam-clicking inside the invulnerability window.** The pre-send is gated
+   per-victim to one packet per `feedback-min-interval-ms` (default 500 ms),
+   matching vanilla's once-per-~10-ticks knockback cadence. Excess clicks still
+   reach the main thread as damage attempts (where vanilla's invulnerability
+   check rejects them, exactly as for vanilla spam), but emit **no** extra
+   velocity or hurt-animation packets — so a spam-clicked victim is knocked back
+   at the vanilla rate, not launched. Set `feedback-min-interval-ms: 0` to
+   disable the gate (re-introduces the spam-knockback exploit; not recommended).

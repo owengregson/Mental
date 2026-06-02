@@ -70,6 +70,24 @@ async-hitreg:
         # fallback for one release — `pre-send-feedback` takes precedence.
         pre-send-feedback: true
 
+        # Minimum spacing, in milliseconds, between pre-sent feedback packets
+        # for the SAME victim. This mirrors the victim's damage-invulnerability
+        # window.
+        #
+        # Vanilla (and 1.8) only apply a knockback-bearing hit about once every
+        # 10 ticks (500 ms): a second hit inside that window deals no knockback
+        # unless it out-damages the first. The async pre-send runs on the netty
+        # thread BEFORE main-thread damage, so it cannot see vanilla's
+        # invulnerability state on its own. Without this gate, every spam-click
+        # that clears `max-cps` would ship a fresh velocity packet and the
+        # victim's client would re-launch on each one — i.e. spam-hitting sends
+        # a player flying, far harder than vanilla ever would.
+        #
+        # 500 ms = vanilla. Keep this at (or just below) your server's
+        # invulnerability window. Set 0 to disable the gate entirely — NOT
+        # recommended; it re-introduces the spam-knockback exploit.
+        feedback-min-interval-ms: 500
+
         # When true, the fast-path damage applier multiplies damage by 1.5
         # if the attacker satisfies the 1.8 critical-hit conditions
         # (falling, not sprinting, not in water, not blind, not in a vehicle,

@@ -15,6 +15,12 @@ import org.bukkit.configuration.ConfigurationSection;
  *                             velocity packet and the hurt-animation packet to the relevant clients
  *                             directly from the netty thread, before main-thread damage runs. This
  *                             is the headline latency win.
+ * @param feedbackMinIntervalMs minimum spacing, in milliseconds, between pre-sent feedback packets
+ *                             for the same victim. This is the victim's damage-invulnerability
+ *                             window: vanilla only applies a knockback-bearing hit about once per
+ *                             {@code 10 ticks (500 ms)}, so without this gate every spam-click would
+ *                             ship a fresh velocity packet and the victim would "fly". {@code 0}
+ *                             disables the gate (not recommended).
  * @param simulateCrits        when true, the fast-path damage applier multiplies damage by 1.5 when
  *                             the attacker satisfies the 1.8 critical-hit conditions (falling, not
  *                             sprinting, not in water, etc.).
@@ -27,8 +33,12 @@ public record HitRegSettings(
         int maxCps,
         boolean fastPath,
         boolean preSendFeedback,
+        long feedbackMinIntervalMs,
         boolean simulateCrits,
         boolean resetAttackCooldown) {
+
+    /** Vanilla's knockback re-eligibility window: maxNoDamageTicks/2 = 10 ticks = 500 ms. */
+    private static final long DEFAULT_FEEDBACK_MIN_INTERVAL_MS = 500L;
 
     public static HitRegSettings from(ConfigurationSection section) {
         boolean enabled = section.getBoolean("enabled", true);
@@ -39,9 +49,12 @@ public record HitRegSettings(
         boolean preSendFeedback = section.getBoolean(
                 "fast-path.pre-send-feedback",
                 section.getBoolean("fast-path.pre-send-velocity", true));
+        long feedbackMinIntervalMs = Math.max(0L, section.getLong(
+                "fast-path.feedback-min-interval-ms", DEFAULT_FEEDBACK_MIN_INTERVAL_MS));
         boolean simulateCrits = section.getBoolean("fast-path.simulate-crits", true);
         boolean resetAttackCooldown = section.getBoolean("fast-path.reset-attack-cooldown", true);
-        return new HitRegSettings(enabled, maxCps, fastPath, preSendFeedback, simulateCrits, resetAttackCooldown);
+        return new HitRegSettings(enabled, maxCps, fastPath, preSendFeedback,
+                feedbackMinIntervalMs, simulateCrits, resetAttackCooldown);
     }
 
     public boolean rateLimited() {

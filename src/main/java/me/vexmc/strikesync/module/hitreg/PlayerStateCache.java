@@ -49,6 +49,8 @@ public final class PlayerStateCache {
                 player.isSprinting(),
                 readKnockbackResistance(player),
                 readMainHandKnockbackLevel(player),
+                player.getNoDamageTicks(),
+                player.getMaximumNoDamageTicks(),
                 player.getEntityId()
         ));
     }
@@ -96,10 +98,29 @@ public final class PlayerStateCache {
             boolean sprinting,
             double knockbackResistance,
             int mainHandKnockbackLevel,
+            int noDamageTicks,
+            int maxNoDamageTicks,
             int entityId
     ) {
         public Vector velocity() {
             return new Vector(vx, vy, vz);
+        }
+
+        /**
+         * Whether the victim is currently inside its damage-invulnerability
+         * window — i.e. vanilla would <em>not</em> apply a fresh
+         * knockback-bearing hit right now (a hit inside the window deals no
+         * knockback unless it out-damages the previous one).
+         *
+         * <p>Mirrors vanilla's {@code invulnerableTime > maxInvulnerableTime / 2}
+         * gate (the same "double-hit guard" the compensation module borrows
+         * from KnockbackSync). Used by the fast path to avoid pre-sending a
+         * phantom knockback packet for a hit that won't actually land — e.g.
+         * when the victim is already invulnerable from fall damage or another
+         * attacker.
+         */
+        public boolean isDamageImmune() {
+            return noDamageTicks > maxNoDamageTicks / 2;
         }
     }
 }

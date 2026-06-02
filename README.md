@@ -73,6 +73,7 @@ async-hitreg:
     fast-path:
         enabled: true # cancel vanilla packet, run plugin pipeline
         pre-send-feedback: true # ship velocity + hurt animation from netty
+        feedback-min-interval-ms: 500 # victim invulnerability window; stops spam-knockback
         simulate-crits: true # 1.8-style crit multiplier
         reset-attack-cooldown: true
 
