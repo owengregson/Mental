@@ -56,10 +56,6 @@ public final class HitApplier {
                 : 1.0;
 
         damageable.damage(amount, attacker);
-
-        if (services.config().hitReg().resetAttackCooldown()) {
-            attacker.resetCooldown();
-        }
     }
 
     /**

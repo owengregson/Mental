@@ -36,9 +36,12 @@ modules:
       # 2+tier, shovel 1+tier (plus the 1.0 hand). A diamond sword deals 8
       # again and axes stop being heavy weapons. Sharpness is always the
       # legacy 1.25/level on this path.
+      #
+      # Note: the 1.9 attack-cooldown METER is deliberately not Mental's
+      # business — Mental never scales damage by charge, so the meter has no
+      # effect on Mental-registered hits, and removing it outright belongs to
+      # a combat-rules plugin (OldCombatMechanics' disable-attack-cooldown).
       legacy-tool-damage: true
-      # Clear the 1.9+ attack cooldown after each registered hit.
-      reset-attack-cooldown: true
 
   # 1.7.10 melee knockback, applied server-side through the velocity
   # pipeline (anticheat-safe by construction).

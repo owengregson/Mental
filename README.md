@@ -86,7 +86,7 @@ GrimAC and Vulcan are detected automatically, and Mental adjusts the one behavio
 No. Mental deals damage through the standard Bukkit event chain, so anything that cancels or modifies damage keeps working exactly as before.
 
 **Does it remove the 1.9 attack cooldown?**
-Effectively, yes: Mental resets the cooldown on every hit, so the recharge meter never weakens 1.8-style click fighting. (Toggleable via `reset-attack-cooldown` if you want cooldowns kept.)
+No, and that's deliberate. Mental never scales damage by charge, so the cooldown has no effect on hits Mental registers — but the meter itself, sword blocking, regen and the rest of the combat *rules* are a different plugin's job. Pair Mental with [OldCombatMechanics](https://github.com/kernitus/BukkitOldCombatMechanics) (its `disable-attack-cooldown` module) for those; the two are built to run together.
 
 **Why doesn't the projectile module do anything on my 1.21.2+ server?**
 Because it doesn't need to. Mojang restored projectile knockback against players in vanilla 1.21.2.
