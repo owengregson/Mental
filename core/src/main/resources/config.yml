@@ -156,6 +156,22 @@ anticheat:
     - GrimAC
     - Vulcan
 
+# Coexistence with combat-rules plugins.
+compatibility:
+  # OldCombatMechanics divides combat with Mental: OCM owns the rules
+  # (attack cooldown, sword blocking, regen, armour, golden apples), Mental
+  # owns knockback and hit delivery. Where OCM's own modules reach into
+  # Mental's half — old-player-knockback, old-fishing-knockback,
+  # fishing-rod-velocity, projectile-knockback, old-tool-damage,
+  # old-critical-hits — Mental yields exactly the interactions OCM is
+  # configured to handle, per player modeset when OCM's API is available.
+  # To give a mechanic to Mental, disable the corresponding OCM module (or
+  # drop it from the modeset); Mental's combos, positional projectile
+  # knockback and ping compensation apply to interactions Mental owns.
+  #   auto   — coordinate as described (recommended).
+  #   ignore — pretend OCM is absent; both plugins will fight. Not advised.
+  old-combat-mechanics: auto
+
 # Verbose logging. Enable globally, then pick categories. Subscribed admins
 # (/mental debug subscribe) receive lines in-game as well.
 debug:

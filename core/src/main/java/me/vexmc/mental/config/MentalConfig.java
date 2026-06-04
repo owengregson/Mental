@@ -23,6 +23,7 @@ public final class MentalConfig {
             @NotNull RodVelocitySettings rodVelocity,
             @NotNull ProjectileKnockbackSettings projectileKnockback,
             @NotNull AnticheatSettings anticheat,
+            @NotNull CompatibilitySettings compatibility,
             @NotNull DebugSettings debug) {
 
         static @NotNull Snapshot defaults() {
@@ -34,6 +35,7 @@ public final class MentalConfig {
                     RodVelocitySettings.DEFAULTS,
                     ProjectileKnockbackSettings.DEFAULTS,
                     AnticheatSettings.DEFAULTS,
+                    CompatibilitySettings.DEFAULTS,
                     DebugSettings.DEFAULTS);
         }
     }
@@ -52,6 +54,7 @@ public final class MentalConfig {
                 RodVelocitySettings.parse(module(modules, "rod-velocity", issues)),
                 ProjectileKnockbackSettings.parse(module(modules, "projectile-knockback", issues)),
                 AnticheatSettings.parse(reader(source, "anticheat", issues)),
+                CompatibilitySettings.parse(reader(source, "compatibility", issues)),
                 DebugSettings.parse(reader(source, "debug", issues)));
         snapshot.set(next);
         return issues.all();
@@ -87,6 +90,10 @@ public final class MentalConfig {
 
     public @NotNull AnticheatSettings anticheat() {
         return snapshot.get().anticheat();
+    }
+
+    public @NotNull CompatibilitySettings compatibility() {
+        return snapshot.get().compatibility();
     }
 
     public @NotNull DebugSettings debug() {

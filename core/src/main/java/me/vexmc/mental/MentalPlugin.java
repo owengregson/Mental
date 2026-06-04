@@ -80,7 +80,8 @@ public final class MentalPlugin extends JavaPlugin {
         applyDebugSettings(debug);
 
         this.services = new MentalServices(
-                this, config, capabilities, environment, scheduling, debug, new AnticheatGate());
+                this, config, capabilities, environment, scheduling, debug,
+                new AnticheatGate(), new me.vexmc.mental.module.ocm.OcmGate());
         this.modules = new ModuleRegistry(getLogger());
 
         registerModules();
@@ -104,6 +105,8 @@ public final class MentalPlugin extends JavaPlugin {
                 () -> config.compensation().probeStrategy().name().toLowerCase(java.util.Locale.ROOT)));
         metrics.addCustomChart(new SimplePie("scheduling_backend",
                 () -> services.scheduling().describe()));
+        metrics.addCustomChart(new SimplePie("ocm_coordination",
+                () -> services.ocmGate().mode().name().toLowerCase(java.util.Locale.ROOT)));
 
         PacketEvents.getAPI().init();
 
@@ -171,6 +174,7 @@ public final class MentalPlugin extends JavaPlugin {
         knockback.hints(compensation);
 
         modules.register(new AnticheatCompatModule(services));
+        modules.register(new me.vexmc.mental.module.ocm.OcmCompatModule(services, services.ocmGate()));
         modules.register(new HitRegistrationModule(services, victimMotion));
         modules.register(knockback);
         modules.register(compensation);

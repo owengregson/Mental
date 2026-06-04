@@ -31,6 +31,7 @@ class MentalConfigTest {
         assertEquals(RodVelocitySettings.DEFAULTS, config.rodVelocity());
         assertEquals(ProjectileKnockbackSettings.DEFAULTS, config.projectileKnockback());
         assertEquals(AnticheatSettings.DEFAULTS, config.anticheat());
+        assertEquals(CompatibilitySettings.DEFAULTS, config.compatibility());
         assertEquals(DebugSettings.DEFAULTS, config.debug());
     }
 
@@ -50,7 +51,22 @@ class MentalConfigTest {
         assertEquals(RodVelocitySettings.DEFAULTS, config.rodVelocity());
         assertEquals(ProjectileKnockbackSettings.DEFAULTS, config.projectileKnockback());
         assertEquals(AnticheatSettings.DEFAULTS, config.anticheat());
+        assertEquals(CompatibilitySettings.DEFAULTS, config.compatibility());
         assertEquals(DebugSettings.DEFAULTS, config.debug());
+    }
+
+    @Test
+    void compatibilitySectionParsesCoordinationModes() throws Exception {
+        MentalConfig config = new MentalConfig();
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.loadFromString(
+                """
+                compatibility:
+                  old-combat-mechanics: ignore
+                """);
+
+        assertTrue(config.reload(yaml).isEmpty());
+        assertEquals(OcmCoordination.IGNORE, config.compatibility().oldCombatMechanics());
     }
 
     @Test
