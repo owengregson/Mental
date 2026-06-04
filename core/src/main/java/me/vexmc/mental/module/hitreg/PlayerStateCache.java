@@ -1,0 +1,106 @@
+package me.vexmc.mental.module.hitreg;
+
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.module.knockback.EntityState;
+import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.Enchantments;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.util.Vector;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+/**
+ * Tick-frozen per-player snapshots.
+ *
+ * <p>The fast path computes knockback on PacketEvents' netty loop, where
+ * touching a live {@code Player} is undefined on Paper and forbidden on
+ * Folia. Each player's snapshot is refreshed once per tick <em>from their own
+ * owning thread</em> (per-player scheduled tasks — region-correct on Folia by
+ * construction); the netty thread only ever reads immutable records out of a
+ * concurrent map.</p>
+ */
+public final class PlayerStateCache {
+
+    private final ConcurrentHashMap<UUID, Snapshot> snapshots = new ConcurrentHashMap<>();
+
+    /** Captures {@code player} now. Must run on the player's owning thread. */
+    @SuppressWarnings("deprecation") // Player#isOnGround: the client-reported value is the one
+    public void update(@NotNull Player player) { //          knockback expectations are built from.
+        Location location = player.getLocation();
+        Vector velocity = player.getVelocity();
+        snapshots.put(player.getUniqueId(), new Snapshot(
+                location.getX(), location.getY(), location.getZ(),
+                location.getYaw(),
+                velocity.getX(), velocity.getY(), velocity.getZ(),
+                player.isOnGround(),
+                player.isSprinting(),
+                clampedKnockbackResistance(player),
+                mainHandKnockbackLevel(player),
+                player.getNoDamageTicks(),
+                player.getMaximumNoDamageTicks(),
+                player.getEntityId()));
+    }
+
+    public @Nullable Snapshot get(@NotNull UUID uuid) {
+        return snapshots.get(uuid);
+    }
+
+    public void forget(@NotNull UUID uuid) {
+        snapshots.remove(uuid);
+    }
+
+    public void clear() {
+        snapshots.clear();
+    }
+
+    private static double clampedKnockbackResistance(Player player) {
+        double value = Attributes.valueOr(player, Attributes.knockbackResistance(), 0.0);
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private static int mainHandKnockbackLevel(Player player) {
+        PlayerInventory inventory = player.getInventory();
+        ItemStack main = inventory.getItemInMainHand();
+        if (main != null && main.getType() != Material.AIR) {
+            return main.getEnchantmentLevel(Enchantments.knockback());
+        }
+        ItemStack off = inventory.getItemInOffHand();
+        if (off == null || off.getType() == Material.AIR) {
+            return 0;
+        }
+        return off.getEnchantmentLevel(Enchantments.knockback());
+    }
+
+    /** Immutable, all-primitive snapshot — safely publishable across threads. */
+    public record Snapshot(
+            double x, double y, double z,
+            float yaw,
+            double vx, double vy, double vz,
+            boolean onGround,
+            boolean sprinting,
+            double knockbackResistance,
+            int mainHandKnockbackLevel,
+            int noDamageTicks,
+            int maxNoDamageTicks,
+            int entityId) {
+
+        /**
+         * Vanilla's double-hit guard: inside this window a fresh hit carries
+         * no knockback unless it out-damages the previous one, so the fast
+         * path must not pre-send velocity for it.
+         */
+        public boolean isDamageImmune() {
+            return noDamageTicks > maxNoDamageTicks / 2;
+        }
+
+        public @NotNull EntityState toEntityState() {
+            return new EntityState(
+                    x, z, yaw, vx, vy, vz, sprinting, mainHandKnockbackLevel, knockbackResistance);
+        }
+    }
+}

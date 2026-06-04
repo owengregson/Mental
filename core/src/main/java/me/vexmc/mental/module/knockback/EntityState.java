@@ -1,8 +1,8 @@
 package me.vexmc.mental.module.knockback;
 
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.Enchantments;
 import org.bukkit.Material;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.EntityEquipment;
@@ -51,7 +51,7 @@ public record EntityState(
         if (weapon == null || weapon.getType() == Material.AIR) {
             return 0;
         }
-        return weapon.getEnchantmentLevel(Enchantment.KNOCKBACK);
+        return weapon.getEnchantmentLevel(Enchantments.knockback());
     }
 
     private static double clampedResistance(LivingEntity entity) {
