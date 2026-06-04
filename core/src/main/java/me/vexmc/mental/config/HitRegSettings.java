@@ -9,10 +9,11 @@ public record HitRegSettings(
         boolean preSendFeedback,
         long feedbackMinIntervalMillis,
         boolean simulateCrits,
+        boolean legacyToolDamage,
         boolean resetAttackCooldown) {
 
     static final HitRegSettings DEFAULTS =
-            new HitRegSettings(true, 20, true, true, 500L, true, true);
+            new HitRegSettings(true, 20, true, true, 500L, true, true, true);
 
     public boolean rateLimited() {
         return maxCps > 0;
@@ -27,6 +28,7 @@ public record HitRegSettings(
                 fastPath.flag("pre-send-feedback", DEFAULTS.preSendFeedback),
                 fastPath.ticksAtLeast("feedback-min-interval-ms", DEFAULTS.feedbackMinIntervalMillis, 0),
                 fastPath.flag("simulate-crits", DEFAULTS.simulateCrits),
+                fastPath.flag("legacy-tool-damage", DEFAULTS.legacyToolDamage),
                 fastPath.flag("reset-attack-cooldown", DEFAULTS.resetAttackCooldown));
     }
 }

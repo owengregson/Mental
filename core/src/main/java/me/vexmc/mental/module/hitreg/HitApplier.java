@@ -49,9 +49,10 @@ public final class HitApplier {
             return;
         }
 
-        boolean simulateCrits = services.config().hitReg().simulateCrits();
+        var settings = services.config().hitReg();
         double amount = damageable instanceof LivingEntity living
-                ? DamageCalculator.calculate(attacker, living, simulateCrits)
+                ? DamageCalculator.calculate(
+                        attacker, living, settings.simulateCrits(), settings.legacyToolDamage())
                 : 1.0;
 
         damageable.damage(amount, attacker);
