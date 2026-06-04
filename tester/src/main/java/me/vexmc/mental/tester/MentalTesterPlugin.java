@@ -10,6 +10,7 @@ import me.vexmc.mental.tester.suite.CommandSuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
 import me.vexmc.mental.tester.suite.OcmCoexistenceSuite;
+import me.vexmc.mental.tester.suite.ProfileSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
 import me.vexmc.mental.tester.suite.ReloadSuite;
 import me.vexmc.mental.tester.suite.ZeroTouchSuite;
@@ -51,6 +52,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(OcmCoexistenceSuite.tests(mental, this));
             } else {
                 suite.addAll(KnockbackSuite.tests(mental, this));
+                suite.addAll(ProfileSuite.tests(mental, this));
                 suite.addAll(ProjectileSuite.tests(mental, this));
                 suite.addAll(FishingSuite.tests(mental, this));
                 suite.addAll(CommandSuite.tests(mental, this));

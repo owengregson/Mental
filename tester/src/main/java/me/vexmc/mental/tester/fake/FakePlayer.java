@@ -444,6 +444,14 @@ public final class FakePlayer {
             Map<UUID, Object> map = (Map<UUID, Object>) byUuid.get(playerList);
             map.put(uuid, serverPlayer);
         }
+        // The by-name map drives Bukkit.getPlayerExact (vanilla keys it
+        // lowercased); without it, command paths cannot target this player.
+        Field byName = playerMapField(playerListClass, String.class, serverPlayer.getClass());
+        if (byName != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) byName.get(playerList);
+            map.put(name.toLowerCase(java.util.Locale.ROOT), serverPlayer);
+        }
     }
 
     private void addToWorld(Object worldServer) {
@@ -551,6 +559,26 @@ public final class FakePlayer {
             }
             field.setAccessible(true);
             if (field.getGenericType().getTypeName().contains("UUID")) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    /** The Map field keyed by {@code keyType} whose values can hold a ServerPlayer. */
+    private static Field playerMapField(Class<?> owner, Class<?> keyType, Class<?> playerClass) {
+        for (Field field : owner.getDeclaredFields()) {
+            if (!Map.class.isAssignableFrom(field.getType())
+                    || !(field.getGenericType()
+                            instanceof java.lang.reflect.ParameterizedType parameterized)) {
+                continue;
+            }
+            java.lang.reflect.Type[] arguments = parameterized.getActualTypeArguments();
+            if (arguments.length == 2
+                    && arguments[0] == keyType
+                    && arguments[1] instanceof Class<?> valueType
+                    && valueType.isAssignableFrom(playerClass)) {
+                field.setAccessible(true);
                 return field;
             }
         }
