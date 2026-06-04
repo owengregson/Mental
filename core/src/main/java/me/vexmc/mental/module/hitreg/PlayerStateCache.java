@@ -117,7 +117,8 @@ public final class PlayerStateCache {
 
         public @NotNull EntityState toEntityState() {
             return new EntityState(
-                    x, z, yaw, vx, vy, vz, sprinting, mainHandKnockbackLevel, knockbackResistance);
+                    x, y, z, yaw, vx, vy, vz, onGround,
+                    sprinting, mainHandKnockbackLevel, knockbackResistance);
         }
     }
 }

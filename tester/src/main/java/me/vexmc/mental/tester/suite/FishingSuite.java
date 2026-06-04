@@ -80,7 +80,7 @@ public final class FishingSuite {
                         KnockbackSuite.restingVictim(victim),
                         rodder.player().getLocation().getX(),
                         rodder.player().getLocation().getZ(),
-                        mental.services().config().knockback(), null,
+                        mental.services().config().knockback().profile(), null,
                         java.util.concurrent.ThreadLocalRandom.current()));
                 context.expect(expected != null, "engine returned no vector for an unresisted rod hit");
 

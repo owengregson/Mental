@@ -16,25 +16,30 @@ import org.jetbrains.annotations.NotNull;
  */
 public record EntityState(
         double x,
+        double y,
         double z,
         float yaw,
         double vx,
         double vy,
         double vz,
+        boolean grounded,
         boolean sprinting,
         int knockbackEnchantLevel,
         double knockbackResistance) {
 
     /** Captures live state; must run on the entity's owning thread. */
+    @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value drives air multipliers
     public static @NotNull EntityState capture(@NotNull LivingEntity entity) {
         Vector velocity = entity.getVelocity();
         return new EntityState(
                 entity.getLocation().getX(),
+                entity.getLocation().getY(),
                 entity.getLocation().getZ(),
                 entity.getLocation().getYaw(),
                 velocity.getX(),
                 velocity.getY(),
                 velocity.getZ(),
+                entity.isOnGround(),
                 entity instanceof Player player && player.isSprinting(),
                 heldKnockbackLevel(entity),
                 clampedResistance(entity));
@@ -53,18 +58,21 @@ public record EntityState(
         if (!(victim instanceof Player player)) {
             return capture(victim);
         }
+        boolean grounded = player.isOnGround();
         VictimMotion.Motion motion = ledger.current(
                 player.getUniqueId(),
                 nowNanos,
-                player.isOnGround(),
+                grounded,
                 Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
         return new EntityState(
                 player.getLocation().getX(),
+                player.getLocation().getY(),
                 player.getLocation().getZ(),
                 player.getLocation().getYaw(),
                 motion.vx(),
                 motion.vy(),
                 motion.vz(),
+                grounded,
                 player.isSprinting(),
                 heldKnockbackLevel(player),
                 clampedResistance(player));

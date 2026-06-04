@@ -81,7 +81,8 @@ public final class MentalPlugin extends JavaPlugin {
 
         this.services = new MentalServices(
                 this, config, capabilities, environment, scheduling, debug,
-                new AnticheatGate(), new me.vexmc.mental.module.ocm.OcmGate());
+                new AnticheatGate(), new me.vexmc.mental.module.ocm.OcmGate(),
+                new me.vexmc.mental.module.knockback.SprintTracker());
         this.modules = new ModuleRegistry(getLogger());
 
         registerModules();
@@ -129,6 +130,9 @@ public final class MentalPlugin extends JavaPlugin {
             knockbackPipeline.clear();
             knockbackPipeline = null;
         }
+        if (services != null) {
+            services.sprintTracker().clear();
+        }
         try {
             if (PacketEvents.getAPI() != null) {
                 PacketEvents.getAPI().terminate();
@@ -168,6 +172,9 @@ public final class MentalPlugin extends JavaPlugin {
         VictimMotion victimMotion = new VictimMotion();
         knockbackPipeline = new KnockbackPipeline(services, victimMotion);
         getServer().getPluginManager().registerEvents(knockbackPipeline, this);
+        // Observation only — feeds the wtap-extra freshness branch; with the
+        // knob disabled (every default) it changes nothing.
+        getServer().getPluginManager().registerEvents(services.sprintTracker(), this);
 
         KnockbackModule knockback = new KnockbackModule(services, victimMotion, knockbackPipeline);
         LatencyCompensationModule compensation = new LatencyCompensationModule(services, victimMotion);

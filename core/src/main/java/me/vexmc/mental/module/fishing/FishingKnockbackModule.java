@@ -110,7 +110,7 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
         EntityState victimState = EntityState.captureVictim(victim, pipeline.ledger(), System.nanoTime());
         KnockbackVector vector = KnockbackEngine.computeBase(
                 victimState, angler.getX(), angler.getZ(),
-                services.config().knockback(), null, ThreadLocalRandom.current());
+                services.config().knockback().profile(), null, ThreadLocalRandom.current());
 
         if (victim instanceof Player victimPlayer) {
             pipeline.submit(victimPlayer, vector, rodder, KnockbackPipeline.Cause.ROD);

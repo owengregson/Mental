@@ -2,6 +2,7 @@ package me.vexmc.mental.module.knockback;
 
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
+import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.config.KnockbackSettings;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.module.ocm.OcmMechanic;
@@ -70,7 +71,8 @@ public final class KnockbackModule extends CombatModule implements Listener {
                 || !(event.getEntity() instanceof Player victim)) {
             return;
         }
-        if (settings.shieldBlockingCancels()
+        KnockbackProfile profile = settings.profile();
+        if (profile.shieldBlockingCancels()
                 && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
                 && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0) {
             debug.log(() -> victim.getName() + " blocked with a shield — knockback skipped");
@@ -88,8 +90,14 @@ public final class KnockbackModule extends CombatModule implements Listener {
 
         Double victimYOverride = hints.takeYOverride(victim.getUniqueId());
         EntityState victimState = EntityState.captureVictim(victim, ledger, System.nanoTime());
+        // The authoritative read spends the attacker's sprint freshness — the
+        // pre-send only peeked, so both paths see the same answer this tick.
+        boolean freshSprint = attacker instanceof Player attackerPlayer
+                && attackerPlayer.isSprinting()
+                && services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
         KnockbackVector vector = KnockbackEngine.compute(
-                EntityState.capture(attacker), victimState, settings, victimYOverride);
+                EntityState.capture(attacker), victimState, profile, victimYOverride,
+                java.util.concurrent.ThreadLocalRandom.current(), freshSprint);
 
         pipeline.submit(victim, vector, attacker, KnockbackPipeline.Cause.MELEE);
         debug.log(() -> vector == null

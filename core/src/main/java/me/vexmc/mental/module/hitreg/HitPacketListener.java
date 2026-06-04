@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.api.event.AsyncHitRegisterEvent;
 import me.vexmc.mental.config.HitRegSettings;
+import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.config.KnockbackSettings;
 import me.vexmc.mental.config.ResistancePolicy;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
@@ -142,6 +143,7 @@ final class HitPacketListener implements PacketListener {
         if (!knockback.enabled()) {
             return;
         }
+        KnockbackProfile profile = knockback.profile();
 
         PlayerStateCache.Snapshot attackerSnap = stateCache.get(attacker.getUniqueId());
         PlayerStateCache.Snapshot victimSnap = stateCache.get(victim.getUniqueId());
@@ -169,14 +171,19 @@ final class HitPacketListener implements PacketListener {
             // OCM computes this hit's knockback on the main thread; a Mental
             // vector pre-sent now would mispredict it.
             debug(attacker, () -> "velocity pre-send skipped: OCM owns this attacker's knockback");
-        } else if (knockback.resistance() == ResistancePolicy.LEGACY
+        } else if (profile.resistance() == ResistancePolicy.LEGACY
                 && victimSnap.knockbackResistance() > 0.0) {
             // The all-or-nothing roll belongs to the authoritative path; a
             // pre-sent vector the roll then suppresses would be a phantom.
             debug(attacker, () -> "velocity pre-send skipped: legacy resistance roll pending");
         } else {
+            // Peek (never consume) sprint freshness — the authoritative
+            // owning-thread compute spends it later this tick.
+            boolean freshSprint = attackerSnap.sprinting()
+                    && services.sprintTracker().peekFresh(attacker.getUniqueId());
             KnockbackVector vector = KnockbackEngine.compute(
-                    attackerSnap.toEntityState(), victimSnap.toEntityState(), knockback, null);
+                    attackerSnap.toEntityState(), victimSnap.toEntityState(), profile, null,
+                    java.util.concurrent.ThreadLocalRandom.current(), freshSprint);
             if (vector != null) {
                 senders.sendVelocity(victim, victimSnap.entityId(), vector.toBukkit());
             }

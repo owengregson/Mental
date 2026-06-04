@@ -65,7 +65,8 @@ public final class KnockbackSuite {
                 // untouched fields would.
                 EntityState victimState = restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
-                        attackerState, victimState, mental.services().config().knockback(), null);
+                        attackerState, victimState,
+                        mental.services().config().knockback().profile(), null);
                 attacker.attack(victim.player());
                 return vector;
             });
@@ -125,7 +126,7 @@ public final class KnockbackSuite {
                 victim.player().setNoDamageTicks(0);
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()), restingVictim(victim),
-                        mental.services().config().knockback(), null);
+                        mental.services().config().knockback().profile(), null);
                 attacker.attack(victim.player());
                 return vector;
             });
@@ -151,11 +152,12 @@ public final class KnockbackSuite {
                     expected.add(KnockbackEngine.compute(
                             attackerState,
                             new EntityState(
-                                    resting.x(), resting.z(), resting.yaw(),
+                                    resting.x(), resting.y(), resting.z(), resting.yaw(),
                                     residual.vx(), residual.vy(), residual.vz(),
-                                    resting.sprinting(), resting.knockbackEnchantLevel(),
+                                    resting.grounded(), resting.sprinting(),
+                                    resting.knockbackEnchantLevel(),
                                     resting.knockbackResistance()),
-                            mental.services().config().knockback(), null));
+                            mental.services().config().knockback().profile(), null));
                 }
                 attacker.attack(victim.player());
                 return expected;
@@ -195,7 +197,8 @@ public final class KnockbackSuite {
     static EntityState restingVictim(FakePlayer victim) {
         EntityState live = EntityState.capture(victim.player());
         return new EntityState(
-                live.x(), live.z(), live.yaw(), 0.0, 0.0, 0.0,
-                live.sprinting(), live.knockbackEnchantLevel(), live.knockbackResistance());
+                live.x(), live.y(), live.z(), live.yaw(), 0.0, 0.0, 0.0,
+                live.grounded(), live.sprinting(),
+                live.knockbackEnchantLevel(), live.knockbackResistance());
     }
 }

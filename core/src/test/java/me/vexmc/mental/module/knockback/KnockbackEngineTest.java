@@ -7,39 +7,53 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.random.RandomGenerator;
-import me.vexmc.mental.config.KnockbackSettings;
+import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.config.ResistancePolicy;
+import me.vexmc.mental.config.VerticalMode;
 import org.junit.jupiter.api.Test;
 
 /**
  * Every expectation below is hand-computed from the 1.7.10 formula with the
- * default settings: base 0.4/0.4, extra 0.5/0.1 per level, vertical limit
+ * default profile: base 0.4/0.4, extra 0.5/0.1 per level, vertical limit
  * 0.4 clamping the BASE before bonus levels (vanilla ordering), horizontal
  * limit off, friction 0.5 per axis, sprint worth one level. The 1.8.9
- * formula is byte-identical; only delivery differed.
+ * formula is byte-identical; only delivery differed. The newer fork knobs
+ * (vertical-mode, range taper, wtap split, air multipliers, add offsets,
+ * vertical floor) each get their own scenario and are no-ops at defaults.
  */
 class KnockbackEngineTest {
 
     private static final double EPSILON = 1.0e-9;
-    private static final KnockbackSettings DEFAULTS = settings(1.0, ResistancePolicy.NONE);
+    private static final KnockbackProfile DEFAULTS = KnockbackProfile.LEGACY_17;
 
-    private static KnockbackSettings settings(double sprintFactor, ResistancePolicy resistance) {
-        return new KnockbackSettings(
-                true, 0.4, 0.4, 0.5, 0.1, 0.4, -1.0, 0.5, 0.5, 0.5,
-                sprintFactor, true, resistance, true);
+    private static KnockbackProfile profile(double sprintFactor, ResistancePolicy resistance) {
+        return withModifiers(DEFAULTS, sprintFactor, resistance);
+    }
+
+    private static KnockbackProfile withModifiers(
+            KnockbackProfile base, double sprintFactor, ResistancePolicy resistance) {
+        return new KnockbackProfile(
+                base.name(), base.displayName(), base.description(),
+                base.base(), base.verticalMode(), base.extra(), base.wtapExtra(),
+                base.friction(), base.limits(), base.air(), base.add(), base.rangeReduction(),
+                sprintFactor, base.combos(), resistance, base.shieldBlockingCancels());
     }
 
     private static EntityState attacker(double x, double z, float yaw, boolean sprinting, int enchant) {
-        return new EntityState(x, z, yaw, 0, 0, 0, sprinting, enchant, 0);
+        return new EntityState(x, 0, z, yaw, 0, 0, 0, true, sprinting, enchant, 0);
     }
 
     private static EntityState victim(double x, double z, double vx, double vy, double vz, double resistance) {
-        return new EntityState(x, z, 0.0f, vx, vy, vz, false, 0, resistance);
+        return new EntityState(x, 0, z, 0.0f, vx, vy, vz, true, false, 0, resistance);
+    }
+
+    private static EntityState airborneVictim(double x, double z, double vx, double vy, double vz) {
+        return new EntityState(x, 0, z, 0.0f, vx, vy, vz, false, false, 0, 0);
     }
 
     private static KnockbackVector computed(EntityState attacker, EntityState victim,
-            KnockbackSettings settings, Double yOverride) {
-        KnockbackVector vector = KnockbackEngine.compute(attacker, victim, settings, yOverride);
+            KnockbackProfile profile, Double yOverride) {
+        KnockbackVector vector = KnockbackEngine.compute(attacker, victim, profile, yOverride);
         assertNotNull(vector);
         return vector;
     }
@@ -99,7 +113,7 @@ class KnockbackEngineTest {
     void knockbackResistanceScalingPolicyScalesHorizontalOnly() {
         KnockbackVector vector = computed(
                 attacker(0, 0, 0.0f, false, 0), victim(3, 4, 0, 0, 0, 0.5),
-                settings(1.0, ResistancePolicy.SCALING), null);
+                profile(1.0, ResistancePolicy.SCALING), null);
 
         assertEquals(0.12, vector.x(), EPSILON);
         assertEquals(0.4, vector.y(), EPSILON);
@@ -108,16 +122,16 @@ class KnockbackEngineTest {
 
     @Test
     void legacyResistanceIsAllOrNothing() {
-        KnockbackSettings legacy = settings(1.0, ResistancePolicy.LEGACY);
+        KnockbackProfile legacy = profile(1.0, ResistancePolicy.LEGACY);
         EntityState attacker = attacker(0, 0, 0.0f, false, 0);
 
         RandomGenerator alwaysResists = constantRandom(0.0); // roll 0.0 < resistance
         assertNull(KnockbackEngine.compute(
-                attacker, victim(3, 4, 0, 0, 0, 0.5), legacy, null, alwaysResists));
+                attacker, victim(3, 4, 0, 0, 0, 0.5), legacy, null, alwaysResists, false));
 
         RandomGenerator neverResists = constantRandom(0.99);
         KnockbackVector full = KnockbackEngine.compute(
-                attacker, victim(3, 4, 0, 0, 0, 0.5), legacy, null, neverResists);
+                attacker, victim(3, 4, 0, 0, 0, 0.5), legacy, null, neverResists, false);
         assertNotNull(full);
         assertEquals(0.24, full.x(), EPSILON); // unscaled — the roll passed, full knockback
         assertEquals(0.32, full.z(), EPSILON);
@@ -135,9 +149,12 @@ class KnockbackEngineTest {
 
     @Test
     void horizontalLimitRescalesBothAxes() {
-        KnockbackSettings capped = new KnockbackSettings(
-                true, 0.4, 0.4, 0.5, 0.1, 0.4, 0.3, 0.5, 0.5, 0.5, 1.0,
-                true, ResistancePolicy.NONE, true);
+        KnockbackProfile capped = new KnockbackProfile(
+                DEFAULTS.name(), DEFAULTS.displayName(), DEFAULTS.description(),
+                DEFAULTS.base(), DEFAULTS.verticalMode(), DEFAULTS.extra(), DEFAULTS.wtapExtra(),
+                DEFAULTS.friction(), new KnockbackProfile.Limits(0.4, -3.9, 0.3),
+                DEFAULTS.air(), DEFAULTS.add(), DEFAULTS.rangeReduction(),
+                1.0, DEFAULTS.combos(), ResistancePolicy.NONE, DEFAULTS.shieldBlockingCancels());
 
         KnockbackVector vector = computed(
                 attacker(0, 0, 0.0f, false, 0), victim(3, 4, 0, 0, 0, 0), capped, null);
@@ -162,7 +179,7 @@ class KnockbackEngineTest {
     void zeroDistanceHitStaysFiniteWithBaseMagnitude() {
         RandomGenerator seeded = RandomGenerator.of("L64X128MixRandom");
         KnockbackVector vector = KnockbackEngine.compute(
-                attacker(5, 5, 0.0f, false, 0), victim(5, 5, 0, 0, 0, 0), DEFAULTS, null, seeded);
+                attacker(5, 5, 0.0f, false, 0), victim(5, 5, 0, 0, 0, 0), DEFAULTS, null, seeded, false);
 
         assertNotNull(vector);
         assertFalse(Double.isNaN(vector.x()));
@@ -175,7 +192,7 @@ class KnockbackEngineTest {
     void sprintFactorScalesTheSprintContribution() {
         KnockbackVector vector = computed(
                 attacker(0, 0, 0.0f, true, 0), victim(3, 4, 0, 0, 0, 0),
-                settings(2.0, ResistancePolicy.NONE), null);
+                profile(2.0, ResistancePolicy.NONE), null);
 
         assertEquals(0.32 + 2.0 * 0.5, vector.z(), EPSILON);
         assertTrue(vector.y() <= 0.4 + 0.1 + EPSILON);
@@ -209,6 +226,176 @@ class KnockbackEngineTest {
         assertEquals(-3.9, raw.x(), EPSILON);
         assertEquals(3.9, raw.y(), EPSILON);
         assertEquals(1.0, raw.z(), EPSILON);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  The fork knob vocabulary — each an era-exact no-op at defaults     */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void verticalModeSetAssignsRegardlessOfVictimMotionAndOverride() {
+        KnockbackProfile assigned = new KnockbackProfile(
+                "set", "Set", "", new KnockbackProfile.Push(0.4, 0.25), VerticalMode.SET,
+                DEFAULTS.extra(), DEFAULTS.wtapExtra(), DEFAULTS.friction(),
+                new KnockbackProfile.Limits(4.0, -3.9, -1.0), DEFAULTS.air(), DEFAULTS.add(),
+                DEFAULTS.rangeReduction(), 1.0, false, ResistancePolicy.NONE, true);
+
+        // Rising, falling, resting, and latency-hinted victims all launch identically.
+        KnockbackVector rising = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, 0.9, 0, 0), assigned, null);
+        KnockbackVector falling = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, -1.5, 0, 0), assigned, null);
+        KnockbackVector hinted = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, 0.9, 0, 0), assigned, -0.5);
+
+        assertEquals(0.25, rising.y(), EPSILON);
+        assertEquals(0.25, falling.y(), EPSILON);
+        assertEquals(0.25, hinted.y(), EPSILON);
+        // Horizontal friction still applies; only the vertical is assigned.
+        assertEquals(0.4, rising.z(), EPSILON);
+    }
+
+    @Test
+    void rangeReductionTapersThePushBeyondItsStartDistance() {
+        KnockbackProfile tapered = new KnockbackProfile(
+                "taper", "Taper", "", DEFAULTS.base(), VerticalMode.ADD,
+                DEFAULTS.extra(), DEFAULTS.wtapExtra(), DEFAULTS.friction(), DEFAULTS.limits(),
+                DEFAULTS.air(), DEFAULTS.add(),
+                new KnockbackProfile.RangeReduction(true, 3.0, 0.025, 1.2, 0.12),
+                1.0, true, ResistancePolicy.NONE, true);
+
+        // 2.5 blocks: inside the start distance — full push.
+        KnockbackVector close = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 2.5, 0, 0, 0, 0), tapered, null);
+        assertEquals(0.4, close.z(), EPSILON);
+
+        // 4 blocks: push − 0.025 × (4 − 1.2) = 0.4 − 0.07 = 0.33.
+        KnockbackVector mid = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, 0, 0, 0), tapered, null);
+        assertEquals(0.33, mid.z(), EPSILON);
+
+        // 10 blocks: reduction capped at 0.12 → push 0.28.
+        KnockbackVector far = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 10, 0, 0, 0, 0), tapered, null);
+        assertEquals(0.28, far.z(), EPSILON);
+
+        // The distance is 3D: a victim 4 blocks away purely vertically tapers too.
+        EntityState below = new EntityState(0, -4, 0.001, 0.0f, 0, 0, 0, true, false, 0, 0);
+        KnockbackVector vertical = KnockbackEngine.compute(
+                attacker(0, 0, 0.0f, false, 0), below, tapered, null,
+                RandomGenerator.of("L64X128MixRandom"), false);
+        assertNotNull(vertical);
+        assertEquals(0.33, Math.hypot(vertical.x(), vertical.z()), 1.0e-6);
+
+        // The base-only path (rods, projectiles) never tapers.
+        KnockbackVector rod = KnockbackEngine.computeBase(
+                victim(0, 10, 0, 0, 0, 0), 0.0, 0.0, tapered, null,
+                RandomGenerator.of("L64X128MixRandom"));
+        assertNotNull(rod);
+        assertEquals(0.4, rod.z(), EPSILON);
+    }
+
+    @Test
+    void wtapExtraReplacesTheSprintContributionOnFreshSprintOnly() {
+        KnockbackProfile wtap = new KnockbackProfile(
+                "wtap", "Wtap", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
+                new KnockbackProfile.WtapExtra(true, 0.8, 0.05),
+                DEFAULTS.friction(), DEFAULTS.limits(), DEFAULTS.air(), DEFAULTS.add(),
+                DEFAULTS.rangeReduction(), 1.0, true, ResistancePolicy.NONE, true);
+        EntityState sprintingAttacker = attacker(0, 0, 0.0f, true, 1); // sprint + Knockback I
+        EntityState restingVictim = victim(0, 4, 0, 0, 0, 0);
+        RandomGenerator random = RandomGenerator.of("L64X128MixRandom");
+
+        // Fresh sprint (w-tap): sprint level uses 0.8/0.05, enchant level stays 0.5.
+        KnockbackVector fresh = KnockbackEngine.compute(
+                sprintingAttacker, restingVictim, wtap, null, random, true);
+        assertNotNull(fresh);
+        assertEquals(0.4 + 1.0 * 0.8 + 1.0 * 0.5, fresh.z(), EPSILON);
+        assertEquals(0.4 + 0.05, fresh.y(), EPSILON);
+
+        // Continuous sprint: plain extra for everything.
+        KnockbackVector continuous = KnockbackEngine.compute(
+                sprintingAttacker, restingVictim, wtap, null, random, false);
+        assertNotNull(continuous);
+        assertEquals(0.4 + 2.0 * 0.5, continuous.z(), EPSILON);
+        assertEquals(0.4 + 0.1, continuous.y(), EPSILON);
+
+        // Disabled knob: freshness changes nothing — the era default.
+        KnockbackVector legacyFresh = KnockbackEngine.compute(
+                sprintingAttacker, restingVictim, DEFAULTS, null, random, true);
+        KnockbackVector legacyStale = KnockbackEngine.compute(
+                sprintingAttacker, restingVictim, DEFAULTS, null, random, false);
+        assertNotNull(legacyFresh);
+        assertNotNull(legacyStale);
+        assertEquals(legacyStale.z(), legacyFresh.z(), EPSILON);
+        assertEquals(legacyStale.y(), legacyFresh.y(), EPSILON);
+    }
+
+    @Test
+    void airMultipliersScaleAirborneVictimsOnly() {
+        KnockbackProfile aired = new KnockbackProfile(
+                "air", "Air", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
+                DEFAULTS.wtapExtra(), DEFAULTS.friction(), DEFAULTS.limits(),
+                new KnockbackProfile.Push(0.6, 0.8), DEFAULTS.add(), DEFAULTS.rangeReduction(),
+                1.0, true, ResistancePolicy.NONE, true);
+
+        KnockbackVector grounded = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(3, 4, 0, 0, 0, 0), aired, null);
+        assertEquals(0.24, grounded.x(), EPSILON);
+        assertEquals(0.4, grounded.y(), EPSILON);
+        assertEquals(0.32, grounded.z(), EPSILON);
+
+        KnockbackVector airborne = computed(
+                attacker(0, 0, 0.0f, false, 0), airborneVictim(3, 4, 0, 0, 0), aired, null);
+        assertEquals(0.24 * 0.6, airborne.x(), EPSILON);
+        assertEquals(0.4 * 0.8, airborne.y(), EPSILON);
+        assertEquals(0.32 * 0.6, airborne.z(), EPSILON);
+    }
+
+    @Test
+    void addOffsetsDistributeByAxisShareAndMatchSigns() {
+        KnockbackProfile added = new KnockbackProfile(
+                "add", "Add", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
+                DEFAULTS.wtapExtra(), DEFAULTS.friction(), DEFAULTS.limits(), DEFAULTS.air(),
+                new KnockbackProfile.Push(0.1, 0.05), DEFAULTS.rangeReduction(),
+                1.0, true, ResistancePolicy.NONE, true);
+
+        // Base vector (0.24, 0.4, 0.32): shares 0.24/0.56 and 0.32/0.56.
+        KnockbackVector vector = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(3, 4, 0, 0, 0, 0), added, null);
+        assertEquals(0.24 + 0.1 * (0.24 / 0.56), vector.x(), EPSILON);
+        assertEquals(0.4 + 0.05, vector.y(), EPSILON);
+        assertEquals(0.32 + 0.1 * (0.32 / 0.56), vector.z(), EPSILON);
+
+        // A single-axis knock keeps its line: the whole addition lands on z,
+        // sign-matched, and the zero x axis stays exactly zero.
+        KnockbackVector axial = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, 0, 0, 0), added, null);
+        assertEquals(0.0, axial.x(), EPSILON);
+        assertEquals(0.4 + 0.1, axial.z(), EPSILON);
+
+        KnockbackVector negative = computed(
+                attacker(0, 4, 0.0f, false, 0), victim(0, 0, 0, 0, 0, 0), added, null);
+        assertEquals(-(0.4 + 0.1), negative.z(), EPSILON);
+    }
+
+    @Test
+    void verticalMinFloorsTheFinalVertical() {
+        KnockbackProfile floored = new KnockbackProfile(
+                "floor", "Floor", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
+                DEFAULTS.wtapExtra(), DEFAULTS.friction(),
+                new KnockbackProfile.Limits(0.4, -0.2, -1.0), DEFAULTS.air(), DEFAULTS.add(),
+                DEFAULTS.rangeReduction(), 1.0, true, ResistancePolicy.NONE, true);
+
+        // A hard downward residual: 0.5 × −2.0 + 0.4 = −0.6 → floored at −0.2.
+        KnockbackVector vector = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, -2.0, 0, 0), floored, null);
+        assertEquals(-0.2, vector.y(), EPSILON);
+
+        // The default floor (−3.9) only restates the packet clamp.
+        KnockbackVector legacy = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, -2.0, 0, 0), DEFAULTS, null);
+        assertEquals(-0.6, legacy.y(), EPSILON);
     }
 
     private static RandomGenerator constantRandom(double value) {

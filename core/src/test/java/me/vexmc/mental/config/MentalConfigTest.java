@@ -91,7 +91,7 @@ class MentalConfigTest {
 
         assertEquals(20, config.hitReg().maxCps());
         assertTrue(config.hitReg().fastPath());
-        assertEquals(0.4, config.knockback().baseHorizontal());
+        assertEquals(0.4, config.knockback().profile().base().horizontal());
         assertEquals(ProbeStrategy.PING, config.compensation().probeStrategy());
         assertEquals(4, warnings.size(), () -> "warnings: " + warnings);
         assertTrue(warnings.stream().anyMatch(w -> w.contains("modules.hit-registration.max-cps")));
@@ -135,12 +135,12 @@ class MentalConfigTest {
 
         assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
         assertEquals(false, config.knockback().enabled());
-        assertEquals(0.6, config.knockback().extraHorizontal());
-        assertEquals(1.2, config.knockback().limitHorizontal());
-        assertTrue(config.knockback().limitsHorizontal());
-        assertEquals(2.0, config.knockback().sprintFactor());
-        assertFalse(config.knockback().combos());
-        assertEquals(ResistancePolicy.SCALING, config.knockback().resistance());
+        assertEquals(0.6, config.knockback().profile().extra().horizontal());
+        assertEquals(1.2, config.knockback().profile().limits().horizontal());
+        assertTrue(config.knockback().profile().limits().limitsHorizontal());
+        assertEquals(2.0, config.knockback().profile().sprintFactor());
+        assertFalse(config.knockback().profile().combos());
+        assertEquals(ResistancePolicy.SCALING, config.knockback().profile().resistance());
         assertEquals(ProbeStrategy.KEEPALIVE, config.compensation().probeStrategy());
         assertEquals(10, config.compensation().pingOffsetMillis());
         assertEquals(ReelInPolicy.CANCEL, config.fishingKnockback().reelIn());
