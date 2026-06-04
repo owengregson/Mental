@@ -88,6 +88,9 @@ No. Mental deals damage through the standard Bukkit event chain, so anything tha
 **Does it remove the 1.9 attack cooldown?**
 No, and that's deliberate. Mental never scales damage by charge, so the cooldown has no effect on hits Mental registers — but the meter itself, sword blocking, regen and the rest of the combat *rules* are a different plugin's job. Pair Mental with [OldCombatMechanics](https://github.com/kernitus/BukkitOldCombatMechanics) (its `disable-attack-cooldown` module) for those; the two are built to run together.
 
+**Can I run it alongside OldCombatMechanics?**
+Yes — that's the intended setup for a complete 1.8-style server. OCM handles the combat rules, Mental handles knockback and hit delivery, and where OCM's own knockback/fishing/projectile modules are enabled, Mental detects it and steps aside automatically, per player modeset, so nothing is ever applied twice. Disable those OCM modules to get Mental's combos, positional projectiles and ping compensation instead. The full ownership table is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+
 **Why doesn't the projectile module do anything on my 1.21.2+ server?**
 Because it doesn't need to. Mojang restored projectile knockback against players in vanilla 1.21.2.
 
@@ -114,7 +117,7 @@ Mental is a multi-module Gradle build:
 
 The wide version range works without reflection on hot paths: `core` compiles against the oldest supported API (1.17), which makes the common path binary-safe everywhere, and anything newer lives in the `compat-*` modules behind runtime feature detection. The two binary breaks in the range (the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames) are absorbed by small boot-time resolvers.
 
-If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline. For what "1.7.10 combat" means precisely — the residual ledger behind combos, the legacy damage tables, and the few client-side mechanics no server can mirror — see [docs/legacy-combat.md](docs/legacy-combat.md).
+If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline. For what "1.7.10 combat" means precisely — the residual ledger behind combos, the legacy damage tables, and the few client-side mechanics no server can mirror — see [docs/legacy-combat.md](docs/legacy-combat.md). How Mental divides combat with OldCombatMechanics (and proves it on live servers) is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
 
 ### API
 

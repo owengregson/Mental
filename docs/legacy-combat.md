@@ -112,3 +112,9 @@ config key.
   `PlayerVelocityEvent` and real damage calls — server-authoritative by
   construction. The only out-of-band behavior remains the optional netty
   pre-send, governed by `anticheat.mode` exactly as before.
+- **OldCombatMechanics divides this cleanly with Mental.** OCM owns the
+  combat *rules* (cooldown, blocking, regen, armour); Mental owns knockback
+  and hit delivery — and wherever OCM's own knockback/fishing/projectile
+  modules are enabled, Mental yields those interactions automatically, per
+  player modeset. The ownership table and mechanics live in
+  [ocm-coexistence.md](ocm-coexistence.md).
