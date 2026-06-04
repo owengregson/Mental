@@ -90,16 +90,28 @@ tasks.named<RunServer>("runServer") {
 val checkTasks = mutableListOf<TaskProvider<Task>>()
 var previousCheck: TaskProvider<Task>? = null
 
-integrationTestVersions.forEach { version ->
-    val suffix = "_" + version.replace(".", "_")
-    val runDir = rootProject.layout.projectDirectory.dir("run/$version").asFile
+/**
+ * One live-server suite: boots Paper [version] in run/[runDirName] with
+ * Mental, the tester, and any [extraPluginJars]; the paired check task fails
+ * the build unless the tester wrote PASS. Run tasks are chained sequentially
+ * by the caller — every server binds the same port.
+ */
+fun registerIntegrationServer(
+    taskSuffix: String,
+    version: String,
+    runDirName: String,
+    extraPluginJars: List<File>,
+    flavour: String,
+): Pair<TaskProvider<RunServer>, TaskProvider<Task>> {
+    val runDir = rootProject.layout.projectDirectory.dir("run/$runDirName").asFile
     val resultFile = runDir.resolve("plugins/MentalTester/test-results.txt")
     val failuresFile = runDir.resolve("plugins/MentalTester/test-failures.txt")
-    val logFile = layout.buildDirectory.file("integration-test-logs/$version.log")
+    val logFile = layout.buildDirectory.file("integration-test-logs/${runDirName.replace('/', '-')}.log")
+    val label = version + flavour
 
-    val runTask = tasks.register<RunServer>("runIntegrationTest$suffix") {
+    val runTask = tasks.register<RunServer>("runIntegrationTest$taskSuffix") {
         group = "mental integration"
-        description = "Boots Paper $version with Mental + tester and runs the suite."
+        description = "Boots Paper $label with Mental + tester and runs the suite."
         dependsOn(tasks.shadowJar, testerShadowJar)
         runDirectory.set(runDir)
         minecraftVersion(version)
@@ -109,11 +121,15 @@ integrationTestVersions.forEach { version ->
         })
         pluginJars.from(tasks.shadowJar.flatMap { it.archiveFile })
         pluginJars.from(testerShadowJar.flatMap { it.archiveFile })
+        extraPluginJars.forEach { pluginJars.from(it) }
 
         doFirst {
             resultFile.delete()
             failuresFile.delete()
             runDir.resolve("plugins/Mental/config.yml").delete()
+            // Companion plugins must start pristine too — their defaults are
+            // part of what the coexistence suite asserts against.
+            runDir.resolve("plugins/OldCombatMechanics").deleteRecursively()
             val properties = runDir.resolve("server.properties")
             if (!properties.exists()) {
                 runDir.mkdirs()
@@ -139,32 +155,58 @@ integrationTestVersions.forEach { version ->
         }
     }
 
-    val checkTask = tasks.register("checkIntegrationTest$suffix") {
+    val checkTask = tasks.register("checkIntegrationTest$taskSuffix") {
         group = "mental integration"
-        description = "Verifies the $version suite reported PASS."
+        description = "Verifies the $label suite reported PASS."
         dependsOn(runTask)
         doLast {
             val log = logFile.get().asFile
             if (!resultFile.exists()) {
                 throw GradleException(
-                    "No test result for $version — server crashed or hung. Log: ${log.absolutePath}")
+                    "No test result for $label — server crashed or hung. Log: ${log.absolutePath}")
             }
             if (failuresFile.exists()) {
                 failuresFile.readLines().filter { it.isNotBlank() }.take(10).forEach {
-                    logger.lifecycle("[$version] FAILURE: $it")
+                    logger.lifecycle("[$label] FAILURE: $it")
                 }
             }
             when (val result = resultFile.readText().trim()) {
-                "PASS" -> logger.lifecycle("[$version] integration tests passed. Log: ${log.absolutePath}")
-                "FAIL" -> throw GradleException("Integration tests failed for $version. Log: ${log.absolutePath}")
-                else -> throw GradleException("Unknown test result '$result' for $version.")
+                "PASS" -> logger.lifecycle("[$label] integration tests passed. Log: ${log.absolutePath}")
+                "FAIL" -> throw GradleException("Integration tests failed for $label. Log: ${log.absolutePath}")
+                else -> throw GradleException("Unknown test result '$result' for $label.")
             }
         }
     }
+    return runTask to checkTask
+}
 
+integrationTestVersions.forEach { version ->
+    val suffix = "_" + version.replace(".", "_")
+    val (runTask, checkTask) = registerIntegrationServer(suffix, version, version, emptyList(), "")
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     checkTasks.add(checkTask)
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ *  OCM coexistence runs. When run/ocm-jar/OldCombatMechanics.jar exists
+ *  (build it in the BukkitOldCombatMechanics repo: ./gradlew shadowJar,
+ *  then copy build/libs/OldCombatMechanics.jar there), the floor and
+ *  ceiling versions also boot with OCM installed; the tester detects it
+ *  and runs the coexistence suite instead of the era suites.
+ * ──────────────────────────────────────────────────────────────────────── */
+val ocmJarFile = rootProject.layout.projectDirectory.file("run/ocm-jar/OldCombatMechanics.jar").asFile
+val ocmCheckTasks = mutableListOf<TaskProvider<Task>>()
+
+if (ocmJarFile.isFile) {
+    setOf(integrationTestVersions.first(), integrationTestVersions.last()).forEach { version ->
+        val suffix = "Ocm_" + version.replace(".", "_")
+        val (runTask, checkTask) = registerIntegrationServer(
+            suffix, version, "ocm/$version", listOf(ocmJarFile), " +OCM")
+        previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
+        previousCheck = checkTask
+        ocmCheckTasks.add(checkTask)
+    }
 }
 
 tasks.register("integrationTest") {
@@ -180,4 +222,20 @@ tasks.register("integrationTestMatrix") {
     group = "mental integration"
     description = "Runs the suite on every version in integrationTestVersions."
     dependsOn(checkTasks)
+}
+
+tasks.register("integrationTestOcm") {
+    group = "mental integration"
+    description = "Runs the OldCombatMechanics coexistence suite on floor and ceiling " +
+            "(requires run/ocm-jar/OldCombatMechanics.jar)."
+    if (ocmJarFile.isFile) {
+        dependsOn(ocmCheckTasks)
+    } else {
+        doFirst {
+            throw GradleException(
+                "run/ocm-jar/OldCombatMechanics.jar is missing. Build it in the " +
+                        "BukkitOldCombatMechanics repo (./gradlew shadowJar) and copy " +
+                        "build/libs/OldCombatMechanics.jar there.")
+        }
+    }
 }

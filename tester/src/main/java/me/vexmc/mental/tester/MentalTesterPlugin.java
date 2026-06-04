@@ -9,8 +9,10 @@ import me.vexmc.mental.tester.suite.BootSuite;
 import me.vexmc.mental.tester.suite.CommandSuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
+import me.vexmc.mental.tester.suite.OcmCoexistenceSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
 import me.vexmc.mental.tester.suite.ReloadSuite;
+import me.vexmc.mental.tester.suite.ZeroTouchSuite;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
@@ -37,15 +39,23 @@ public final class MentalTesterPlugin extends JavaPlugin {
         TaskHandle[] starter = new TaskHandle[1];
         starter[0] = scheduling.repeatGlobal(SETTLE_TICKS, 72_000L, () -> {
             starter[0].cancel();
+            boolean ocmInstalled = getServer().getPluginManager().getPlugin("OldCombatMechanics") != null;
             List<TestCase> suite = new ArrayList<>(BootSuite.tests(mental));
-            if (!mental.services().capabilities().folia()) {
+            if (mental.services().capabilities().folia()) {
+                getLogger().info("Folia detected — running the boot suite only.");
+            } else if (ocmInstalled) {
+                // The coexistence environment: OCM's default config owns most
+                // combat, so the era suites (which assert Mental's vectors)
+                // legitimately do not apply — ownership itself is under test.
+                getLogger().info("OldCombatMechanics detected — running the coexistence suite.");
+                suite.addAll(OcmCoexistenceSuite.tests(mental, this));
+            } else {
                 suite.addAll(KnockbackSuite.tests(mental, this));
                 suite.addAll(ProjectileSuite.tests(mental, this));
                 suite.addAll(FishingSuite.tests(mental, this));
                 suite.addAll(CommandSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
-            } else {
-                getLogger().info("Folia detected — running the boot suite only.");
+                suite.addAll(ZeroTouchSuite.tests(mental, this));
             }
             new TestHarness(this, scheduling).run(suite);
         });

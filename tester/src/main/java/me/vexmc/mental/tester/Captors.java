@@ -20,6 +20,7 @@ public final class Captors implements Listener {
     private final Map<UUID, Vector> velocities = new ConcurrentHashMap<>();
     private final Map<UUID, Double> damages = new ConcurrentHashMap<>();
     private final Map<UUID, String> projectileHits = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> knockbackApplies = new ConcurrentHashMap<>();
 
     public static @NotNull Captors register(@NotNull Plugin plugin) {
         Captors captors = new Captors();
@@ -48,6 +49,17 @@ public final class Captors implements Listener {
         }
     }
 
+    /**
+     * Mental fires this for every knockback it applies and for nothing it
+     * yields — the ownership discriminator for coexistence assertions (the
+     * raw velocity values of Mental's 1.7.10 and OCM's 1.8 first hits are
+     * intentionally identical).
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onKnockbackApply(@NotNull me.vexmc.mental.api.event.KnockbackApplyEvent event) {
+        knockbackApplies.merge(event.getVictim().getUniqueId(), 1, Integer::sum);
+    }
+
     public @Nullable Vector velocityOf(@NotNull UUID player) {
         return velocities.get(player);
     }
@@ -60,8 +72,13 @@ public final class Captors implements Listener {
         return projectileHits.get(entity);
     }
 
+    public int knockbackAppliesTo(@NotNull UUID victim) {
+        return knockbackApplies.getOrDefault(victim, 0);
+    }
+
     public void reset() {
         velocities.clear();
         damages.clear();
+        knockbackApplies.clear();
     }
 }
