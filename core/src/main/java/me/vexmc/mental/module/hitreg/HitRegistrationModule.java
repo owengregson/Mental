@@ -9,6 +9,7 @@ import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.engine.CombatModule;
+import me.vexmc.mental.module.knockback.VictimMotion;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -31,13 +32,15 @@ public final class HitRegistrationModule extends CombatModule implements Listene
     private final PlayerStateCache stateCache = new PlayerStateCache();
     private final HitFeedbackGate feedbackGate = new HitFeedbackGate();
     private final ConcurrentHashMap<UUID, TaskHandle> snapshotTasks = new ConcurrentHashMap<>();
+    private final VictimMotion ledger;
 
     private PacketListenerCommon handle;
 
-    public HitRegistrationModule(@NotNull MentalServices services) {
+    public HitRegistrationModule(@NotNull MentalServices services, @NotNull VictimMotion ledger) {
         super(services, "hit-registration", "Hit Registration",
                 "Netty-thread attack interception with owning-thread damage and pre-sent feedback.",
                 DebugCategory.HITREG);
+        this.ledger = ledger;
     }
 
     @Override
@@ -74,7 +77,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
 
     @EventHandler
     public void onPlayerJoin(@NotNull PlayerJoinEvent event) {
-        stateCache.update(event.getPlayer());
+        stateCache.update(event.getPlayer(), ledger);
         track(event.getPlayer());
     }
 
@@ -98,7 +101,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
             }
             return services.scheduling().repeatOn(
                     player, 1L, 1L,
-                    () -> stateCache.update(player),
+                    () -> stateCache.update(player, ledger),
                     () -> {
                         snapshotTasks.remove(uuid);
                         stateCache.forget(uuid);

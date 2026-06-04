@@ -12,6 +12,7 @@ import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.config.CompensationSettings;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.module.knockback.KnockbackHints;
+import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.platform.Attributes;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -22,7 +23,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -62,15 +62,17 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
     private final LatencyTracker tracker = new LatencyTracker();
     private final CombatTracker combat = new CombatTracker();
     private final ConcurrentHashMap<UUID, Hint> hints = new ConcurrentHashMap<>();
+    private final VictimMotion ledger;
 
     private ProbeListener probe;
     private PacketListenerCommon probeHandle;
     private TaskHandle probeTask;
 
-    public LatencyCompensationModule(@NotNull MentalServices services) {
+    public LatencyCompensationModule(@NotNull MentalServices services, @NotNull VictimMotion ledger) {
         super(services, "latency-compensation", "Latency Compensation",
                 "Ping-aware vertical knockback correction with spike-filtered probes.",
                 DebugCategory.COMPENSATION);
+        this.ledger = ledger;
     }
 
     @Override
@@ -213,10 +215,13 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
         return Math.max(0.0, effective - settings.pingOffsetMillis());
     }
 
+    @SuppressWarnings("deprecation") // Entity#isOnGround: client-reported, feeds the residual decay
     private @Nullable Hint computeHint(Player victim, CompensationSettings settings, double compensatedMillis) {
-        Vector velocity = victim.getVelocity();
-        double serverVy = velocity.getY();
         double gravity = Attributes.valueOr(victim, Attributes.gravity(), DEFAULT_GRAVITY);
+        // The residual ledger is the same motion model the knockback engine
+        // consumes — the hint extrapolates that exact value forward by ping.
+        double serverVy = ledger.current(
+                victim.getUniqueId(), System.nanoTime(), victim.isOnGround(), gravity).vy();
         int compensatedTicks = (int) Math.ceil(compensatedMillis * 20.0 / 1000.0);
         if (compensatedTicks <= 0) {
             return null;

@@ -14,11 +14,13 @@ public record KnockbackSettings(
         double frictionY,
         double frictionZ,
         double sprintFactor,
-        boolean honorArmorResistance,
+        boolean combos,
+        @NotNull ResistancePolicy resistance,
         boolean shieldBlockingCancels) {
 
     static final KnockbackSettings DEFAULTS = new KnockbackSettings(
-            true, 0.4, 0.4, 0.5, 0.1, 0.4, -1.0, 0.5, 0.5, 0.5, 1.0, false, true);
+            true, 0.4, 0.4, 0.5, 0.1, 0.4, -1.0, 0.5, 0.5, 0.5, 1.0,
+            true, ResistancePolicy.NONE, true);
 
     public boolean limitsVertical() {
         return limitVertical > 0;
@@ -46,7 +48,8 @@ public record KnockbackSettings(
                 friction.numberAtLeast("y", DEFAULTS.frictionY, 0),
                 friction.numberAtLeast("z", DEFAULTS.frictionZ, 0),
                 modifiers.numberAtLeast("sprint", DEFAULTS.sprintFactor, 0),
-                modifiers.flag("armor-resistance", DEFAULTS.honorArmorResistance),
+                modifiers.flag("combos", DEFAULTS.combos),
+                modifiers.oneOf("armor-resistance", DEFAULTS.resistance, ResistancePolicy.class),
                 modifiers.flag("shield-blocking-cancels", DEFAULTS.shieldBlockingCancels));
     }
 }

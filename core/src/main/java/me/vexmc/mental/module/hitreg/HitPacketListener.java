@@ -12,6 +12,7 @@ import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.api.event.AsyncHitRegisterEvent;
 import me.vexmc.mental.config.HitRegSettings;
 import me.vexmc.mental.config.KnockbackSettings;
+import me.vexmc.mental.config.ResistancePolicy;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackVector;
 import org.bukkit.Bukkit;
@@ -157,12 +158,19 @@ final class HitPacketListener implements PacketListener {
             return;
         }
 
-        if (services.anticheatGate().allowVelocityPreSend()) {
+        if (!services.anticheatGate().allowVelocityPreSend()) {
+            debug(attacker, () -> "velocity pre-send suppressed by anticheat policy");
+        } else if (knockback.resistance() == ResistancePolicy.LEGACY
+                && victimSnap.knockbackResistance() > 0.0) {
+            // The all-or-nothing roll belongs to the authoritative path; a
+            // pre-sent vector the roll then suppresses would be a phantom.
+            debug(attacker, () -> "velocity pre-send skipped: legacy resistance roll pending");
+        } else {
             KnockbackVector vector = KnockbackEngine.compute(
                     attackerSnap.toEntityState(), victimSnap.toEntityState(), knockback, null);
-            senders.sendVelocity(victim, victimSnap.entityId(), vector.toBukkit());
-        } else {
-            debug(attacker, () -> "velocity pre-send suppressed by anticheat policy");
+            if (vector != null) {
+                senders.sendVelocity(victim, victimSnap.entityId(), vector.toBukkit());
+            }
         }
 
         float hurtYaw = FeedbackSenders.hurtYaw(

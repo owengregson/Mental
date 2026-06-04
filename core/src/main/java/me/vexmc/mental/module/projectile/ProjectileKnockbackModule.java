@@ -4,6 +4,7 @@ import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.config.ProjectileKnockbackSettings;
 import me.vexmc.mental.engine.CombatModule;
+import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import org.bukkit.entity.Egg;
 import org.bukkit.entity.EnderPearl;
 import org.bukkit.entity.Snowball;
@@ -24,10 +25,13 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class ProjectileKnockbackModule extends CombatModule implements Listener {
 
-    public ProjectileKnockbackModule(@NotNull MentalServices services) {
+    private final KnockbackPipeline pipeline;
+
+    public ProjectileKnockbackModule(@NotNull MentalServices services, @NotNull KnockbackPipeline pipeline) {
         super(services, "projectile-knockback", "Projectile Knockback",
-                "1.8 knockback from snowballs, eggs, and ender pearls.",
+                "1.7.10 knockback from snowballs, eggs, ender pearls, and arrows.",
                 DebugCategory.PROJECTILE);
+        this.pipeline = pipeline;
     }
 
     @Override

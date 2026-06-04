@@ -4,6 +4,7 @@ import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.config.FishingKnockbackSettings;
 import me.vexmc.mental.engine.CombatModule;
+import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackVector;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -35,10 +36,13 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
 
     private static final String CITIZENS_NPC_METADATA = "NPC";
 
-    public FishingKnockbackModule(@NotNull MentalServices services) {
+    private final KnockbackPipeline pipeline;
+
+    public FishingKnockbackModule(@NotNull MentalServices services, @NotNull KnockbackPipeline pipeline) {
         super(services, "fishing-knockback", "Fishing Knockback",
-                "1.8 rod combat: hooks damage and knock back what they hit.",
+                "1.7.10 rod combat: hooks damage and knock back what they hit.",
                 DebugCategory.FISHING);
+        this.pipeline = pipeline;
     }
 
     @Override

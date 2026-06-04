@@ -1,6 +1,7 @@
 package me.vexmc.mental.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -96,7 +97,8 @@ class MentalConfigTest {
                       horizontal: 1.2
                     modifiers:
                       sprint: 2
-                      armor-resistance: true
+                      combos: false
+                      armor-resistance: scaling
                   latency-compensation:
                     probe-strategy: keepalive
                     ping-offset-ms: 10
@@ -121,7 +123,8 @@ class MentalConfigTest {
         assertEquals(1.2, config.knockback().limitHorizontal());
         assertTrue(config.knockback().limitsHorizontal());
         assertEquals(2.0, config.knockback().sprintFactor());
-        assertTrue(config.knockback().honorArmorResistance());
+        assertFalse(config.knockback().combos());
+        assertEquals(ResistancePolicy.SCALING, config.knockback().resistance());
         assertEquals(ProbeStrategy.KEEPALIVE, config.compensation().probeStrategy());
         assertEquals(10, config.compensation().pingOffsetMillis());
         assertEquals(DragInPolicy.ALL, config.fishingKnockback().cancelDraggingIn());

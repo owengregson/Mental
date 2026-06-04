@@ -34,12 +34,12 @@ modules:
       # Clear the 1.9+ attack cooldown after each registered hit.
       reset-attack-cooldown: true
 
-  # 1.8-style melee knockback, applied server-side through the velocity
+  # 1.7.10 melee knockback, applied server-side through the velocity
   # pipeline (anticheat-safe by construction).
   knockback:
     enabled: true
     # Base knockback every hit applies, after friction halves the victim's
-    # current motion.
+    # residual motion.
     base:
       horizontal: 0.4
       vertical: 0.4
@@ -49,13 +49,13 @@ modules:
       horizontal: 0.5
       vertical: 0.1
     # The vertical limit clamps the BASE vertical component before bonus
-    # levels are added (vanilla 1.8 ordering: a sprint hit reaches 0.5).
+    # levels are added (vanilla legacy ordering: a sprint hit reaches 0.5).
     # Horizontal limit caps the post-friction base; values <= 0 disable.
     limits:
       vertical: 0.4
       horizontal: -1
-    # Fraction of the victim's current velocity that survives into the new
-    # vector. Vanilla 1.8 halves each axis.
+    # Fraction of the victim's residual motion that survives into the new
+    # vector. Legacy vanilla halves each axis.
     friction:
       x: 0.5
       y: 0.5
@@ -63,8 +63,15 @@ modules:
     modifiers:
       # Bonus levels granted by sprinting.
       sprint: 1.0
-      # Honor armor knockback resistance (netherite). 1.8 had none.
-      armor-resistance: false
+      # 1.7.10 hit stacking. The legacy server never reverted a victim's
+      # motion after knockback, so quick successive hits compounded into
+      # combos. Set false for 1.8.9 delivery: every melee hit lands flat
+      # (rod and projectile residuals still feed the next melee hit once).
+      combos: true
+      # Knockback resistance (netherite): none (ignore it — the 1.7.10 item
+      # pool), legacy (probabilistic all-or-nothing, the 1.7.10 rule), or
+      # scaling (deterministic 1 - resistance).
+      armor-resistance: none
       # Skip Mental knockback when a shield absorbed the hit.
       shield-blocking-cancels: true
 

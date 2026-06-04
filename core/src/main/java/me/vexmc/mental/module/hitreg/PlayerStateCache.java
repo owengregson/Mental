@@ -3,6 +3,7 @@ package me.vexmc.mental.module.hitreg;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.module.knockback.EntityState;
+import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
 import org.bukkit.Location;
@@ -10,7 +11,6 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -28,16 +28,26 @@ public final class PlayerStateCache {
 
     private final ConcurrentHashMap<UUID, Snapshot> snapshots = new ConcurrentHashMap<>();
 
-    /** Captures {@code player} now. Must run on the player's owning thread. */
+    /**
+     * Captures {@code player} now. Must run on the player's owning thread.
+     * Motion comes from the {@link VictimMotion} ledger — the same legacy
+     * residual the authoritative damage path feeds the engine — so the netty
+     * pre-send and the owning-thread apply compute from one model.
+     */
     @SuppressWarnings("deprecation") // Player#isOnGround: the client-reported value is the one
-    public void update(@NotNull Player player) { //          knockback expectations are built from.
+    public void update(@NotNull Player player, @NotNull VictimMotion ledger) { // knockback expectations are built from.
         Location location = player.getLocation();
-        Vector velocity = player.getVelocity();
+        boolean onGround = player.isOnGround();
+        VictimMotion.Motion motion = ledger.current(
+                player.getUniqueId(),
+                System.nanoTime(),
+                onGround,
+                Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
         snapshots.put(player.getUniqueId(), new Snapshot(
                 location.getX(), location.getY(), location.getZ(),
                 location.getYaw(),
-                velocity.getX(), velocity.getY(), velocity.getZ(),
-                player.isOnGround(),
+                motion.vx(), motion.vy(), motion.vz(),
+                onGround,
                 player.isSprinting(),
                 clampedKnockbackResistance(player),
                 mainHandKnockbackLevel(player),

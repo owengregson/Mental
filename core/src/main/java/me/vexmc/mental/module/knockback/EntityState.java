@@ -40,6 +40,36 @@ public record EntityState(
                 clampedResistance(entity));
     }
 
+    /**
+     * Captures a knockback victim. Player motion comes from the
+     * {@link VictimMotion} ledger — the legacy residual model — because the
+     * server's own view of player motion is reverted or stale on every
+     * supported version. Mobs are server-simulated, so their live velocity
+     * is already the legacy-correct input.
+     */
+    @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value drives the residual decay
+    public static @NotNull EntityState captureVictim(
+            @NotNull LivingEntity victim, @NotNull VictimMotion ledger, long nowNanos) {
+        if (!(victim instanceof Player player)) {
+            return capture(victim);
+        }
+        VictimMotion.Motion motion = ledger.current(
+                player.getUniqueId(),
+                nowNanos,
+                player.isOnGround(),
+                Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
+        return new EntityState(
+                player.getLocation().getX(),
+                player.getLocation().getZ(),
+                player.getLocation().getYaw(),
+                motion.vx(),
+                motion.vy(),
+                motion.vz(),
+                player.isSprinting(),
+                heldKnockbackLevel(player),
+                clampedResistance(player));
+    }
+
     private static int heldKnockbackLevel(LivingEntity entity) {
         EntityEquipment equipment = entity.getEquipment();
         if (equipment == null) {

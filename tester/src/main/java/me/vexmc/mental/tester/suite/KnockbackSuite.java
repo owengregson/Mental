@@ -57,12 +57,16 @@ public final class KnockbackSuite {
                 attacker.player().setSprinting(sprinting);
                 victim.player().setNoDamageTicks(0);
                 EntityState attackerState = EntityState.capture(attacker.player());
-                EntityState victimState = EntityState.capture(victim.player());
+                // A fresh victim has no residual: the ledger the module
+                // consumes reads zero motion, exactly as a 1.7.10 server's
+                // untouched fields would.
+                EntityState victimState = restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
                         attackerState, victimState, mental.services().config().knockback(), null);
                 attacker.attack(victim.player());
                 return vector;
             });
+            context.expect(expected != null, "engine returned no vector for an unresisted hit");
 
             context.awaitTicks(3);
 
@@ -84,5 +88,13 @@ public final class KnockbackSuite {
             });
             captors.unregister();
         }
+    }
+
+    /** The victim's engine input with an empty residual ledger: zero motion. */
+    static EntityState restingVictim(FakePlayer victim) {
+        EntityState live = EntityState.capture(victim.player());
+        return new EntityState(
+                live.x(), live.z(), live.yaw(), 0.0, 0.0, 0.0,
+                live.sprinting(), live.knockbackEnchantLevel(), live.knockbackResistance());
     }
 }

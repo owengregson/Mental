@@ -21,6 +21,8 @@ import me.vexmc.mental.module.fishing.FishingKnockbackModule;
 import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
 import me.vexmc.mental.module.knockback.KnockbackModule;
+import me.vexmc.mental.module.knockback.KnockbackPipeline;
+import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bstats.bukkit.Metrics;
@@ -48,6 +50,7 @@ public final class MentalPlugin extends JavaPlugin {
     private MentalServices services;
     private ModuleRegistry modules;
     private PlayerDebugSink playerDebugSink;
+    private KnockbackPipeline knockbackPipeline;
     private Metrics metrics;
 
     @Override
@@ -119,6 +122,10 @@ public final class MentalPlugin extends JavaPlugin {
         if (modules != null) {
             modules.disableAll();
         }
+        if (knockbackPipeline != null) {
+            knockbackPipeline.clear();
+            knockbackPipeline = null;
+        }
         try {
             if (PacketEvents.getAPI() != null) {
                 PacketEvents.getAPI().terminate();
@@ -155,17 +162,21 @@ public final class MentalPlugin extends JavaPlugin {
     }
 
     private void registerModules() {
-        KnockbackModule knockback = new KnockbackModule(services);
-        LatencyCompensationModule compensation = new LatencyCompensationModule(services);
+        VictimMotion victimMotion = new VictimMotion();
+        knockbackPipeline = new KnockbackPipeline(services, victimMotion);
+        getServer().getPluginManager().registerEvents(knockbackPipeline, this);
+
+        KnockbackModule knockback = new KnockbackModule(services, victimMotion, knockbackPipeline);
+        LatencyCompensationModule compensation = new LatencyCompensationModule(services, victimMotion);
         knockback.hints(compensation);
 
         modules.register(new AnticheatCompatModule(services));
-        modules.register(new HitRegistrationModule(services));
+        modules.register(new HitRegistrationModule(services, victimMotion));
         modules.register(knockback);
         modules.register(compensation);
-        modules.register(new FishingKnockbackModule(services));
+        modules.register(new FishingKnockbackModule(services, knockbackPipeline));
         modules.register(new FishingRodVelocityModule(services));
-        modules.register(new ProjectileKnockbackModule(services));
+        modules.register(new ProjectileKnockbackModule(services, knockbackPipeline));
     }
 
     private void registerCommands() {
