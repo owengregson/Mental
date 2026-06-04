@@ -33,11 +33,12 @@ time that has nothing to do with network latency.
 client click
   └─ INTERACT_ENTITY ───────────► netty thread (PacketEvents)
        ├─ CPS limiter (per-attacker sliding window)
+       ├─ reach validation (optional, ping-rewound — see below)
        ├─ validation against tick-frozen snapshots
        ├─ AsyncHitRegisterEvent (cancellable, truly async)
        ├─ vanilla packet cancelled
-       ├─ PRE-SEND  ── velocity packet ───────► victim      (T + one-way trip)
-       │            └─ hurt animation ────────► victim + attacker
+       ├─ PRE-SEND  ── ⟦bundle: velocity + hurt⟧ ──► victim  (T + one-way trip)
+       │            └─ hurt animation ─────────────► attacker
        └─ Scheduling.runOn(victim) ──► owning thread
                                          ├─ re-resolve + re-validate
                                          ├─ DamageCalculator (1.7.10 damage + crits)
@@ -52,6 +53,21 @@ hurt feedback ship straight from the netty thread, arriving one round-trip
 leg earlier than vanilla's tracker pulse. The main-thread damage that
 follows re-emits the same signals through vanilla; clients treat the
 duplicates as no-op corrections.
+
+On 1.19.4+ the victim's burst is wrapped in **Bundle delimiters**
+(`fast-path.bundle-feedback`), so the client applies the velocity and the
+hurt animation in the same frame — the knock and the flinch can never split
+across a frame boundary. Velocity always precedes hurt; a suppressed
+velocity ships the hurt bare, never a single-packet bundle. The pre-send
+deliberately drives `HURT_ANIMATION` (with an explicit direction yaw)
+rather than `DAMAGE_EVENT`: clients couple damage-type effects to the
+latter, which the authoritative re-send would double-fire.
+
+The knockback the pre-send predicts is computed from the **victim's
+resolved profile**, frozen into their per-tick snapshot — the same profile
+the authoritative path resolves on the owning thread, so prediction and
+truth can never use different math (see
+[knockback-profiles.md](knockback-profiles.md)).
 
 ### What is preserved 1:1
 
@@ -94,6 +110,19 @@ is enabled, the engine receives the simulated vertical motion instead of
 the server's stale value. The engine owns the formula; the compensator only
 corrects its input.
 
+## Reach validation (optional)
+
+`hit-registration.reach-validation` (default **off**) is a ping-rewound
+sanity gate for player-vs-player packets — the ClubSpigot-lite shape. Every
+tracked player keeps a forty-sample position ring (one per tick); an ATTACK
+is checked against the victim's hitbox at the instant the attacker actually
+*saw* — history rewound by `ping + interpolation-offset-ms` (capped) — plus
+their live position, and dropped only when **every** candidate sits beyond
+`max-reach + leniency` from the attacker's eye. Deliberately lenient:
+borderline hits always land. Creative attackers are exempt and a raised
+1.20.5+ `entity-interaction-range` attribute widens the gate. This is a
+blatant-reach filter for servers running no anticheat, not an anticheat.
+
 ## Anticheat posture
 
 Prediction engines verify what the client did against the velocity the
@@ -102,8 +131,9 @@ that pipeline. The exception — the pre-sent velocity packet — is exactly
 what `anticheat.mode: auto` suppresses while GrimAC or Vulcan is installed:
 the hit still registers at packet speed, knockback reverts to vanilla
 cadence, and the prediction engine sees a perfectly ordinary server. The
-hurt-animation pre-send is cosmetic and stays on. Mental never cancels
-flags and never requests exemptions.
+hurt-animation pre-send is cosmetic and stays on. Reach validation defers
+to a detected anticheat the same way — reach is its department. Mental
+never cancels flags and never requests exemptions.
 
 ## Edge cases
 
@@ -112,6 +142,7 @@ flags and never requests exemptions.
 | First hit after join | Snapshot seeded on join; a missing snapshot skips the pre-send (vanilla cadence) |
 | Victim already invulnerable | Cached immunity check + per-victim window gate — no pre-send, no phantom feedback |
 | Spam past the CPS cap | Packet cancelled at the netty layer, nothing downstream |
+| Beyond rewound reach (validation on) | Packet cancelled at the netty layer, best candidate distance debug-logged |
 | `AsyncHitRegisterEvent` cancelled | Packet cancelled, hit never existed |
 | Target retired mid-flight | Owning-thread task retires silently |
 | Server lag spike | Snapshots age but stay consistent; damage path re-validates everything against live state |

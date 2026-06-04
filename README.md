@@ -11,13 +11,14 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 
 ## Why Mental?
 
-- **Attacks register faster.** Mental processes attacks asynchronously via the netty thread, meaning there is zero server latency for hit animations.
+- **Attacks register faster.** Mental processes attacks asynchronously via the netty thread, meaning there is zero server latency for hit animations. On 1.19.4+ the velocity and hurt animation arrive bundled, in the same client frame.
 - **Knockback uses 1:1 replicated 1.7/1.8 formula**, line for line. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, critical hits and Sharpness damage.
 - **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so quick successive hits stack and launch — the mechanical core of legacy combo PvP. Fishing rods and projectiles knock away from where the shooter stands, like they used to.
+- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, `kohi`, `mmc`, `lunar`, or your own — assignable per server, per world, and per player at runtime (`/mental kb`, or the API for practice cores).
 - **The "Ping Problem" is fixed.** Mental measures each player's connection during combat and corrects the knockback they receive, so getting hit feels the same on 20 ms as it does on 150 ms.
 - **Fishing rods restored to legacy mechanics.** Hooks damage and shove players on contact, casts fly like in 1.8, and the reel-in pull is gone.
 - **Projectiles knock back.** Snowballs, eggs and ender pearls push players.
-- **Anticheat compatible.** Mental supports and recognizes common anticheats like GrimAC and Vulcan. Mental is also compatible with most others by design.
+- **Anticheat compatible.** Mental supports and recognizes common anticheats like GrimAC and Vulcan. Mental is also compatible with most others by design. Servers running none can opt into Mental's own ping-rewound reach validation.
 
 ## Compatibility
 
@@ -35,7 +36,7 @@ Mental plugin jars are universal and work on all supported versions.
 2. Drop it into your server's `plugins/` folder.
 3. Restart.
 
-The defaults already give you the classic 1.8 combat. Fully documented config is at `plugins/Mental/config.yml`.
+The defaults already give you the classic combat. The configuration is split by concern under `plugins/Mental/` — every option is explained in its file.
 
 ## Commands
 
@@ -45,6 +46,7 @@ Use **`/mental`** (or `/mtl`). It opens an interactive dashboard in chat where y
 | --- | --- |
 | `/mental` | The dashboard. View and toggle every module by clicking. |
 | `/mental module <name> <on\|off\|status>` | Toggle a module from console or scripts (saved to config). |
+| `/mental kb` | Knockback profiles: list, `info <profile>`, `set <profile> [player]`, `reset [player]`. |
 | `/mental ping [player]` | A player's measured ping, jitter and connection quality. |
 | `/mental reload` | Apply config changes without a restart. Safe mid-combat. |
 | `/mental debug <on\|off>` | Verbose logging for troubleshooting (see the FAQ). |
@@ -55,27 +57,27 @@ Module names for the `module` command: `hit-registration`, `knockback`, `latency
 
 ## Configuration
 
-Everything is in `plugins/Mental/config.yml`, and every option is explained right there in the file, so this section stays short.
+Split by concern under `plugins/Mental/`, every option explained in its file:
+
+| File | What lives there |
+| --- | --- |
+| `config.yml` | The control panel: module switches, anticheat policy, OCM coordination, debug. |
+| `knockback.yml` | Which profile applies where (default + per-world), plus rod, fishing and projectile mechanics. |
+| `hit-registration.yml` | The async hit pipeline, its fast path, and reach validation. |
+| `latency-compensation.yml` | Ping-aware knockback correction. |
+| `profiles/*.yml` | One knockback feel per file. Presets regenerate when deleted; your edits stay. |
 
 ```yaml
-modules:
-  knockback:
-    base: {horizontal: 0.4, vertical: 0.4}   # the classic numbers
-    modifiers:
-      sprint: 1.0                            # scale sprint-hit knockback
-      combos: true                           # 1.7.10 hit stacking; false = flat 1.8.9 hits
-
-  latency-compensation:
-    enabled: true                            # ping-aware knockback correction
-
-  hit-registration:
-    max-cps: 20                              # clicks per second before extras are ignored
-
-anticheat:
-  mode: auto                                 # back off automatically when an anticheat is present
+# knockback.yml — pick the feel
+knockback:
+  profile: legacy-1.7        # legacy-1.7 · legacy-1.8 · kohi · mmc · lunar · custom
+  per-world:
+    duels: kohi              # optional per-world overrides
 ```
 
-`/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config.
+Profiles are the whole engine knob set — base/extra pushes, friction, vertical assign-vs-add, the MMC distance taper, air multipliers, w-tap bonuses and more. The guide (with the preset provenance and the fork-porting hazard table) is [docs/knockback-profiles.md](docs/knockback-profiles.md).
+
+`/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config. A v1 single-file config migrates automatically — tuned knockback values become `profiles/custom.yml` and stay selected.
 
 ## FAQ
 
@@ -117,7 +119,7 @@ Mental is a multi-module Gradle build:
 
 The wide version range works without reflection on hot paths: `core` compiles against the oldest supported API (1.17), which makes the common path binary-safe everywhere, and anything newer lives in the `compat-*` modules behind runtime feature detection. The two binary breaks in the range (the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames) are absorbed by small boot-time resolvers.
 
-If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline. For what "1.7.10 combat" means precisely — the residual ledger behind combos, the legacy damage tables, and the few client-side mechanics no server can mirror — see [docs/legacy-combat.md](docs/legacy-combat.md). How Mental divides combat with OldCombatMechanics (and proves it on live servers) is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline. For what "1.7.10 combat" means precisely — the residual ledger behind combos, the legacy damage tables, and the few client-side mechanics no server can mirror — see [docs/legacy-combat.md](docs/legacy-combat.md). The knockback-profile system (presets, provenance, the divisor↔multiplier porting hazard) is in [docs/knockback-profiles.md](docs/knockback-profiles.md), with the research behind it in [docs/research/](docs/research/). How Mental divides combat with OldCombatMechanics (and proves it on live servers) is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
 
 ### API
 
@@ -140,6 +142,9 @@ public void onKnockback(KnockbackApplyEvent event) {
 
 // Query Mental's state:
 OptionalDouble ping = Mental.get().pingMillis(player);
+
+// Pin a duel to a knockback profile (practice cores):
+Mental.get().setKnockbackProfile(victim, "kohi");   // fires PlayerKnockbackProfileChangeEvent
 ```
 
 ### Building and testing
