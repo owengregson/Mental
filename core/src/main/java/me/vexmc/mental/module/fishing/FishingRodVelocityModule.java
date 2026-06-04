@@ -60,6 +60,11 @@ public final class FishingRodVelocityModule extends CombatModule implements List
                 || !services.config().rodVelocity().enabled()) {
             return;
         }
+        if (services.ocmGate().handles(
+                me.vexmc.mental.module.ocm.OcmMechanic.FISHING_ROD_VELOCITY, event.getPlayer())) {
+            debug.log(() -> "OCM owns rod velocity for " + event.getPlayer().getName() + " — yielding");
+            return;
+        }
         FishHook hook = event.getHook();
         Location eyes = event.getPlayer().getLocation();
         KnockbackVector launch = RodLaunchMath.launch(eyes.getYaw(), eyes.getPitch());

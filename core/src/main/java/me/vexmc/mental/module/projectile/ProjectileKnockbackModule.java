@@ -11,6 +11,7 @@ import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Enchantments;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -140,6 +141,13 @@ public final class ProjectileKnockbackModule extends CombatModule implements Lis
         if (!isThrownProjectile(projectile) || !(event.getHitEntity() instanceof Player victim)) {
             return;
         }
+        // OCM's projectile-knockback follows the defender's modeset (the
+        // damager is never human). Arrows above are exempt: OCM has no arrow
+        // module, so Mental's Punch handling keeps working alongside it.
+        if (services.ocmGate().handles(OcmMechanic.PROJECTILE_KNOCKBACK, victim)) {
+            debug.log(() -> "OCM owns projectile knockback against " + victim.getName() + " — yielding");
+            return;
+        }
         if (!isKnockableVictim(victim, projectile.getShooter())) {
             return;
         }
@@ -175,6 +183,12 @@ public final class ProjectileKnockbackModule extends CombatModule implements Lis
         } else if (event.getDamager() instanceof EnderPearl) {
             substitute = settings.enderPearlDamage();
         } else {
+            return;
+        }
+        if (services.ocmGate().handles(OcmMechanic.PROJECTILE_KNOCKBACK,
+                event.getEntity() instanceof Player victim ? victim : null)) {
+            debug.log(() -> "OCM owns the " + event.getDamager().getType()
+                    + " damage substitution — yielding");
             return;
         }
 

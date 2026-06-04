@@ -10,6 +10,7 @@ import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;
@@ -75,6 +76,12 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
                 || !(event.getHitEntity() instanceof LivingEntity victim)) {
             return;
         }
+        // OCM's old-fishing-knockback is a whole-mechanic owner: it damages,
+        // knocks and handles reel-in itself. The rodder's modeset decides.
+        if (services.ocmGate().handles(OcmMechanic.FISHING_KNOCKBACK, rodder)) {
+            debug.log(() -> "OCM owns rod combat for " + rodder.getName() + " — yielding");
+            return;
+        }
         if (victim.getUniqueId().equals(rodder.getUniqueId())
                 || rodder.getGameMode() == GameMode.CREATIVE
                 || victim.hasMetadata(CITIZENS_NPC_METADATA)) {
@@ -125,6 +132,10 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
         FishingKnockbackSettings settings = services.config().fishingKnockback();
         Entity caught = event.getCaught();
         if (!settings.enabled() || caught == null || settings.reelIn() == ReelInPolicy.VANILLA) {
+            return;
+        }
+        if (services.ocmGate().handles(OcmMechanic.FISHING_KNOCKBACK, event.getPlayer())) {
+            debug.log(() -> "OCM owns reel-in for " + event.getPlayer().getName() + " — yielding");
             return;
         }
 
