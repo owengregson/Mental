@@ -88,6 +88,8 @@ public final class MentalPlugin extends JavaPlugin {
             }
         }, this);
 
+        me.vexmc.mental.api.Mental.register(new MentalApiImpl(this, modules));
+
         PacketEvents.getAPI().init();
 
         getLogger().info(() -> "Mental enabled — server " + environment.describe()
@@ -97,6 +99,7 @@ public final class MentalPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        me.vexmc.mental.api.Mental.register(null);
         if (modules != null) {
             modules.disableAll();
         }
