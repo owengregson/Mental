@@ -36,17 +36,27 @@ public final class ProjectileSuite {
                 });
                 context.awaitTicks(5);
 
+                Snowball[] tracked = new Snowball[1];
                 context.syncRun(() -> {
                     victim.player().setNoDamageTicks(0);
-                    Location launch = victimSpot.clone().add(0, 1.0, -3);
-                    Snowball snowball = victimSpot.getWorld().spawn(launch, Snowball.class);
-                    snowball.setVelocity(new Vector(0, 0.05, 0.9));
+                    // Point-blank: the snowball's first flight step crosses the
+                    // victim's hitbox, so the hit cannot depend on long-range physics.
+                    Location launch = victimSpot.clone().add(0, 1.0, -0.8);
+                    tracked[0] = victimSpot.getWorld().spawn(launch, Snowball.class);
+                    tracked[0].setVelocity(new Vector(0, 0.0, 0.5));
                 });
 
                 Double observed = null;
-                for (int attempt = 0; attempt < 10 && observed == null; attempt++) {
+                for (int attempt = 0; attempt < 12 && observed == null; attempt++) {
                     context.awaitTicks(5);
                     observed = captors.damageOf(victim.uuid());
+                    if (observed == null) {
+                        String state = context.sync(() -> "snowball alive=" + tracked[0].isValid()
+                                + " at " + tracked[0].getLocation().toVector()
+                                + " victim at " + victim.player().getLocation().toVector()
+                                + " hitEvent=" + captors.projectileHitOn(victim.uuid()));
+                        context.note(state);
+                    }
                 }
 
                 double expected = mental.services().config().projectileKnockback().snowballDamage();

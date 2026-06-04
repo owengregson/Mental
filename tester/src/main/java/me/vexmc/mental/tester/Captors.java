@@ -19,6 +19,7 @@ public final class Captors implements Listener {
 
     private final Map<UUID, Vector> velocities = new ConcurrentHashMap<>();
     private final Map<UUID, Double> damages = new ConcurrentHashMap<>();
+    private final Map<UUID, String> projectileHits = new ConcurrentHashMap<>();
 
     public static @NotNull Captors register(@NotNull Plugin plugin) {
         Captors captors = new Captors();
@@ -40,12 +41,23 @@ public final class Captors implements Listener {
         damages.put(event.getEntity().getUniqueId(), event.getDamage());
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onProjectileHit(@NotNull org.bukkit.event.entity.ProjectileHitEvent event) {
+        if (event.getHitEntity() != null) {
+            projectileHits.put(event.getHitEntity().getUniqueId(), event.getEntity().getType().name());
+        }
+    }
+
     public @Nullable Vector velocityOf(@NotNull UUID player) {
         return velocities.get(player);
     }
 
     public @Nullable Double damageOf(@NotNull UUID entity) {
         return damages.get(entity);
+    }
+
+    public @Nullable String projectileHitOn(@NotNull UUID entity) {
+        return projectileHits.get(entity);
     }
 
     public void reset() {

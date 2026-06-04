@@ -89,6 +89,13 @@ public final class FakePlayer {
         fireAsyncPreLogin();
         this.placedViaPlayerList = addToPlayerList(minecraftServer);
 
+        if (Bukkit.getPlayer(uuid) == null) {
+            plugin.getLogger().info("[fake] placeNewPlayer did not register the player (online="
+                    + Bukkit.getOnlinePlayers().size() + ") — registering directly");
+            registerInPlayerList(minecraftServer);
+            this.placedViaPlayerList = false;
+        }
+
         this.bukkitPlayer = Bukkit.getPlayer(uuid);
         if (bukkitPlayer == null) {
             throw new IllegalStateException("Bukkit player " + uuid + " not found after placement");
@@ -96,6 +103,11 @@ public final class FakePlayer {
         if (!placedViaPlayerList) {
             addToWorld(worldServer);
         }
+
+        // The login pipeline relocates new players to the world spawn; the
+        // Bukkit teleport afterwards is the authoritative way to take them
+        // to the requested location on every version.
+        bukkitPlayer.teleport(location);
 
         this.tickTask = scheduling.repeatOn(bukkitPlayer, 1L, 1L, this::tickServerPlayer, () -> {});
     }
@@ -357,8 +369,10 @@ public final class FakePlayer {
     private boolean addToPlayerList(Object minecraftServer) throws ReflectiveOperationException {
         Object playerList = invoke(method(minecraftServer.getClass(), "getPlayerList"), minecraftServer);
         Class<?> playerListClass = nmsClass("net.minecraft.server.players.PlayerList");
-        String placeName = remapper.remapMethodName(playerListClass, "placeNewPlayer",
+        String placeName = remapMethod(playerListClass, "placeNewPlayer",
                 connection.getClass(), serverPlayer.getClass());
+        plugin.getLogger().info("[fake] placeNewPlayer resolves to '" + placeName
+                + "' on " + playerListClass.getName());
 
         for (Method method : playerListClass.getMethods()) {
             if (!method.getName().equals(placeName) && !method.getName().equals("placeNewPlayer")) {
@@ -369,35 +383,49 @@ public final class FakePlayer {
                     && parameters[0].isAssignableFrom(connection.getClass())
                     && parameters[1].isAssignableFrom(serverPlayer.getClass())
                     && parameters[2].getSimpleName().equals("CommonListenerCookie")) {
+                plugin.getLogger().info("[fake] placing via cookie overload " + method);
                 method.invoke(playerList, connection, serverPlayer, createListenerCookie(parameters[2]));
                 return true;
             }
             if (parameters.length == 2
                     && parameters[0].isAssignableFrom(connection.getClass())
                     && parameters[1].isAssignableFrom(serverPlayer.getClass())) {
+                plugin.getLogger().info("[fake] placing via classic overload " + method);
                 method.invoke(playerList, connection, serverPlayer);
                 return true;
             }
         }
+        plugin.getLogger().info("[fake] no placeNewPlayer overload matched — registering directly");
+        return false;
+    }
 
-        // Fallback: load player data and register in the list structures directly.
+    /** Registers straight into the PlayerList structures (no login pipeline). */
+    private void registerInPlayerList(Object minecraftServer) throws ReflectiveOperationException {
+        Object playerList = invoke(method(minecraftServer.getClass(), "getPlayerList"), minecraftServer);
+        Class<?> playerListClass = nmsClass("net.minecraft.server.players.PlayerList");
+
         Method load = Reflect.methodAssignable(playerListClass,
-                remapper.remapMethodName(playerListClass, "load", serverPlayer.getClass()),
-                serverPlayer.getClass());
+                remapMethod(playerListClass, "load", serverPlayer.getClass()), serverPlayer.getClass());
         if (load == null) {
             load = Reflect.methodAssignable(playerListClass, "load", serverPlayer.getClass());
         }
-        if (load == null) {
-            throw new NoSuchMethodException("No compatible PlayerList registration on " + playerListClass);
+        if (load != null) {
+            try {
+                load.invoke(playerList, serverPlayer);
+            } catch (Throwable failure) {
+                plugin.getLogger().info("[fake] PlayerList.load failed (" + failure.getCause()
+                        + ") — continuing with raw registration");
+            }
         }
-        load.invoke(playerList, serverPlayer);
 
         Field playersField = Reflect.field(playerListClass,
                 remapper.remapFieldName(playerListClass, "players"));
         if (playersField != null) {
             @SuppressWarnings("unchecked")
             List<Object> players = (List<Object>) playersField.get(playerList);
-            players.add(serverPlayer);
+            if (!players.contains(serverPlayer)) {
+                players.add(serverPlayer);
+            }
         }
         Field byUuid = mapField(playerListClass, serverPlayer.getClass());
         if (byUuid != null) {
@@ -405,7 +433,6 @@ public final class FakePlayer {
             Map<UUID, Object> map = (Map<UUID, Object>) byUuid.get(playerList);
             map.put(uuid, serverPlayer);
         }
-        return false;
     }
 
     private void addToWorld(Object worldServer) {
