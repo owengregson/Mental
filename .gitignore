@@ -49,3 +49,6 @@ replay_pid*.log
 *~
 *.swp
 *.swo
+
+# Claude Code session artifacts
+.claude/
