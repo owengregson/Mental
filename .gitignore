@@ -1,20 +1,13 @@
-# --- Maven --------------------------------------------------------
-target/
-dependency-reduced-pom.xml
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-buildNumber.properties
-.flattened-pom.xml
-.mvn/wrapper/maven-wrapper.jar
-
-# --- Gradle (in case anyone forks to a Gradle build) -------------
+# --- Gradle -------------------------------------------------------
 .gradle/
 build/
-!**/src/main/**/build/
-!**/src/test/**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# --- Integration-test server checkouts ---------------------------
+run/
+
+# --- Legacy Maven (history only) ----------------------------------
+target/
 
 # --- IDE: IntelliJ IDEA ------------------------------------------
 .idea/
