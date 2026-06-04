@@ -7,6 +7,7 @@ import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.tester.suite.BootSuite;
 import me.vexmc.mental.tester.suite.CommandSuite;
+import me.vexmc.mental.tester.suite.EraParitySuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
 import me.vexmc.mental.tester.suite.OcmCoexistenceSuite;
@@ -58,6 +59,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(CommandSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
+                suite.addAll(EraParitySuite.tests(mental, this));
             }
             new TestHarness(this, scheduling).run(suite);
         });

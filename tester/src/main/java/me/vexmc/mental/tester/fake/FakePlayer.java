@@ -78,6 +78,33 @@ public final class FakePlayer {
         player().attack(target);
     }
 
+    /**
+     * Sets the server-side motion directly — no Bukkit event, no
+     * {@code hurtMarked}. This is how the era-parity suite plays the role of
+     * the client: a real victim's trajectory comes from the client applying
+     * velocity packets, which a synthetic player has no client to do.
+     * Owning thread only.
+     */
+    public void setMotion(double x, double y, double z) {
+        try {
+            Class<?> entityClass = nmsClass("net.minecraft.world.entity.Entity");
+            Method setter = Reflect.methodAssignable(entityClass,
+                    remapMethod(entityClass, "setDeltaMovement",
+                            double.class, double.class, double.class),
+                    double.class, double.class, double.class);
+            if (setter == null) {
+                setter = Reflect.methodAssignable(entityClass, "setDeltaMovement",
+                        double.class, double.class, double.class);
+            }
+            if (setter == null) {
+                throw new NoSuchMethodException("setDeltaMovement(double,double,double)");
+            }
+            setter.invoke(serverPlayer, x, y, z);
+        } catch (ReflectiveOperationException failure) {
+            plugin.getLogger().warning("[fake] setMotion failed: " + failure);
+        }
+    }
+
     /** Must run on the global/main thread. */
     public void spawn(@NotNull Location location) throws ReflectiveOperationException {
         Object worldServer = handleOf(location.getWorld());
