@@ -13,6 +13,7 @@ dependencies {
     compileOnly(libs.paper.api.floor)
     compileOnly(libs.jetbrains.annotations)
     implementation(libs.packetevents.spigot)
+    implementation(libs.bstats.bukkit)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -38,6 +39,7 @@ tasks.shadowJar {
 
     relocate("com.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.api")
     relocate("io.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.impl")
+    relocate("org.bstats", "me.vexmc.mental.lib.bstats")
 }
 
 tasks.build {

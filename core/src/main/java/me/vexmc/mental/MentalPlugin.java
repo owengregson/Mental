@@ -23,6 +23,8 @@ import me.vexmc.mental.module.hitreg.HitRegistrationModule;
 import me.vexmc.mental.module.knockback.KnockbackModule;
 import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
 import me.vexmc.mental.platform.SchedulingFactory;
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
 import org.jetbrains.annotations.NotNull;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -40,11 +42,13 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class MentalPlugin extends JavaPlugin {
 
     private static final String BRIGADIER_BRIDGE = "me.vexmc.mental.compat.brigadier.BrigadierBridge";
+    private static final int BSTATS_PLUGIN_ID = 31788;
 
     private MentalConfig config;
     private MentalServices services;
     private ModuleRegistry modules;
     private PlayerDebugSink playerDebugSink;
+    private Metrics metrics;
 
     @Override
     public void onLoad() {
@@ -90,6 +94,14 @@ public final class MentalPlugin extends JavaPlugin {
 
         me.vexmc.mental.api.Mental.register(new MentalApiImpl(this, modules));
 
+        this.metrics = new Metrics(this, BSTATS_PLUGIN_ID);
+        metrics.addCustomChart(new SimplePie("anticheat_mode",
+                () -> config.anticheat().mode().name().toLowerCase(java.util.Locale.ROOT)));
+        metrics.addCustomChart(new SimplePie("probe_strategy",
+                () -> config.compensation().probeStrategy().name().toLowerCase(java.util.Locale.ROOT)));
+        metrics.addCustomChart(new SimplePie("scheduling_backend",
+                () -> services.scheduling().describe()));
+
         PacketEvents.getAPI().init();
 
         getLogger().info(() -> "Mental enabled — server " + environment.describe()
@@ -100,6 +112,10 @@ public final class MentalPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         me.vexmc.mental.api.Mental.register(null);
+        if (metrics != null) {
+            metrics.shutdown();
+            metrics = null;
+        }
         if (modules != null) {
             modules.disableAll();
         }
