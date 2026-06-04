@@ -1,7 +1,3 @@
-plugins {
-    `java-library`
-}
-
 allprojects {
     group = "me.vexmc"
     version = "1.0.0"

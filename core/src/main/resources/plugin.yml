@@ -1,0 +1,39 @@
+name: Mental
+version: '${version}'
+main: me.vexmc.mental.MentalPlugin
+api-version: '1.17'
+folia-supported: true
+description: Latency-compensated 1.8 combat — async hit registration, knockback, fishing and projectile mechanics.
+authors: [owengregson]
+website: https://github.com/owengregson/StrikeSync
+
+commands:
+  mental:
+    description: Mental root command — dashboard, modules, ping, debug, reload.
+    aliases: [mtl]
+
+permissions:
+  mental.*:
+    description: Grants every Mental permission.
+    default: op
+    children:
+      mental.command.use: true
+      mental.command.module: true
+      mental.command.reload: true
+      mental.command.debug: true
+      mental.command.ping: true
+  mental.command.use:
+    description: Use /mental, the dashboard, help, and version.
+    default: true
+  mental.command.module:
+    description: Toggle and inspect modules.
+    default: op
+  mental.command.reload:
+    description: Reload the configuration.
+    default: op
+  mental.command.debug:
+    description: Control debug logging and subscribe to debug output.
+    default: op
+  mental.command.ping:
+    description: View measured ping statistics.
+    default: true
