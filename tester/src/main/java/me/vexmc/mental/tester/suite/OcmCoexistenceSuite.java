@@ -166,6 +166,25 @@ public final class OcmCoexistenceSuite {
                 }
                 sword.addUnsafeEnchantment(sharpness, 5);
                 attacker.player().getInventory().setItemInMainHand(sword);
+                // Synthetic players skip vanilla's per-tick equipment and
+                // attack-strength bookkeeping; pin what a real ticking player
+                // holding this sword would read — the attribute carrying the
+                // weapon's damage, and a full attack charge (the fast path
+                // leaves real attackers at full charge by construction).
+                org.bukkit.attribute.Attribute damageAttribute =
+                        me.vexmc.mental.platform.Attributes.attackDamage();
+                org.bukkit.attribute.Attribute speedAttribute =
+                        me.vexmc.mental.platform.Attributes.attackSpeed();
+                if (damageAttribute == null || speedAttribute == null) {
+                    return false;
+                }
+                var attackDamage = attacker.player().getAttribute(damageAttribute);
+                var attackSpeed = attacker.player().getAttribute(speedAttribute);
+                if (attackDamage == null || attackSpeed == null) {
+                    return false;
+                }
+                attackDamage.setBaseValue(7.0);
+                attackSpeed.setBaseValue(40.0);
                 victim.player().setNoDamageTicks(0);
                 victim.player().setHealth(20.0);
                 new HitApplier(mental.services()).apply(
