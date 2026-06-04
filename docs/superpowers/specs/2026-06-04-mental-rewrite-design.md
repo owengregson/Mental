@@ -165,9 +165,11 @@ Modules: `hit-registration`, `knockback`, `latency-compensation`, `fishing-knock
 
 ### 4.4 Combat behavior (ported + new)
 
-**Melee knockback** — StrikeSync's engine verbatim (it already matches OCM/1.8):
-direction-normalized base KB with friction, sprint+enchant bonus, vertical cap before
-bonus, optional armor-KB-resistance honoring; computed at `EntityDamageByEntityEvent
+**Melee knockback** — StrikeSync's engine with one authenticity fix: the vertical
+limit clamps the *base* Y **before** bonus levels are added (vanilla-1.8/OCM ordering,
+so sprint hits reach 0.5; StrikeSync clamped after, flattening sprint verticals).
+Direction-normalized base KB with friction, sprint+enchant bonus, optional
+armor-KB-resistance honoring; computed at `EntityDamageByEntityEvent
 (MONITOR)`, stashed per-victim, applied at `PlayerVelocityEvent (HIGH)` — i.e. **always
 server-authoritative** (anticheat-safe). Additions from OCM: skip when shield BLOCKING
 modifier absorbed the hit; pending-KB entries expire after 2 ticks.
