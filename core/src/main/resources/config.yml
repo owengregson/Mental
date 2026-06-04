@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────
-#  Mental — latency-compensated 1.8 combat
+#  Mental — latency-compensated 1.7.10 combat
 #
 #  Every module can also be toggled live: /mental module <name> <on|off>
 #  Reloads (/mental reload) swap the whole configuration atomically — no
@@ -118,7 +118,7 @@ modules:
     # Also knock back non-player entities.
     knockback-non-player-entities: false
 
-  # 1.8 rod cast feel: launch speed, spread, and flight gravity.
+  # 1.7.10 rod cast feel: launch speed, spread, and flight gravity.
   rod-velocity:
     enabled: true
 

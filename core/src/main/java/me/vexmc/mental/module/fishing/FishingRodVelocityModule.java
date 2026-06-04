@@ -17,9 +17,9 @@ import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * 1.8 rod cast feel: launch velocity from the 1.8 formula (with its exact
+ * 1.7.10 rod cast feel: launch velocity from the legacy formula (with its exact
  * gaussian spread), then a per-hook gravity adjustment of −0.01/tick while
- * airborne — modern hooks fall under 0.03 gravity, 1.8's fell under 0.04.
+ * airborne — modern hooks fall under 0.03 gravity, legacy hooks fell under 0.04.
  *
  * <p>Each hook gets its own scheduled task on the hook's scheduler: on Folia
  * that is the hook's region thread and the task retires automatically with
@@ -34,7 +34,7 @@ public final class FishingRodVelocityModule extends CombatModule implements List
 
     public FishingRodVelocityModule(@NotNull MentalServices services) {
         super(services, "rod-velocity", "Rod Velocity",
-                "1.8 cast speed, spread, and in-flight hook gravity.",
+                "1.7.10 cast speed, spread, and in-flight hook gravity.",
                 DebugCategory.FISHING);
     }
 

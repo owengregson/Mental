@@ -20,7 +20,7 @@ import org.jetbrains.annotations.Nullable;
  * attacker)} — which fires the full event chain (damage events, armor,
  * invulnerability, vanilla knockback, hurt feedback) exactly as a vanilla hit
  * would. Sweep, durability, statistics and hunger are deliberate omissions
- * for the 1.8 target feel.</p>
+ * for the 1.7.10 target feel.</p>
  */
 public final class HitApplier {
 

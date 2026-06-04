@@ -13,6 +13,7 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 
 - **Attacks register faster.** Mental processes attacks asynchronously via the netty thread, meaning there is zero server latency for hit animations.
 - **Knockback uses 1:1 replicated 1.7/1.8 formula**, line for line. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, critical hits and Sharpness damage.
+- **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so quick successive hits stack and launch — the mechanical core of legacy combo PvP. Fishing rods and projectiles knock away from where the shooter stands, like they used to.
 - **The "Ping Problem" is fixed.** Mental measures each player's connection during combat and corrects the knockback they receive, so getting hit feels the same on 20 ms as it does on 150 ms.
 - **Fishing rods restored to legacy mechanics.** Hooks damage and shove players on contact, casts fly like in 1.8, and the reel-in pull is gone.
 - **Projectiles knock back.** Snowballs, eggs and ender pearls push players.
@@ -59,8 +60,10 @@ Everything is in `plugins/Mental/config.yml`, and every option is explained righ
 ```yaml
 modules:
   knockback:
-    base: {horizontal: 0.4, vertical: 0.4}   # the classic 1.8 numbers
-    modifiers: {sprint: 1.0}                 # scale sprint-hit knockback
+    base: {horizontal: 0.4, vertical: 0.4}   # the classic numbers
+    modifiers:
+      sprint: 1.0                            # scale sprint-hit knockback
+      combos: true                           # 1.7.10 hit stacking; false = flat 1.8.9 hits
 
   latency-compensation:
     enabled: true                            # ping-aware knockback correction
@@ -111,7 +114,7 @@ Mental is a multi-module Gradle build:
 
 The wide version range works without reflection on hot paths: `core` compiles against the oldest supported API (1.17), which makes the common path binary-safe everywhere, and anything newer lives in the `compat-*` modules behind runtime feature detection. The two binary breaks in the range (the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames) are absorbed by small boot-time resolvers.
 
-If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline.
+If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline. For what "1.7.10 combat" means precisely — the residual ledger behind combos, the legacy damage tables, and the few client-side mechanics no server can mirror — see [docs/legacy-combat.md](docs/legacy-combat.md).
 
 ### API
 

@@ -40,10 +40,10 @@ client click
        │            └─ hurt animation ────────► victim + attacker
        └─ Scheduling.runOn(victim) ──► owning thread
                                          ├─ re-resolve + re-validate
-                                         ├─ DamageCalculator (1.8 damage + crits)
+                                         ├─ DamageCalculator (1.7.10 damage + crits)
                                          └─ damage(amount, attacker)
                                               └─ full vanilla event chain:
-                                                 damage events → knockback module
+                                                 damage events → knockback pipeline
                                                  → PlayerVelocityEvent → tracker
 ```
 
@@ -63,8 +63,8 @@ gate biased toward *not* pre-sending).
 ### What is deliberately omitted
 
 Sweep attacks, weapon durability, statistics, advancements, hunger — the
-1.8 target audience runs without them, and reimplementing them via internals
-would cost the cross-version stability this plugin is built on.
+1.7.10 target audience runs without them, and reimplementing them via
+internals would cost the cross-version stability this plugin is built on.
 
 ## Why the snapshots
 
@@ -74,6 +74,12 @@ on Folia). Every online player therefore snapshots itself once per tick
 map. The packet thread reads immutable records, never entities. On Folia
 each snapshot task rides its player's region; on Paper it is the main
 thread; the code is identical.
+
+The motion fields inside each snapshot come from the victim-motion ledger —
+the decaying residual of previously applied knockback that makes hits stack
+the way 1.7.10 delivered them — so the netty pre-send and the
+owning-thread apply compute from one model. The era semantics live in
+[legacy-combat.md](legacy-combat.md).
 
 ## Latency compensation
 

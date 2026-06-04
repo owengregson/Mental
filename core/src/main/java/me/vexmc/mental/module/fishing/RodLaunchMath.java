@@ -6,8 +6,8 @@ import me.vexmc.mental.module.knockback.KnockbackVector;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * The 1.8 fishing-hook cast velocity: direction from yaw/pitch × 0.4,
- * normalized, perturbed by 1.8's exact gaussian spread, scaled × 1.5.
+ * The 1.7.10 fishing-hook cast velocity: direction from yaw/pitch × 0.4,
+ * normalized, perturbed by the legacy exact gaussian spread, scaled × 1.5.
  */
 final class RodLaunchMath {
 

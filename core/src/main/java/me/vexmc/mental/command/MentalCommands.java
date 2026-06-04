@@ -300,7 +300,7 @@ public final class MentalCommands {
     private void help(CommandContext context) {
         var builder = Component.text()
                 .append(Brand.prefix())
-                .append(Component.text(" — latency-compensated 1.8 combat", Brand.MUTED));
+                .append(Component.text(" — latency-compensated 1.7.10 combat", Brand.MUTED));
         appendHelpRows(builder, "/mental", tree.root(), context);
         context.reply(builder.build());
     }

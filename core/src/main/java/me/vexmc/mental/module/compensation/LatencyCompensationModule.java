@@ -33,7 +33,7 @@ import org.jetbrains.annotations.Nullable;
  * vertical motion on the server is stale by one network leg" and publishes a
  * one-shot hint with the client-expected value. The knockback engine stays
  * the single owner of the formula; the compensator only corrects its input
- * (the KnockbackSync-derived algorithm, adapted for Mental's 1.8 engine).</p>
+ * (the KnockbackSync-derived algorithm, adapted for Mental's legacy engine).</p>
  *
  * <p>Pipeline per hit, at {@code HIGHEST} damage priority (one slot before
  * the knockback module's {@code MONITOR} pass): spike-filter the measured
