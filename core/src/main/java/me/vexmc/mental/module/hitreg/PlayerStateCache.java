@@ -4,6 +4,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.VictimMotion;
+import me.vexmc.mental.module.ocm.OcmGate;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
 import org.bukkit.Location;
@@ -35,7 +37,8 @@ public final class PlayerStateCache {
      * pre-send and the owning-thread apply compute from one model.
      */
     @SuppressWarnings("deprecation") // Player#isOnGround: the client-reported value is the one
-    public void update(@NotNull Player player, @NotNull VictimMotion ledger) { // knockback expectations are built from.
+    public void update(@NotNull Player player, @NotNull VictimMotion ledger, // knockback expectations are built from.
+            @NotNull OcmGate ocmGate) {
         Location location = player.getLocation();
         boolean onGround = player.isOnGround();
         VictimMotion.Motion motion = ledger.current(
@@ -53,6 +56,9 @@ public final class PlayerStateCache {
                 mainHandKnockbackLevel(player),
                 player.getNoDamageTicks(),
                 player.getMaximumNoDamageTicks(),
+                // OCM's API is owning-thread only; freeze the answer here so the
+                // netty pre-send can consult it without touching OCM.
+                ocmGate.handles(OcmMechanic.MELEE_KNOCKBACK, player),
                 player.getEntityId()));
     }
 
@@ -97,6 +103,7 @@ public final class PlayerStateCache {
             int mainHandKnockbackLevel,
             int noDamageTicks,
             int maxNoDamageTicks,
+            boolean ocmOwnsMeleeKnockback,
             int entityId) {
 
         /**

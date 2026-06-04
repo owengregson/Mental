@@ -165,6 +165,10 @@ final class HitPacketListener implements PacketListener {
 
         if (!services.anticheatGate().allowVelocityPreSend()) {
             debug(attacker, () -> "velocity pre-send suppressed by anticheat policy");
+        } else if (attackerSnap.ocmOwnsMeleeKnockback()) {
+            // OCM computes this hit's knockback on the main thread; a Mental
+            // vector pre-sent now would mispredict it.
+            debug(attacker, () -> "velocity pre-send skipped: OCM owns this attacker's knockback");
         } else if (knockback.resistance() == ResistancePolicy.LEGACY
                 && victimSnap.knockbackResistance() > 0.0) {
             // The all-or-nothing roll belongs to the authoritative path; a

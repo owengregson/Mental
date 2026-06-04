@@ -4,6 +4,7 @@ import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.config.KnockbackSettings;
 import me.vexmc.mental.engine.CombatModule;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -73,6 +74,15 @@ public final class KnockbackModule extends CombatModule implements Listener {
                 && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
                 && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0) {
             debug.log(() -> victim.getName() + " blocked with a shield — knockback skipped");
+            return;
+        }
+        // OCM's ownership rule for offensive mechanics: the attacker's modeset
+        // decides (the victim's when a mob attacks). Where OCM's
+        // old-player-knockback governs this hit, its LOWEST velocity handler
+        // applies the 1.8 knock unopposed — Mental submits nothing.
+        Player decider = attacker instanceof Player attackerPlayer ? attackerPlayer : victim;
+        if (services.ocmGate().handles(OcmMechanic.MELEE_KNOCKBACK, decider)) {
+            debug.log(() -> "OCM owns melee knockback for " + decider.getName() + " — yielding");
             return;
         }
 

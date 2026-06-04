@@ -164,6 +164,15 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
             combat.mark(attacker.getUniqueId(), now);
         }
 
+        // The hint corrects input to Mental's knockback engine; when OCM owns
+        // this hit's knockback there is nothing to correct. Combat marking
+        // stays — ping stats remain live for the dashboard.
+        Player ocmDecider = event.getDamager() instanceof Player attacker ? attacker : victim;
+        if (services.ocmGate().handles(
+                me.vexmc.mental.module.ocm.OcmMechanic.MELEE_KNOCKBACK, ocmDecider)) {
+            return;
+        }
+
         Double pingMillis = tracker.forPlayer(victimId).pingMillis();
         if (pingMillis == null) {
             return;
