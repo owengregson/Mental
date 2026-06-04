@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.api.event.PlayerKnockbackProfileChangeEvent;
 import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.config.KnockbackSettings;
 import me.vexmc.mental.config.MentalConfig;
@@ -67,10 +68,26 @@ public final class KnockbackProfiles {
     }
 
     /**
-     * Sets or clears (null) a player's override. Returns false — and changes
-     * nothing — when the named profile does not exist.
+     * Sets or clears (null) a player's override, firing
+     * {@link PlayerKnockbackProfileChangeEvent} when something actually
+     * changed. Returns false — and changes nothing — when the named profile
+     * does not exist. Call from the player's owning thread.
      */
-    public boolean setOverride(@NotNull UUID player, @Nullable String profile) {
+    public boolean setOverride(@NotNull Player player, @Nullable String profile) {
+        UUID id = player.getUniqueId();
+        String before = overrides.get(id);
+        if (!setOverrideName(id, profile)) {
+            return false;
+        }
+        String after = overrides.get(id);
+        if (!java.util.Objects.equals(before, after)) {
+            new PlayerKnockbackProfileChangeEvent(player, before, after).callEvent();
+        }
+        return true;
+    }
+
+    /** The validation-only core of {@link #setOverride}; never fires events. */
+    boolean setOverrideName(@NotNull UUID player, @Nullable String profile) {
         if (profile == null) {
             overrides.remove(player);
             return true;

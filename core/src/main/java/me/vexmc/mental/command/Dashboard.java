@@ -30,6 +30,13 @@ final class Dashboard {
         }
 
         builder.append(Component.newline())
+                .append(Component.text("  knockback profile: ", Brand.MUTED))
+                .append(Component.text(services.config().knockback().defaultProfile(), Brand.TEXT)
+                        .hoverEvent(HoverEvent.showText(
+                                Component.text("Profiles overview", Brand.TEXT)))
+                        .clickEvent(ClickEvent.runCommand("/mental kb")));
+
+        builder.append(Component.newline())
                 .append(Component.text("  anticheat: ", Brand.MUTED))
                 .append(Component.text(services.anticheatGate().describe(), Brand.TEXT));
 

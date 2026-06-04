@@ -35,6 +35,7 @@ public final class MentalCommands {
 
     private static final String PERMISSION_USE = "mental.command.use";
     private static final String PERMISSION_MODULE = "mental.command.module";
+    private static final String PERMISSION_KNOCKBACK = "mental.command.knockback";
     private static final String PERMISSION_RELOAD = "mental.command.reload";
     private static final String PERMISSION_DEBUG = "mental.command.debug";
     private static final String PERMISSION_PING = "mental.command.ping";
@@ -62,6 +63,8 @@ public final class MentalCommands {
                 Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
         Suggester categories = (sender, partial) ->
                 List.of(DebugCategory.values()).stream().map(DebugCategory::key).toList();
+        Suggester profileNames = (sender, partial) ->
+                services.knockbackProfiles().names().stream().sorted().toList();
 
         LiteralNode root = literal("mental")
                 .permission(PERMISSION_USE)
@@ -77,6 +80,33 @@ public final class MentalCommands {
                                         .runs(context -> toggleModule(context, false)).build())
                                 .then(literal("status").describe("Show the module's state.")
                                         .runs(this::moduleStatus).build())
+                                .build())
+                        .build())
+                .then(literal("kb")
+                        .permission(PERMISSION_KNOCKBACK)
+                        .describe("Knockback profiles — list, inspect, assign.")
+                        .runs(this::kbOverview)
+                        .then(literal("info")
+                                .describe("Show a profile's values.")
+                                .then(argument("profile", profileNames)
+                                        .runs(this::kbInfo)
+                                        .build())
+                                .build())
+                        .then(literal("set")
+                                .describe("Override a player's profile.")
+                                .then(argument("profile", profileNames)
+                                        .runs(context -> kbSet(context, null))
+                                        .then(argument("player", onlinePlayers)
+                                                .runs(context -> kbSet(context, context.arg("player")))
+                                                .build())
+                                        .build())
+                                .build())
+                        .then(literal("reset")
+                                .describe("Clear a player's profile override.")
+                                .runs(context -> kbReset(context, null))
+                                .then(argument("player", onlinePlayers)
+                                        .runs(context -> kbReset(context, context.arg("player")))
+                                        .build())
                                 .build())
                         .build())
                 .then(literal("ping")
@@ -162,6 +192,107 @@ public final class MentalCommands {
             return;
         }
         context.reply(Messages.moduleStatus(module.displayName(), module.active(), module.description()));
+    }
+
+    private void kbOverview(CommandContext context) {
+        var knockback = services.config().knockback();
+        var builder = Component.text()
+                .append(Brand.prefix())
+                .append(Component.text(" Knockback profiles", Brand.TEXT))
+                .append(Component.text("  default: ", Brand.MUTED))
+                .append(Component.text(knockback.defaultProfile(), Brand.ACCENT));
+        if (!knockback.perWorld().isEmpty()) {
+            builder.append(Component.text("  per-world: ", Brand.MUTED))
+                    .append(Component.text(knockback.perWorld().toString(), Brand.ACCENT));
+        }
+        knockback.profiles().keySet().stream().sorted().forEach(name -> {
+            var profile = knockback.byName(name);
+            boolean selected = name.equals(knockback.defaultProfile());
+            builder.append(Component.newline())
+                    .append(Component.text("  " + (selected ? "●" : "○") + " ",
+                            selected ? Brand.SUCCESS : Brand.MUTED))
+                    .append(Component.text(name, Brand.SECONDARY)
+                            .clickEvent(ClickEvent.suggestCommand("/mental kb info " + name)))
+                    .append(Component.text(" — ", Brand.MUTED))
+                    .append(Component.text(profile == null || profile.description().isEmpty()
+                            ? profile == null ? "?" : profile.displayName()
+                            : profile.description(), Brand.TEXT));
+        });
+        context.reply(builder.build());
+    }
+
+    private void kbInfo(CommandContext context) {
+        String name = context.arg("profile").toLowerCase(Locale.ROOT);
+        var profile = services.config().knockback().byName(name);
+        if (profile == null) {
+            context.reply(Brand.failure("Unknown profile '" + name + "'. Available: "
+                    + String.join(", ", services.knockbackProfiles().names().stream().sorted().toList())));
+            return;
+        }
+        context.reply(Brand.line(Component.text()
+                .append(Component.text(profile.displayName(), Brand.SECONDARY))
+                .append(Component.text(" (" + profile.name() + ")", Brand.MUTED))
+                .append(profile.description().isEmpty()
+                        ? Component.empty()
+                        : Component.text(" — " + profile.description(), Brand.TEXT))
+                .append(Component.newline())
+                .append(Component.text("  base ", Brand.MUTED))
+                .append(Component.text(profile.base().horizontal() + "/" + profile.base().vertical(),
+                        Brand.ACCENT))
+                .append(Component.text("  vertical ", Brand.MUTED))
+                .append(Component.text(profile.verticalMode().name().toLowerCase(Locale.ROOT), Brand.ACCENT))
+                .append(Component.text("  extra ", Brand.MUTED))
+                .append(Component.text(profile.extra().horizontal() + "/" + profile.extra().vertical(),
+                        Brand.ACCENT))
+                .append(Component.text("  friction ", Brand.MUTED))
+                .append(Component.text(String.valueOf(profile.friction().x()), Brand.ACCENT))
+                .append(Component.text("  combos ", Brand.MUTED))
+                .append(Component.text(String.valueOf(profile.combos()),
+                        profile.combos() ? Brand.SUCCESS : Brand.FAILURE))
+                .append(Component.text("  taper ", Brand.MUTED))
+                .append(Component.text(profile.rangeReduction().enabled() ? "on" : "off",
+                        profile.rangeReduction().enabled() ? Brand.SUCCESS : Brand.FAILURE))
+                .build()));
+    }
+
+    private void kbSet(CommandContext context, String playerName) {
+        Player target = resolveKbTarget(context, playerName);
+        if (target == null) {
+            return;
+        }
+        String profile = context.arg("profile").toLowerCase(Locale.ROOT);
+        if (!services.knockbackProfiles().setOverride(target, profile)) {
+            context.reply(Brand.failure("Unknown profile '" + profile + "'. Available: "
+                    + String.join(", ", services.knockbackProfiles().names().stream().sorted().toList())));
+            return;
+        }
+        context.reply(Brand.success(target.getName() + " now uses the '" + profile
+                + "' knockback profile (override)."));
+    }
+
+    private void kbReset(CommandContext context, String playerName) {
+        Player target = resolveKbTarget(context, playerName);
+        if (target == null) {
+            return;
+        }
+        services.knockbackProfiles().setOverride(target, null);
+        context.reply(Brand.success(target.getName() + " follows the world/default profile again ("
+                + services.knockbackProfiles().resolve(target).name() + ")."));
+    }
+
+    private Player resolveKbTarget(CommandContext context, String playerName) {
+        if (playerName == null) {
+            Player self = context.playerSender();
+            if (self == null) {
+                context.reply(Messages.playersOnly());
+            }
+            return self;
+        }
+        Player target = Bukkit.getPlayerExact(playerName);
+        if (target == null) {
+            context.reply(Messages.playerNotFound(playerName));
+        }
+        return target;
     }
 
     private void pingSelf(CommandContext context) {

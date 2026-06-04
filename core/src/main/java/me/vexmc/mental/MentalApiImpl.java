@@ -1,12 +1,14 @@
 package me.vexmc.mental;
 
 import java.util.OptionalDouble;
+import java.util.Set;
 import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.engine.ModuleRegistry;
 import me.vexmc.mental.module.compensation.LatencyCompensationModule;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 record MentalApiImpl(@NotNull MentalPlugin plugin, @NotNull ModuleRegistry modules)
         implements Mental.MentalApi {
@@ -26,6 +28,26 @@ record MentalApiImpl(@NotNull MentalPlugin plugin, @NotNull ModuleRegistry modul
                     return ping == null ? OptionalDouble.empty() : OptionalDouble.of(ping);
                 })
                 .orElse(OptionalDouble.empty());
+    }
+
+    @Override
+    public @NotNull String knockbackProfile(@NotNull Player player) {
+        return plugin.services().knockbackProfiles().resolve(player).name();
+    }
+
+    @Override
+    public @Nullable String knockbackProfileOverride(@NotNull Player player) {
+        return plugin.services().knockbackProfiles().override(player.getUniqueId());
+    }
+
+    @Override
+    public boolean setKnockbackProfile(@NotNull Player player, @Nullable String profile) {
+        return plugin.services().knockbackProfiles().setOverride(player, profile);
+    }
+
+    @Override
+    public @NotNull Set<String> knockbackProfiles() {
+        return Set.copyOf(plugin.services().knockbackProfiles().names());
     }
 
     @Override
