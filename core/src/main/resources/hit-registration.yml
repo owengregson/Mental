@@ -19,6 +19,11 @@ hit-registration:
     # to a full tick. Automatically suppressed for the velocity packet when
     # an anticheat is detected (see anticheat.mode in config.yml).
     pre-send-feedback: true
+    # Wrap each pre-sent burst (velocity + hurt animation) in a Bundle
+    # packet on 1.19.4+ so the client applies both in the same frame —
+    # atomic on-screen feedback. Older protocols have no bundle and send
+    # the packets back-to-back regardless.
+    bundle-feedback: true
     # Minimum interval between pre-sent feedback bursts per victim.
     # auto (the default) follows each victim's live hurt window — half of
     # maximum-no-damage-ticks, vanilla's re-hit boundary (20 ticks -> 500ms)

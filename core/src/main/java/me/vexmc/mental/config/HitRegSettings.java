@@ -8,6 +8,7 @@ public record HitRegSettings(
         boolean fastPath,
         boolean preSendFeedback,
         long feedbackMinIntervalMillis,
+        boolean bundleFeedback,
         boolean simulateCrits,
         boolean legacyToolDamage) {
 
@@ -15,7 +16,7 @@ public record HitRegSettings(
     public static final long FEEDBACK_INTERVAL_AUTO = -1L;
 
     static final HitRegSettings DEFAULTS =
-            new HitRegSettings(true, 20, true, true, FEEDBACK_INTERVAL_AUTO, true, true);
+            new HitRegSettings(true, 20, true, true, FEEDBACK_INTERVAL_AUTO, true, true, true);
 
     public boolean rateLimited() {
         return maxCps > 0;
@@ -29,6 +30,7 @@ public record HitRegSettings(
                 fastPath.flag("enabled", DEFAULTS.fastPath),
                 fastPath.flag("pre-send-feedback", DEFAULTS.preSendFeedback),
                 parseFeedbackInterval(fastPath),
+                fastPath.flag("bundle-feedback", DEFAULTS.bundleFeedback),
                 fastPath.flag("simulate-crits", DEFAULTS.simulateCrits),
                 fastPath.flag("legacy-tool-damage", DEFAULTS.legacyToolDamage));
     }

@@ -167,6 +167,7 @@ final class HitPacketListener implements PacketListener {
             return;
         }
 
+        org.bukkit.util.Vector velocity = null;
         if (!services.anticheatGate().allowVelocityPreSend()) {
             debug(attacker, () -> "velocity pre-send suppressed by anticheat policy");
         } else if (attackerSnap.ocmOwnsMeleeKnockback()) {
@@ -187,13 +188,17 @@ final class HitPacketListener implements PacketListener {
                     attackerSnap.toEntityState(), victimSnap.toEntityState(), profile, null,
                     java.util.concurrent.ThreadLocalRandom.current(), freshSprint);
             if (vector != null) {
-                senders.sendVelocity(victim, victimSnap.entityId(), vector.toBukkit());
+                velocity = vector.toBukkit();
             }
         }
 
+        // One burst to the victim — velocity (when eligible) and hurt land in
+        // a single bundle frame on 1.19.4+; the attacker's third-person view
+        // is its own connection and needs no bundling.
         float hurtYaw = FeedbackSenders.hurtYaw(
                 attackerSnap.x(), attackerSnap.z(), victimSnap.x(), victimSnap.z(), victimSnap.yaw());
-        senders.sendHurt(victim, victimSnap.entityId(), hurtYaw);
+        senders.sendVictimBurst(
+                victim, victimSnap.entityId(), velocity, hurtYaw, settings.bundleFeedback());
         senders.sendHurt(attacker, victimSnap.entityId(), hurtYaw);
     }
 
