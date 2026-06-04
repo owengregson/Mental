@@ -50,5 +50,6 @@ replay_pid*.log
 *.swp
 *.swo
 
-# Claude Code session artifacts
-.claude/
+# Claude Code — session artifacts stay local; skills are project config
+.claude/*
+!.claude/skills/
