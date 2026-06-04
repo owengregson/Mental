@@ -54,8 +54,8 @@ public final class KnockbackSuite {
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 2));
             });
-            // Outlast the 60-tick join invulnerability modern servers grant.
-            context.awaitTicks(70);
+            // Land and settle — spawn invulnerability is cleared at spawn.
+            context.awaitTicks(5);
 
             KnockbackVector expected = context.sync(() -> {
                 attacker.player().setSprinting(sprinting);
@@ -120,8 +120,8 @@ public final class KnockbackSuite {
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 2));
             });
-            // Outlast the 60-tick join invulnerability modern servers grant.
-            context.awaitTicks(70);
+            // Land and settle — spawn invulnerability is cleared at spawn.
+            context.awaitTicks(5);
 
             KnockbackVector first = context.sync(() -> {
                 victim.player().setNoDamageTicks(0);

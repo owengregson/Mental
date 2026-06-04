@@ -61,7 +61,7 @@ public final class ProfileSuite {
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 2));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             KnockbackVector expected = context.sync(() -> {
                 context.expect(mental.services().knockbackProfiles()
@@ -116,7 +116,7 @@ public final class ProfileSuite {
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 2));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             KnockbackVector expected = context.sync(() -> {
                 context.expect(mental.services().knockbackProfiles()

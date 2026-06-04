@@ -25,7 +25,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class MentalTesterPlugin extends JavaPlugin {
 
-    private static final long SETTLE_TICKS = 100L;
+    private static final long SETTLE_TICKS = 40L;
 
     @Override
     public void onEnable() {

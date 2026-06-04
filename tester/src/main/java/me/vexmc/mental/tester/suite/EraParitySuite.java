@@ -65,7 +65,7 @@ public final class EraParitySuite {
     private static final double SINGLE_EVENT_TOLERANCE = 0.05;
     /** Multi-event trajectories: ±1 tick of event alignment is absorbed by candidates. */
     private static final double MULTI_EVENT_TOLERANCE = 0.12;
-    private static final int SETTLE_TICKS = 45;
+    private static final int SETTLE_TICKS = 40;
     private static final long NANOS_PER_TICK = 50_000_000L;
 
     private EraParitySuite() {}
@@ -179,7 +179,7 @@ public final class EraParitySuite {
                 victim.spawn(Arena.offset(start, 0, 2));
                 Bukkit.getPluginManager().registerEvents(client, tester);
             });
-            context.awaitTicks(70); // outlast join invulnerability
+            context.awaitTicks(5); // land and settle (spawn invulnerability is cleared at spawn)
 
             Location start = context.sync(() -> {
                 context.expect(mental.services().knockbackProfiles()
@@ -215,8 +215,11 @@ public final class EraParitySuite {
                 });
             }
 
+            int expectedEvents = (shape.preMotion != null ? 1 : 0)
+                    + 1
+                    + (shape.secondHitGapTicks > 0 ? 1 : 0);
             return settleAndCompare(context, client, victim, start,
-                    shape.describe() + "/" + profile);
+                    shape.describe() + "/" + profile, expectedEvents);
         } finally {
             context.syncRun(() -> {
                 attacker.remove();
@@ -243,7 +246,7 @@ public final class EraParitySuite {
                 victim.spawn(Arena.offset(start, 0, 0));
                 Bukkit.getPluginManager().registerEvents(client, tester);
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             Location start = context.sync(() -> victim.player().getLocation().clone());
             boolean launched = context.sync(() -> {
@@ -291,7 +294,7 @@ public final class EraParitySuite {
                 Bukkit.getPluginManager().registerEvents(client, tester);
                 return spot;
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             Location start = context.sync(() -> victim.player().getLocation().clone());
             context.syncRun(() -> {
@@ -340,11 +343,17 @@ public final class EraParitySuite {
      */
     private static Outcome settleAndCompare(
             TestContext context, ClientEmulator client, FakePlayer victim, Location start,
-            String label) throws Exception {
+            String label, int expectedEvents) throws Exception {
         context.awaitTicks(SETTLE_TICKS);
 
         List<ClientEmulator.Stamp> stamps = client.stamps();
         context.expect(!stamps.isEmpty(), label + ": no velocity event was ever captured");
+        // Every staged motion must actually have happened — a blocked hit
+        // would otherwise let the oracle "match" a trajectory that never
+        // contained the knock at all.
+        context.expect(stamps.size() == expectedEvents, label + ": expected " + expectedEvents
+                + " velocity event(s) but observed " + stamps.size()
+                + " — a staged hit or motion never landed");
 
         Location live = context.sync(() -> victim.player().getLocation().clone());
         long firstNanos = stamps.get(0).nanos();

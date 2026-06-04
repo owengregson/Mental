@@ -49,6 +49,7 @@ public final class FakePlayer {
 
     private Object serverPlayer;
     private Object connection;
+    private Object gameListener;
     private Player bukkitPlayer;
     private boolean placedViaPlayerList;
     private TaskHandle tickTask;
@@ -133,6 +134,9 @@ public final class FakePlayer {
         if (!placedViaPlayerList) {
             addToWorld(worldServer);
         }
+        // Fresh players carry 60 ticks of spawn invulnerability — three
+        // seconds a suite would otherwise have to sleep away per scenario.
+        clearSpawnInvulnerability();
 
         // The login pipeline relocates new players to the world spawn; the
         // Bukkit teleport afterwards is the authoritative way to take them
@@ -298,6 +302,7 @@ public final class FakePlayer {
         setField(connectionClass, connection, "address", new InetSocketAddress("127.0.0.1", 9999));
 
         Object listener = createGamePacketListener(minecraftServer, connectionClass);
+        this.gameListener = listener;
         Field connectionField = Reflect.field(serverPlayer.getClass(),
                 remapper.remapFieldName(serverPlayer.getClass(), "connection"));
         if (connectionField == null) {
@@ -501,6 +506,52 @@ public final class FakePlayer {
             }
         }
         plugin.getLogger().warning("Could not add fake player to the world directly");
+    }
+
+    /**
+     * Join protection moved across the version range: through 1.21.1 it is
+     * {@code ServerPlayer.spawnInvulnerableTime} (60 ticks); from 1.21.2 the
+     * player is invulnerable until their client confirms loading —
+     * {@code hasClientLoaded()} on the game packet listener, backed by
+     * {@code clientLoadedTimeoutTimer} (and {@code waitingForRespawn} on the
+     * newest versions), which a clientless player can only time out. Both
+     * mechanisms are cleared; whichever exists on this version takes effect.
+     *
+     * <p>The listener must be read back off the player: modern
+     * {@code placeNewPlayer} builds its <em>own</em> listener, replacing the
+     * one this bootstrap created.</p>
+     */
+    private void clearSpawnInvulnerability() {
+        setField(serverPlayer, "spawnInvulnerableTime", 0);
+        try {
+            Field connectionField = Reflect.field(serverPlayer.getClass(),
+                    remapper.remapFieldName(serverPlayer.getClass(), "connection"));
+            if (connectionField == null) {
+                connectionField = Reflect.field(serverPlayer.getClass(), "connection");
+            }
+            Object liveListener = connectionField == null ? null : connectionField.get(serverPlayer);
+            if (liveListener != null) {
+                setField(liveListener, "clientLoadedTimeoutTimer", 0);
+                setField(liveListener, "waitingForRespawn", false);
+            }
+        } catch (Throwable ignored) {
+            // Best effort — pre-1.21.2 versions have neither field.
+        }
+    }
+
+    private void setField(Object target, String mojangName, Object value) {
+        try {
+            Field field = Reflect.field(target.getClass(),
+                    remapper.remapFieldName(target.getClass(), mojangName));
+            if (field == null) {
+                field = Reflect.field(target.getClass(), mojangName);
+            }
+            if (field != null) {
+                field.set(target, value);
+            }
+        } catch (Throwable ignored) {
+            // Best effort — the field may not exist on this version.
+        }
     }
 
     private void tickServerPlayer() {

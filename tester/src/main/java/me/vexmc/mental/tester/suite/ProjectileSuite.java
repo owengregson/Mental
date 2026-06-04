@@ -46,8 +46,8 @@ public final class ProjectileSuite {
                     victim.spawn(spot);
                     return spot;
                 });
-                // Outlast the 60-tick join invulnerability modern servers grant.
-                context.awaitTicks(70);
+                // Land and settle — spawn invulnerability is cleared at spawn.
+                context.awaitTicks(5);
 
                 KnockbackVector expected = context.sync(() -> {
                     victim.player().setNoDamageTicks(0);

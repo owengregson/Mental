@@ -88,7 +88,7 @@ public final class OcmCoexistenceSuite {
                 victim.spawn(Arena.offset(centre, 0, 2));
                 freshVictim.spawn(Arena.offset(centre, 2, 2));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             // Phase 1 — default ("old") modeset: OCM's knock, Mental silent.
             Boolean ownedByOcm = context.sync(() -> {
@@ -161,7 +161,7 @@ public final class OcmCoexistenceSuite {
                 attacker.spawn(Arena.offset(centre, -3, -2));
                 victim.spawn(Arena.offset(centre, -3, 2));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             Boolean armed = context.sync(() -> {
                 ItemStack sword = new ItemStack(Material.DIAMOND_SWORD);
@@ -229,7 +229,7 @@ public final class OcmCoexistenceSuite {
                 rodder.spawn(Arena.offset(centre, 3, -3));
                 victim.spawn(Arena.offset(centre, 3, 0));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             context.expect(context.sync(() -> mental.services().ocmGate()
                             .handles(OcmMechanic.FISHING_KNOCKBACK, rodder.player())),
@@ -285,7 +285,7 @@ public final class OcmCoexistenceSuite {
                 shooter.spawn(Arena.offset(centre, 6, -3));
                 victim.spawn(Arena.offset(centre, 6, 0));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             context.expect(context.sync(() -> mental.services().ocmGate()
                             .handles(OcmMechanic.PROJECTILE_KNOCKBACK, victim.player())),

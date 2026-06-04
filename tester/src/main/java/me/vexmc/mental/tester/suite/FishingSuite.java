@@ -42,8 +42,8 @@ public final class FishingSuite {
                     rodder.spawn(Arena.offset(centre, -3, -3));
                     victim.spawn(Arena.offset(centre, -3, 0));
                 });
-                // Outlast the 60-tick join invulnerability modern servers grant.
-                context.awaitTicks(70);
+                // Land and settle — spawn invulnerability is cleared at spawn.
+                context.awaitTicks(5);
 
                 boolean launched = context.sync(() -> {
                     victim.player().setNoDamageTicks(0);

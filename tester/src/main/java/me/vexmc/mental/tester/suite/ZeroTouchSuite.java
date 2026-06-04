@@ -56,7 +56,7 @@ public final class ZeroTouchSuite {
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 2));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             context.syncRun(() -> {
                 victim.player().setNoDamageTicks(0);
@@ -94,7 +94,7 @@ public final class ZeroTouchSuite {
                 rodder.spawn(Arena.offset(centre, 3, -3));
                 caught.spawn(Arena.offset(centre, 3, 0));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             // Stage the reel-in event Mental's reel-in policy listens to,
             // with a real hook hooked onto the victim. When the module is
@@ -144,7 +144,7 @@ public final class ZeroTouchSuite {
                 Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
                 rodder.spawn(Arena.offset(centre, -6, -3));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             // A real PlayerFishEvent FISHING pass: with the module off, the
             // hook's velocity one tick later must be whatever vanilla gave it
@@ -198,7 +198,7 @@ public final class ZeroTouchSuite {
                 shooter.spawn(Arena.offset(centre, 6, -3));
                 victim.spawn(Arena.offset(centre, 6, 0));
             });
-            context.awaitTicks(70);
+            context.awaitTicks(5);
 
             context.syncRun(() -> {
                 victim.player().setNoDamageTicks(0);
