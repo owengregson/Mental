@@ -1,0 +1,332 @@
+package me.vexmc.mental.command;
+
+import static me.vexmc.mental.common.command.ArgumentNode.argument;
+import static me.vexmc.mental.common.command.LiteralNode.literal;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
+import me.vexmc.mental.MentalPlugin;
+import me.vexmc.mental.MentalServices;
+import me.vexmc.mental.common.command.CommandContext;
+import me.vexmc.mental.common.command.CommandMessages;
+import me.vexmc.mental.common.command.CommandTree;
+import me.vexmc.mental.common.command.LiteralNode;
+import me.vexmc.mental.common.command.Suggester;
+import me.vexmc.mental.common.debug.DebugCategory;
+import me.vexmc.mental.debug.PlayerDebugSink;
+import me.vexmc.mental.engine.CombatModule;
+import me.vexmc.mental.engine.ModuleRegistry;
+import me.vexmc.mental.module.compensation.LatencyCompensationModule;
+import me.vexmc.mental.text.Brand;
+import me.vexmc.mental.text.Messages;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+import org.jetbrains.annotations.NotNull;
+
+/**
+ * The whole {@code /mental} tree, declared once and rendered by whichever
+ * backend this server supports. Every action funnels through the same small
+ * helpers, so Brigadier and classic dispatch are behaviorally identical.
+ */
+public final class MentalCommands {
+
+    private static final String PERMISSION_USE = "mental.command.use";
+    private static final String PERMISSION_MODULE = "mental.command.module";
+    private static final String PERMISSION_RELOAD = "mental.command.reload";
+    private static final String PERMISSION_DEBUG = "mental.command.debug";
+    private static final String PERMISSION_PING = "mental.command.ping";
+
+    private final MentalPlugin plugin;
+    private final MentalServices services;
+    private final ModuleRegistry modules;
+    private final PlayerDebugSink debugSink;
+    private CommandTree tree;
+
+    public MentalCommands(
+            @NotNull MentalPlugin plugin,
+            @NotNull MentalServices services,
+            @NotNull ModuleRegistry modules,
+            @NotNull PlayerDebugSink debugSink) {
+        this.plugin = plugin;
+        this.services = services;
+        this.modules = modules;
+        this.debugSink = debugSink;
+    }
+
+    public @NotNull CommandTree build() {
+        Suggester moduleIds = (sender, partial) -> modules.ids();
+        Suggester onlinePlayers = (sender, partial) ->
+                Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
+        Suggester categories = (sender, partial) ->
+                List.of(DebugCategory.values()).stream().map(DebugCategory::key).toList();
+
+        LiteralNode root = literal("mental")
+                .permission(PERMISSION_USE)
+                .describe("Interactive combat dashboard.")
+                .runs(context -> context.reply(Dashboard.render(services, modules)))
+                .then(literal("module")
+                        .permission(PERMISSION_MODULE)
+                        .describe("Toggle and inspect combat modules.")
+                        .then(argument("name", moduleIds)
+                                .then(literal("on").describe("Enable the module.")
+                                        .runs(context -> toggleModule(context, true)).build())
+                                .then(literal("off").describe("Disable the module.")
+                                        .runs(context -> toggleModule(context, false)).build())
+                                .then(literal("status").describe("Show the module's state.")
+                                        .runs(this::moduleStatus).build())
+                                .build())
+                        .build())
+                .then(literal("ping")
+                        .permission(PERMISSION_PING)
+                        .describe("Measured RTT, jitter, and spike state.")
+                        .runs(this::pingSelf)
+                        .then(argument("player", onlinePlayers)
+                                .runs(this::pingOther)
+                                .build())
+                        .build())
+                .then(literal("debug")
+                        .permission(PERMISSION_DEBUG)
+                        .describe("Verbose logging controls.")
+                        .runs(this::debugStatus)
+                        .then(literal("on").describe("Enable debug logging.")
+                                .runs(context -> setDebugEnabled(context, true)).build())
+                        .then(literal("off").describe("Disable debug logging.")
+                                .runs(context -> setDebugEnabled(context, false)).build())
+                        .then(literal("category")
+                                .describe("Toggle a single debug category.")
+                                .then(argument("category", categories)
+                                        .then(literal("on").runs(context -> setCategory(context, true)).build())
+                                        .then(literal("off").runs(context -> setCategory(context, false)).build())
+                                        .build())
+                                .build())
+                        .then(literal("subscribe")
+                                .describe("Receive debug lines in-game.")
+                                .runs(this::toggleSubscription)
+                                .build())
+                        .build())
+                .then(literal("reload")
+                        .permission(PERMISSION_RELOAD)
+                        .describe("Reload the configuration atomically.")
+                        .runs(this::reload)
+                        .build())
+                .then(literal("version")
+                        .describe("Version, platform, and capability report.")
+                        .runs(this::version)
+                        .build())
+                .then(literal("help")
+                        .describe("Show every command.")
+                        .runs(this::help)
+                        .build())
+                .build();
+
+        this.tree = new CommandTree(root, new CommandMessages() {
+            @Override
+            public @NotNull Component noPermission() {
+                return Messages.noPermission();
+            }
+
+            @Override
+            public @NotNull Component unknownSubcommand() {
+                return Messages.unknownSubcommand();
+            }
+
+            @Override
+            public @NotNull Component usage(@NotNull String usage) {
+                return Messages.usage(usage);
+            }
+        });
+        return tree;
+    }
+
+    private void toggleModule(CommandContext context, boolean enabled) {
+        String id = context.arg("name").toLowerCase(Locale.ROOT);
+        CombatModule module = modules.byId(id).orElse(null);
+        if (module == null) {
+            context.reply(Messages.moduleUnknown(id, modules.ids()));
+            return;
+        }
+        plugin.getConfig().set("modules." + id + ".enabled", enabled);
+        plugin.saveConfig();
+        plugin.reloadAll();
+        context.reply(Messages.moduleToggled(module.displayName(), module.active()));
+    }
+
+    private void moduleStatus(CommandContext context) {
+        String id = context.arg("name").toLowerCase(Locale.ROOT);
+        CombatModule module = modules.byId(id).orElse(null);
+        if (module == null) {
+            context.reply(Messages.moduleUnknown(id, modules.ids()));
+            return;
+        }
+        context.reply(Messages.moduleStatus(module.displayName(), module.active(), module.description()));
+    }
+
+    private void pingSelf(CommandContext context) {
+        Player self = context.playerSender();
+        if (self == null) {
+            context.reply(Messages.playersOnly());
+            return;
+        }
+        context.reply(renderPing(self));
+    }
+
+    private void pingOther(CommandContext context) {
+        Player target = Bukkit.getPlayerExact(context.arg("player"));
+        if (target == null) {
+            context.reply(Messages.playerNotFound(context.arg("player")));
+            return;
+        }
+        context.reply(renderPing(target));
+    }
+
+    private Component renderPing(Player target) {
+        UUID id = target.getUniqueId();
+        LatencyCompensationModule compensation = compensation();
+        LatencyCompensationModule.PingStats stats = compensation != null
+                ? compensation.pingStats(id)
+                : new LatencyCompensationModule.PingStats(null, null, 0.0, false);
+
+        String measured = stats.pingMillis() != null
+                ? Math.round(stats.pingMillis()) + "ms"
+                : target.getPing() + "ms (vanilla — no probe yet)";
+        String previous = stats.previousPingMillis() != null
+                ? Math.round(stats.previousPingMillis()) + "ms"
+                : "—";
+
+        return Brand.line(Component.text()
+                .append(Component.text(target.getName(), Brand.SECONDARY))
+                .append(Component.text("  rtt=", Brand.MUTED))
+                .append(Component.text(measured, Brand.ACCENT))
+                .append(Component.text("  previous=", Brand.MUTED))
+                .append(Component.text(previous, Brand.ACCENT))
+                .append(Component.text("  jitter=", Brand.MUTED))
+                .append(Component.text(String.format(Locale.ROOT, "%.1fms", stats.jitterMillis()), Brand.ACCENT))
+                .append(Component.text("  spike=", Brand.MUTED))
+                .append(Component.text(String.valueOf(stats.spike()),
+                        stats.spike() ? Brand.FAILURE : Brand.SUCCESS))
+                .append(Component.text("  strategy=", Brand.MUTED))
+                .append(Component.text(services.config().compensation().probeStrategy().name(), Brand.ACCENT))
+                .build());
+    }
+
+    private void debugStatus(CommandContext context) {
+        var debug = services.debug();
+        StringBuilder active = new StringBuilder();
+        for (DebugCategory category : debug.activeCategories()) {
+            if (!active.isEmpty()) {
+                active.append(", ");
+            }
+            active.append(category.key());
+        }
+        context.reply(Brand.line(Component.text()
+                .append(Component.text("debug ", Brand.TEXT))
+                .append(Component.text(debug.enabled() ? "ENABLED" : "DISABLED",
+                        debug.enabled() ? Brand.SUCCESS : Brand.FAILURE))
+                .append(Component.text("  categories: ", Brand.MUTED))
+                .append(Component.text(active.isEmpty() ? "none" : active.toString(), Brand.ACCENT))
+                .build()));
+    }
+
+    private void setDebugEnabled(CommandContext context, boolean enabled) {
+        plugin.getConfig().set("debug.enabled", enabled);
+        plugin.saveConfig();
+        services.debug().enabled(enabled);
+        context.reply(enabled
+                ? Brand.success("Debug logging enabled.")
+                : Brand.failure("Debug logging disabled."));
+    }
+
+    private void setCategory(CommandContext context, boolean enabled) {
+        String key = context.arg("category").toLowerCase(Locale.ROOT);
+        DebugCategory category = DebugCategory.byKey(key).orElse(null);
+        if (category == null) {
+            context.reply(Brand.failure("Unknown debug category '" + key + "'."));
+            return;
+        }
+        plugin.getConfig().set("debug.categories." + category.key(), enabled);
+        plugin.saveConfig();
+        services.debug().activate(category, enabled);
+        context.reply(enabled
+                ? Brand.success("Debug category '" + category.key() + "' enabled.")
+                : Brand.failure("Debug category '" + category.key() + "' disabled."));
+    }
+
+    private void toggleSubscription(CommandContext context) {
+        Player player = context.playerSender();
+        if (player == null) {
+            context.reply(Messages.playersOnly());
+            return;
+        }
+        boolean subscribed = debugSink.toggle(player.getUniqueId());
+        context.reply(subscribed
+                ? Brand.success("Subscribed to in-game debug output.")
+                : Brand.failure("Unsubscribed from in-game debug output."));
+    }
+
+    private void reload(CommandContext context) {
+        long started = System.nanoTime();
+        try {
+            List<String> warnings = plugin.reloadAll();
+            long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
+            context.reply(Messages.reloadSucceeded(elapsedMillis, warnings));
+        } catch (Exception failure) {
+            context.reply(Messages.reloadFailed(failure.getMessage() == null
+                    ? failure.getClass().getSimpleName()
+                    : failure.getMessage()));
+        }
+    }
+
+    private void version(CommandContext context) {
+        context.reply(Brand.line(Component.text()
+                .append(Component.text("Mental " + plugin.getDescription().getVersion(), Brand.SECONDARY))
+                .append(Component.newline())
+                .append(Component.text("  server: ", Brand.MUTED))
+                .append(Component.text(services.environment().describe(), Brand.TEXT))
+                .append(Component.newline())
+                .append(Component.text("  scheduling: ", Brand.MUTED))
+                .append(Component.text(services.scheduling().describe(), Brand.TEXT))
+                .append(Component.newline())
+                .append(Component.text("  capabilities: ", Brand.MUTED))
+                .append(Component.text(services.capabilities().describe(), Brand.TEXT))
+                .append(Component.newline())
+                .append(Component.text("  anticheat: ", Brand.MUTED))
+                .append(Component.text(services.anticheatGate().describe(), Brand.TEXT))
+                .build()));
+    }
+
+    private void help(CommandContext context) {
+        var builder = Component.text()
+                .append(Brand.prefix())
+                .append(Component.text(" — latency-compensated 1.8 combat", Brand.MUTED));
+        appendHelpRows(builder, "/mental", tree.root(), context);
+        context.reply(builder.build());
+    }
+
+    private void appendHelpRows(
+            net.kyori.adventure.text.TextComponent.Builder builder,
+            String prefix,
+            LiteralNode node,
+            CommandContext context) {
+        for (var child : node.children()) {
+            if (!(child instanceof LiteralNode literal) || !literal.allowed(context.sender())) {
+                continue;
+            }
+            String command = prefix + " " + literal.name();
+            builder.append(Component.newline())
+                    .append(Component.text("  " + command, Brand.SECONDARY)
+                            .clickEvent(ClickEvent.suggestCommand(command)))
+                    .append(Component.text(" — ", Brand.MUTED))
+                    .append(Component.text(literal.description(), Brand.TEXT));
+        }
+    }
+
+    private LatencyCompensationModule compensation() {
+        return modules.byId("latency-compensation")
+                .filter(LatencyCompensationModule.class::isInstance)
+                .map(LatencyCompensationModule.class::cast)
+                .orElse(null);
+    }
+}

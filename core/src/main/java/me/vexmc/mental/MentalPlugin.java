@@ -3,12 +3,16 @@ package me.vexmc.mental;
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import java.util.List;
+import me.vexmc.mental.command.BukkitCommandRenderer;
+import me.vexmc.mental.command.MentalCommands;
+import me.vexmc.mental.common.command.CommandTree;
 import me.vexmc.mental.common.debug.DebugLog;
 import me.vexmc.mental.common.platform.Capabilities;
 import me.vexmc.mental.common.platform.ServerEnvironment;
 import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.config.MentalConfig;
 import me.vexmc.mental.debug.ConsoleSink;
+import me.vexmc.mental.debug.PlayerDebugSink;
 import me.vexmc.mental.engine.ModuleRegistry;
 import me.vexmc.mental.module.anticheat.AnticheatCompatModule;
 import me.vexmc.mental.module.anticheat.AnticheatGate;
@@ -35,9 +39,12 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public final class MentalPlugin extends JavaPlugin {
 
+    private static final String BRIGADIER_BRIDGE = "me.vexmc.mental.compat.brigadier.BrigadierBridge";
+
     private MentalConfig config;
     private MentalServices services;
     private ModuleRegistry modules;
+    private PlayerDebugSink playerDebugSink;
 
     @Override
     public void onLoad() {
@@ -61,6 +68,8 @@ public final class MentalPlugin extends JavaPlugin {
 
         DebugLog debug = new DebugLog();
         debug.addSink(new ConsoleSink(getLogger()));
+        this.playerDebugSink = new PlayerDebugSink();
+        debug.addSink(playerDebugSink);
         applyDebugSettings(debug);
 
         this.services = new MentalServices(
@@ -71,6 +80,13 @@ public final class MentalPlugin extends JavaPlugin {
         modules.enableAll();
 
         registerCommands();
+
+        getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+            @org.bukkit.event.EventHandler
+            public void onQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+                playerDebugSink.forget(event.getPlayer().getUniqueId());
+            }
+        }, this);
 
         PacketEvents.getAPI().init();
 
@@ -134,7 +150,30 @@ public final class MentalPlugin extends JavaPlugin {
     }
 
     private void registerCommands() {
-        // Command tree wiring lands with the command system.
+        CommandTree tree = new MentalCommands(this, services, modules, playerDebugSink).build();
+
+        var command = getCommand("mental");
+        if (command != null) {
+            BukkitCommandRenderer renderer = new BukkitCommandRenderer(tree);
+            command.setExecutor(renderer);
+            command.setTabCompleter(renderer);
+        } else {
+            getLogger().warning("plugin.yml is missing the 'mental' command — commands unavailable.");
+        }
+
+        if (services.capabilities().brigadierCommands()) {
+            try {
+                Class.forName(BRIGADIER_BRIDGE)
+                        .getMethod("register", org.bukkit.plugin.java.JavaPlugin.class,
+                                CommandTree.class, String.class, List.class)
+                        .invoke(null, this, tree, "Mental root command — dashboard, modules, ping, debug.",
+                                List.of("mtl"));
+                getLogger().info("Commands rendered natively via Brigadier.");
+            } catch (ReflectiveOperationException failure) {
+                getLogger().warning("Brigadier bridge failed to load; classic commands remain active: "
+                        + failure);
+            }
+        }
     }
 
     private void applyDebugSettings(DebugLog debug) {
