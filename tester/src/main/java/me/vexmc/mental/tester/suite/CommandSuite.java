@@ -26,15 +26,17 @@ public final class CommandSuite {
                             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mental module knockback status"));
                     context.expect(status, "'mental module knockback status' was not handled");
                 }),
-                new TestCase("command: player opens the dashboard", context -> {
+                new TestCase("command: permitted player opens the dashboard", context -> {
                     FakePlayer player = new FakePlayer(tester, mental.services().scheduling());
                     try {
                         context.syncRun(() ->
                                 player.spawn(Arena.prepare(Bukkit.getWorlds().get(0))));
                         context.awaitTicks(3);
-                        boolean handled = context.sync(() ->
-                                Bukkit.dispatchCommand(player.player(), "mental"));
-                        context.expect(handled, "bare /mental was not handled for a player");
+                        boolean handled = context.sync(() -> {
+                            player.player().addAttachment(tester, "mental.command.use", true);
+                            return Bukkit.dispatchCommand(player.player(), "mental");
+                        });
+                        context.expect(handled, "bare /mental was not handled for a permitted player");
                     } finally {
                         context.syncRun(player::remove);
                     }

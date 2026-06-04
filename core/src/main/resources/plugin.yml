@@ -11,6 +11,7 @@ commands:
   mental:
     description: Mental root command — dashboard, modules, ping, debug, reload.
     aliases: [mtl]
+    permission: mental.command.use
 
 permissions:
   mental.*:
@@ -24,7 +25,7 @@ permissions:
       mental.command.ping: true
   mental.command.use:
     description: Use /mental, the dashboard, help, and version.
-    default: true
+    default: op
   mental.command.module:
     description: Toggle and inspect modules.
     default: op
@@ -36,4 +37,4 @@ permissions:
     default: op
   mental.command.ping:
     description: View measured ping statistics.
-    default: true
+    default: op
