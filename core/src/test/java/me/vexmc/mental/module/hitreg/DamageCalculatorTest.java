@@ -51,4 +51,17 @@ class DamageCalculatorTest {
         assertNull(DamageCalculator.legacyAttackDamage(Material.WOODEN_HOE));
         assertNull(DamageCalculator.legacyAttackDamage(Material.FISHING_ROD));
     }
+
+    @Test
+    void vanillaSharpnessMatchesWhatOcmDecomposes() {
+        // OCM subtracts DamageUtils.getNewSharpnessDamage(level) — 1 + 0.5(l−1)
+        // — from the raw damage; the vanilla-shape composition must add the
+        // exact same series or the decomposition drifts.
+        assertEquals(0.0, DamageCalculator.vanillaSharpnessBonus(0));
+        assertEquals(0.0, DamageCalculator.vanillaSharpnessBonus(-1));
+        assertEquals(1.0, DamageCalculator.vanillaSharpnessBonus(1));
+        assertEquals(1.5, DamageCalculator.vanillaSharpnessBonus(2));
+        assertEquals(2.0, DamageCalculator.vanillaSharpnessBonus(3));
+        assertEquals(3.0, DamageCalculator.vanillaSharpnessBonus(5));
+    }
 }

@@ -22,6 +22,16 @@ import org.jetbrains.annotations.Nullable;
  * point, axes became heavy weapons); {@code legacyToolDamage} restores the
  * pre-1.9 tables — sword {@code 4+tier}, axe {@code 3+tier}, pickaxe
  * {@code 2+tier}, shovel {@code 1+tier}, plus the 1.0 base hand damage.</p>
+ *
+ * <p>When OldCombatMechanics governs damage for the attacker
+ * ({@code vanillaShape}), the composition switches to exactly what vanilla
+ * would produce at full charge — attribute base, the 1.9 crit rules
+ * (sprinting excludes), the 1.9 Sharpness formula — because OCM's damage
+ * machinery <em>decomposes</em> the event back into those components before
+ * replacing them with its configured values. Feeding it legacy-composed
+ * damage would double-apply sharpness and crits; feeding it vanilla-shaped
+ * damage makes OCM the single source of truth for the hit, which is the
+ * point of yielding.</p>
  */
 public final class DamageCalculator {
 
@@ -31,8 +41,17 @@ public final class DamageCalculator {
             @NotNull Player attacker,
             @NotNull LivingEntity target,
             boolean simulateCrits,
-            boolean legacyToolDamage) {
+            boolean legacyToolDamage,
+            boolean vanillaShape) {
         ItemStack weapon = attacker.getInventory().getItemInMainHand();
+
+        if (vanillaShape) {
+            double damage = Attributes.valueOr(attacker, Attributes.attackDamage(), 1.0);
+            if (simulateCrits && isCritical(attacker) && !attacker.isSprinting()) {
+                damage *= 1.5;
+            }
+            return Math.max(0.0, damage + vanillaEnchantmentBonus(weapon));
+        }
 
         Double legacy = legacyToolDamage && weapon != null ? legacyAttackDamage(weapon.getType()) : null;
         double damage = legacy != null
@@ -48,6 +67,11 @@ public final class DamageCalculator {
     /** Pre-1.9 Sharpness: {@code 1.25 × level} (1.9 changed it to {@code 0.5 × level + 0.5}). */
     static double sharpnessBonus(int level) {
         return level <= 0 ? 0.0 : 1.25 * level;
+    }
+
+    /** The 1.9+ Sharpness vanilla composes with: {@code 1 + 0.5 × (level − 1)}. */
+    static double vanillaSharpnessBonus(int level) {
+        return level <= 0 ? 0.0 : 1.0 + 0.5 * (level - 1);
     }
 
     /**
@@ -107,5 +131,13 @@ public final class DamageCalculator {
         }
         Enchantment sharpness = Enchantments.sharpness();
         return sharpness == null ? 0.0 : sharpnessBonus(weapon.getEnchantmentLevel(sharpness));
+    }
+
+    private static double vanillaEnchantmentBonus(@Nullable ItemStack weapon) {
+        if (weapon == null || weapon.getType() == Material.AIR) {
+            return 0.0;
+        }
+        Enchantment sharpness = Enchantments.sharpness();
+        return sharpness == null ? 0.0 : vanillaSharpnessBonus(weapon.getEnchantmentLevel(sharpness));
     }
 }

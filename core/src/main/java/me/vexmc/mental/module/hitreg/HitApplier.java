@@ -50,9 +50,17 @@ public final class HitApplier {
         }
 
         var settings = services.config().hitReg();
+        // Where OCM's damage modules govern this attacker, hand the hurt
+        // pipeline vanilla-shaped damage: OCM decomposes the event into
+        // vanilla components and substitutes its configured values, so it —
+        // not Mental — is the damage model for the hit.
+        boolean ocmShapesDamage =
+                services.ocmGate().handles(me.vexmc.mental.module.ocm.OcmMechanic.TOOL_DAMAGE, attacker)
+                || services.ocmGate().handles(me.vexmc.mental.module.ocm.OcmMechanic.CRITICAL_HITS, attacker);
         double amount = damageable instanceof LivingEntity living
                 ? DamageCalculator.calculate(
-                        attacker, living, settings.simulateCrits(), settings.legacyToolDamage())
+                        attacker, living, settings.simulateCrits(), settings.legacyToolDamage(),
+                        ocmShapesDamage)
                 : 1.0;
 
         damageable.damage(amount, attacker);
