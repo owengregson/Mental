@@ -118,11 +118,16 @@ modules:
   rod-velocity:
     enabled: true
 
-  # Restore knockback from zero-damage projectiles (snowballs, eggs, ender
-  # pearls) the way 1.8 applied it. The configured damage is substituted
-  # only when the projectile dealt exactly zero.
+  # 1.7.10 projectile knockback: pushes away from where the SHOOTER stood
+  # (modern servers push along the projectile's flight), computed from the
+  # victim's residual so projectile hits feed combos. The configured damage
+  # is substituted only when the projectile dealt exactly zero, keeping the
+  # vanilla hurt pipeline (i-frames, protection plugins) in charge.
   projectile-knockback:
     enabled: true
+    # Also take over arrow knockback: positional base plus the legacy Punch
+    # bonus (0.6/level along the flight, +0.1 vertical, ignores resistance).
+    arrows: true
     damage:
       snowball: 0.0001
       egg: 0.0001

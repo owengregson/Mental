@@ -95,6 +95,11 @@ public final class KnockbackPipeline implements Listener {
         pending.put(victim.getUniqueId(), new Pending(vector, attacker, cause, System.nanoTime()));
     }
 
+    /** Drops a pending vector — a protection plugin cancelled the hit it belonged to. */
+    public void withdraw(@NotNull Player victim) {
+        pending.remove(victim.getUniqueId());
+    }
+
     /**
      * Safety net for sources vanilla never arms a velocity event for (modern
      * ender pearls): one tick later, if the submission is still pending, set

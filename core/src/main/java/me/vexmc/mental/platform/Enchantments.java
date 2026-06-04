@@ -16,11 +16,16 @@ import org.jetbrains.annotations.Nullable;
 public final class Enchantments {
 
     private static final @Nullable Enchantment SHARPNESS = resolve("SHARPNESS", "DAMAGE_ALL");
+    private static final @Nullable Enchantment PUNCH = resolve("PUNCH", "ARROW_KNOCKBACK");
 
     private Enchantments() {}
 
     public static @Nullable Enchantment sharpness() {
         return SHARPNESS;
+    }
+
+    public static @Nullable Enchantment punch() {
+        return PUNCH;
     }
 
     public static @NotNull Enchantment knockback() {
