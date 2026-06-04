@@ -2,11 +2,11 @@
 
 **Date:** 2026-06-04
 **Status:** Approved (autonomous execution authorized by owner)
-**Supersedes:** StrikeSync 4.0.1 (single-version Paper 26.1.2 plugin)
+**Supersedes:** the legacy plugin, v4.0.1 (single-version Paper 26.1.2)
 
 ## 1. Goals
 
-Rewrite StrikeSync from scratch as **Mental**: a latency-compensated combat plugin
+Rewrite the legacy plugin from scratch as **Mental**: a latency-compensated combat plugin
 delivering authentic 1.8 combat feel on modern servers.
 
 | Requirement | Target |
@@ -48,7 +48,7 @@ These facts drive the architecture; each was verified against primary sources
 8. **Anticheats:** GrimAC and Vulcan run movement-prediction engines. Velocity applied
    server-side (`PlayerVelocityEvent` → `setVelocity`) is *by construction* compatible:
    the server's own model produces the packet, so prediction matches. **Out-of-band
-   velocity packets (StrikeSync's pre-send fast path) are the one risky behavior** and
+   velocity packets (the legacy pre-send fast path) are the one risky behavior** and
    must be policy-gated when an anticheat is detected. Grim's public API is observational
    (`FlagEvent`, `CompletePredictionEvent`) — no "register custom KB" hook exists; Vulcan
    has no public API. Hurt-animation pre-send is cosmetic and prediction-irrelevant.
@@ -165,9 +165,9 @@ Modules: `hit-registration`, `knockback`, `latency-compensation`, `fishing-knock
 
 ### 4.4 Combat behavior (ported + new)
 
-**Melee knockback** — StrikeSync's engine with one authenticity fix: the vertical
+**Melee knockback** — the legacy engine with one authenticity fix: the vertical
 limit clamps the *base* Y **before** bonus levels are added (vanilla-1.8/OCM ordering,
-so sprint hits reach 0.5; StrikeSync clamped after, flattening sprint verticals).
+so sprint hits reach 0.5; the legacy code clamped after, flattening sprint verticals).
 Direction-normalized base KB with friction, sprint+enchant bonus, optional
 armor-KB-resistance honoring; computed at `EntityDamageByEntityEvent
 (MONITOR)`, stashed per-victim, applied at `PlayerVelocityEvent (HIGH)` — i.e. **always
@@ -327,13 +327,13 @@ config parsing (defaults, invalid values, round-trip) via `MemoryConfiguration`.
 ### 4.13 Migration & repo hygiene
 
 - Delete Maven/Eclipse artifacts (`pom.xml`, `.classpath`, `.project`, `.settings/`,
-  `.factorypath`, `StrikeSync.iml`, tracked `target/` outputs) and the old source tree.
+  `.factorypath`, the legacy `.iml`, tracked `target/` outputs) and the old source tree.
 - `FAST_PATH.md` → rewritten `docs/fast-path.md` for Mental.
 - README rewritten (features, version matrix, install, commands, config, API, anticheat
   notes, acknowledgements preserved: knockback-sync GPL-3.0 algorithm adaptation, SmashHit
   concept, OCM-inspired fishing/projectile mechanics + test harness).
 - Version reset to `1.0.0`. License stays MIT.
-- GitHub repo rename (StrikeSync → Mental) is an owner action outside the working tree;
+- GitHub repo rename to `Mental` is an owner action outside the working tree;
   flagged as a manual follow-up.
 
 ## 5. Risks & mitigations

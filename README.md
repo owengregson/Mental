@@ -1,189 +1,173 @@
 # Mental
 
-> Latency-compensated 1.8 combat for modern Minecraft — async hit registration, authentic knockback, fishing rod and projectile mechanics. One jar, Paper 1.17.1 through 26.1.2, Folia-ready.
+**Classic 1.8 combat for modern Paper servers.**
 
-[![Java](https://img.shields.io/badge/Java-17+-orange?style=flat-square)](https://adoptium.net/)
+Mental brings back the way PvP used to feel: the knockback, the rod hits, the snowball trades. It also registers hits faster than vanilla and evens out the playing field for players on higher ping. One jar runs on every Paper version from 1.17.1 through 26.1.2, Folia included, with no dependencies.
+
 [![Paper](https://img.shields.io/badge/Paper-1.17.1%20→%2026.1.2-blue?style=flat-square)](https://papermc.io/)
 [![Folia](https://img.shields.io/badge/Folia-supported-purple?style=flat-square)](https://github.com/PaperMC/Folia)
+[![Java](https://img.shields.io/badge/Java-17+-orange?style=flat-square)](https://adoptium.net/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
----
+## Why Mental?
 
-## What it does
+If you run a PvP server, you know the problem. Modern Minecraft combat doesn't feel like 1.8, and it's not just the attack cooldown: knockback behaves differently, fishing rods stopped being a weapon, snowballs and eggs do nothing, and a player on 150 ms ping fights at a disadvantage that has nothing to do with skill.
 
-Mental intercepts attack packets on the netty event loop, validates them
-against tick-frozen state snapshots, and dispatches damage straight to the
-victim's owning thread — skipping the 25–100 ms vanilla spends queueing the
-hit through the main thread and waiting for the next entity-tracker pulse.
-Damage still flows through Bukkit's normal event chain, so protection and
-region plugins keep working untouched.
+Mental fixes the whole picture:
 
-On top of that core, Mental ships the full 1.8 combat feel:
+- **Hits land faster.** A vanilla server sits on every attack for a couple of game ticks before the victim feels anything. Mental processes attacks the moment they arrive, shaving roughly 25–100 ms off every hit. Combat feels crisp and immediate, especially up close.
+- **Knockback is the real 1.8 formula**, not an approximation. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, 1.8 critical hits and Sharpness damage. Fights feel the way veterans remember them.
+- **Ping doesn't decide fights.** Mental quietly measures each player's connection during combat and corrects the knockback they receive, so getting hit feels the same on 20 ms as it does on 150 ms.
+- **Fishing rods are weapons again.** Hooks damage and shove players on contact, casts fly like they did in 1.8, and the reel-in pull that ruins rod fights is gone.
+- **Projectiles knock back.** Snowballs, eggs and ender pearls push players around like they used to.
+- **Your anticheat keeps working.** Mental recognizes GrimAC and Vulcan on its own and stays inside what their movement checks expect. No false flags, no exemptions, nothing to set up.
+- **Your other plugins keep working.** Every hit still flows through the normal Bukkit damage events, so protection plugins, region flags and combat loggers all see ordinary combat.
 
-| Module | What it restores |
+## Compatibility
+
+| | |
 | --- | --- |
-| **Hit Registration** | Netty-thread attack interception, CPS limiting, pre-sent combat feedback |
-| **Knockback** | The 1.8 melee formula — friction, sprint and enchant bonuses, authentic vertical-cap ordering |
-| **Latency Compensation** | Ping-aware vertical knockback correction (spike-filtered probes, gravity simulation) |
-| **Fishing Knockback** | Rod hooks damage and shove what they hit; reel-in pull suppressed |
-| **Rod Velocity** | 1.8 cast speed, spread, and in-flight hook gravity |
-| **Projectile Knockback** | Snowballs, eggs and ender pearls knock players back again (pre-1.21.2 servers) |
-| **Anticheat Compat** | Detects GrimAC/Vulcan and suppresses the one prediction-unsafe behavior automatically |
+| **Server** | Paper 1.17.1 → 26.1.2 · Folia 1.19.4+ |
+| **Java** | 17 or newer |
+| **Dependencies** | None. Everything Mental needs ships inside the jar. |
 
-## Version support
+The same jar works on every supported version. Each release is verified by actually booting servers across the range and checking the combat behavior in-game, not just by compiling against the API.
 
-One jar covers every server below — verified by booting real Paper servers
-in the integration matrix on every release:
+## Installation
 
-| Server | Status |
-| --- | --- |
-| Paper 1.17.1 → 1.20.4 | ✅ (Java 17+ runtime) |
-| Paper 1.20.5 → 1.21.11 | ✅ |
-| Paper 26.x (year scheme) | ✅ |
-| Folia (1.19.4+) | ✅ (`folia-supported`, region-aware scheduling throughout) |
+1. Download `Mental-<version>.jar` from the [releases page](../../releases).
+2. Drop it into your server's `plugins/` folder.
+3. Restart.
 
-The compatibility layer is structural, not stringly-typed: the core compiles
-against the 1.17 API so the common path is binary-safe by construction, and
-version-specific code (Folia schedulers, Brigadier commands) lives in
-separately-compiled units that are only class-loaded behind feature
-detection. The two binary breaks in the range — the 1.21.3 `Attribute`
-enum→interface change and the 1.20.5 enchantment renames — are absorbed by
-tiny boot-time resolvers.
-
-## Install
-
-1. Drop `Mental-<version>.jar` into `plugins/`. **No dependencies** —
-   PacketEvents is shaded and relocated inside.
-2. Start the server. Config generates at `plugins/Mental/config.yml`.
+That's the whole setup. The defaults already give you the classic 1.8 feel; if you want to tune anything, a fully documented config appears at `plugins/Mental/config.yml`.
 
 ## Commands
 
-The root command is an interactive dashboard: every module with its live
-state, click-to-toggle buttons, and hover documentation. On Paper 1.20.6+
-the tree renders natively through Brigadier — clients validate arguments as
-they type, and branches you lack permission for never appear at all.
+Start with **`/mental`** (or `/mtl`). It opens an interactive dashboard in chat: every module with its live status, click to toggle, hover for what each one does. Most owners never need anything else.
 
-| Command | Permission | Description |
-| --- | --- | --- |
-| `/mental` | `mental.command.use` | Interactive dashboard |
-| `/mental module <name> <on\|off\|status>` | `mental.command.module` | Manage any module (persists to config) |
-| `/mental ping [player]` | `mental.command.ping` | Measured RTT, jitter, spike state, probe strategy |
-| `/mental debug <on\|off>` | `mental.command.debug` | Toggle verbose logging |
-| `/mental debug category <name> <on\|off>` | `mental.command.debug` | Per-category control |
-| `/mental debug subscribe` | `mental.command.debug` | Receive debug lines in-game |
-| `/mental reload` | `mental.command.reload` | Atomic config reload, timed |
-| `/mental version` | `mental.command.use` | Version, platform, capability report |
-| `/mental help` | `mental.command.use` | Clickable command list |
+| Command | What it does |
+| --- | --- |
+| `/mental` | The dashboard. View and toggle every module by clicking. |
+| `/mental module <name> <on\|off\|status>` | Toggle a module from console or scripts (saved to config). |
+| `/mental ping [player]` | A player's measured ping, jitter and connection quality. |
+| `/mental reload` | Apply config changes without a restart. Safe mid-combat. |
+| `/mental debug <on\|off>` | Verbose logging for troubleshooting (see the FAQ). |
+| `/mental version` | Version, server platform and feature report. |
+| `/mental help` | Clickable list of every command you can use. |
 
-Alias: `/mtl`. Note: on 1.20.6+ servers, registering native commands
-disables Bukkit's `/reload` (Paper lifecycle-API behavior) — use
-`/mental reload` for config changes.
+Module names for the `module` command: `hit-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`.
+
+By default, regular players can open the dashboard and check ping; anything that changes state needs op or the matching `mental.command.*` permission. `mental.*` grants everything.
+
+One quirk worth knowing: on Paper 1.20.6 and newer, Mental registers its commands natively, so clients validate arguments as you type. Paper disables the old `/reload` command for servers using that system. Use `/mental reload` for config changes (you should anyway).
 
 ## Configuration
 
-Defaults reproduce the 1.8 PvP feel with the latency win enabled. Every key
-is documented inline in `config.yml`; reloads swap the typed snapshot
-atomically, so no hit is ever processed against a half-applied config.
+Everything lives in `plugins/Mental/config.yml`, and every option is explained right there in the file, so this section stays short. A few knobs people ask about:
 
 ```yaml
 modules:
-  hit-registration:
-    enabled: true
-    max-cps: 20
-    fast-path: {enabled: true, pre-send-feedback: true, feedback-min-interval-ms: 500,
-                simulate-crits: true, reset-attack-cooldown: true}
   knockback:
-    enabled: true
-    base: {horizontal: 0.4, vertical: 0.4}
-    extra: {horizontal: 0.5, vertical: 0.1}
-    limits: {vertical: 0.4, horizontal: -1}
-    friction: {x: 0.5, y: 0.5, z: 0.5}
-    modifiers: {sprint: 1.0, armor-resistance: false, shield-blocking-cancels: true}
+    base: {horizontal: 0.4, vertical: 0.4}   # the classic 1.8 numbers
+    modifiers: {sprint: 1.0}                 # scale sprint-hit knockback
+
   latency-compensation:
-    enabled: true
-    probe-strategy: PING        # dedicated 1.17+ ping/pong channel; KEEPALIVE available
-    ping-offset-ms: 25
-    spike-threshold-ms: 20
-    probe-interval-ticks: 5
-    combat-timeout-ticks: 30
-    off-ground-sync: true
-  fishing-knockback: {enabled: true, damage: 0.0001, cancel-dragging-in: players,
-                      knockback-non-player-entities: false}
-  rod-velocity: {enabled: true}
-  projectile-knockback: {enabled: true, damage: {snowball: 0.0001, egg: 0.0001, ender-pearl: 0.0001}}
+    enabled: true                            # ping-aware knockback correction
+
+  hit-registration:
+    max-cps: 20                              # clicks per second before extras are ignored
 
 anticheat:
-  mode: auto                    # auto | force-safe | off
-  known: [GrimAC, Vulcan]
-
-debug:
-  enabled: false
-  categories: {hitreg: false, knockback: false, compensation: false, fishing: false,
-               projectile: false, packets: false, anticheat: false, scheduling: false,
-               commands: false, config: false}
+  mode: auto                                 # back off automatically when an anticheat is present
 ```
 
-## Anticheat compatibility
+`/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config.
 
-Movement-prediction anticheats (GrimAC, Vulcan) verify client motion against
-the velocity the server's own pipeline produced. Everything gameplay-relevant
-in Mental is applied through that pipeline — `PlayerVelocityEvent`, real
-`damage()` calls — and is therefore compatible by construction. The single
-out-of-band behavior is the netty-thread velocity pre-send; in `auto` mode
-Mental suppresses exactly that while a known anticheat is installed (hits
-still land at full speed, feedback reverts to vanilla cadence) and logs the
-adjustment. No flags are cancelled, no exemptions requested.
+## FAQ
 
-## API
+**Will it clash with my anticheat?**
+GrimAC and Vulcan are detected automatically, and Mental adjusts the one behavior their movement prediction would object to. Hits still register at full speed. Running something else? Set `anticheat.mode: force-safe` and Mental behaves the same way unconditionally.
+
+**Will it clash with WorldGuard, GriefPrevention or my combat logger?**
+No. Mental deals damage through the standard Bukkit event chain, so anything that cancels or modifies damage keeps working exactly as before.
+
+**Does it remove the 1.9 attack cooldown?**
+Effectively, yes: Mental resets the cooldown on every hit, so the recharge meter never weakens 1.8-style click fighting. (Toggleable via `reset-attack-cooldown` if you want cooldowns kept.)
+
+**Why doesn't the projectile module do anything on my 1.21.2+ server?**
+Because it doesn't need to. Mojang restored projectile knockback against players in vanilla 1.21.2, so Mental steps aside there instead of doubling it up.
+
+**Does it really run on Folia?**
+Yes, natively. Mental was built region-aware from the start rather than patched for it afterwards.
+
+**Does it phone home?**
+Only anonymous usage stats via [bStats](https://bstats.org/plugin/bukkit/Mental/31788), the standard for Bukkit plugins. Disable it globally in `plugins/bStats/config.yml` if you prefer.
+
+**Something feels off. How do I see what's happening?**
+`/mental debug on`, then `/mental debug subscribe` to stream diagnostics to your chat in-game. Ten categories can be toggled individually so you only see the system you're chasing. If it looks like a bug, [open an issue](../../issues) with what you find.
+
+## For developers
+
+### How it's put together
+
+Mental is a multi-module Gradle build:
+
+| Module | Purpose |
+| --- | --- |
+| `api` | The small public API other plugins compile against |
+| `common` | Pure logic with no Bukkit dependency: combat math, config model, command tree |
+| `core` | The plugin itself: combat modules, packet layer, Bukkit wiring |
+| `compat-folia` | Folia schedulers, loaded only when Folia is detected |
+| `compat-brigadier` | Native command registration, loaded only on 1.20.6+ |
+| `tester` | The in-server integration test harness |
+
+The wide version range works without reflection on hot paths: `core` compiles against the oldest supported API (1.17), which makes the common path binary-safe everywhere, and anything newer lives in the `compat-*` modules behind runtime feature detection. The two binary breaks in the range (the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames) are absorbed by small boot-time resolvers.
+
+If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline.
+
+### API
+
+Two events and a small facade, under `me.vexmc.mental.api`. Add the Mental jar to your compile classpath and `softdepend: [Mental]` to your plugin.yml.
 
 ```java
-// Veto hits before vanilla ever sees them (fires on a packet worker thread):
+// Veto hits before they happen (fires on a packet thread — keep it fast):
 @EventHandler
 public void onHit(AsyncHitRegisterEvent event) {
-    if (!myRegionAllowsPvp(event.getAttacker(), event.getTarget())) {
+    if (!allowed(event.getAttacker(), event.getTarget())) {
         event.setCancelled(true);
     }
 }
 
-// Adjust or veto the final knockback vector (fires on the owning thread):
+// Adjust or cancel knockback right before it is applied:
 @EventHandler
 public void onKnockback(KnockbackApplyEvent event) {
     event.velocity(event.velocity().multiply(0.8));
 }
 
-// Query the facade:
-Mental.MentalApi mental = Mental.get();
-OptionalDouble ping = mental.pingMillis(player);
+// Query Mental's state:
+OptionalDouble ping = Mental.get().pingMillis(player);
 ```
 
-## Building
+### Building and testing
 
 ```bash
 ./gradlew build                    # compile + unit tests → core/build/libs/Mental-<version>.jar
-./gradlew integrationTest          # boots real Paper servers on 1.17.1 and 26.1.2
+./gradlew integrationTest          # boots real Paper servers (oldest + newest supported)
 ./gradlew integrationTestMatrix    # the full seven-version matrix
 ```
 
-Integration tests spin up live servers with synthetic players and assert the
-actual combat outcomes — the knockback suite verifies the applied velocity
-vector matches the engine's math to three decimal places, end to end.
-JDK 17 and 25 are provisioned automatically via Gradle toolchains.
+The integration tests are the interesting part. They start actual Paper servers, spawn synthetic players, throw real punches, and assert that the resulting velocity matches the 1.8 math to three decimal places. Gradle provisions the right JDK for each server version automatically, so a plain clone and `./gradlew build` is all you need.
 
-For the byte-level pipeline analysis, see [docs/fast-path.md](docs/fast-path.md).
+Contributions are welcome. For anything bigger than a bugfix, open an issue first so we can talk it through.
 
-## Acknowledgements
+## Credits
 
-- Latency-compensation algorithm adapted from
-  [CASELOAD7000/knockback-sync](https://github.com/CASELOAD7000/knockback-sync) (GPL-3.0).
-- Async hit-registration concept inspired by
-  [frash23/SmashHit](https://github.com/frash23/SmashHit).
-- 1.8 fishing-rod and projectile mechanics, and the real-server integration
-  test approach, derived from
-  [kernitus/BukkitOldCombatMechanics](https://github.com/kernitus/BukkitOldCombatMechanics) (MPL-2.0).
-- Packet layer by [PacketEvents](https://github.com/retrooper/packetevents) (shaded).
+Mental stands on prior art:
 
-> Mental is the ground-up rewrite of StrikeSync; this repository carries its
-> history. (Repository rename to `Mental` pending.)
+- [knockback-sync](https://github.com/CASELOAD7000/knockback-sync) — the latency-compensation approach
+- [BukkitOldCombatMechanics](https://github.com/kernitus/BukkitOldCombatMechanics) — 1.8 rod and projectile mechanics, and the real-server testing approach
+- [SmashHit](https://github.com/frash23/SmashHit) — the async hit-registration concept
+- [PacketEvents](https://github.com/retrooper/packetevents) — the packet layer (bundled inside the jar)
 
 ## License
 

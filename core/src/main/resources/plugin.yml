@@ -5,7 +5,7 @@ api-version: '1.17'
 folia-supported: true
 description: Latency-compensated 1.8 combat — async hit registration, knockback, fishing and projectile mechanics.
 authors: [owengregson]
-website: https://github.com/owengregson/StrikeSync
+website: https://github.com/owengregson/Mental
 
 commands:
   mental:

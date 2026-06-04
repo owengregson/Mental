@@ -2,14 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rewrite StrikeSync from the ground up as **Mental** — a multi-version (Paper 1.17.1→26.1.2), Folia-supporting, anticheat-compatible 1.8-combat plugin with fishing-rod/projectile knockback, a new command system, debug subsystem, and real-server integration tests.
+**Goal:** Rewrite the legacy plugin from the ground up as **Mental** — a multi-version (Paper 1.17.1→26.1.2), Folia-supporting, anticheat-compatible 1.8-combat plugin with fishing-rod/projectile knockback, a new command system, debug subsystem, and real-server integration tests.
 
 **Architecture:** Multi-module Gradle build. `:api` (public events/facade) and `:common` (internal SPI: Scheduling, Capabilities, DebugLog, command-spec model) compile against paper-api **1.17.1**; `:core` (the plugin + all modules, shadow assembly) compiles against **1.17.1**; `:compat-modern` (FoliaScheduling, BrigadierBridge) compiles against **1.20.6** and is class-loaded only behind feature detection; `:tester` is a separate integration-test plugin booted alongside Mental inside real Paper servers per version.
 
 **Tech Stack:** Java 17 bytecode (JDK 25 toolchain), Gradle 9.5.1 Kotlin DSL + version catalog + foojay toolchain resolver, PacketEvents 2.12.1 (shaded/relocated), Shadow 9.4.2, run-paper 3.0.2, JUnit 5, reflection-remapper (tester only).
 
 **Reference material (in this repo / on this machine — do not delete until Phase 9):**
-- Old sources: `src/main/java/me/vexmc/strikesync/**` (canonical port source for hitreg/compensation/knockback/config/messages)
+- Old sources: the legacy `src/main/java` tree (canonical port source for hitreg/compensation/knockback/config/messages)
 - OCM repo: `/Users/owengregson/Documents/BukkitOldCombatMechanics` (build wiring: `build.gradle.kts`; fishing: `ModuleFishingKnockback.java`, `ModuleFishingRodVelocity.java`; projectile: `ModuleProjectileKnockback.java`; tests: `src/integrationTest/kotlin/**`, esp. `FakePlayer.kt`)
 - Spec: `docs/superpowers/specs/2026-06-04-mental-rewrite-design.md`
 
@@ -28,7 +28,7 @@
 - Create: `api/build.gradle.kts`, `common/build.gradle.kts`, `core/build.gradle.kts`, `compat/modern/build.gradle.kts`, `tester/build.gradle.kts`
 - Copy from OCM: `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`, `gradle/wrapper/gradle-wrapper.properties` (Gradle 9.5.1)
 - Modify: `.gitignore` (add `.gradle/`, `build/`, `run/`, keep `target/` ignored)
-- Delete: `pom.xml`, `.classpath`, `.project`, `.factorypath`, `.settings/`, `StrikeSync.iml`, `.vscode/settings.json` (old src/ stays until Phase 9)
+- Delete: `pom.xml`, `.classpath`, `.project`, `.factorypath`, `.settings/`, the legacy `.iml`, `.vscode/settings.json` (old src/ stays until Phase 9)
 
 - [ ] **Step 1:** `settings.gradle.kts`:
 
@@ -251,7 +251,7 @@ public record Capabilities(
 
 **Files:** `core/.../text/Brand.java`, `Messages.java`; `core/.../engine/CombatModule.java`, `ModuleRegistry.java`; `core/.../MentalPlugin.java`; resource `core/src/main/resources/plugin.yml`
 
-- [ ] `Brand`: port StrikeSync palette, prefix `Mental` (gold bold "Men" + yellow bold "tal"? No — single clean prefix: `Mental` gold bold + arrow). Keep helpers `prefix/line/success/failure/info`.
+- [ ] `Brand`: port the legacy palette, prefix `Mental` (gold bold "Men" + yellow bold "tal"? No — single clean prefix: `Mental` gold bold + arrow). Keep helpers `prefix/line/success/failure/info`.
 - [ ] `CombatModule`: abstract — `id()`, `displayName()`, `description()`, lifecycle `enable/disable/reload`, `listener` helpers (`registerListener(Listener)` tracked for auto-unregister on disable), scoped debug. `ModuleRegistry`: ordered map, exception-isolated lifecycle (`enableAll/disableAll/reloadAll`), `statuses()` for dashboard.
 - [ ] `plugin.yml`:
 
@@ -263,7 +263,7 @@ api-version: '1.17'
 folia-supported: true
 description: Latency-compensated 1.8 combat - async hitreg, knockback, fishing and projectile mechanics.
 authors: [owengregson]
-website: https://github.com/owengregson/StrikeSync
+website: https://github.com/owengregson/Mental
 commands:
   mental:
     description: Mental root command.
@@ -307,14 +307,14 @@ permissions:
   - horizontal cap 0.3: plain hit → xz scaled to magnitude 0.3
   - Y-override: vicVy override 0.0 with friction → y = 0.4
 - [ ] **Step 2:** run `./gradlew :core:test --tests '*KnockbackEngine*'` → compile failure/red.
-- [ ] **Step 3:** implement: port StrikeSync `KnockbackEngine.computeImpl` formula with the **vertical-cap-before-bonus** ordering (matches OCM lines 152-199); deterministic `RandomGenerator` injectable for the zero-distance branch.
+- [ ] **Step 3:** implement: port the legacy `KnockbackEngine.computeImpl` formula with the **vertical-cap-before-bonus** ordering (matches OCM lines 152-199); deterministic `RandomGenerator` injectable for the zero-distance branch.
 - [ ] **Step 4:** tests green. **Step 5:** Commit `feat(knockback): 1.8 knockback engine with authentic vertical-cap ordering`.
 
 ### Task 11: KnockbackModule
 
 **Files:** `core/.../module/knockback/KnockbackModule.java`; api: `api/src/main/java/me/vexmc/mental/api/event/KnockbackApplyEvent.java`
 
-- [ ] Port StrikeSync module: `EntityDamageByEntityEvent@MONITOR(ignoreCancelled)` compute → pending map; `PlayerVelocityEvent@HIGH` apply; quit cleanup. Additions: (a) pending entries stamped with tick + expire >2 ticks (lazily, on next access + periodic sweep piggybacked on apply); (b) skip when shield absorbed hit: `event.isApplicable(BLOCKING) && event.getDamage(BLOCKING) < 0` semantics — port OCM's check `getDamage(DamageModifier.BLOCKING) <= 0` guard direction exactly from `ModulePlayerKnockback.java:143`; (c) fire mutable `KnockbackApplyEvent(victim, attacker, vector)` just before applying; cancelled ⇒ leave vanilla velocity.
+- [ ] Port the legacy module: `EntityDamageByEntityEvent@MONITOR(ignoreCancelled)` compute → pending map; `PlayerVelocityEvent@HIGH` apply; quit cleanup. Additions: (a) pending entries stamped with tick + expire >2 ticks (lazily, on next access + periodic sweep piggybacked on apply); (b) skip when shield absorbed hit: `event.isApplicable(BLOCKING) && event.getDamage(BLOCKING) < 0` semantics — port OCM's check `getDamage(DamageModifier.BLOCKING) <= 0` guard direction exactly from `ModulePlayerKnockback.java:143`; (c) fire mutable `KnockbackApplyEvent(victim, attacker, vector)` just before applying; cancelled ⇒ leave vanilla velocity.
 - [ ] Compensation hint hookup left as a `KnockbackHints` interface (UUID → OptionalDouble yOverride), no-op until Task 15 wires the compensation module in.
 - [ ] Commit `feat(knockback): melee knockback module with apply event and shield guard`.
 
@@ -323,7 +323,7 @@ permissions:
 **Files:** `core/.../module/hitreg/`: `PlayerStateCache.java` (+ per-player `repeatOn` snapshot tasks), `CpsLimiter.java`, `HitFeedbackGate.java`, `DamageCalculator.java`, `AsyncVelocitySender.java`, `HurtFeedbackSender.java`, `HitDispatcher.java`, `HitApplier.java`; tests for CpsLimiter/FeedbackGate/DamageCalculator-sharpness
 - api: `api/.../event/AsyncHitRegisterEvent.java` (port, package change only)
 
-- [ ] Port from StrikeSync with these deltas:
+- [ ] Port from the legacy plugin with these deltas:
   - `PlayerStateCache`: replace the global every-tick all-players task with per-player `scheduling.repeatOn(player, 1, 1, snapshotTask, retired)` started on join/enable, handle removal on quit (Folia-correct). Snapshot record unchanged (15 fields) + built via `Attributes` resolver.
   - `CpsLimiter`, `HitFeedbackGate`: port verbatim; unit tests lock window semantics (acquire/deny/slide; one pre-send per window).
   - `DamageCalculator`: extract `static double sharpnessBonus(int level)` (`level<=0 ? 0 : 1.0 + 0.5*(level-1)`) — unit-tested; attribute base via `Attributes.attackDamage()`.
@@ -344,7 +344,7 @@ permissions:
 
 **Files:** `core/.../module/compensation/MotionMath.java`, `JitterCalculator.java`, `LatencyTracker.java`, `CombatTracker.java`, `GroundProbe.java`; tests for MotionMath + JitterCalculator + LatencyTracker
 
-- [ ] Port all five from StrikeSync verbatim (MotionMath MAX_TICKS=30, gravity loop `(v-g)*0.98` capped 3.92; Jitter 15-sample IQR; LatencyTracker outstanding-32 eviction; CombatTracker timeout map; GroundProbe 4-corner 5.0-block raytrace).
+- [ ] Port all five from the legacy plugin verbatim (MotionMath MAX_TICKS=30, gravity loop `(v-g)*0.98` capped 3.92; Jitter 15-sample IQR; LatencyTracker outstanding-32 eviction; CombatTracker timeout map; GroundProbe 4-corner 5.0-block raytrace).
 - [ ] Tests: MotionMath trace `v=0.4,g=0.08` → tick velocities `(0.3136, 0.228928, 0.14594944…)`, `ticksToApex(0.4,0.08)==5`; Jitter: constant 50ms×15 → 0.0, one 500ms outlier filtered (jitter < 5); LatencyTracker: probe send/response RTT math + unmatched id returns false + eviction at 33rd outstanding.
 - [ ] Commit `feat(compensation): motion simulation, jitter, and latency tracking primitives`.
 
@@ -472,9 +472,9 @@ permissions:
 
 ### Task 28: Legacy removal + final verification
 
-- [ ] Delete `src/` (old plugin), stray `target/`; confirm no references: `grep -ri strikesync --include='*.java' --include='*.kts' --include='*.yml' .` → only docs/acknowledgement mentions remain (and spec/plan history).
+- [ ] Delete `src/` (old plugin), stray `target/`; confirm no references: grep for the legacy plugin name → no matches remain.
 - [ ] Full gate: `./gradlew clean build integrationTest` → green; `unzip -l core/build/libs/Mental-1.0.0.jar` sanity (plugin.yml, relocated lib, compat classes, no kotlin).
-- [ ] Commit `chore: remove legacy StrikeSync sources` then `release: Mental 1.0.0`.
+- [ ] Commit `chore: remove legacy sources` then `release: Mental 1.0.0`.
 - [ ] Report: summarize verification evidence; flag GitHub repo rename as manual follow-up.
 
 ---
