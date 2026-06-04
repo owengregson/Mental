@@ -50,7 +50,8 @@ public final class KnockbackSuite {
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 2));
             });
-            context.awaitTicks(5);
+            // Outlast the 60-tick join invulnerability modern servers grant.
+            context.awaitTicks(70);
 
             KnockbackVector expected = context.sync(() -> {
                 attacker.player().setSprinting(sprinting);
@@ -67,7 +68,8 @@ public final class KnockbackSuite {
 
             Vector applied = captors.velocityOf(victim.uuid());
             context.expect(applied != null,
-                    "no PlayerVelocityEvent observed for the victim — knockback never applied");
+                    "no PlayerVelocityEvent observed for the victim — knockback never applied"
+                            + " (damage event: " + captors.damageOf(victim.uuid()) + ")");
             context.expectNear(expected.x(), applied.getX(), EPSILON, "knockback x");
             context.expectNear(expected.y(), applied.getY(), EPSILON, "knockback y");
             context.expectNear(expected.z(), applied.getZ(), EPSILON, "knockback z");

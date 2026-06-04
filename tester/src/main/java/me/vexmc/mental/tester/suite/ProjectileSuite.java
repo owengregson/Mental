@@ -34,34 +34,44 @@ public final class ProjectileSuite {
                     victim.spawn(spot);
                     return spot;
                 });
-                context.awaitTicks(5);
+                // Outlast the 60-tick join invulnerability modern servers grant.
+                context.awaitTicks(70);
 
-                Snowball[] tracked = new Snowball[1];
                 context.syncRun(() -> {
                     victim.player().setNoDamageTicks(0);
                     // Point-blank: the snowball's first flight step crosses the
                     // victim's hitbox, so the hit cannot depend on long-range physics.
                     Location launch = victimSpot.clone().add(0, 1.0, -0.8);
-                    tracked[0] = victimSpot.getWorld().spawn(launch, Snowball.class);
-                    tracked[0].setVelocity(new Vector(0, 0.0, 0.5));
+                    Snowball snowball = victimSpot.getWorld().spawn(launch, Snowball.class);
+                    snowball.setVelocity(new Vector(0, 0.0, 0.5));
                 });
 
-                Double observed = null;
-                for (int attempt = 0; attempt < 12 && observed == null; attempt++) {
+                Double observedDamage = null;
+                for (int attempt = 0; attempt < 12 && observedDamage == null; attempt++) {
                     context.awaitTicks(5);
-                    observed = captors.damageOf(victim.uuid());
-                    if (observed == null) {
-                        String state = context.sync(() -> "snowball alive=" + tracked[0].isValid()
-                                + " at " + tracked[0].getLocation().toVector()
-                                + " victim at " + victim.player().getLocation().toVector()
-                                + " hitEvent=" + captors.projectileHitOn(victim.uuid()));
-                        context.note(state);
+                    observedDamage = captors.damageOf(victim.uuid());
+                    if (captors.projectileHitOn(victim.uuid()) != null && attempt >= 2) {
+                        break; // the hit landed; whatever events it produces have fired by now
                     }
                 }
 
-                double expected = mental.services().config().projectileKnockback().snowballDamage();
-                context.expect(observed != null, "snowball never registered a damage event");
-                context.expectNear(expected, observed, 1.0e-6, "substituted snowball damage");
+                if (observedDamage != null) {
+                    // Pre-1.21.2 behavior: the zero-damage hit fired an event and
+                    // the module substituted the configured trigger damage.
+                    double expected = mental.services().config().projectileKnockback().snowballDamage();
+                    context.expectNear(expected, observedDamage, 1.0e-6, "substituted snowball damage");
+                    return;
+                }
+
+                // 1.21.2+ restored native projectile knockback for players: no
+                // zero-damage event fires and none is needed — the contract is
+                // that the victim still gets shoved.
+                context.expect(captors.projectileHitOn(victim.uuid()) != null,
+                        "snowball never reached the victim");
+                context.expect(captors.velocityOf(victim.uuid()) != null,
+                        "snowball hit produced neither a damage event nor knockback");
+                context.note("no zero-damage event on this version — vanilla applies projectile "
+                        + "knockback natively and the module stays correctly inert");
             } finally {
                 context.syncRun(victim::remove);
                 captors.unregister();
