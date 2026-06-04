@@ -44,6 +44,7 @@ final class HitPacketListener implements PacketListener {
     private final PlayerStateCache stateCache;
     private final HitFeedbackGate feedbackGate;
     private final FeedbackSenders senders;
+    private final PositionHistory positionHistory;
 
     HitPacketListener(
             @NotNull MentalServices services,
@@ -51,13 +52,15 @@ final class HitPacketListener implements PacketListener {
             @NotNull HitApplier applier,
             @NotNull PlayerStateCache stateCache,
             @NotNull HitFeedbackGate feedbackGate,
-            @NotNull FeedbackSenders senders) {
+            @NotNull FeedbackSenders senders,
+            @NotNull PositionHistory positionHistory) {
         this.services = services;
         this.limiter = limiter;
         this.applier = applier;
         this.stateCache = stateCache;
         this.feedbackGate = feedbackGate;
         this.senders = senders;
+        this.positionHistory = positionHistory;
     }
 
     @Override
@@ -98,6 +101,12 @@ final class HitPacketListener implements PacketListener {
             Entity target = SpigotConversionUtil.getEntityById(attacker.getWorld(), targetId);
             if (!(target instanceof Damageable damageable) || damageable.isDead()
                     || !isAttackable(attacker, damageable)) {
+                return;
+            }
+
+            if (damageable instanceof Player victim
+                    && !passesReachValidation(attacker, victim, settings)) {
+                event.setCancelled(true);
                 return;
             }
 
@@ -200,6 +209,43 @@ final class HitPacketListener implements PacketListener {
         senders.sendVictimBurst(
                 victim, victimSnap.entityId(), velocity, hurtYaw, settings.bundleFeedback());
         senders.sendHurt(attacker, victimSnap.entityId(), hurtYaw);
+    }
+
+    /**
+     * The rewound-reach gate: passes unless every candidate instant — the
+     * victim's history around (now − ping − interpolation) plus their live
+     * position — puts the hitbox beyond reach + leniency. Bias runs toward
+     * allowing: untracked parties, creative attackers, and a detected
+     * anticheat (whose job reach is) all skip the check.
+     */
+    private boolean passesReachValidation(Player attacker, Player victim, HitRegSettings settings) {
+        HitRegSettings.ReachValidation reach = settings.reachValidation();
+        if (!reach.enabled() || !services.anticheatGate().allowReachValidation()) {
+            return true;
+        }
+        PlayerStateCache.Snapshot attackerSnap = stateCache.get(attacker.getUniqueId());
+        PlayerStateCache.Snapshot victimSnap = stateCache.get(victim.getUniqueId());
+        if (attackerSnap == null || victimSnap == null || attackerSnap.creative()) {
+            return true;
+        }
+
+        long rewindMillis = Math.min(
+                (long) attackerSnap.pingMillis() + reach.interpolationOffsetMillis(),
+                reach.rewindCapMillis());
+        long instantNanos = System.nanoTime() - rewindMillis * 1_000_000L;
+        // One tick of slack on each side of the rewound instant: the victim
+        // may have moved up to a sample boundary in either direction.
+        ReachValidator.Verdict verdict = ReachValidator.validate(
+                attackerSnap.x(), attackerSnap.y() + ReachValidator.EYE_HEIGHT, attackerSnap.z(),
+                positionHistory.samplesAround(victim.getUniqueId(), instantNanos, 75_000_000L),
+                victimSnap.x(), victimSnap.y(), victimSnap.z(),
+                Math.max(reach.maxReach(), attackerSnap.attackReach()), reach.leniency());
+        if (!verdict.valid()) {
+            debug(attacker, () -> String.format(java.util.Locale.ROOT,
+                    "hit on %s dropped by reach validation: %.2f blocks at every candidate"
+                            + " (rewind %dms)", victim.getName(), verdict.bestDistance(), rewindMillis));
+        }
+        return verdict.valid();
     }
 
     private static boolean isAttackable(Player attacker, Damageable target) {

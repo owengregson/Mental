@@ -10,6 +10,7 @@ import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -65,7 +66,10 @@ public final class PlayerStateCache {
                 // Resolution touches getWorld(); freeze the victim's profile
                 // here so the netty pre-send computes from the same one the
                 // authoritative path will resolve this tick.
-                profiles.resolve(player)));
+                profiles.resolve(player),
+                player.getPing(),
+                player.getGameMode() == GameMode.CREATIVE,
+                Attributes.valueOr(player, Attributes.entityInteractionRange(), 3.0)));
     }
 
     public @Nullable Snapshot get(@NotNull UUID uuid) {
@@ -111,7 +115,10 @@ public final class PlayerStateCache {
             int maxNoDamageTicks,
             boolean ocmOwnsMeleeKnockback,
             int entityId,
-            @NotNull KnockbackProfile profile) {
+            @NotNull KnockbackProfile profile,
+            int pingMillis,
+            boolean creative,
+            double attackReach) {
 
         /**
          * Vanilla's double-hit guard: inside this window a fresh hit carries

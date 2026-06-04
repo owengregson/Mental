@@ -28,6 +28,8 @@ public final class Attributes {
             resolve("KNOCKBACK_RESISTANCE", "GENERIC_KNOCKBACK_RESISTANCE");
     private static final @Nullable Attribute GRAVITY =
             resolve("GRAVITY", "GENERIC_GRAVITY");
+    private static final @Nullable Attribute ENTITY_INTERACTION_RANGE =
+            resolve("ENTITY_INTERACTION_RANGE", "PLAYER_ENTITY_INTERACTION_RANGE");
 
     private Attributes() {}
 
@@ -46,6 +48,11 @@ public final class Attributes {
     /** Absent below 1.20.5 — callers fall back to vanilla's 0.08. */
     public static @Nullable Attribute gravity() {
         return GRAVITY;
+    }
+
+    /** Absent below 1.20.5 — callers fall back to the classic 3.0 attack reach. */
+    public static @Nullable Attribute entityInteractionRange() {
+        return ENTITY_INTERACTION_RANGE;
     }
 
     /** The attribute's current value, or {@code fallback} when absent on this entity or version. */

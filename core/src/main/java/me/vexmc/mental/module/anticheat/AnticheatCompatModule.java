@@ -48,7 +48,7 @@ public final class AnticheatCompatModule extends CombatModule implements Listene
 
     @Override
     protected void onDisable() {
-        services.anticheatGate().update(true, List.of());
+        services.anticheatGate().update(true, true, List.of());
     }
 
     @Override
@@ -88,16 +88,20 @@ public final class AnticheatCompatModule extends CombatModule implements Listene
             }
         }
 
-        boolean allowPreSend = switch (settings.mode()) {
+        // One posture governs both adjustable behaviors today: with an
+        // anticheat present, the pre-send is its movement-prediction hazard
+        // and reach is its own department.
+        boolean permissive = switch (settings.mode()) {
             case AUTO -> detected.isEmpty();
             case FORCE_SAFE -> false;
             case OFF -> true;
         };
 
         AnticheatGate gate = services.anticheatGate();
-        boolean changed = gate.allowVelocityPreSend() != allowPreSend
+        boolean changed = gate.allowVelocityPreSend() != permissive
+                || gate.allowReachValidation() != permissive
                 || !gate.detected().equals(detected);
-        gate.update(allowPreSend, detected);
+        gate.update(permissive, permissive, detected);
 
         if (changed) {
             services.plugin().getLogger().info("Anticheat policy (" + trigger + "): " + gate.describe());

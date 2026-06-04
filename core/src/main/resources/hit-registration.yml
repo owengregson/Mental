@@ -10,6 +10,27 @@ hit-registration:
   # Hits per second per attacker before clicks are dropped at the packet
   # layer. 0 disables the limiter.
   max-cps: 20
+  # Rewound-reach validation for player-vs-player attacks: each hit is
+  # checked against where the victim WAS when the attacker threw it —
+  # position history rewound by the attacker's ping plus the client's
+  # entity-interpolation delay — and dropped at the packet layer when it
+  # misses by more than max-reach + leniency at every candidate instant.
+  # A sanity gate against blatant reach, deliberately lenient; while a
+  # known anticheat is detected (anticheat.mode in config.yml) Mental
+  # defers to it and this check idles. Off by default — enable it on
+  # servers that run no anticheat. Creative attackers are exempt, and the
+  # 1.20.5+ entity-interaction-range attribute is honored when raised.
+  reach-validation:
+    enabled: false
+    # Survival attack reach, attacker eye to the victim's hitbox.
+    max-reach: 3.0
+    # Slack for hitbox/eye-height approximation and victim motion.
+    leniency: 0.4
+    # The client renders other entities slightly in the past; added to the
+    # measured ping when choosing the rewind instant.
+    interpolation-offset-ms: 100
+    # Hard cap on the total rewind window.
+    rewind-cap-ms: 500
   fast-path:
     # Cancel the vanilla attack packet and run Mental's pipeline instead.
     # Disable if a plugin needs the vanilla packet flow untouched.

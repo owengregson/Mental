@@ -31,6 +31,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
     private final CpsLimiter limiter = new CpsLimiter();
     private final PlayerStateCache stateCache = new PlayerStateCache();
     private final HitFeedbackGate feedbackGate = new HitFeedbackGate();
+    private final PositionHistory positionHistory = new PositionHistory();
     private final ConcurrentHashMap<UUID, TaskHandle> snapshotTasks = new ConcurrentHashMap<>();
     private final VictimMotion ledger;
 
@@ -52,7 +53,8 @@ public final class HitRegistrationModule extends CombatModule implements Listene
     protected void onEnable() {
         listen(this);
         HitPacketListener listener = new HitPacketListener(
-                services, limiter, new HitApplier(services), stateCache, feedbackGate, new FeedbackSenders());
+                services, limiter, new HitApplier(services), stateCache, feedbackGate,
+                new FeedbackSenders(), positionHistory);
         handle = PacketEvents.getAPI().getEventManager()
                 .registerListener(listener, PacketListenerPriority.NORMAL);
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -73,6 +75,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
         limiter.clear();
         stateCache.clear();
         feedbackGate.clear();
+        positionHistory.clear();
     }
 
     @EventHandler
@@ -91,6 +94,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
         limiter.forget(id);
         stateCache.forget(id);
         feedbackGate.forget(id);
+        positionHistory.forget(id);
     }
 
     private void track(@NotNull Player player) {
@@ -101,11 +105,17 @@ public final class HitRegistrationModule extends CombatModule implements Listene
             }
             return services.scheduling().repeatOn(
                     player, 1L, 1L,
-                    () -> stateCache.update(player, ledger, services.ocmGate(),
-                            services.knockbackProfiles()),
+                    () -> {
+                        stateCache.update(player, ledger, services.ocmGate(),
+                                services.knockbackProfiles());
+                        org.bukkit.Location location = player.getLocation();
+                        positionHistory.record(uuid, location.getX(), location.getY(),
+                                location.getZ(), System.nanoTime());
+                    },
                     () -> {
                         snapshotTasks.remove(uuid);
                         stateCache.forget(uuid);
+                        positionHistory.forget(uuid);
                     });
         });
     }
