@@ -8,6 +8,7 @@ dependencies {
     compileOnly(project(":core"))
     compileOnly(libs.paper.api.floor)
     compileOnly(libs.jetbrains.annotations)
+    compileOnly(libs.netty.all)
     implementation(libs.reflection.remapper)
 }
 
