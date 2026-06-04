@@ -132,8 +132,7 @@ public final class FakePlayer {
             // Stubbed connection — fall through to direct list removal.
         }
         try {
-            Object minecraftServer = minecraftServer();
-            Object playerList = invoke(method(minecraftServer.getClass(), "getPlayerList"), minecraftServer);
+            Object playerList = playerList(minecraftServer());
             Method remove = Reflect.methodAssignable(playerList.getClass(),
                     remapMethod(playerList.getClass(), "remove", serverPlayer.getClass()),
                     serverPlayer.getClass());
@@ -182,6 +181,18 @@ public final class FakePlayer {
 
     private Object handleOf(Object craftObject) throws ReflectiveOperationException {
         return invoke(method(craftObject.getClass(), "getHandle"), craftObject);
+    }
+
+    private Object playerList(Object minecraftServer) throws ReflectiveOperationException {
+        Class<?> serverClass = nmsClass("net.minecraft.server.MinecraftServer");
+        Method getter = Reflect.method(serverClass, remapMethod(serverClass, "getPlayerList"));
+        if (getter == null) {
+            getter = Reflect.method(serverClass, "getPlayerList");
+        }
+        if (getter == null) {
+            throw new NoSuchMethodException("getPlayerList not resolvable on " + serverClass);
+        }
+        return getter.invoke(minecraftServer);
     }
 
     private Object createGameProfile() throws ReflectiveOperationException {
@@ -367,7 +378,7 @@ public final class FakePlayer {
     }
 
     private boolean addToPlayerList(Object minecraftServer) throws ReflectiveOperationException {
-        Object playerList = invoke(method(minecraftServer.getClass(), "getPlayerList"), minecraftServer);
+        Object playerList = playerList(minecraftServer);
         Class<?> playerListClass = nmsClass("net.minecraft.server.players.PlayerList");
         String placeName = remapMethod(playerListClass, "placeNewPlayer",
                 connection.getClass(), serverPlayer.getClass());
@@ -401,7 +412,7 @@ public final class FakePlayer {
 
     /** Registers straight into the PlayerList structures (no login pipeline). */
     private void registerInPlayerList(Object minecraftServer) throws ReflectiveOperationException {
-        Object playerList = invoke(method(minecraftServer.getClass(), "getPlayerList"), minecraftServer);
+        Object playerList = playerList(minecraftServer);
         Class<?> playerListClass = nmsClass("net.minecraft.server.players.PlayerList");
 
         Method load = Reflect.methodAssignable(playerListClass,
