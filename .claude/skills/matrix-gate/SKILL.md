@@ -12,11 +12,13 @@ description: Use when running, verifying, or debugging Mental's verification gat
 scripts/integration-matrix.sh        # LOCAL gate: all servers AT ONCE (~2m40s)
 scripts/integration-matrix.sh --versions 1.17.1,26.1.2 --no-ocm   # targeted
 ./gradlew integrationTest            # sequential floor+ceiling (CI path)
-./gradlew integrationTestMatrix      # sequential all versions (release CI)
+./gradlew integrationTestMatrix      # sequential all versions, one machine
 ./gradlew integrationTestOcm         # +OCM coexistence (needs run/ocm-jar/OldCombatMechanics.jar)
 ```
 
-The script exists because Gradle serializes tasks within a project. It reuses
+The script exists because Gradle serializes tasks within a project. On CI,
+the auto-release workflow runs the full matrix in parallel across runners
+and only tags/releases when version-bumped and fully green. It reuses
 run-paper's cached paperclip jars (`~/.gradle/caches/run-task-jars/paper/jars`)
 with `-add-plugin=` injection, one port per server from 25600. OCM runs are
 included automatically when the OCM jar is staged.

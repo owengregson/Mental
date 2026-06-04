@@ -1,33 +1,114 @@
-name: release
+name: auto-release
 
-# Triggered by pushing a semver tag like `v1.0.0`. Builds on a clean runner,
-# runs the full integration matrix against real Paper servers, and publishes
-# a GitHub Release with the jar attached.
+# The auto-releaser. Every push to main answers three questions:
+#
+#   1. Has the version in build.gradle.kts been bumped past the last
+#      release? (No tag v<version> yet.)
+#   2. Do the unit tests pass?
+#   3. Does the FULL integration matrix pass — every supported Paper
+#      version booted for real, in parallel across runners?
+#
+# Only when all three hold does it build the jar, tag v<version> at the
+# verified commit, and publish a GitHub Release whose notes are install
+# instructions plus a collapsed changelog of every commit since the last
+# release. No version bump → the run ends at the detect job in seconds.
 on:
   push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+*'
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release (e.g. v1.0.0)'
-        required: true
 
 permissions:
   contents: write
 
+# One release pipeline at a time; a queued run re-evaluates the version
+# after the previous one finishes, so the same version can never double-tag.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
 jobs:
-  release:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.facts.outputs.version }}
+      tag: ${{ steps.facts.outputs.tag }}
+      previous_tag: ${{ steps.facts.outputs.previous_tag }}
+      should_release: ${{ steps.facts.outputs.should_release }}
+      matrix: ${{ steps.facts.outputs.matrix }}
+
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Read version, last release, and the test matrix
+        id: facts
+        run: |
+          version=$(grep -m1 -E '^\s*version = "' build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          tag="v$version"
+
+          # The nearest release tag by ANCESTRY, not semver sort — the
+          # legacy v4.x StrikeSync tags outsort every Mental 1.x forever.
+          previous_tag=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            should_release=false
+            echo "Version $version is already released as $tag — nothing to do."
+          else
+            should_release=true
+            echo "Version $version is unreleased (last release: ${previous_tag:-none}) — releasing."
+          fi
+
+          # The integration matrix comes from gradle.properties, the same
+          # source of truth the build uses.
+          matrix=$(grep '^integrationTestVersions=' gradle.properties \
+            | cut -d= -f2 | jq -cR 'split(",") | map(gsub("\\s+";""))')
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "previous_tag=$previous_tag"
+            echo "should_release=$should_release"
+            echo "matrix=$matrix"
+          } >> "$GITHUB_OUTPUT"
+
+  unit:
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v5
         with:
-          fetch-depth: 0
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build and unit test
+        run: ./gradlew build
+
+  integration:
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        version: ${{ fromJSON(needs.detect.outputs.matrix) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
       - name: Set up JDKs (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: |
             17
@@ -35,22 +116,59 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
-      - name: Resolve tag
-        id: tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          fi
+      # The expensive part of booting a version is downloading paperclip and
+      # patching the server. Restore the newest cache for this version and
+      # save an updated one every run (the run_id key never pre-exists, so
+      # new Paper builds keep flowing into the cache).
+      - name: Cache the Paper server runtime
+        uses: actions/cache@v4
+        with:
+          path: |
+            run/${{ matrix.version }}/cache
+            run/${{ matrix.version }}/versions
+            run/${{ matrix.version }}/libraries
+            run/${{ matrix.version }}/world*
+            ~/.gradle/caches/run-task-jars
+          key: paper-runtime-${{ matrix.version }}-${{ github.run_id }}
+          restore-keys: |
+            paper-runtime-${{ matrix.version }}-
 
-      - name: Build and unit test
+      - name: Run integration suite on Paper ${{ matrix.version }}
+        run: ./gradlew "checkIntegrationTest_${MATRIX_VERSION//./_}"
+        env:
+          MATRIX_VERSION: ${{ matrix.version }}
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-integration-log-${{ matrix.version }}
+          path: core/build/integration-test-logs/${{ matrix.version }}.log
+
+  release:
+    needs: [detect, unit, integration]
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full history + tags for the changelog)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build the release jar
         run: ./gradlew build
-
-      - name: Full integration matrix
-        run: ./gradlew integrationTestMatrix
 
       - name: Locate jar
         id: jar
@@ -59,36 +177,55 @@ jobs:
           echo "path=$jar" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$jar")" >> "$GITHUB_OUTPUT"
 
-      - name: Generate release notes
-        id: notes
+      - name: Compose release notes
+        env:
+          TAG: ${{ needs.detect.outputs.tag }}
+          PREVIOUS_TAG: ${{ needs.detect.outputs.previous_tag }}
+          JAR_NAME: ${{ steps.jar.outputs.name }}
         run: |
-          {
-            echo 'notes<<EOF'
-            echo "## Mental ${{ steps.tag.outputs.name }}"
-            echo
-            echo '**Supports:** Paper 1.17.1 → 26.1.2, Folia. **Requires:** Java 17+. No plugin dependencies.'
-            echo
-            echo 'Verified by booting real Paper servers across the full version matrix.'
-            echo
-            echo '### Install'
-            echo
-            echo "1. Drop \`${{ steps.jar.outputs.name }}\` into your server's \`plugins/\` directory."
-            echo '2. Start the server. Default config is generated under `plugins/Mental/config.yml`.'
-            echo
-            echo '### Verify'
-            echo
-            echo '```'
-            echo 'sha256sum '${{ steps.jar.outputs.name }}
-            echo '```'
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            range="$PREVIOUS_TAG..HEAD"
+            since="since $PREVIOUS_TAG"
+          else
+            range="HEAD"
+            since="full history"
+          fi
+          changelog=$(git log "$range" --no-merges --pretty='- %s (`%h`)')
+          count=$(printf '%s\n' "$changelog" | grep -c '^- ' || true)
 
-      - name: Create release
+          {
+            echo "**Supports** Paper 1.17.1 → 26.1.2 · Folia — **Requires** Java 17+ — no plugin dependencies."
+            echo
+            echo "### Install"
+            echo
+            echo "1. Download \`$JAR_NAME\` below and drop it into your server's \`plugins/\` folder."
+            echo "2. Restart the server."
+            echo
+            echo "That's it — the defaults are the classic combat. Configuration is generated under \`plugins/Mental/\`: \`knockback.yml\` selects the knockback profile (presets live in \`plugins/Mental/profiles/\`), and every option is documented in its file."
+            echo
+            echo "Upgrading from an old single-file config? It migrates automatically — tuned knockback values become \`profiles/custom.yml\` (and stay selected), and the original is kept as \`config-v1-backup.yml\`."
+            echo
+            echo "<details>"
+            echo "<summary>Changelog — $count commits $since</summary>"
+            echo
+            echo "$changelog"
+            echo
+            echo "</details>"
+            echo
+            echo "---"
+            echo "_Released automatically after unit tests and the full ${{ join(fromJSON(needs.detect.outputs.matrix), ', ') }} integration matrix passed on real Paper servers._"
+          } > release-notes.md
+
+          echo "── release-notes.md ──"
+          cat release-notes.md
+
+      - name: Tag and publish the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          name: Mental ${{ steps.tag.outputs.name }}
-          body: ${{ steps.notes.outputs.notes }}
+          tag_name: ${{ needs.detect.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Mental ${{ needs.detect.outputs.tag }}
+          body_path: release-notes.md
           files: ${{ steps.jar.outputs.path }}
           fail_on_unmatched_files: true
-          generate_release_notes: true
+          make_latest: 'true'
