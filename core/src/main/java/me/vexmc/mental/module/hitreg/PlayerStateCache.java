@@ -2,7 +2,9 @@ package me.vexmc.mental.module.hitreg;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.module.knockback.EntityState;
+import me.vexmc.mental.module.knockback.KnockbackProfiles;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.ocm.OcmMechanic;
@@ -38,7 +40,7 @@ public final class PlayerStateCache {
      */
     @SuppressWarnings("deprecation") // Player#isOnGround: the client-reported value is the one
     public void update(@NotNull Player player, @NotNull VictimMotion ledger, // knockback expectations are built from.
-            @NotNull OcmGate ocmGate) {
+            @NotNull OcmGate ocmGate, @NotNull KnockbackProfiles profiles) {
         Location location = player.getLocation();
         boolean onGround = player.isOnGround();
         VictimMotion.Motion motion = ledger.current(
@@ -59,7 +61,11 @@ public final class PlayerStateCache {
                 // OCM's API is owning-thread only; freeze the answer here so the
                 // netty pre-send can consult it without touching OCM.
                 ocmGate.handles(OcmMechanic.MELEE_KNOCKBACK, player),
-                player.getEntityId()));
+                player.getEntityId(),
+                // Resolution touches getWorld(); freeze the victim's profile
+                // here so the netty pre-send computes from the same one the
+                // authoritative path will resolve this tick.
+                profiles.resolve(player)));
     }
 
     public @Nullable Snapshot get(@NotNull UUID uuid) {
@@ -92,7 +98,7 @@ public final class PlayerStateCache {
         return off.getEnchantmentLevel(Enchantments.knockback());
     }
 
-    /** Immutable, all-primitive snapshot — safely publishable across threads. */
+    /** Immutable snapshot (primitives plus one immutable profile) — safely publishable across threads. */
     public record Snapshot(
             double x, double y, double z,
             float yaw,
@@ -104,7 +110,8 @@ public final class PlayerStateCache {
             int noDamageTicks,
             int maxNoDamageTicks,
             boolean ocmOwnsMeleeKnockback,
-            int entityId) {
+            int entityId,
+            @NotNull KnockbackProfile profile) {
 
         /**
          * Vanilla's double-hit guard: inside this window a fresh hit carries

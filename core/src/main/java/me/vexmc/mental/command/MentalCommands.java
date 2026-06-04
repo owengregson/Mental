@@ -148,7 +148,7 @@ public final class MentalCommands {
             context.reply(Messages.moduleUnknown(id, modules.ids()));
             return;
         }
-        plugin.getConfig().set("modules." + id + ".enabled", enabled);
+        plugin.getConfig().set("modules." + id, enabled);
         plugin.saveConfig();
         plugin.reloadAll();
         context.reply(Messages.moduleToggled(module.displayName(), module.active()));

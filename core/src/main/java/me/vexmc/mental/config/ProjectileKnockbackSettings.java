@@ -12,10 +12,10 @@ public record ProjectileKnockbackSettings(
     static final ProjectileKnockbackSettings DEFAULTS =
             new ProjectileKnockbackSettings(true, true, 0.0001, 0.0001, 0.0001);
 
-    static @NotNull ProjectileKnockbackSettings parse(@NotNull ConfigReader reader) {
+    static @NotNull ProjectileKnockbackSettings parse(boolean enabled, @NotNull ConfigReader reader) {
         ConfigReader damage = reader.sub("damage");
         return new ProjectileKnockbackSettings(
-                reader.flag("enabled", DEFAULTS.enabled),
+                enabled,
                 reader.flag("arrows", DEFAULTS.arrows),
                 damage.numberAtLeast("snowball", DEFAULTS.snowballDamage, 0),
                 damage.numberAtLeast("egg", DEFAULTS.eggDamage, 0),

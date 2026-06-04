@@ -3,15 +3,16 @@ package me.vexmc.mental.config;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * Typed, atomically-swapped configuration.
  *
- * <p>A reload parses the whole file into one immutable {@link Snapshot} and
- * publishes it with a single reference store: any code path observes either
- * the old configuration or the new one in full, never a torn mix mid-hit.</p>
+ * <p>A reload parses every file in {@link ConfigSources} into one immutable
+ * {@link Snapshot} and publishes it with a single reference store: any code
+ * path observes either the old configuration or the new one in full, never
+ * a torn mix mid-hit. Module on/off switches live in config.yml's
+ * {@code modules} map; each mechanic's tunables live in its own file.</p>
  */
 public final class MentalConfig {
 
@@ -42,20 +43,33 @@ public final class MentalConfig {
 
     private final AtomicReference<Snapshot> snapshot = new AtomicReference<>(Snapshot.defaults());
 
-    /** Parses {@code source} and atomically publishes the result; returns any warnings. */
-    public @NotNull List<String> reload(@NotNull FileConfiguration source) {
+    /** Parses {@code sources} and atomically publishes the result; returns any warnings. */
+    public @NotNull List<String> reload(@NotNull ConfigSources sources) {
         ConfigIssues issues = new ConfigIssues();
-        ConfigurationSection modules = source.getConfigurationSection("modules");
+        ConfigReader modules = new ConfigReader(
+                sources.main().getConfigurationSection("modules"), "config.yml: modules", issues);
         Snapshot next = new Snapshot(
-                HitRegSettings.parse(module(modules, "hit-registration", issues)),
-                KnockbackSettings.parse(module(modules, "knockback", issues)),
-                CompensationSettings.parse(module(modules, "latency-compensation", issues)),
-                FishingKnockbackSettings.parse(module(modules, "fishing-knockback", issues)),
-                RodVelocitySettings.parse(module(modules, "rod-velocity", issues)),
-                ProjectileKnockbackSettings.parse(module(modules, "projectile-knockback", issues)),
-                AnticheatSettings.parse(reader(source, "anticheat", issues)),
-                CompatibilitySettings.parse(reader(source, "compatibility", issues)),
-                DebugSettings.parse(reader(source, "debug", issues)));
+                HitRegSettings.parse(
+                        modules.flag("hit-registration", true),
+                        reader(sources.hitReg(), "hit-registration", ConfigStore.HIT_REG_FILE, issues)),
+                KnockbackSettings.parse(
+                        modules.flag("knockback", true),
+                        reader(sources.knockback(), "knockback", ConfigStore.KNOCKBACK_FILE, issues),
+                        sources.profiles(),
+                        issues),
+                CompensationSettings.parse(
+                        modules.flag("latency-compensation", true),
+                        reader(sources.latency(), "latency-compensation", ConfigStore.LATENCY_FILE, issues)),
+                FishingKnockbackSettings.parse(
+                        modules.flag("fishing-knockback", true),
+                        reader(sources.knockback(), "fishing-knockback", ConfigStore.KNOCKBACK_FILE, issues)),
+                new RodVelocitySettings(modules.flag("rod-velocity", true)),
+                ProjectileKnockbackSettings.parse(
+                        modules.flag("projectile-knockback", true),
+                        reader(sources.knockback(), "projectile-knockback", ConfigStore.KNOCKBACK_FILE, issues)),
+                AnticheatSettings.parse(reader(sources.main(), "anticheat", "config.yml", issues)),
+                CompatibilitySettings.parse(reader(sources.main(), "compatibility", "config.yml", issues)),
+                DebugSettings.parse(reader(sources.main(), "debug", "config.yml", issues)));
         snapshot.set(next);
         return issues.all();
     }
@@ -100,14 +114,11 @@ public final class MentalConfig {
         return snapshot.get().debug();
     }
 
-    private static @NotNull ConfigReader module(
-            ConfigurationSection modules, @NotNull String id, @NotNull ConfigIssues issues) {
-        ConfigurationSection section = modules == null ? null : modules.getConfigurationSection(id);
-        return new ConfigReader(section, "modules." + id, issues);
-    }
-
     private static @NotNull ConfigReader reader(
-            @NotNull FileConfiguration source, @NotNull String path, @NotNull ConfigIssues issues) {
-        return new ConfigReader(source.getConfigurationSection(path), path, issues);
+            @NotNull ConfigurationSection root,
+            @NotNull String path,
+            @NotNull String file,
+            @NotNull ConfigIssues issues) {
+        return new ConfigReader(root.getConfigurationSection(path), file + ": " + path, issues);
     }
 }

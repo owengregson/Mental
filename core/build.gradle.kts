@@ -126,7 +126,9 @@ fun registerIntegrationServer(
         doFirst {
             resultFile.delete()
             failuresFile.delete()
-            runDir.resolve("plugins/Mental/config.yml").delete()
+            // The whole config tree resets per run — split files, profiles,
+            // migration artifacts — so every suite starts from the defaults.
+            runDir.resolve("plugins/Mental").deleteRecursively()
             // Companion plugins must start pristine too — their defaults are
             // part of what the coexistence suite asserts against.
             runDir.resolve("plugins/OldCombatMechanics").deleteRecursively()

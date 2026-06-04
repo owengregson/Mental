@@ -77,7 +77,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
 
     @EventHandler
     public void onPlayerJoin(@NotNull PlayerJoinEvent event) {
-        stateCache.update(event.getPlayer(), ledger, services.ocmGate());
+        stateCache.update(event.getPlayer(), ledger, services.ocmGate(), services.knockbackProfiles());
         track(event.getPlayer());
     }
 
@@ -101,7 +101,8 @@ public final class HitRegistrationModule extends CombatModule implements Listene
             }
             return services.scheduling().repeatOn(
                     player, 1L, 1L,
-                    () -> stateCache.update(player, ledger, services.ocmGate()),
+                    () -> stateCache.update(player, ledger, services.ocmGate(),
+                            services.knockbackProfiles()),
                     () -> {
                         snapshotTasks.remove(uuid);
                         stateCache.forget(uuid);

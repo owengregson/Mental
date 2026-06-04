@@ -71,7 +71,7 @@ public final class KnockbackModule extends CombatModule implements Listener {
                 || !(event.getEntity() instanceof Player victim)) {
             return;
         }
-        KnockbackProfile profile = settings.profile();
+        KnockbackProfile profile = services.knockbackProfiles().resolve(victim);
         if (profile.shieldBlockingCancels()
                 && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
                 && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0) {

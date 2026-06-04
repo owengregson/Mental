@@ -156,7 +156,7 @@ public final class ProjectileKnockbackModule extends CombatModule implements Lis
         EntityState victimState = EntityState.captureVictim(victim, pipeline.ledger(), System.nanoTime());
         KnockbackVector vector = KnockbackEngine.computeBase(
                 victimState, source.getX(), source.getZ(),
-                services.config().knockback().profile(), null, ThreadLocalRandom.current());
+                services.knockbackProfiles().resolve(victim), null, ThreadLocalRandom.current());
 
         pipeline.submit(victim, vector, shooterEntity(projectile), KnockbackPipeline.Cause.PROJECTILE);
         pipeline.ensureDelivery(victim);
@@ -219,7 +219,7 @@ public final class ProjectileKnockbackModule extends CombatModule implements Lis
         EntityState victimState = EntityState.captureVictim(victim, pipeline.ledger(), System.nanoTime());
         KnockbackVector vector = KnockbackEngine.computeBase(
                 victimState, source.getX(), source.getZ(),
-                services.config().knockback().profile(), null, ThreadLocalRandom.current());
+                services.knockbackProfiles().resolve(victim), null, ThreadLocalRandom.current());
 
         if (vector != null) {
             vector = withPunch(vector, flight != null ? flight.velocity() : arrow.getVelocity(),

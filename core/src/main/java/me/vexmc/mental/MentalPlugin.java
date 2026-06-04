@@ -47,6 +47,7 @@ public final class MentalPlugin extends JavaPlugin {
     private static final int BSTATS_PLUGIN_ID = 31788;
 
     private MentalConfig config;
+    private me.vexmc.mental.config.ConfigStore configStore;
     private MentalServices services;
     private ModuleRegistry modules;
     private PlayerDebugSink playerDebugSink;
@@ -66,8 +67,15 @@ public final class MentalPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
 
+        this.configStore = new me.vexmc.mental.config.ConfigStore(
+                getDataFolder(), this::getResource, message -> getLogger().info(message));
+        if (configStore.migrateLegacyLayout(getConfig())) {
+            reloadConfig();
+        }
+        configStore.ensureDefaultFiles();
+
         this.config = new MentalConfig();
-        reportConfigIssues(config.reload(getConfig()));
+        reportConfigIssues(config.reload(configStore.loadSources(getConfig())));
 
         Capabilities capabilities = Capabilities.detect();
         ServerEnvironment environment = ServerEnvironment.parse(Bukkit.getBukkitVersion());
@@ -82,7 +90,8 @@ public final class MentalPlugin extends JavaPlugin {
         this.services = new MentalServices(
                 this, config, capabilities, environment, scheduling, debug,
                 new AnticheatGate(), new me.vexmc.mental.module.ocm.OcmGate(),
-                new me.vexmc.mental.module.knockback.SprintTracker());
+                new me.vexmc.mental.module.knockback.SprintTracker(),
+                new me.vexmc.mental.module.knockback.KnockbackProfiles(config));
         this.modules = new ModuleRegistry(getLogger());
 
         registerModules();
@@ -94,6 +103,7 @@ public final class MentalPlugin extends JavaPlugin {
             @org.bukkit.event.EventHandler
             public void onQuit(org.bukkit.event.player.PlayerQuitEvent event) {
                 playerDebugSink.forget(event.getPlayer().getUniqueId());
+                services.knockbackProfiles().forget(event.getPlayer().getUniqueId());
             }
         }, this);
 
@@ -132,6 +142,7 @@ public final class MentalPlugin extends JavaPlugin {
         }
         if (services != null) {
             services.sprintTracker().clear();
+            services.knockbackProfiles().clear();
         }
         try {
             if (PacketEvents.getAPI() != null) {
@@ -147,13 +158,19 @@ public final class MentalPlugin extends JavaPlugin {
     }
 
     /**
-     * Re-reads config.yml, swaps the typed snapshot atomically, and converges
-     * every module onto its configured state. Returns config warnings for
-     * display to the invoking command sender.
+     * Re-reads every configuration file, swaps the typed snapshot atomically,
+     * and converges every module onto its configured state. Returns config
+     * warnings for display to the invoking command sender.
      */
     public @NotNull List<String> reloadAll() {
         reloadConfig();
-        List<String> warnings = config.reload(getConfig());
+        configStore.ensureDefaultFiles();
+        List<String> warnings = new java.util.ArrayList<>(
+                config.reload(configStore.loadSources(getConfig())));
+        for (java.util.UUID stale : services.knockbackProfiles().clearStaleOverrides()) {
+            warnings.add("knockback profile override cleared for " + stale
+                    + " — its profile no longer exists");
+        }
         reportConfigIssues(warnings);
         applyDebugSettings(services.debug());
         modules.reloadAll();
@@ -224,7 +241,7 @@ public final class MentalPlugin extends JavaPlugin {
 
     private void reportConfigIssues(List<String> warnings) {
         for (String warning : warnings) {
-            getLogger().warning("config.yml — " + warning);
+            getLogger().warning("config — " + warning);
         }
     }
 }

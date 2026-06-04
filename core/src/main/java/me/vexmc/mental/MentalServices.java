@@ -6,6 +6,7 @@ import me.vexmc.mental.common.platform.ServerEnvironment;
 import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.config.MentalConfig;
 import me.vexmc.mental.module.anticheat.AnticheatGate;
+import me.vexmc.mental.module.knockback.KnockbackProfiles;
 import me.vexmc.mental.module.knockback.SprintTracker;
 import me.vexmc.mental.module.ocm.OcmGate;
 import org.jetbrains.annotations.NotNull;
@@ -20,4 +21,5 @@ public record MentalServices(
         @NotNull DebugLog debug,
         @NotNull AnticheatGate anticheatGate,
         @NotNull OcmGate ocmGate,
-        @NotNull SprintTracker sprintTracker) {}
+        @NotNull SprintTracker sprintTracker,
+        @NotNull KnockbackProfiles knockbackProfiles) {}

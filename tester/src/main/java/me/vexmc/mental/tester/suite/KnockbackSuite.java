@@ -66,7 +66,7 @@ public final class KnockbackSuite {
                 EntityState victimState = restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
                         attackerState, victimState,
-                        mental.services().config().knockback().profile(), null);
+                        mental.services().knockbackProfiles().resolve(victim.player()), null);
                 attacker.attack(victim.player());
                 return vector;
             });
@@ -126,7 +126,7 @@ public final class KnockbackSuite {
                 victim.player().setNoDamageTicks(0);
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()), restingVictim(victim),
-                        mental.services().config().knockback().profile(), null);
+                        mental.services().knockbackProfiles().resolve(victim.player()), null);
                 attacker.attack(victim.player());
                 return vector;
             });
@@ -157,7 +157,7 @@ public final class KnockbackSuite {
                                     resting.grounded(), resting.sprinting(),
                                     resting.knockbackEnchantLevel(),
                                     resting.knockbackResistance()),
-                            mental.services().config().knockback().profile(), null));
+                            mental.services().knockbackProfiles().resolve(victim.player()), null));
                 }
                 attacker.attack(victim.player());
                 return expected;

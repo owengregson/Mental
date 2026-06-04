@@ -72,6 +72,18 @@ record ConfigReader(@Nullable ConfigurationSection section, @NotNull String pref
         return value;
     }
 
+    @NotNull String text(@NotNull String key, @NotNull String fallback) {
+        if (section == null || !section.isSet(key)) {
+            return fallback;
+        }
+        Object raw = section.get(key);
+        if (!(raw instanceof String value) || value.isBlank()) {
+            issues.warn(path(key), "expected text, found '" + raw + "'", fallback);
+            return fallback;
+        }
+        return value.trim();
+    }
+
     <E extends Enum<E>> @NotNull E oneOf(@NotNull String key, @NotNull E fallback, @NotNull Class<E> type) {
         if (section == null || !section.isSet(key)) {
             return fallback;

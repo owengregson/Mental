@@ -11,9 +11,9 @@ public record FishingKnockbackSettings(
     static final FishingKnockbackSettings DEFAULTS =
             new FishingKnockbackSettings(true, 0.0001, ReelInPolicy.LEGACY, false);
 
-    static @NotNull FishingKnockbackSettings parse(@NotNull ConfigReader reader) {
+    static @NotNull FishingKnockbackSettings parse(boolean enabled, @NotNull ConfigReader reader) {
         return new FishingKnockbackSettings(
-                reader.flag("enabled", DEFAULTS.enabled),
+                enabled,
                 reader.numberAtLeast("damage", DEFAULTS.damage, 0),
                 reader.oneOf("reel-in", DEFAULTS.reelIn, ReelInPolicy.class),
                 reader.flag("knockback-non-player-entities", DEFAULTS.knockbackNonPlayerEntities));

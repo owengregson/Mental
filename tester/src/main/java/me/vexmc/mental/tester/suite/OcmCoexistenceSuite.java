@@ -112,7 +112,7 @@ public final class OcmCoexistenceSuite {
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()),
                         KnockbackSuite.restingVictim(freshVictim),
-                        mental.services().config().knockback().profile(), null);
+                        mental.services().knockbackProfiles().resolve(freshVictim.player()), null);
                 attacker.attack(freshVictim.player());
                 return vector;
             });

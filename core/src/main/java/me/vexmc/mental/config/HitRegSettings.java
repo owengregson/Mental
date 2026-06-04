@@ -21,10 +21,10 @@ public record HitRegSettings(
         return maxCps > 0;
     }
 
-    static @NotNull HitRegSettings parse(@NotNull ConfigReader reader) {
+    static @NotNull HitRegSettings parse(boolean enabled, @NotNull ConfigReader reader) {
         ConfigReader fastPath = reader.sub("fast-path");
         return new HitRegSettings(
-                reader.flag("enabled", DEFAULTS.enabled),
+                enabled,
                 reader.intAtLeast("max-cps", DEFAULTS.maxCps, 0),
                 fastPath.flag("enabled", DEFAULTS.fastPath),
                 fastPath.flag("pre-send-feedback", DEFAULTS.preSendFeedback),

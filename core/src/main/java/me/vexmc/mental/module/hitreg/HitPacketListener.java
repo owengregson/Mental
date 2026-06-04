@@ -143,13 +143,15 @@ final class HitPacketListener implements PacketListener {
         if (!knockback.enabled()) {
             return;
         }
-        KnockbackProfile profile = knockback.profile();
 
         PlayerStateCache.Snapshot attackerSnap = stateCache.get(attacker.getUniqueId());
         PlayerStateCache.Snapshot victimSnap = stateCache.get(victim.getUniqueId());
         if (attackerSnap == null || victimSnap == null) {
             return;
         }
+        // The victim's profile, frozen by their per-tick snapshot — the same
+        // one the authoritative owning-thread path resolves this tick.
+        KnockbackProfile profile = victimSnap.profile();
         if (victimSnap.isDamageImmune()) {
             debug(attacker, () -> "pre-send skipped: " + victim.getName() + " still invulnerable");
             return;

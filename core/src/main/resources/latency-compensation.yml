@@ -1,0 +1,25 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — ping-aware knockback compensation
+#
+#  Predicts whether the victim is already on the ground on their own screen
+#  and corrects the server's stale view before knockback is computed. The
+#  module switch lives in config.yml.
+# ──────────────────────────────────────────────────────────────────────────
+
+latency-compensation:
+  # PING uses the dedicated 1.17+ play ping/pong channel (recommended);
+  # KEEPALIVE measures over keep-alive packets.
+  probe-strategy: PING
+  # Subtracted from each measured round trip before compensation
+  # (tournament-derived constant).
+  ping-offset-ms: 25
+  # A ping jump larger than this is treated as a one-off spike and the
+  # previous reading is used instead.
+  spike-threshold-ms: 20
+  # How often probes are sent to players in combat.
+  probe-interval-ticks: 5
+  # How long after the last hit a player keeps receiving probes.
+  combat-timeout-ticks: 30
+  # Also rewrite the victim's vertical motion while airborne (full
+  # client-side simulation), not just the on-ground case.
+  off-ground-sync: true

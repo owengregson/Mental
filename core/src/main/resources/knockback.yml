@@ -1,0 +1,53 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — knockback selection and the knockback-family mechanics
+#
+#  The melee knockback FEEL lives in profiles/<name>.yml — one file per
+#  profile, presets regenerated when missing. This file decides which
+#  profile applies where; module on/off switches live in config.yml.
+# ──────────────────────────────────────────────────────────────────────────
+
+knockback:
+  # The profile applied everywhere no override says otherwise. Must match a
+  # file name in profiles/ (without .yml). Shipped presets:
+  #   legacy-1.7   the 1.7.10 model with ledger combos (the default)
+  #   legacy-1.8   identical math, 1.8.9 flat delivery (no melee combos)
+  #   kohi         the canonical Kohi/HCF values
+  #   mmc          the community remake of the Minemen Club feel
+  #   lunar        a community recreation of Lunar-network-era knockback
+  #   custom       yours — a fully commented schema to edit freely
+  profile: legacy-1.7
+
+  # Per-world overrides: world name -> profile name. Worlds not listed use
+  # the default profile. A per-player override (the API or /mental kb set)
+  # beats both.
+  per-world: {}
+  #  example_world: kohi
+
+# 1.7.10 fishing rod combat: hooks are real zero-damage hits that knock
+# away from where the ANGLER stands (the legacy direction), and a rod hit
+# arms the hurt window — suppressing the knockback of a melee hit that
+# follows within ten ticks, exactly the era's rod-then-sword interplay.
+# The knock itself uses the victim's resolved knockback profile.
+fishing-knockback:
+  # Damage dealt by the hook. Kept minimal — its job is to trigger the
+  # damage pipeline, not to hurt.
+  damage: 0.0001
+  # Reeling in a hooked entity: legacy (the 1.7.10 pull toward the
+  # angler), cancel (no pull at all), or vanilla (untouched).
+  reel-in: legacy
+  # Also knock back non-player entities.
+  knockback-non-player-entities: false
+
+# 1.7.10 projectile knockback: pushes away from where the SHOOTER stood
+# (modern servers push along the projectile's flight), computed from the
+# victim's residual so projectile hits feed combos. The configured damage
+# is substituted only when the projectile dealt exactly zero, keeping the
+# vanilla hurt pipeline (i-frames, protection plugins) in charge.
+projectile-knockback:
+  # Also take over arrow knockback: positional base plus the legacy Punch
+  # bonus (0.6/level along the flight, +0.1 vertical, ignores resistance).
+  arrows: true
+  damage:
+    snowball: 0.0001
+    egg: 0.0001
+    ender-pearl: 0.0001

@@ -61,7 +61,7 @@ public final class ProjectileSuite {
                             KnockbackSuite.restingVictim(victim),
                             shooter.player().getLocation().getX(),
                             shooter.player().getLocation().getZ(),
-                            mental.services().config().knockback().profile(), null,
+                            mental.services().knockbackProfiles().resolve(victim.player()), null,
                             ThreadLocalRandom.current());
                 });
                 context.expect(expected != null, "engine returned no vector for an unresisted hit");

@@ -155,7 +155,8 @@ public final class KnockbackPipeline implements Listener {
 
         AppliedTag tag = applied.remove(victimId);
         Cause cause = tag != null && now - tag.stampNanos() < APPLIED_TAG_TTL_NANOS ? tag.cause() : null;
-        if (cause == Cause.MELEE && !services.config().knockback().profile().combos()) {
+        if (cause == Cause.MELEE
+                && !services.knockbackProfiles().resolve(event.getPlayer()).combos()) {
             return; // 1.8.9 send-then-revert: the melee residual never persists
         }
 

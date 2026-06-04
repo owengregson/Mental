@@ -14,9 +14,9 @@ public record CompensationSettings(
     static final CompensationSettings DEFAULTS =
             new CompensationSettings(true, ProbeStrategy.PING, 25, 20, 5L, 30L, true);
 
-    static @NotNull CompensationSettings parse(@NotNull ConfigReader reader) {
+    static @NotNull CompensationSettings parse(boolean enabled, @NotNull ConfigReader reader) {
         return new CompensationSettings(
-                reader.flag("enabled", DEFAULTS.enabled),
+                enabled,
                 reader.oneOf("probe-strategy", DEFAULTS.probeStrategy, ProbeStrategy.class),
                 reader.intAtLeast("ping-offset-ms", DEFAULTS.pingOffsetMillis, 0),
                 reader.intAtLeast("spike-threshold-ms", DEFAULTS.spikeThresholdMillis, 1),
