@@ -135,6 +135,43 @@ class MentalConfigTest {
     }
 
     @Test
+    void feedbackIntervalParsesAutoFixedAndLegacyValues() throws Exception {
+        MentalConfig config = new MentalConfig();
+        YamlConfiguration yaml = new YamlConfiguration();
+
+        yaml.loadFromString(
+                """
+                modules:
+                  hit-registration:
+                    fast-path:
+                      feedback-min-interval-ms: auto
+                """);
+        assertTrue(config.reload(yaml).isEmpty());
+        assertEquals(HitRegSettings.FEEDBACK_INTERVAL_AUTO, config.hitReg().feedbackMinIntervalMillis());
+
+        yaml.loadFromString(
+                """
+                modules:
+                  hit-registration:
+                    fast-path:
+                      feedback-min-interval-ms: 350
+                """);
+        assertTrue(config.reload(yaml).isEmpty());
+        assertEquals(350L, config.hitReg().feedbackMinIntervalMillis());
+
+        // Configs written before the auto default keep their explicit number.
+        yaml.loadFromString(
+                """
+                modules:
+                  hit-registration:
+                    fast-path:
+                      feedback-min-interval-ms: 500
+                """);
+        assertTrue(config.reload(yaml).isEmpty());
+        assertEquals(500L, config.hitReg().feedbackMinIntervalMillis());
+    }
+
+    @Test
     void reloadPublishesFreshAtomicSnapshot() throws Exception {
         MentalConfig config = new MentalConfig();
         YamlConfiguration yaml = new YamlConfiguration();

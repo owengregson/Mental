@@ -116,7 +116,7 @@ final class HitPacketListener implements PacketListener {
             event.setCancelled(true);
 
             if (settings.preSendFeedback() && damageable instanceof Player victim) {
-                preSendCombatFeedback(attacker, victim, now, settings.feedbackMinIntervalMillis());
+                preSendCombatFeedback(attacker, victim, now, settings);
             }
 
             services.scheduling().runOn(
@@ -137,7 +137,7 @@ final class HitPacketListener implements PacketListener {
      * window, and the per-victim gate enforces vanilla's once-per-window
      * cadence across attackers and sub-tick bursts.
      */
-    private void preSendCombatFeedback(Player attacker, Player victim, long now, long minIntervalMillis) {
+    private void preSendCombatFeedback(Player attacker, Player victim, long now, HitRegSettings settings) {
         KnockbackSettings knockback = services.config().knockback();
         if (!knockback.enabled()) {
             return;
@@ -152,6 +152,11 @@ final class HitPacketListener implements PacketListener {
             debug(attacker, () -> "pre-send skipped: " + victim.getName() + " still invulnerable");
             return;
         }
+        // auto follows the victim's live hurt window (vanilla 20 ticks -> 500ms;
+        // attack-frequency style retuning shortens it in step with the server).
+        long minIntervalMillis = settings.feedbackMinIntervalMillis() >= 0
+                ? settings.feedbackMinIntervalMillis()
+                : victimSnap.maxNoDamageTicks() * 50L / 2L;
         if (!feedbackGate.tryPreSend(victim.getUniqueId(), now, minIntervalMillis)) {
             debug(attacker, () -> "pre-send gated: " + victim.getName()
                     + " inside " + minIntervalMillis + "ms window");

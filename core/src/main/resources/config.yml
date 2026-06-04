@@ -25,9 +25,13 @@ modules:
       # to a full tick. Automatically suppressed for the velocity packet when
       # an anticheat is detected (see anticheat.mode).
       pre-send-feedback: true
-      # Minimum interval between pre-sent feedback bursts per victim. The
-      # default mirrors vanilla's 10-tick damage-immunity window.
-      feedback-min-interval-ms: 500
+      # Minimum interval between pre-sent feedback bursts per victim.
+      # auto (the default) follows each victim's live hurt window — half of
+      # maximum-no-damage-ticks, vanilla's re-hit boundary (20 ticks -> 500ms)
+      # — so plugins that retune the window (OldCombatMechanics'
+      # attack-frequency) are honored without extra configuration. Set a
+      # number to fix the interval in milliseconds instead.
+      feedback-min-interval-ms: auto
       # Apply the legacy critical multiplier (1.5x on the weapon damage,
       # before enchantments — the pre-1.9 order) while the attacker is
       # falling. Sprinting does not block crits; that rule arrived in 1.9.
