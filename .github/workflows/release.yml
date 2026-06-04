@@ -1,8 +1,8 @@
 name: release
 
-# Triggered by pushing a semver tag like `v3.0.0`. The workflow builds the
-# project on a clean runner and creates a GitHub Release with the produced
-# jar attached as a downloadable asset.
+# Triggered by pushing a semver tag like `v1.0.0`. Builds on a clean runner,
+# runs the full integration matrix against real Paper servers, and publishes
+# a GitHub Release with the jar attached.
 on:
   push:
     tags:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v3.0.0)'
+        description: 'Tag to release (e.g. v1.0.0)'
         required: true
 
 permissions:
@@ -26,12 +26,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v4
         with:
-          java-version: '25'
+          java-version: |
+            17
+            25
           distribution: 'temurin'
-          cache: 'maven'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Resolve tag
         id: tag
@@ -42,13 +46,16 @@ jobs:
             echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build
-        run: mvn -B -ntp clean package
+      - name: Build and unit test
+        run: ./gradlew build
+
+      - name: Full integration matrix
+        run: ./gradlew integrationTestMatrix
 
       - name: Locate jar
         id: jar
         run: |
-          jar=$(ls target/StrikeSync-*.jar | grep -v 'original-' | head -n1)
+          jar=$(ls core/build/libs/Mental-*.jar | head -n1)
           echo "path=$jar" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$jar")" >> "$GITHUB_OUTPUT"
 
@@ -57,15 +64,16 @@ jobs:
         run: |
           {
             echo 'notes<<EOF'
-            echo "## StrikeSync ${{ steps.tag.outputs.name }}"
+            echo "## Mental ${{ steps.tag.outputs.name }}"
             echo
-            echo '**Build:** Java 25, Paper 26.1.2, PacketEvents 2.12.1.'
+            echo '**Supports:** Paper 1.17.1 → 26.1.2, Folia. **Requires:** Java 17+. No plugin dependencies.'
+            echo
+            echo 'Verified by booting real Paper servers across the full version matrix.'
             echo
             echo '### Install'
             echo
-            echo '1. Install [PacketEvents](https://modrinth.com/plugin/packetevents) (required dependency).'
-            echo "2. Drop \`${{ steps.jar.outputs.name }}\` into your server's \`plugins/\` directory."
-            echo '3. Start the server. Default config is generated under `plugins/StrikeSync/config.yml`.'
+            echo "1. Drop \`${{ steps.jar.outputs.name }}\` into your server's \`plugins/\` directory."
+            echo '2. Start the server. Default config is generated under `plugins/Mental/config.yml`.'
             echo
             echo '### Verify'
             echo
@@ -79,7 +87,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: StrikeSync ${{ steps.tag.outputs.name }}
+          name: Mental ${{ steps.tag.outputs.name }}
           body: ${{ steps.notes.outputs.notes }}
           files: ${{ steps.jar.outputs.path }}
           fail_on_unmatched_files: true

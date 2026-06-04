@@ -2,17 +2,9 @@ name: build
 
 on:
   push:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'pom.xml'
-      - '.github/workflows/**'
+    branches: ['**']
+    tags-ignore: ['v*']
   pull_request:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'pom.xml'
-      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
@@ -28,15 +20,51 @@ jobs:
         with:
           java-version: '25'
           distribution: 'temurin'
-          cache: 'maven'
 
-      - name: Build
-        run: mvn -B -ntp clean package
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and unit test
+        run: ./gradlew build
 
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
-          name: StrikeSync-${{ github.sha }}
-          path: target/StrikeSync-*.jar
-          if-no-files-found: error
-          retention-days: 14
+          name: Mental
+          path: core/build/libs/Mental-*.jar
+
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        version: ['1.17.1', '1.20.6', '1.21.11', '26.1.2']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDKs (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: |
+            17
+            25
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run integration suite on Paper ${{ matrix.version }}
+        run: ./gradlew "checkIntegrationTest_${MATRIX_VERSION//./_}"
+        env:
+          MATRIX_VERSION: ${{ matrix.version }}
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-log-${{ matrix.version }}
+          path: core/build/integration-test-logs/${{ matrix.version }}.log
