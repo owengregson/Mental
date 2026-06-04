@@ -98,6 +98,7 @@ jobs:
     needs: detect
     if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: true
       matrix:
@@ -123,7 +124,7 @@ jobs:
       # save an updated one every run (the run_id key never pre-exists, so
       # new Paper builds keep flowing into the cache).
       - name: Cache the Paper server runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             run/${{ matrix.version }}/cache
@@ -140,8 +141,8 @@ jobs:
         env:
           MATRIX_VERSION: ${{ matrix.version }}
 
-      - name: Upload server log on failure
-        if: failure()
+      - name: Upload server log
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: release-integration-log-${{ matrix.version }}

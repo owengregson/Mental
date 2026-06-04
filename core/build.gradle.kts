@@ -115,7 +115,10 @@ fun registerIntegrationServer(
         dependsOn(tasks.shadowJar, testerShadowJar)
         runDirectory.set(runDir)
         minecraftVersion(version)
-        jvmArgs("-Dcom.mojang.eula.agree=true", "-Xmx2G")
+        // disable.watchdog matters on slow CI runners: a >60s tick stall
+        // trips the legacy watchdog, whose forced shutdown can deadlock old
+        // servers into a hung process that never writes a test result.
+        jvmArgs("-Dcom.mojang.eula.agree=true", "-Ddisable.watchdog=true", "-Xmx2G")
         javaLauncher.set(javaToolchains.launcherFor {
             languageVersion.set(JavaLanguageVersion.of(requiredJavaVersion(version)))
         })
