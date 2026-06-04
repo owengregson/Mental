@@ -38,9 +38,10 @@ knockback:
 
   # WindSpigot's w-tap split. When enabled, a sprint hit whose sprint was
   # freshly (re-)engaged since the attacker's last attack — the w-tap
-  # timing — uses these values for the sprint contribution instead of
-  # extra. Knockback-enchant levels always use extra. Disabled, sprint
-  # freshness changes nothing (the vanilla/era behavior).
+  # timing — uses these values instead of extra: horizontally for the
+  # sprint levels only (enchant levels always use extra), and for the
+  # hit's single flat vertical bonus (vanilla applies it once, never per
+  # level). Disabled, sprint freshness changes nothing (the era behavior).
   wtap-extra:
     enabled: false
     horizontal: 0.5

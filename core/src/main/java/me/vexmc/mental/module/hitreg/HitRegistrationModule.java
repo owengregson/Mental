@@ -11,6 +11,7 @@ import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -108,7 +109,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
                     () -> {
                         stateCache.update(player, ledger, services.ocmGate(),
                                 services.knockbackProfiles());
-                        org.bukkit.Location location = player.getLocation();
+                        Location location = player.getLocation();
                         positionHistory.record(uuid, location.getX(), location.getY(),
                                 location.getZ(), System.nanoTime());
                     },

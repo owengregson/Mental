@@ -50,6 +50,8 @@ Use **`/mental`** (or `/mtl`). It opens an interactive dashboard in chat where y
 | `/mental ping [player]` | A player's measured ping, jitter and connection quality. |
 | `/mental reload` | Apply config changes without a restart. Safe mid-combat. |
 | `/mental debug <on\|off>` | Verbose logging for troubleshooting (see the FAQ). |
+| `/mental debug category <name> <on\|off>` | Toggle one of the ten debug categories individually. |
+| `/mental debug subscribe` | Stream debug lines to your in-game chat. |
 | `/mental version` | Version, server platform and feature report. |
 | `/mental help` | Clickable list of every command you can use. |
 
@@ -77,7 +79,7 @@ knockback:
 
 Profiles are the whole engine knob set — base/extra pushes, friction, vertical assign-vs-add, the MMC distance taper, air multipliers, w-tap bonuses and more. The guide (with the preset provenance and the fork-porting hazard table) is [docs/knockback-profiles.md](docs/knockback-profiles.md).
 
-`/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config. A v1 single-file config migrates automatically — tuned knockback values become `profiles/custom.yml` and stay selected.
+`/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config. A v1 single-file `config.yml` migrates automatically on first start: tuned knockback values become `profiles/custom.yml` and stay selected, and the original file is kept as `config-v1-backup.yml`.
 
 ## FAQ
 

@@ -40,6 +40,9 @@ jobs:
       fail-fast: true
       max-parallel: 1
       matrix:
+        # A deliberate sample — floor, the Folia-era midpoint, a recent
+        # release, and the ceiling. Every version in gradle.properties'
+        # integrationTestVersions runs on release via integrationTestMatrix.
         version: ['1.17.1', '1.20.6', '1.21.11', '26.1.2']
 
     steps:

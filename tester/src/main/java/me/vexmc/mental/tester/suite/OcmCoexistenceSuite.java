@@ -9,6 +9,8 @@ import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackVector;
 import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.ocm.OcmMechanic;
+import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -18,7 +20,11 @@ import me.vexmc.mental.tester.fake.FakePlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.FishHook;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Snowball;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
@@ -159,8 +165,8 @@ public final class OcmCoexistenceSuite {
 
             Boolean armed = context.sync(() -> {
                 ItemStack sword = new ItemStack(Material.DIAMOND_SWORD);
-                org.bukkit.enchantments.Enchantment sharpness =
-                        me.vexmc.mental.platform.Enchantments.sharpness();
+                Enchantment sharpness =
+                        Enchantments.sharpness();
                 if (sharpness == null) {
                     return false;
                 }
@@ -171,10 +177,10 @@ public final class OcmCoexistenceSuite {
                 // holding this sword would read — the attribute carrying the
                 // weapon's damage, and a full attack charge (the fast path
                 // leaves real attackers at full charge by construction).
-                org.bukkit.attribute.Attribute damageAttribute =
-                        me.vexmc.mental.platform.Attributes.attackDamage();
-                org.bukkit.attribute.Attribute speedAttribute =
-                        me.vexmc.mental.platform.Attributes.attackSpeed();
+                Attribute damageAttribute =
+                        Attributes.attackDamage();
+                Attribute speedAttribute =
+                        Attributes.attackSpeed();
                 if (damageAttribute == null || speedAttribute == null) {
                     return false;
                 }
@@ -233,7 +239,7 @@ public final class OcmCoexistenceSuite {
                 victim.player().setNoDamageTicks(0);
                 try {
                     return rodder.player().launchProjectile(
-                            org.bukkit.entity.FishHook.class, new Vector(0, 0.1, 0.75)) != null;
+                            FishHook.class, new Vector(0, 0.1, 0.75)) != null;
                 } catch (Throwable unsupported) {
                     return false;
                 }
@@ -290,7 +296,7 @@ public final class OcmCoexistenceSuite {
                 Vector direction = victim.player().getLocation().toVector()
                         .subtract(shooter.player().getLocation().toVector())
                         .normalize().multiply(1.5);
-                shooter.player().launchProjectile(org.bukkit.entity.Snowball.class, direction);
+                shooter.player().launchProjectile(Snowball.class, direction);
             });
 
             String hit = null;

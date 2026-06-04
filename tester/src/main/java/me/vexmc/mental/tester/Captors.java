@@ -3,11 +3,13 @@ package me.vexmc.mental.tester;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.api.event.KnockbackApplyEvent;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerVelocityEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
@@ -43,7 +45,7 @@ public final class Captors implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onProjectileHit(@NotNull org.bukkit.event.entity.ProjectileHitEvent event) {
+    public void onProjectileHit(@NotNull ProjectileHitEvent event) {
         if (event.getHitEntity() != null) {
             projectileHits.put(event.getHitEntity().getUniqueId(), event.getEntity().getType().name());
         }
@@ -56,7 +58,7 @@ public final class Captors implements Listener {
      * intentionally identical).
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-    public void onKnockbackApply(@NotNull me.vexmc.mental.api.event.KnockbackApplyEvent event) {
+    public void onKnockbackApply(@NotNull KnockbackApplyEvent event) {
         knockbackApplies.merge(event.getVictim().getUniqueId(), 1, Integer::sum);
     }
 

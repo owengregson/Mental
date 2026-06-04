@@ -1,6 +1,7 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.MentalPlugin;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackVector;
@@ -81,7 +82,7 @@ public final class FishingSuite {
                         rodder.player().getLocation().getX(),
                         rodder.player().getLocation().getZ(),
                         mental.services().knockbackProfiles().resolve(victim.player()), null,
-                        java.util.concurrent.ThreadLocalRandom.current()));
+                        ThreadLocalRandom.current()));
                 context.expect(expected != null, "engine returned no vector for an unresisted rod hit");
 
                 Vector applied = captors.velocityOf(victim.uuid());

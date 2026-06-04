@@ -56,9 +56,10 @@ knockback:
                             # as modifiers.sprint levels, each Knockback
                             # enchant level adds another
   wtap-extra:               # WindSpigot's split: a freshly re-engaged
-    enabled: false          # sprint (the w-tap timing) uses these values
-    horizontal: 0.5         # for the sprint contribution; enchant levels
-    vertical: 0.1           # always use extra
+    enabled: false          # sprint (the w-tap timing) uses these values —
+    horizontal: 0.5         # horizontally for sprint levels only (enchant
+    vertical: 0.1           # stays on extra), and for the hit's one flat
+                            # vertical bonus (vanilla never scales it)
   friction: {x: 0.5, y: 0.5, z: 0.5}       # surviving fraction of the
                             # victim's residual motion (see the hazard note)
   limits:

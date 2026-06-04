@@ -2,6 +2,7 @@ package me.vexmc.mental.engine;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +53,7 @@ public final class ModuleRegistry {
 
     public void disableAll() {
         List<CombatModule> reversed = new ArrayList<>(modules.values());
-        java.util.Collections.reverse(reversed);
+        Collections.reverse(reversed);
         for (CombatModule module : reversed) {
             disableQuietly(module);
         }

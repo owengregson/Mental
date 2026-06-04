@@ -2,7 +2,11 @@ package me.vexmc.mental;
 
 import com.github.retrooper.packetevents.PacketEvents;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
+import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.command.BukkitCommandRenderer;
 import me.vexmc.mental.command.MentalCommands;
 import me.vexmc.mental.common.command.CommandTree;
@@ -10,6 +14,7 @@ import me.vexmc.mental.common.debug.DebugLog;
 import me.vexmc.mental.common.platform.Capabilities;
 import me.vexmc.mental.common.platform.ServerEnvironment;
 import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.config.ConfigStore;
 import me.vexmc.mental.config.MentalConfig;
 import me.vexmc.mental.debug.ConsoleSink;
 import me.vexmc.mental.debug.PlayerDebugSink;
@@ -22,14 +27,21 @@ import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
 import me.vexmc.mental.module.knockback.KnockbackModule;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
+import me.vexmc.mental.module.knockback.KnockbackProfiles;
+import me.vexmc.mental.module.knockback.SprintTracker;
 import me.vexmc.mental.module.knockback.VictimMotion;
+import me.vexmc.mental.module.ocm.OcmCompatModule;
+import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
-import org.jetbrains.annotations.NotNull;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * Bootstrap. Owns wiring and lifecycle ordering; substance lives in the
@@ -47,7 +59,7 @@ public final class MentalPlugin extends JavaPlugin {
     private static final int BSTATS_PLUGIN_ID = 31788;
 
     private MentalConfig config;
-    private me.vexmc.mental.config.ConfigStore configStore;
+    private ConfigStore configStore;
     private MentalServices services;
     private ModuleRegistry modules;
     private PlayerDebugSink playerDebugSink;
@@ -67,7 +79,7 @@ public final class MentalPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
 
-        this.configStore = new me.vexmc.mental.config.ConfigStore(
+        this.configStore = new ConfigStore(
                 getDataFolder(), this::getResource, message -> getLogger().info(message));
         if (configStore.migrateLegacyLayout(getConfig())) {
             reloadConfig();
@@ -89,9 +101,9 @@ public final class MentalPlugin extends JavaPlugin {
 
         this.services = new MentalServices(
                 this, config, capabilities, environment, scheduling, debug,
-                new AnticheatGate(), new me.vexmc.mental.module.ocm.OcmGate(),
-                new me.vexmc.mental.module.knockback.SprintTracker(),
-                new me.vexmc.mental.module.knockback.KnockbackProfiles(config));
+                new AnticheatGate(), new OcmGate(),
+                new SprintTracker(),
+                new KnockbackProfiles(config));
         this.modules = new ModuleRegistry(getLogger());
 
         registerModules();
@@ -99,25 +111,25 @@ public final class MentalPlugin extends JavaPlugin {
 
         registerCommands();
 
-        getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
-            @org.bukkit.event.EventHandler
-            public void onQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        getServer().getPluginManager().registerEvents(new Listener() {
+            @EventHandler
+            public void onQuit(PlayerQuitEvent event) {
                 playerDebugSink.forget(event.getPlayer().getUniqueId());
                 services.knockbackProfiles().forget(event.getPlayer().getUniqueId());
             }
         }, this);
 
-        me.vexmc.mental.api.Mental.register(new MentalApiImpl(this, modules));
+        Mental.register(new MentalApiImpl(this, modules));
 
         this.metrics = new Metrics(this, BSTATS_PLUGIN_ID);
         metrics.addCustomChart(new SimplePie("anticheat_mode",
-                () -> config.anticheat().mode().name().toLowerCase(java.util.Locale.ROOT)));
+                () -> config.anticheat().mode().name().toLowerCase(Locale.ROOT)));
         metrics.addCustomChart(new SimplePie("probe_strategy",
-                () -> config.compensation().probeStrategy().name().toLowerCase(java.util.Locale.ROOT)));
+                () -> config.compensation().probeStrategy().name().toLowerCase(Locale.ROOT)));
         metrics.addCustomChart(new SimplePie("scheduling_backend",
                 () -> services.scheduling().describe()));
         metrics.addCustomChart(new SimplePie("ocm_coordination",
-                () -> services.ocmGate().mode().name().toLowerCase(java.util.Locale.ROOT)));
+                () -> services.ocmGate().mode().name().toLowerCase(Locale.ROOT)));
 
         PacketEvents.getAPI().init();
 
@@ -128,7 +140,7 @@ public final class MentalPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        me.vexmc.mental.api.Mental.register(null);
+        Mental.register(null);
         if (metrics != null) {
             metrics.shutdown();
             metrics = null;
@@ -165,9 +177,9 @@ public final class MentalPlugin extends JavaPlugin {
     public @NotNull List<String> reloadAll() {
         reloadConfig();
         configStore.ensureDefaultFiles();
-        List<String> warnings = new java.util.ArrayList<>(
+        List<String> warnings = new ArrayList<>(
                 config.reload(configStore.loadSources(getConfig())));
-        for (java.util.UUID stale : services.knockbackProfiles().clearStaleOverrides()) {
+        for (UUID stale : services.knockbackProfiles().clearStaleOverrides()) {
             warnings.add("knockback profile override cleared for " + stale
                     + " — its profile no longer exists");
         }
@@ -198,7 +210,7 @@ public final class MentalPlugin extends JavaPlugin {
         knockback.hints(compensation);
 
         modules.register(new AnticheatCompatModule(services));
-        modules.register(new me.vexmc.mental.module.ocm.OcmCompatModule(services, services.ocmGate()));
+        modules.register(new OcmCompatModule(services, services.ocmGate()));
         modules.register(new HitRegistrationModule(services, victimMotion));
         modules.register(knockback);
         modules.register(compensation);
@@ -224,7 +236,7 @@ public final class MentalPlugin extends JavaPlugin {
                 Class.forName(BRIGADIER_BRIDGE)
                         .getMethod("register", org.bukkit.plugin.java.JavaPlugin.class,
                                 CommandTree.class, String.class, List.class)
-                        .invoke(null, this, tree, "Mental root command — dashboard, modules, ping, debug.",
+                        .invoke(null, this, tree, "Mental root command — dashboard, modules, knockback profiles, ping, debug.",
                                 List.of("mtl"));
                 getLogger().info("Commands rendered natively via Brigadier.");
             } catch (ReflectiveOperationException failure) {

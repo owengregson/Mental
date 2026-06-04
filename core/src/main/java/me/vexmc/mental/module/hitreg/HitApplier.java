@@ -2,6 +2,7 @@ package me.vexmc.mental.module.hitreg;
 
 import java.util.UUID;
 import me.vexmc.mental.MentalServices;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Damageable;
@@ -55,8 +56,8 @@ public final class HitApplier {
         // vanilla components and substitutes its configured values, so it —
         // not Mental — is the damage model for the hit.
         boolean ocmShapesDamage =
-                services.ocmGate().handles(me.vexmc.mental.module.ocm.OcmMechanic.TOOL_DAMAGE, attacker)
-                || services.ocmGate().handles(me.vexmc.mental.module.ocm.OcmMechanic.CRITICAL_HITS, attacker);
+                services.ocmGate().handles(OcmMechanic.TOOL_DAMAGE, attacker)
+                || services.ocmGate().handles(OcmMechanic.CRITICAL_HITS, attacker);
         double amount = damageable instanceof LivingEntity living
                 ? DamageCalculator.calculate(
                         attacker, living, settings.simulateCrits(), settings.legacyToolDamage(),

@@ -13,8 +13,10 @@ import org.jetbrains.annotations.Nullable;
  * server default. Practice cores listen here to mirror kit/arena profile
  * swaps.
  *
- * <p>Fired synchronously from the caller's thread; change profiles from the
- * player's owning thread.</p>
+ * <p>Always fires on the player's owning thread (the main thread on
+ * non-Folia servers): {@code setKnockbackProfile} must be called from that
+ * thread, and this event fires synchronously inside the call, before it
+ * returns.</p>
  */
 public final class PlayerKnockbackProfileChangeEvent extends Event {
 

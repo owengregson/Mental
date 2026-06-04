@@ -6,7 +6,9 @@
 #  every melee knock, so each hit lands flat and melee never feeds itself
 #  (modifiers.combos: false). Rod and projectile residuals still feed the
 #  next melee hit once — exactly the 1.8.9 behavior. Knockback resistance
-#  follows the era's probabilistic all-or-nothing code path.
+#  follows the era's probabilistic all-or-nothing code path — a deliberate
+#  difference from legacy-1.7's armor-resistance: none, which reproduces
+#  the 1.7 item pool (nothing a player wore resisted knockback there).
 #
 #  This preset is regenerated when the file is missing; your edits stay.
 # ──────────────────────────────────────────────────────────────────────────

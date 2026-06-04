@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -80,7 +81,7 @@ public final class KnockbackProfiles {
             return false;
         }
         String after = overrides.get(id);
-        if (!java.util.Objects.equals(before, after)) {
+        if (!Objects.equals(before, after)) {
             new PlayerKnockbackProfileChangeEvent(player, before, after).callEvent();
         }
         return true;

@@ -43,8 +43,11 @@ public record KnockbackProfile(
     /**
      * The WindSpigot sprint-freshness split: when enabled, a sprint hit whose
      * sprint was freshly (re-)engaged since the attacker's last attack — the
-     * w-tap timing — uses these values for the sprint contribution instead of
-     * {@code extra}. Knockback-enchant levels always use {@code extra}.
+     * w-tap timing — uses these values instead of {@code extra}. Horizontally
+     * that swap applies to the sprint levels only (enchant levels always use
+     * {@code extra.horizontal}); the vertical bonus is a single flat term in
+     * vanilla — applied once, never per level — so sprint freshness picks
+     * which pair supplies it for the whole hit.
      */
     public record WtapExtra(boolean enabled, double horizontal, double vertical) {}
 

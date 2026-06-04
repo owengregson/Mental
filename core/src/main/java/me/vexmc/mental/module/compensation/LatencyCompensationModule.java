@@ -13,6 +13,7 @@ import me.vexmc.mental.config.CompensationSettings;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.module.knockback.KnockbackHints;
 import me.vexmc.mental.module.knockback.VictimMotion;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Attributes;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -169,7 +170,7 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
         // stays — ping stats remain live for the dashboard.
         Player ocmDecider = event.getDamager() instanceof Player attacker ? attacker : victim;
         if (services.ocmGate().handles(
-                me.vexmc.mental.module.ocm.OcmMechanic.MELEE_KNOCKBACK, ocmDecider)) {
+                OcmMechanic.MELEE_KNOCKBACK, ocmDecider)) {
             return;
         }
 

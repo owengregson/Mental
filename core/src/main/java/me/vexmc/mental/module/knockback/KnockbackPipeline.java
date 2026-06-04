@@ -2,6 +2,7 @@ package me.vexmc.mental.module.knockback;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.api.event.KnockbackApplyEvent;
 import me.vexmc.mental.common.debug.DebugCategory;
@@ -196,7 +197,7 @@ public final class KnockbackPipeline implements Listener {
         ledger.forget(victimId);
     }
 
-    private void debug(@NotNull java.util.function.Supplier<String> message) {
+    private void debug(@NotNull Supplier<String> message) {
         services.debug().log(DebugCategory.KNOCKBACK, message);
     }
 }

@@ -7,6 +7,7 @@ import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import org.bukkit.Location;
 import org.bukkit.entity.FishHook;
 import org.bukkit.event.EventHandler;
@@ -61,7 +62,7 @@ public final class FishingRodVelocityModule extends CombatModule implements List
             return;
         }
         if (services.ocmGate().handles(
-                me.vexmc.mental.module.ocm.OcmMechanic.FISHING_ROD_VELOCITY, event.getPlayer())) {
+                OcmMechanic.FISHING_ROD_VELOCITY, event.getPlayer())) {
             debug.log(() -> "OCM owns rod velocity for " + event.getPlayer().getName() + " — yielding");
             return;
         }

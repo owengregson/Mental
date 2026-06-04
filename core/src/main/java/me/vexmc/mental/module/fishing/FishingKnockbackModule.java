@@ -1,5 +1,6 @@
 package me.vexmc.mental.module.fishing;
 
+import java.util.Locale;
 import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
@@ -175,6 +176,6 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
     private static String describe(Entity entity) {
         return entity instanceof Player player
                 ? player.getName()
-                : entity.getType().toString().toLowerCase(java.util.Locale.ROOT);
+                : entity.getType().toString().toLowerCase(Locale.ROOT);
     }
 }

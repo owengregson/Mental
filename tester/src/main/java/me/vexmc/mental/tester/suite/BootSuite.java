@@ -2,6 +2,7 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.List;
 import me.vexmc.mental.MentalPlugin;
+import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.tester.TestCase;
 import org.jetbrains.annotations.NotNull;
 
@@ -42,7 +43,7 @@ public final class BootSuite {
                     }
                 }),
                 new TestCase("boot: public api facade responds", context -> {
-                    var api = me.vexmc.mental.api.Mental.get();
+                    var api = Mental.get();
                     context.expect(api != null, "Mental API facade is not registered");
                     context.expect(api.moduleEnabled("knockback"), "API reports knockback disabled");
                     context.expect(!api.moduleEnabled("not-a-module"), "API invented a module");

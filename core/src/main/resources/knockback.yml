@@ -25,9 +25,10 @@ knockback:
 
 # 1.7.10 fishing rod combat: hooks are real zero-damage hits that knock
 # away from where the ANGLER stands (the legacy direction), and a rod hit
-# arms the hurt window — suppressing the knockback of a melee hit that
-# follows within ten ticks, exactly the era's rod-then-sword interplay.
-# The knock itself uses the victim's resolved knockback profile.
+# arms the 20-tick hurt window — whose first half suppresses the knockback
+# of a melee hit that follows (the vanilla noDamageTicks > max/2 gate),
+# exactly the era's rod-then-sword interplay. The knock itself uses the
+# victim's resolved knockback profile.
 fishing-knockback:
   # Damage dealt by the hook. Kept minimal — its job is to trigger the
   # damage pipeline, not to hurt.

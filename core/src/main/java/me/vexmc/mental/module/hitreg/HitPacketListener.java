@@ -3,13 +3,16 @@ package me.vexmc.mental.module.hitreg;
 import com.github.retrooper.packetevents.event.PacketListener;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity.InteractAction;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
 import io.github.retrooper.packetevents.util.SpigotConversionUtil;
+import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.api.event.AsyncHitRegisterEvent;
+import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.config.HitRegSettings;
 import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.config.KnockbackSettings;
@@ -21,6 +24,7 @@ import org.bukkit.GameMode;
 import org.bukkit.entity.Damageable;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -176,7 +180,7 @@ final class HitPacketListener implements PacketListener {
             return;
         }
 
-        org.bukkit.util.Vector velocity = null;
+        Vector velocity = null;
         if (!services.anticheatGate().allowVelocityPreSend()) {
             debug(attacker, () -> "velocity pre-send suppressed by anticheat policy");
         } else if (attackerSnap.ocmOwnsMeleeKnockback()) {
@@ -195,7 +199,7 @@ final class HitPacketListener implements PacketListener {
                     && services.sprintTracker().peekFresh(attacker.getUniqueId());
             KnockbackVector vector = KnockbackEngine.compute(
                     attackerSnap.toEntityState(), victimSnap.toEntityState(), profile, null,
-                    java.util.concurrent.ThreadLocalRandom.current(), freshSprint);
+                    ThreadLocalRandom.current(), freshSprint);
             if (vector != null) {
                 velocity = vector.toBukkit();
             }
@@ -241,7 +245,7 @@ final class HitPacketListener implements PacketListener {
                 victimSnap.x(), victimSnap.y(), victimSnap.z(),
                 Math.max(reach.maxReach(), attackerSnap.attackReach()), reach.leniency());
         if (!verdict.valid()) {
-            debug(attacker, () -> String.format(java.util.Locale.ROOT,
+            debug(attacker, () -> String.format(Locale.ROOT,
                     "hit on %s dropped by reach validation: %.2f blocks at every candidate"
                             + " (rewind %dms)", victim.getName(), verdict.bestDistance(), rewindMillis));
         }
@@ -262,12 +266,12 @@ final class HitPacketListener implements PacketListener {
     private static String describe(Damageable target) {
         return target instanceof Player player
                 ? player.getName()
-                : target.getType().toString().toLowerCase(java.util.Locale.ROOT);
+                : target.getType().toString().toLowerCase(Locale.ROOT);
     }
 
     private void debug(Player attacker, Supplier<String> message) {
         services.debug().log(
-                me.vexmc.mental.common.debug.DebugCategory.HITREG,
+                DebugCategory.HITREG,
                 () -> "[" + attacker.getName() + "] " + message.get());
     }
 }

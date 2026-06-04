@@ -1,5 +1,6 @@
 package me.vexmc.mental.module.knockback;
 
+import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.config.KnockbackProfile;
@@ -97,7 +98,7 @@ public final class KnockbackModule extends CombatModule implements Listener {
                 && services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
         KnockbackVector vector = KnockbackEngine.compute(
                 EntityState.capture(attacker), victimState, profile, victimYOverride,
-                java.util.concurrent.ThreadLocalRandom.current(), freshSprint);
+                ThreadLocalRandom.current(), freshSprint);
 
         pipeline.submit(victim, vector, attacker, KnockbackPipeline.Cause.MELEE);
         debug.log(() -> vector == null

@@ -1,5 +1,6 @@
 package me.vexmc.mental.tester.suite;
 
+import java.util.ArrayList;
 import java.util.List;
 import me.vexmc.mental.MentalPlugin;
 import me.vexmc.mental.module.knockback.EntityState;
@@ -144,7 +145,7 @@ public final class KnockbackSuite {
                 victim.player().setNoDamageTicks(0);
                 EntityState attackerState = EntityState.capture(attacker.player());
                 EntityState resting = restingVictim(victim);
-                List<KnockbackVector> expected = new java.util.ArrayList<>();
+                List<KnockbackVector> expected = new ArrayList<>();
                 for (int elapsed = gapTicks - 1; elapsed <= gapTicks + 1; elapsed++) {
                     VictimMotion.Motion residual = VictimMotion.decay(
                             first.x(), first.y(), first.z(), elapsed, grounded,

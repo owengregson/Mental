@@ -12,7 +12,7 @@
 #  This preset is regenerated when the file is missing; your edits stay.
 # ──────────────────────────────────────────────────────────────────────────
 display-name: Kohi
-description: "The canonical Kohi/HCF values — lower base, gentler sprint bonus, flat delivery."
+description: "The canonical Kohi/HCF values — lower base, smaller per-level bonus (0.425/0.085), flat delivery."
 
 knockback:
   base:

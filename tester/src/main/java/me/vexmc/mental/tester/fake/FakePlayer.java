@@ -6,12 +6,15 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import me.vexmc.mental.common.scheduling.Scheduling;
@@ -450,7 +453,7 @@ public final class FakePlayer {
         if (byName != null) {
             @SuppressWarnings("unchecked")
             Map<String, Object> map = (Map<String, Object>) byName.get(playerList);
-            map.put(name.toLowerCase(java.util.Locale.ROOT), serverPlayer);
+            map.put(name.toLowerCase(Locale.ROOT), serverPlayer);
         }
     }
 
@@ -570,10 +573,10 @@ public final class FakePlayer {
         for (Field field : owner.getDeclaredFields()) {
             if (!Map.class.isAssignableFrom(field.getType())
                     || !(field.getGenericType()
-                            instanceof java.lang.reflect.ParameterizedType parameterized)) {
+                            instanceof ParameterizedType parameterized)) {
                 continue;
             }
-            java.lang.reflect.Type[] arguments = parameterized.getActualTypeArguments();
+            Type[] arguments = parameterized.getActualTypeArguments();
             if (arguments.length == 2
                     && arguments[0] == keyType
                     && arguments[1] instanceof Class<?> valueType
