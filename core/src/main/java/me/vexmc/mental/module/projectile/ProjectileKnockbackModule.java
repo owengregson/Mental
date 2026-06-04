@@ -101,7 +101,9 @@ public final class ProjectileKnockbackModule extends CombatModule implements Lis
     /** Stamps the bow's Punch level onto the arrow; hit-time item state is unreliable. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onShootBow(@NotNull EntityShootBowEvent event) {
-        if (!(event.getProjectile() instanceof AbstractArrow arrow) || arrow instanceof Trident) {
+        ProjectileKnockbackSettings settings = services.config().projectileKnockback();
+        if (!settings.enabled() || !settings.arrows()
+                || !(event.getProjectile() instanceof AbstractArrow arrow) || arrow instanceof Trident) {
             return;
         }
         ItemStack bow = event.getBow();
