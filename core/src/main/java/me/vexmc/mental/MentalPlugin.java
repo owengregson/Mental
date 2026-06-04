@@ -11,6 +11,9 @@ import me.vexmc.mental.config.MentalConfig;
 import me.vexmc.mental.debug.ConsoleSink;
 import me.vexmc.mental.engine.ModuleRegistry;
 import me.vexmc.mental.module.anticheat.AnticheatGate;
+import me.vexmc.mental.module.compensation.LatencyCompensationModule;
+import me.vexmc.mental.module.hitreg.HitRegistrationModule;
+import me.vexmc.mental.module.knockback.KnockbackModule;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bukkit.Bukkit;
 import org.jetbrains.annotations.NotNull;
@@ -113,7 +116,14 @@ public final class MentalPlugin extends JavaPlugin {
     }
 
     private void registerModules() {
-        // Modules register here in dependency order as they come online.
+        HitRegistrationModule hitReg = new HitRegistrationModule(services);
+        KnockbackModule knockback = new KnockbackModule(services);
+        LatencyCompensationModule compensation = new LatencyCompensationModule(services);
+        knockback.hints(compensation);
+
+        modules.register(hitReg);
+        modules.register(knockback);
+        modules.register(compensation);
     }
 
     private void registerCommands() {

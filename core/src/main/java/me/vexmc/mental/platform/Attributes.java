@@ -26,6 +26,8 @@ public final class Attributes {
             resolve("ATTACK_SPEED", "GENERIC_ATTACK_SPEED");
     private static final @Nullable Attribute KNOCKBACK_RESISTANCE =
             resolve("KNOCKBACK_RESISTANCE", "GENERIC_KNOCKBACK_RESISTANCE");
+    private static final @Nullable Attribute GRAVITY =
+            resolve("GRAVITY", "GENERIC_GRAVITY");
 
     private Attributes() {}
 
@@ -39,6 +41,11 @@ public final class Attributes {
 
     public static @Nullable Attribute knockbackResistance() {
         return KNOCKBACK_RESISTANCE;
+    }
+
+    /** Absent below 1.20.5 — callers fall back to vanilla's 0.08. */
+    public static @Nullable Attribute gravity() {
+        return GRAVITY;
     }
 
     /** The attribute's current value, or {@code fallback} when absent on this entity or version. */
