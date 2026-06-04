@@ -10,10 +10,14 @@ import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.config.MentalConfig;
 import me.vexmc.mental.debug.ConsoleSink;
 import me.vexmc.mental.engine.ModuleRegistry;
+import me.vexmc.mental.module.anticheat.AnticheatCompatModule;
 import me.vexmc.mental.module.anticheat.AnticheatGate;
 import me.vexmc.mental.module.compensation.LatencyCompensationModule;
+import me.vexmc.mental.module.fishing.FishingKnockbackModule;
+import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
 import me.vexmc.mental.module.knockback.KnockbackModule;
+import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bukkit.Bukkit;
 import org.jetbrains.annotations.NotNull;
@@ -116,14 +120,17 @@ public final class MentalPlugin extends JavaPlugin {
     }
 
     private void registerModules() {
-        HitRegistrationModule hitReg = new HitRegistrationModule(services);
         KnockbackModule knockback = new KnockbackModule(services);
         LatencyCompensationModule compensation = new LatencyCompensationModule(services);
         knockback.hints(compensation);
 
-        modules.register(hitReg);
+        modules.register(new AnticheatCompatModule(services));
+        modules.register(new HitRegistrationModule(services));
         modules.register(knockback);
         modules.register(compensation);
+        modules.register(new FishingKnockbackModule(services));
+        modules.register(new FishingRodVelocityModule(services));
+        modules.register(new ProjectileKnockbackModule(services));
     }
 
     private void registerCommands() {
