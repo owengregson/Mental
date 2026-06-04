@@ -103,7 +103,7 @@ class MentalConfigTest {
                     probe-strategy: keepalive
                     ping-offset-ms: 10
                   fishing-knockback:
-                    cancel-dragging-in: all
+                    reel-in: cancel
                 anticheat:
                   mode: force-safe
                   known: [GrimAC, Vulcan, Matrix]
@@ -127,7 +127,7 @@ class MentalConfigTest {
         assertEquals(ResistancePolicy.SCALING, config.knockback().resistance());
         assertEquals(ProbeStrategy.KEEPALIVE, config.compensation().probeStrategy());
         assertEquals(10, config.compensation().pingOffsetMillis());
-        assertEquals(DragInPolicy.ALL, config.fishingKnockback().cancelDraggingIn());
+        assertEquals(ReelInPolicy.CANCEL, config.fishingKnockback().reelIn());
         assertEquals(AnticheatMode.FORCE_SAFE, config.anticheat().mode());
         assertEquals(List.of("GrimAC", "Vulcan", "Matrix"), config.anticheat().knownPlugins());
         assertTrue(config.debug().enabled());

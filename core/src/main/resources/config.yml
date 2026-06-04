@@ -103,14 +103,18 @@ modules:
     # client-side simulation), not just the on-ground case.
     off-ground-sync: true
 
-  # 1.8 fishing rod combat: hooks damage and knock back what they hit.
+  # 1.7.10 fishing rod combat: hooks are real zero-damage hits that knock
+  # away from where the ANGLER stands (the legacy direction), and a rod hit
+  # arms the hurt window — suppressing the knockback of a melee hit that
+  # follows within ten ticks, exactly the era's rod-then-sword interplay.
   fishing-knockback:
     enabled: true
     # Damage dealt by the hook. Kept minimal — its job is to trigger the
     # damage pipeline, not to hurt.
     damage: 0.0001
-    # Suppress vanilla's reel-in pull for: all | players | mobs | none.
-    cancel-dragging-in: players
+    # Reeling in a hooked entity: legacy (the 1.7.10 pull toward the
+    # angler), cancel (no pull at all), or vanilla (untouched).
+    reel-in: legacy
     # Also knock back non-player entities.
     knockback-non-player-entities: false
 

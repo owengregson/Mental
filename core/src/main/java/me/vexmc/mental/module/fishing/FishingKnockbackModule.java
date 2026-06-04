@@ -1,9 +1,13 @@
 package me.vexmc.mental.module.fishing;
 
+import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.config.FishingKnockbackSettings;
+import me.vexmc.mental.config.ReelInPolicy;
 import me.vexmc.mental.engine.CombatModule;
+import me.vexmc.mental.module.knockback.EntityState;
+import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackVector;
 import org.bukkit.GameMode;
@@ -21,20 +25,24 @@ import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * 1.8 fishing rod combat: a hook that strikes a living entity deals the
- * configured (negligible) damage through the normal damage pipeline — so
- * region and protection plugins keep their veto — and applies the 1.8 rod
- * knockback vector. Vanilla's reel-in pull is suppressed per policy by
- * cancelling the catch and removing the hook.
+ * 1.7.10 rod combat. A bobber that strikes a living entity is a real
+ * zero-damage hit: the negligible damage runs through the normal damage
+ * pipeline (region and protection plugins keep their veto, the 20-tick
+ * hurt window arms — which is why a rod hit suppresses the knockback of a
+ * melee hit that follows within ten ticks), and the knock itself is the
+ * engine's bare base 0.4/0.4 <em>away from where the angler stands</em>,
+ * exactly the legacy {@code causeThrownDamage} direction. The hook's own
+ * position never enters the math.
  *
- * <p>The hook is identified by {@code instanceof FishHook}, never by entity
- * type constant — the enum spelling changed across the supported range while
- * the interface did not. Velocity is applied directly after the damage call,
- * matching OCM's proven semantics for rod hits.</p>
+ * <p>Reeling in honors {@link ReelInPolicy}: the legacy pull
+ * ({@code motion += Δ × 0.1} plus {@code √distance × 0.08} of lift),
+ * a hard cancel, or untouched vanilla.</p>
  */
 public final class FishingKnockbackModule extends CombatModule implements Listener {
 
     private static final String CITIZENS_NPC_METADATA = "NPC";
+    private static final double REEL_PULL_FACTOR = 0.1;
+    private static final double REEL_LIFT_FACTOR = 0.08;
 
     private final KnockbackPipeline pipeline;
 
@@ -62,8 +70,8 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
     public void onProjectileHit(@NotNull ProjectileHitEvent event) {
         FishingKnockbackSettings settings = services.config().fishingKnockback();
         if (!settings.enabled()
-                || !(event.getEntity() instanceof FishHook hook)
-                || !(hook.getShooter() instanceof Player rodder)
+                || !(event.getEntity() instanceof FishHook)
+                || !(event.getEntity().getShooter() instanceof Player rodder)
                 || !(event.getHitEntity() instanceof LivingEntity victim)) {
             return;
         }
@@ -86,18 +94,27 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
         }
 
         victim.damage(settings.damage(), rodder);
+        if (victim.getNoDamageTicks() <= victim.getMaximumNoDamageTicks() / 2.0) {
+            debug.log(() -> "rod hit on " + describe(victim) + " was cancelled — no knockback");
+            return;
+        }
 
-        Vector velocity = victim.getVelocity();
-        Location hookLocation = hook.getLocation();
-        Location victimLocation = victim.getLocation();
-        KnockbackVector vector = RodKnockbackMath.knockback(
-                velocity.getX(), velocity.getY(), velocity.getZ(),
-                hookLocation.getX(), hookLocation.getY(), hookLocation.getZ(),
-                victimLocation.getX(), victimLocation.getZ());
-        victim.setVelocity(vector.toBukkit());
+        Location angler = rodder.getLocation();
+        EntityState victimState = EntityState.captureVictim(victim, pipeline.ledger(), System.nanoTime());
+        KnockbackVector vector = KnockbackEngine.computeBase(
+                victimState, angler.getX(), angler.getZ(),
+                services.config().knockback(), null, ThreadLocalRandom.current());
 
+        if (victim instanceof Player victimPlayer) {
+            pipeline.submit(victimPlayer, vector, rodder, KnockbackPipeline.Cause.ROD);
+            pipeline.ensureDelivery(victimPlayer);
+        } else if (vector != null) {
+            victim.setVelocity(vector.toBukkit());
+        }
         debug.log(() -> rodder.getName() + " hooked " + describe(victim)
-                + " -> (" + vector.x() + ", " + vector.y() + ", " + vector.z() + ")");
+                + (vector == null
+                        ? " — legacy resistance cancelled the knock"
+                        : " -> (" + vector.x() + ", " + vector.y() + ", " + vector.z() + ")"));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -107,12 +124,41 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
         }
         FishingKnockbackSettings settings = services.config().fishingKnockback();
         Entity caught = event.getCaught();
-        if (!settings.enabled() || caught == null || !settings.cancelDraggingIn().cancels(caught)) {
+        if (!settings.enabled() || caught == null || settings.reelIn() == ReelInPolicy.VANILLA) {
             return;
         }
+
         event.setCancelled(true);
         event.getHook().remove();
-        debug.log(() -> "suppressed reel-in pull on " + describe(caught));
+        if (settings.reelIn() == ReelInPolicy.CANCEL) {
+            debug.log(() -> "suppressed reel-in pull on " + describe(caught));
+            return;
+        }
+
+        Vector pull = legacyPull(event.getPlayer().getLocation(), caught.getLocation());
+        Vector current = caught instanceof LivingEntity living
+                ? currentMotion(living)
+                : caught.getVelocity();
+        caught.setVelocity(current.add(pull));
+        debug.log(() -> "legacy reel pull on " + describe(caught)
+                + " -> (" + pull.getX() + ", " + pull.getY() + ", " + pull.getZ() + ")");
+    }
+
+    /** {@code Δ × 0.1} per axis plus {@code √distance × 0.08} of lift — handleHookRetraction, 1.7.10. */
+    static @NotNull Vector legacyPull(@NotNull Location angler, @NotNull Location caught) {
+        double deltaX = angler.getX() - caught.getX();
+        double deltaY = angler.getY() - caught.getY();
+        double deltaZ = angler.getZ() - caught.getZ();
+        double distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+        return new Vector(
+                deltaX * REEL_PULL_FACTOR,
+                deltaY * REEL_PULL_FACTOR + Math.sqrt(distance) * REEL_LIFT_FACTOR,
+                deltaZ * REEL_PULL_FACTOR);
+    }
+
+    private @NotNull Vector currentMotion(LivingEntity living) {
+        EntityState state = EntityState.captureVictim(living, pipeline.ledger(), System.nanoTime());
+        return new Vector(state.vx(), state.vy(), state.vz());
     }
 
     private static String describe(Entity entity) {
