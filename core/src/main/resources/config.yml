@@ -1,0 +1,144 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — latency-compensated 1.8 combat
+#
+#  Every module can also be toggled live: /mental module <name> <on|off>
+#  Reloads (/mental reload) swap the whole configuration atomically — no
+#  hit is ever processed against a half-applied config.
+# ──────────────────────────────────────────────────────────────────────────
+config-version: 1
+
+modules:
+  # Asynchronous hit registration. Attack packets are validated on the
+  # netty thread and damage is dispatched straight to the victim's owning
+  # thread, skipping the vanilla main-thread queue entirely.
+  hit-registration:
+    enabled: true
+    # Hits per second per attacker before clicks are dropped at the packet
+    # layer. 0 disables the limiter.
+    max-cps: 20
+    fast-path:
+      # Cancel the vanilla attack packet and run Mental's pipeline instead.
+      # Disable if a plugin needs the vanilla packet flow untouched.
+      enabled: true
+      # Ship knockback velocity + hurt feedback to clients directly from the
+      # netty thread — perceived hit response improves by one RTT leg plus up
+      # to a full tick. Automatically suppressed for the velocity packet when
+      # an anticheat is detected (see anticheat.mode).
+      pre-send-feedback: true
+      # Minimum interval between pre-sent feedback bursts per victim. The
+      # default mirrors vanilla's 10-tick damage-immunity window.
+      feedback-min-interval-ms: 500
+      # Apply the 1.8 critical multiplier (1.5x) when the attacker is
+      # falling, not sprinting, and not blinded.
+      simulate-crits: true
+      # Clear the 1.9+ attack cooldown after each registered hit.
+      reset-attack-cooldown: true
+
+  # 1.8-style melee knockback, applied server-side through the velocity
+  # pipeline (anticheat-safe by construction).
+  knockback:
+    enabled: true
+    # Base knockback every hit applies, after friction halves the victim's
+    # current motion.
+    base:
+      horizontal: 0.4
+      vertical: 0.4
+    # Bonus per level: sprinting counts as one level, each Knockback
+    # enchantment level adds another.
+    extra:
+      horizontal: 0.5
+      vertical: 0.1
+    # The vertical limit clamps the BASE vertical component before bonus
+    # levels are added (vanilla 1.8 ordering: a sprint hit reaches 0.5).
+    # Horizontal limit caps the post-friction base; values <= 0 disable.
+    limits:
+      vertical: 0.4
+      horizontal: -1
+    # Fraction of the victim's current velocity that survives into the new
+    # vector. Vanilla 1.8 halves each axis.
+    friction:
+      x: 0.5
+      y: 0.5
+      z: 0.5
+    modifiers:
+      # Bonus levels granted by sprinting.
+      sprint: 1.0
+      # Honor armor knockback resistance (netherite). 1.8 had none.
+      armor-resistance: false
+      # Skip Mental knockback when a shield absorbed the hit.
+      shield-blocking-cancels: true
+
+  # Ping-aware vertical-knockback compensation: predicts whether the victim
+  # is already on the ground on their own screen and corrects the server's
+  # stale view before knockback is computed.
+  latency-compensation:
+    enabled: true
+    # PING uses the dedicated 1.17+ play ping/pong channel (recommended);
+    # KEEPALIVE measures over keep-alive packets.
+    probe-strategy: PING
+    # Subtracted from each measured round trip before compensation
+    # (tournament-derived constant).
+    ping-offset-ms: 25
+    # A ping jump larger than this is treated as a one-off spike and the
+    # previous reading is used instead.
+    spike-threshold-ms: 20
+    # How often probes are sent to players in combat.
+    probe-interval-ticks: 5
+    # How long after the last hit a player keeps receiving probes.
+    combat-timeout-ticks: 30
+    # Also rewrite the victim's vertical motion while airborne (full
+    # client-side simulation), not just the on-ground case.
+    off-ground-sync: true
+
+  # 1.8 fishing rod combat: hooks damage and knock back what they hit.
+  fishing-knockback:
+    enabled: true
+    # Damage dealt by the hook. Kept minimal — its job is to trigger the
+    # damage pipeline, not to hurt.
+    damage: 0.0001
+    # Suppress vanilla's reel-in pull for: all | players | mobs | none.
+    cancel-dragging-in: players
+    # Also knock back non-player entities.
+    knockback-non-player-entities: false
+
+  # 1.8 rod cast feel: launch speed, spread, and flight gravity.
+  rod-velocity:
+    enabled: true
+
+  # Restore knockback from zero-damage projectiles (snowballs, eggs, ender
+  # pearls) the way 1.8 applied it. The configured damage is substituted
+  # only when the projectile dealt exactly zero.
+  projectile-knockback:
+    enabled: true
+    damage:
+      snowball: 0.0001
+      egg: 0.0001
+      ender-pearl: 0.0001
+
+# Coexistence with movement-prediction anticheats.
+#   auto       — when a listed plugin is installed, suppress the one risky
+#                behavior (pre-sent velocity packets); everything else in
+#                Mental is server-authoritative and needs no adjustment.
+#   force-safe — always behave as if an anticheat were installed.
+#   off        — never adjust.
+anticheat:
+  mode: auto
+  known:
+    - GrimAC
+    - Vulcan
+
+# Verbose logging. Enable globally, then pick categories. Subscribed admins
+# (/mental debug subscribe) receive lines in-game as well.
+debug:
+  enabled: false
+  categories:
+    hitreg: false
+    knockback: false
+    compensation: false
+    fishing: false
+    projectile: false
+    packets: false
+    anticheat: false
+    scheduling: false
+    commands: false
+    config: false
