@@ -52,12 +52,18 @@ import org.jetbrains.annotations.Nullable;
  * victim's own sprint state changes nothing (the folk "sprint reduces
  * knockback" is client-side technique, not server math).</p>
  *
- * <p>Scenario notes: "walking" and "jumping" victims carry direct
- * server-side motion with an empty residual ledger — precisely how a legacy
- * server experienced a moving real player, whose walk/jump was client-side
- * and never entered the server's fields. Each scenario settles ~2 seconds
- * before the endpoint is read, making the comparison insensitive to ±1 tick
- * of scheduling skew (a settled trajectory's endpoint no longer moves).</p>
+ * <p>Scenario notes: walking and charging-sprint victims hold their input
+ * through the whole engagement, combat-style — an {@link InputDriver} feeds
+ * the era movement accelerations (ground 0.1/0.13, air 0.02/0.026) into the
+ * victim's pre-tick slot, exactly where a client integrates held keys: they
+ * approach the attacker before the hit, keep pushing toward them through
+ * the knock flight, and the input ends at touchdown. The residual ledger
+ * stays empty throughout — precisely how a legacy server experienced a
+ * moving real player, whose movement was client-side and never entered the
+ * server's fields. The jumping victim is a single impulse. Each scenario
+ * settles ~2 seconds before the endpoint is read, making the comparison
+ * insensitive to ±1 tick of scheduling skew (a settled trajectory's
+ * endpoint no longer moves).</p>
  */
 public final class EraParitySuite {
 
@@ -66,7 +72,6 @@ public final class EraParitySuite {
     /** Multi-event trajectories: ±1 tick of event alignment is absorbed by candidates. */
     private static final double MULTI_EVENT_TOLERANCE = 0.12;
     private static final int SETTLE_TICKS = 40;
-    private static final long NANOS_PER_TICK = 50_000_000L;
 
     private EraParitySuite() {}
 
@@ -84,10 +89,28 @@ public final class EraParitySuite {
                     melee(mental, tester, context, "legacy-1.7", new MeleeShape().sprintAttacker());
                     melee(mental, tester, context, "legacy-1.8", new MeleeShape().sprintAttacker());
                 }),
-                new TestCase("era: a walking victim keeps trajectory parity", context -> {
-                    MeleeShape walking = new MeleeShape().victimPreMotion(new Vector(0, 0, -0.2), 2);
+                new TestCase("era: a victim walking at the attacker keeps trajectory parity", context -> {
+                    // Holds W the whole engagement: approach, flight, landing.
+                    MeleeShape walking = new MeleeShape().heldInput(0.1, 0.02);
                     melee(mental, tester, context, "legacy-1.7", walking);
                     melee(mental, tester, context, "legacy-1.8", walking);
+                }),
+                new TestCase("era: a sprinting victim charging the attacker keeps trajectory parity", context -> {
+                    // Sprint-charges the whole engagement — the classic
+                    // run-at-each-other trade; air input fights the knock.
+                    MeleeShape charging = new MeleeShape()
+                            .sprintAttacker().sprintVictim().heldInput(0.13, 0.026);
+                    Outcome charge17 = melee(mental, tester, context, "legacy-1.7", charging);
+                    melee(mental, tester, context, "legacy-1.8", charging);
+                    Outcome still17 = melee(mental, tester, context, "legacy-1.7",
+                            new MeleeShape().sprintAttacker());
+                    context.note(String.format(Locale.ROOT,
+                            "era-difference[charge] a charging victim lands %.3f blocks out vs"
+                                    + " %.3f standing still — held input eating knockback",
+                            charge17.liveDistance(), still17.liveDistance()));
+                    context.expect(charge17.liveDistance() < still17.liveDistance() - 0.2,
+                            "charging into the hit must shorten the knock (got "
+                                    + charge17.liveDistance() + " vs " + still17.liveDistance() + ")");
                 }),
                 new TestCase("era: the victim's own sprint state is placebo", context -> {
                     Outcome sprintOnly = melee(mental, tester, context, "legacy-1.7",
@@ -132,6 +155,8 @@ public final class EraParitySuite {
         @Nullable Vector preMotion;
         int preMotionLeadTicks;
         int secondHitGapTicks = -1;
+        double inputGroundAccel;
+        double inputAirAccel;
 
         MeleeShape sprintAttacker() {
             this.sprintAttacker = true;
@@ -150,6 +175,17 @@ public final class EraParitySuite {
             return this;
         }
 
+        /** Held movement input toward the attacker, approach through flight. */
+        MeleeShape heldInput(double groundAccel, double airAccel) {
+            this.inputGroundAccel = groundAccel;
+            this.inputAirAccel = airAccel;
+            return this;
+        }
+
+        boolean hasInput() {
+            return inputAirAccel > 0;
+        }
+
         MeleeShape secondHitAfter(int gapTicks) {
             this.secondHitGapTicks = gapTicks;
             return this;
@@ -159,11 +195,18 @@ public final class EraParitySuite {
             return (secondHitGapTicks > 0 ? "combo" : "single")
                     + (sprintAttacker ? "+sprint" : "")
                     + (sprintVictim ? "+victimSprint" : "")
+                    + (hasInput() ? "+heldInput" : "")
                     + (preMotion != null ? (preMotion.getY() > 0 ? "+jump" : "+walk") : "");
         }
     }
 
     private record Outcome(double liveDistance, double oracleDistance) {}
+
+    /** Clears horizontal motion, preserving the grounded gravity cycle. */
+    private static void clearHorizontalMotion(FakePlayer player) {
+        double vy = player.player().getVelocity().getY();
+        player.setMotion(0, vy, 0);
+    }
 
     private static Outcome melee(
             MentalPlugin mental, MentalTesterPlugin tester, TestContext context,
@@ -181,6 +224,21 @@ public final class EraParitySuite {
             });
             context.awaitTicks(5); // land and settle (spawn invulnerability is cleared at spawn)
 
+            if (shape.hasInput()) {
+                // The victim charges at full speed before the trade — motion
+                // set straight to the input model's terminal velocity (the
+                // fixed point of accel→move→drag: a·0.546/0.454, which moves
+                // at the real 4.3/5.6 m/s walk/sprint speeds) — and holds
+                // the key from here on: approach, knock flight, landing.
+                double terminal = shape.inputGroundAccel * 0.546 / (1.0 - 0.546);
+                context.syncRun(() -> {
+                    victim.setMotion(0, 0, -terminal);
+                    victim.preTick(new InputDriver(
+                            victim, client, 0, -1, shape.inputGroundAccel, shape.inputAirAccel));
+                });
+                context.awaitTicks(3); // a short full-speed run-up
+            }
+
             Location start = context.sync(() -> {
                 context.expect(mental.services().knockbackProfiles()
                                 .setOverride(victim.player(), profile),
@@ -197,6 +255,15 @@ public final class EraParitySuite {
                 } else {
                     victim.player().setNoDamageTicks(0);
                     attacker.attack(victim.player());
+                    // Defeat the synchronous send-then-restore: vanilla puts
+                    // the PRE-knock motion back after sending the packet (a
+                    // charging victim's approach speed!), which a clientless
+                    // player would integrate for one stray tick. A real
+                    // client integrates only the packet — which the emulator
+                    // re-applies next tick. Horizontal only: zeroing motY
+                    // breaks the grounded flag (onGround only refreshes while
+                    // moving down), which would flip the launch to air drag.
+                    clearHorizontalMotion(victim);
                 }
                 return at;
             });
@@ -205,6 +272,7 @@ public final class EraParitySuite {
                 context.syncRun(() -> {
                     victim.player().setNoDamageTicks(0);
                     attacker.attack(victim.player());
+                    clearHorizontalMotion(victim);
                 });
             }
             if (shape.secondHitGapTicks > 0) {
@@ -212,16 +280,21 @@ public final class EraParitySuite {
                 context.syncRun(() -> {
                     victim.player().setNoDamageTicks(0);
                     attacker.attack(victim.player());
+                    clearHorizontalMotion(victim);
                 });
             }
 
             int expectedEvents = (shape.preMotion != null ? 1 : 0)
                     + 1
                     + (shape.secondHitGapTicks > 0 ? 1 : 0);
+            EraOracle.Input input = shape.hasInput()
+                    ? new EraOracle.Input(0, -1, shape.inputAirAccel)
+                    : null;
             return settleAndCompare(context, client, victim, start,
-                    shape.describe() + "/" + profile, expectedEvents);
+                    shape.describe() + "/" + profile, expectedEvents, input);
         } finally {
             context.syncRun(() -> {
+                victim.preTick(null);
                 attacker.remove();
                 victim.remove();
             });
@@ -343,7 +416,7 @@ public final class EraParitySuite {
      */
     private static Outcome settleAndCompare(
             TestContext context, ClientEmulator client, FakePlayer victim, Location start,
-            String label, int expectedEvents) throws Exception {
+            String label, int expectedEvents, @Nullable EraOracle.Input input) throws Exception {
         context.awaitTicks(SETTLE_TICKS);
 
         List<ClientEmulator.Stamp> stamps = client.stamps();
@@ -353,14 +426,17 @@ public final class EraParitySuite {
         // contained the knock at all.
         context.expect(stamps.size() == expectedEvents, label + ": expected " + expectedEvents
                 + " velocity event(s) but observed " + stamps.size()
-                + " — a staged hit or motion never landed");
+                + " — a staged hit or motion never landed, or the server emitted extras: "
+                + stamps);
 
         Location live = context.sync(() -> victim.player().getLocation().clone());
-        long firstNanos = stamps.get(0).nanos();
+        // Stamps carry the SERVER tick they fired on — exact event spacing
+        // even when concurrent load dilates real-time tick length.
+        int firstTick = stamps.get(0).tick();
         int lastTick = 0;
         List<EraOracle.VelocityEvent> base = new ArrayList<>();
         for (ClientEmulator.Stamp stamp : stamps) {
-            int tick = (int) Math.round((stamp.nanos() - firstNanos) / (double) NANOS_PER_TICK);
+            int tick = stamp.tick() - firstTick;
             base.add(new EraOracle.VelocityEvent(
                     tick, stamp.velocity().getX(), stamp.velocity().getY(), stamp.velocity().getZ()));
             lastTick = Math.max(lastTick, tick);
@@ -379,7 +455,7 @@ public final class EraParitySuite {
             }
             EraOracle.Result result = EraOracle.simulate(
                     start.getX(), start.getY(), start.getZ(), true, Arena.floorY(),
-                    candidate, lastTick + 1 + SETTLE_TICKS);
+                    candidate, lastTick + 1 + SETTLE_TICKS, input);
             double delta = Math.max(Math.abs(result.x() - live.getX()),
                     Math.max(Math.abs(result.y() - live.getY()), Math.abs(result.z() - live.getZ())));
             if (delta < bestDelta) {
@@ -388,7 +464,11 @@ public final class EraParitySuite {
             }
         }
 
-        double tolerance = base.size() > 1 ? MULTI_EVENT_TOLERANCE : SINGLE_EVENT_TOLERANCE;
+        // Held input adds one tick of landing-detection alignment on top of
+        // multi-event bucket alignment — both get the wider tolerance.
+        double tolerance = base.size() > 1 || input != null
+                ? MULTI_EVENT_TOLERANCE
+                : SINGLE_EVENT_TOLERANCE;
         double liveDistance = Math.hypot(live.getX() - start.getX(), live.getZ() - start.getZ());
         double oracleDistance = best.distanceFrom(start.getX(), start.getZ());
         context.note(String.format(Locale.ROOT,
@@ -451,6 +531,74 @@ public final class EraParitySuite {
     }
 
     /* ------------------------------------------------------------------ */
+    /*  The input driver                                                   */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * A held movement key, fed into the victim's pre-tick slot — the place a
+     * client integrates input, before the move. Three phases, exactly the
+     * combat pattern: ground acceleration toward the attacker while
+     * approaching (before any knock has landed), air acceleration through
+     * the knock flight ("holding W into the hit"), and nothing once the
+     * flight touches down. The oracle's {@link EraOracle.Input} integrates
+     * the identical air model into the expected trajectory, so the legacy
+     * expectation moves with the input.
+     */
+    private static final class InputDriver implements Runnable {
+
+        private final FakePlayer victim;
+        private final ClientEmulator client;
+        private final double dirX;
+        private final double dirZ;
+        private final double groundAccel;
+        private final double airAccel;
+        private boolean flewSinceKnock;
+        private boolean done;
+
+        InputDriver(FakePlayer victim, ClientEmulator client,
+                double dirX, double dirZ, double groundAccel, double airAccel) {
+            this.victim = victim;
+            this.client = client;
+            this.dirX = dirX;
+            this.dirZ = dirZ;
+            this.groundAccel = groundAccel;
+            this.airAccel = airAccel;
+        }
+
+        @Override
+        @SuppressWarnings("deprecation") // Player#isOnGround — the integration-relevant flag
+        public void run() {
+            if (done) {
+                return;
+            }
+            org.bukkit.entity.Player player = victim.player();
+            boolean grounded = player.isOnGround();
+            boolean knocked = !client.stamps().isEmpty();
+
+            double accel;
+            if (!knocked) {
+                accel = grounded ? groundAccel : 0; // running approach
+            } else if (!grounded) {
+                flewSinceKnock = true;
+                accel = airAccel; // fighting the knock mid-air
+            } else if (flewSinceKnock) {
+                done = true; // flight over — the engagement's input window ends
+                return;
+            } else {
+                return; // knock applied but the launch move hasn't run yet
+            }
+            if (accel == 0) {
+                return;
+            }
+            Vector motion = player.getVelocity();
+            victim.setMotion(
+                    motion.getX() + dirX * accel,
+                    motion.getY(),
+                    motion.getZ() + dirZ * accel);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  The client emulator                                                */
     /* ------------------------------------------------------------------ */
 
@@ -470,7 +618,7 @@ public final class EraParitySuite {
      */
     private static final class ClientEmulator implements Listener {
 
-        record Stamp(long nanos, @NotNull Vector velocity) {}
+        record Stamp(int tick, @NotNull Vector velocity) {}
 
         private static final double MATCH_EPSILON = 0.02;
 
@@ -489,16 +637,19 @@ public final class EraParitySuite {
                 return;
             }
             Vector packet = event.getVelocity().clone();
-            stamps.add(new Stamp(System.nanoTime(), packet));
+            stamps.add(new Stamp(Bukkit.getCurrentTick(), packet));
             // Nothing the server computed mid-tick may leak into the
             // trajectory; the packet is the only truth a client sees.
-            victim.setMotion(0, 0, 0);
+            // Horizontal only — zeroing motY un-grounds a standing victim
+            // (onGround refreshes only while moving down) and would flip
+            // the launch tick to air friction.
+            victim.setMotion(0, event.getPlayer().getVelocity().getY(), 0);
             scheduling.runOn(event.getPlayer(), () -> applyIfLost(packet), () -> {});
         }
 
         /** Stamps motion applied directly (walk/jump setup) — no event fires for it. */
         void stampManual(@NotNull Vector motion) {
-            stamps.add(new Stamp(System.nanoTime(), motion.clone()));
+            stamps.add(new Stamp(Bukkit.getCurrentTick(), motion.clone()));
         }
 
         @NotNull List<Stamp> stamps() {

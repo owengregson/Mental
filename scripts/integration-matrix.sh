@@ -23,7 +23,10 @@
 set -u
 cd "$(dirname "$0")/.."
 
-VERSIONS_DEFAULT="1.17.1 1.18.2 1.19.4 1.20.6 1.21.4 1.21.11 26.1.2"
+# Newest first: the heavy modern servers ignite (paperclip, JIT, chunk IO)
+# while nothing else runs; the lightweight Java-17 trio boots last into a
+# calm machine instead of reaching its longest suites mid-ignition.
+VERSIONS_DEFAULT="26.1.2 1.21.11 1.21.4 1.20.6 1.19.4 1.18.2 1.17.1"
 OCM_VERSIONS="1.17.1 26.1.2"
 JAR_CACHE="$HOME/.gradle/caches/run-task-jars/paper/jars"
 OCM_JAR="$PWD/run/ocm-jar/OldCombatMechanics.jar"
@@ -111,7 +114,13 @@ run_one() {
     [ "$flavour" = ocm ] && plugin_args="$plugin_args -add-plugin=$OCM_JAR"
 
     echo "[$label] booting on port $port" >> "$LIVE"
-    ( cd "$dir" && exec "$java" -Xmx1G -Dcom.mojang.eula.agree=true \
+    # 768M is generous for a flat test world; small heaps keep nine
+    # concurrent JVMs far away from memory pressure (page-fault storms
+    # read as 30s+ tick stalls). caffeinate -i stops macOS from App-Napping
+    # backgrounded servers — a napped JVM stalls without ever logging lag.
+    local keepawake=""
+    command -v caffeinate >/dev/null 2>&1 && keepawake="caffeinate -i"
+    ( cd "$dir" && exec $keepawake "$java" -Xmx768M -Dcom.mojang.eula.agree=true \
             -Ddisable.watchdog=true \
             -jar "$jar" --nogui --port "$port" $plugin_args ) > "$log" 2>&1 &
     local server=$!
@@ -139,17 +148,23 @@ run_one() {
 
 echo "── concurrent matrix: $VERSIONS $([ "$WITH_OCM" = yes ] && echo "+ OCM($OCM_VERSIONS)") ──" | tee -a "$LIVE"
 
+# Staggered launches: server BOOT is the CPU spike (world load, class
+# loading); offsetting starts by a few seconds keeps any one server's tick
+# thread from starving while the suites themselves overlap freely.
+STAGGER_SECONDS=3
 port=$BASE_PORT
 for v in $VERSIONS; do
     run_one "$v" "$PWD/run/$v" "$port" "$v" plain &
     PIDS="$PIDS $!"
     port=$((port + 1))
+    sleep "$STAGGER_SECONDS"
 done
 if [ "$WITH_OCM" = yes ]; then
     for v in $OCM_VERSIONS; do
         run_one "$v" "$PWD/run/ocm/$v" "$port" "$v+OCM" ocm &
         PIDS="$PIDS $!"
         port=$((port + 1))
+        sleep "$STAGGER_SECONDS"
     done
 fi
 

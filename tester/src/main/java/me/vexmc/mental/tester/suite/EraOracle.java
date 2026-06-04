@@ -30,6 +30,15 @@ final class EraOracle {
     /** Motion replaced (all axes) before the move of tick {@code tick}. */
     record VelocityEvent(int tick, double vx, double vy, double vz) {}
 
+    /**
+     * Continuous movement input held through the knock flight — the
+     * "keeps walking/sprinting at you" victim. The acceleration is the era
+     * (and modern) air value applied before each airborne move, exactly
+     * where the client integrates held keys; it stops on landing, when the
+     * combat flight ends. Air accel: 0.02 walking, 0.026 sprinting.
+     */
+    record Input(double dirX, double dirZ, double airAccel) {}
+
     record Result(double x, double y, double z, boolean grounded) {
 
         double distanceFrom(double startX, double startZ) {
@@ -42,6 +51,13 @@ final class EraOracle {
     static @NotNull Result simulate(
             double startX, double startY, double startZ, boolean startGrounded,
             double floorY, @NotNull List<VelocityEvent> events, int ticks) {
+        return simulate(startX, startY, startZ, startGrounded, floorY, events, ticks, null);
+    }
+
+    static @NotNull Result simulate(
+            double startX, double startY, double startZ, boolean startGrounded,
+            double floorY, @NotNull List<VelocityEvent> events, int ticks,
+            @org.jetbrains.annotations.Nullable Input input) {
 
         double x = startX;
         double y = startY;
@@ -50,6 +66,8 @@ final class EraOracle {
         double vy = 0;
         double vz = 0;
         boolean grounded = startGrounded;
+        boolean inputActive = input != null;
+        boolean flewSinceKnock = false;
 
         for (int tick = 0; tick < ticks; tick++) {
             for (VelocityEvent event : events) {
@@ -57,6 +75,18 @@ final class EraOracle {
                     vx = event.vx();
                     vy = event.vy();
                     vz = event.vz();
+                }
+            }
+
+            // Held input integrates before the move, air strength, until the
+            // post-knock flight touches down.
+            if (inputActive) {
+                if (!grounded) {
+                    flewSinceKnock = true;
+                    vx += input.dirX() * input.airAccel();
+                    vz += input.dirZ() * input.airAccel();
+                } else if (flewSinceKnock) {
+                    inputActive = false;
                 }
             }
 

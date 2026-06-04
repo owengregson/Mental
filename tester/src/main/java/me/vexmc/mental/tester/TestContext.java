@@ -16,8 +16,11 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class TestContext {
 
-    private static final long SYNC_TIMEOUT_SECONDS = 30;
-    private static final long TICK_WAIT_TIMEOUT_SECONDS = 60;
+    // Generous: a concurrent matrix can momentarily starve a healthy server
+    // (the host, not the suite, is the bottleneck); genuinely dead servers
+    // are caught by the launcher's hard per-server watchdog.
+    private static final long SYNC_TIMEOUT_SECONDS = 90;
+    private static final long TICK_WAIT_TIMEOUT_SECONDS = 120;
 
     private final Scheduling scheduling;
     private final Logger logger;

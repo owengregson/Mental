@@ -27,6 +27,7 @@ import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import xyz.jpenilla.reflectionremapper.ReflectionRemapper;
 
 /**
@@ -53,6 +54,7 @@ public final class FakePlayer {
     private Player bukkitPlayer;
     private boolean placedViaPlayerList;
     private TaskHandle tickTask;
+    private volatile Runnable preTick;
 
     public FakePlayer(@NotNull JavaPlugin plugin, @NotNull Scheduling scheduling) {
         this.plugin = plugin;
@@ -77,6 +79,16 @@ public final class FakePlayer {
 
     public void attack(@NotNull Entity target) {
         player().attack(target);
+    }
+
+    /**
+     * Runs {@code hook} on the owning thread immediately before each physics
+     * tick — the slot where a real client applies its movement INPUT (the
+     * acceleration happens before the move in every era's integration). The
+     * era suite drives walking/sprinting victims through this.
+     */
+    public void preTick(@Nullable Runnable hook) {
+        this.preTick = hook;
     }
 
     /**
@@ -186,12 +198,28 @@ public final class FakePlayer {
     /*  NMS bootstrap                                                      */
     /* ------------------------------------------------------------------ */
 
+    private static volatile ReflectionRemapper sharedRemapper;
+
+    /**
+     * Parsing the reobf mappings out of the Paper jar costs real time on
+     * spigot-mapped runtimes; one parse serves every fake player in the JVM.
+     */
     private static ReflectionRemapper createRemapper(JavaPlugin plugin) {
-        try {
-            return ReflectionRemapper.forReobfMappingsInPaperJar();
-        } catch (Throwable mojangMappedRuntime) {
-            plugin.getLogger().info("No reobf mappings present — Mojang-mapped runtime, using identity remapper.");
-            return ReflectionRemapper.noop();
+        ReflectionRemapper cached = sharedRemapper;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (FakePlayer.class) {
+            if (sharedRemapper == null) {
+                try {
+                    sharedRemapper = ReflectionRemapper.forReobfMappingsInPaperJar();
+                } catch (Throwable mojangMappedRuntime) {
+                    plugin.getLogger().info(
+                            "No reobf mappings present — Mojang-mapped runtime, using identity remapper.");
+                    sharedRemapper = ReflectionRemapper.noop();
+                }
+            }
+            return sharedRemapper;
         }
     }
 
@@ -522,7 +550,11 @@ public final class FakePlayer {
      * one this bootstrap created.</p>
      */
     private void clearSpawnInvulnerability() {
+        // Through 1.21.1: a plain timer on ServerPlayer.
         setField(serverPlayer, "spawnInvulnerableTime", 0);
+        // 1.21.2 through 1.21.x: client-loaded state on the Player entity.
+        setField(serverPlayer, "clientLoaded", true);
+        setField(serverPlayer, "clientLoadedTimeoutTimer", 0);
         try {
             Field connectionField = Reflect.field(serverPlayer.getClass(),
                     remapper.remapFieldName(serverPlayer.getClass(), "connection"));
@@ -555,6 +587,14 @@ public final class FakePlayer {
     }
 
     private void tickServerPlayer() {
+        Runnable hook = preTick;
+        if (hook != null) {
+            try {
+                hook.run();
+            } catch (Throwable ignored) {
+                // Input emulation is best-effort, like the tick itself.
+            }
+        }
         try {
             Method tick = resolveTickMethod(serverPlayer.getClass());
             if (tick != null) {
