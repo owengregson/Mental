@@ -118,12 +118,22 @@ class MentalConfigTest {
         config.reload(bundled());
         Map<String, KnockbackProfile> profiles = config.knockback().profiles();
 
+        KnockbackProfile legacy17 = profiles.get("legacy-1.7");
+        assertNotNull(legacy17);
+        // The full tracker stamp, NOT the later-joiner decay: vanilla's
+        // tracker wire was connection-order bimodal, and the dominant mode
+        // shipped undecayed (measured on real 1.7.10, both join orders).
+        assertEquals(KnockbackDelivery.TRACKER, legacy17.meleeDelivery());
+        assertEquals(KnockbackDelivery.TRACKER, legacy17.projectileDelivery());
+
         KnockbackProfile legacy18 = profiles.get("legacy-1.8");
         assertNotNull(legacy18);
         assertFalse(legacy18.combos());
         assertEquals(ResistancePolicy.LEGACY, legacy18.resistance());
         assertEquals(KnockbackProfile.LEGACY_17.base(), legacy18.base());
         assertEquals(KnockbackProfile.LEGACY_17.extra(), legacy18.extra());
+        assertEquals(KnockbackDelivery.IMMEDIATE, legacy18.meleeDelivery());
+        assertEquals(KnockbackDelivery.TRACKER, legacy18.projectileDelivery());
 
         KnockbackProfile kohi = profiles.get("kohi");
         assertNotNull(kohi);
@@ -136,6 +146,8 @@ class MentalConfigTest {
 
         KnockbackProfile mmc = profiles.get("mmc");
         assertNotNull(mmc);
+        assertEquals(KnockbackDelivery.IMMEDIATE, mmc.meleeDelivery());
+        assertEquals(KnockbackDelivery.IMMEDIATE, mmc.projectileDelivery());
         assertEquals(VerticalMode.SET, mmc.verticalMode());
         assertEquals(new KnockbackProfile.Push(0.38488, 0.25635), mmc.base());
         assertTrue(mmc.rangeReduction().enabled());
@@ -290,6 +302,8 @@ class MentalConfigTest {
                             horizontal: 0.6
                           limits:
                             horizontal: 1.2
+                          delivery:
+                            melee: tracker-decayed
                           modifiers:
                             sprint: 2
                             combos: false
@@ -305,6 +319,9 @@ class MentalConfigTest {
         assertTrue(tuned.limits().limitsHorizontal());
         assertEquals(2.0, tuned.sprintFactor());
         assertFalse(tuned.combos());
+        // the opt-in later-joiner wire parses; projectile stays the default
+        assertEquals(KnockbackDelivery.TRACKER_DECAYED, tuned.meleeDelivery());
+        assertEquals(KnockbackDelivery.TRACKER, tuned.projectileDelivery());
         assertEquals(ResistancePolicy.SCALING, tuned.resistance());
         assertEquals(ProbeStrategy.KEEPALIVE, config.compensation().probeStrategy());
         assertEquals(10, config.compensation().pingOffsetMillis());

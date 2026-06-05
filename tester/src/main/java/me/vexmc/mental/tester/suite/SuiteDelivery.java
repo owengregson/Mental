@@ -8,8 +8,9 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * Mirrors the pipeline's wire delivery for suite expectations: a
- * TRACKER-delivered vector ships one victim physics tick late (the measured
- * 1.7.10 wire), an IMMEDIATE one ships as computed (1.8.9 melee).
+ * TRACKER_DECAYED vector ships one victim physics tick late (the 1.7.10
+ * later-joiner wire); TRACKER and IMMEDIATE ship as computed (the full
+ * stamp — vanilla's tracker decayed only by connection order).
  */
 final class SuiteDelivery {
 
@@ -27,7 +28,7 @@ final class SuiteDelivery {
 
     private static @Nullable KnockbackVector adjust(
             @Nullable KnockbackVector vector, KnockbackDelivery delivery, boolean grounded) {
-        if (vector == null || delivery != KnockbackDelivery.TRACKER) {
+        if (vector == null || delivery != KnockbackDelivery.TRACKER_DECAYED) {
             return vector;
         }
         VictimMotion.Motion decayed = VictimMotion.decayOnce(

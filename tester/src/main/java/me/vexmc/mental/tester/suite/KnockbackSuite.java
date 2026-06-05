@@ -71,12 +71,16 @@ public final class KnockbackSuite {
                         mental.services().knockbackProfiles().resolve(victim.player());
                 KnockbackVector vector = KnockbackEngine.compute(
                         attackerState, victimState, profile, null);
+                // Spawn placement can emit its own velocity event; clear it
+                // so the next captured event is the knock's, not stale state.
+                captors.reset();
                 attacker.attack(victim.player());
                 return SuiteDelivery.melee(vector, profile, victimState.grounded());
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
 
-            context.awaitTicks(3);
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the knock's velocity event");
 
             Vector applied = captors.velocityOf(victim.uuid());
             context.expect(applied != null,
@@ -86,8 +90,10 @@ public final class KnockbackSuite {
             context.expectNear(expected.y(), applied.getY(), EPSILON, "knockback y");
             context.expectNear(expected.z(), applied.getZ(), EPSILON, "knockback z");
             if (sprinting) {
-                // the measured 1.7.10 wire value for a standing sprint hit
-                context.expectNear(0.3731, applied.getY(), 5.0e-3,
+                // the full-stamp era wire for a standing sprint hit — what
+                // 1.8.9 always shipped and 1.7.10 shipped to victims who
+                // joined before their attacker (measured 0.4607 on both)
+                context.expectNear(0.4608, applied.getY(), 5.0e-3,
                         "sprint hit vertical (era wire value)");
             }
         } finally {
@@ -130,12 +136,15 @@ public final class KnockbackSuite {
                 EntityState victimState = restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()), victimState, profile, null);
+                captors.reset();
                 attacker.attack(victim.player());
                 return SuiteDelivery.melee(vector, profile, victimState.grounded());
             });
             context.expect(first != null, "engine returned no vector for the first hit");
 
             context.awaitTicks(gapTicks);
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the first hit's velocity event");
 
             Vector appliedFirst = captors.velocityOf(victim.uuid());
             context.expect(appliedFirst != null, "first hit produced no velocity event");
@@ -171,7 +180,8 @@ public final class KnockbackSuite {
                 return expected;
             });
 
-            context.awaitTicks(3);
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the second hit's velocity event");
             Vector appliedSecond = captors.velocityOf(victim.uuid());
             context.expect(appliedSecond != null, "second hit produced no velocity event");
 

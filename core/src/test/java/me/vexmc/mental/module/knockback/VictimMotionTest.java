@@ -62,12 +62,15 @@ class VictimMotionTest {
         assertEquals(0.0, motion.vz(), EPSILON);
     }
 
-    // ── the 1.7.10 wire decay (KnockbackDelivery.TRACKER) ────────────────
+    // ── the later-joiner wire (KnockbackDelivery.TRACKER_DECAYED) ────────
 
     @Test
     void trackerDecayMatchesMeasuredGroundedSprintHit() {
-        // vanilla 1.7.10 shipped a standing sprint hit as (0.4914, 0.3731):
-        // the formula (0.9, 0.4608) decayed one GROUND tick before the send
+        // vanilla 1.7.10 shipped a standing sprint hit as (0.4914, 0.3731)
+        // to victims whose connection slot ran between the hit and the
+        // tracker send (joined after their attacker): the formula
+        // (0.9, 0.4608) decayed one GROUND tick. Victims who joined first
+        // received the full stamp — the decay is opt-in, not the default.
         VictimMotion.Motion shipped = VictimMotion.decayOnce(0.9, 0.4608, 0.0, true, GRAVITY);
         assertEquals(0.4914, shipped.vx(), 1.0e-4);
         assertEquals(0.3731, shipped.vy(), 1.0e-4);

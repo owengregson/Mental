@@ -76,18 +76,21 @@ public final class ProfileSuite {
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()),
                         victimState, resolved, null);
+                captors.reset();
                 attacker.attack(victim.player());
                 return SuiteDelivery.melee(vector, resolved, victimState.grounded());
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
             // The kohi base differs from legacy-1.7 — matching it proves the
             // profile actually switched, not just that a knock arrived. The
-            // expectation is the WIRE value: equilibrium baseline + kohi base,
-            // through the tracker delivery decay.
-            context.expectNear((-0.0784 * 0.5 + 0.35 - 0.08) * 0.98, expected.y(), EPSILON,
+            // expectation is the WIRE value: equilibrium baseline + kohi
+            // base, shipped as the full tracker stamp (the decayed wire is
+            // the opt-in tracker-decayed delivery, not kohi's default).
+            context.expectNear(-0.0784 * 0.5 + 0.35, expected.y(), EPSILON,
                     "kohi expectation sanity (wire vertical)");
 
-            context.awaitTicks(3);
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the kohi knock's velocity event");
             Vector applied = captors.velocityOf(victim.uuid());
             context.expect(applied != null, "kohi-profile hit produced no velocity event");
             context.expectNear(expected.x(), applied.getX(), EPSILON, "kohi knockback x");
@@ -131,12 +134,14 @@ public final class ProfileSuite {
                         EntityState.capture(attacker.player()),
                         KnockbackSuite.restingVictim(victim),
                         mental.services().knockbackProfiles().resolve(victim.player()), null);
+                captors.reset();
                 attacker.attack(victim.player());
                 return vector;
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
 
-            context.awaitTicks(3);
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the mmc knock's velocity event");
             Vector applied = captors.velocityOf(victim.uuid());
             context.expect(applied != null, "mmc-profile hit produced no velocity event");
             context.expectNear(expected.x(), applied.getX(), EPSILON, "mmc knockback x");

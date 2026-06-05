@@ -1,8 +1,11 @@
 package me.vexmc.mental.tester;
 
+import org.bukkit.GameRule;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Monster;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -15,14 +18,28 @@ public final class Arena {
     private static final int BASE_X = 100;
     private static final int BASE_Y = 150;
     private static final int BASE_Z = 100;
-    private static final int SIZE = 11;
+    private static final int SIZE = 12;
+    // Flight room along +z for FULL-STAMP knocks: a sprint knock flies
+    // ~4.95 blocks (the 11-block square of the decayed-wire era let victims
+    // sail off the +z edge into a 150-block drop, whose repeated hurt
+    // events polluted the captors). The ACTORS must stay inside the
+    // original chunk (x,z < 112): 1.20.6 does not tick clientless players
+    // in the neighbouring chunk, and an unticked victim never settles onto
+    // the floor — it reads an airborne zero baseline instead of the
+    // grounded −0.0784 equilibrium.
+    private static final int PLATFORM_LENGTH = 21;
     private static final int RUNWAY_LENGTH = 34;
 
     private Arena() {}
 
-    /** Builds (idempotently) and returns the platform centre. Main thread only. */
+    /**
+     * Builds (idempotently) and returns the scenario anchor. Main thread
+     * only. The anchor sits near the low-z end — knocks travel +z — so the
+     * actors share the old single-chunk placement while the floor extends
+     * far enough that full-stamp flights land on stone.
+     */
     public static @NotNull Location prepare(@NotNull World world) {
-        return build(world, SIZE, SIZE, SIZE / 2.0, SIZE / 2.0);
+        return build(world, SIZE, PLATFORM_LENGTH, SIZE / 2.0, 3.5);
     }
 
     /**
@@ -40,6 +57,20 @@ public final class Arena {
     }
 
     private static Location build(World world, int sizeX, int sizeZ, double centreDx, double centreDz) {
+        // The run worlds are normal night-cycling worlds and the platform is
+        // dark spawnable stone: hostile mobs spawn ON it, wander over and
+        // punch test players mid-scenario — a zombie's 2.5 damage and its
+        // full-strength 0.4 knock at an arbitrary bearing read exactly like
+        // phantom velocity events in the captors. Spawning stays off and
+        // anything hostile already nearby is purged each prepare.
+        world.setGameRule(GameRule.DO_MOB_SPAWNING, false);
+        for (Entity entity : world.getEntities()) {
+            if (entity instanceof Monster
+                    && Math.abs(entity.getLocation().getX() - BASE_X) < 64
+                    && Math.abs(entity.getLocation().getZ() - BASE_Z) < 64) {
+                entity.remove();
+            }
+        }
         world.getChunkAt(BASE_X >> 4, BASE_Z >> 4).load();
         world.getChunkAt((BASE_X + sizeX) >> 4, (BASE_Z + sizeZ) >> 4).load();
         for (int x = 0; x < sizeX; x++) {

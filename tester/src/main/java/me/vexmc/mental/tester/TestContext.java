@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import java.util.logging.Logger;
 import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.common.scheduling.TaskHandle;
@@ -68,6 +69,21 @@ public final class TestContext {
             throw new AssertionError("Waited " + TICK_WAIT_TIMEOUT_SECONDS + "s for "
                     + ticks + " ticks — server tick stalled?");
         }
+    }
+
+    /**
+     * Ticks until the condition holds — condition-based waiting where a
+     * fixed sleep would race the matrix: under nine concurrent servers,
+     * event dispatch can lag a fixed 3-tick window and a last-write-wins
+     * captor then reads stale spawn-time state instead of the knock.
+     */
+    public void awaitUntil(@NotNull BooleanSupplier condition, int maxTicks, @NotNull String what)
+            throws InterruptedException {
+        for (int tick = 0; tick < maxTicks && !condition.getAsBoolean(); tick++) {
+            awaitTicks(1);
+        }
+        expect(condition.getAsBoolean(),
+                "timed out after " + maxTicks + " ticks waiting for " + what);
     }
 
     public void expect(boolean condition, @NotNull String message) {

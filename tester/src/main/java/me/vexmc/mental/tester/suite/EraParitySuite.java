@@ -81,26 +81,27 @@ public final class EraParitySuite {
                 new TestCase("era: plain hit lands where the 1.7.10 and 1.8.9 models say", context -> {
                     Outcome legacy17 = melee(mental, tester, context, "legacy-1.7", new MeleeShape());
                     Outcome legacy18 = melee(mental, tester, context, "legacy-1.8", new MeleeShape());
-                    // The math is era-identical but the WIRE was not: 1.7.10
-                    // shipped via the tracker (one decay tick — ground hits
-                    // lose x0.546 horizontal), 1.8.9 melee sent immediately.
-                    // Measured on the real servers: 0.99 vs 1.99 blocks.
-                    context.expectNear(0.99, legacy17.liveDistance(), 0.3,
+                    // The single-hit WIRE is era-identical: 1.8.9 sent in
+                    // attack(), and 1.7.10's tracker shipped the same full
+                    // stamp to any victim who joined before their attacker
+                    // (the wire was join-order bimodal — see era-wire
+                    // measurements addendum 2; the decayed mode is the
+                    // opt-in tracker-decayed delivery). Measured flight on
+                    // the real servers, both eras: ~1.99 blocks.
+                    context.expectNear(1.99, legacy17.liveDistance(), 0.3,
                             "1.7.10 plain-hit distance (measured era value)");
                     context.expectNear(1.99, legacy18.liveDistance(), 0.3,
                             "1.8.9 plain-hit distance (measured era value)");
-                    context.expect(legacy17.liveDistance() < legacy18.liveDistance() * 0.65,
-                            "1.7.10 wire decay must roughly halve the 1.8.9 distance (got "
-                                    + legacy17.liveDistance() + " vs " + legacy18.liveDistance() + ")");
                 }),
                 new TestCase("era: sprint hit lands where both era models say", context -> {
                     Outcome sprint17 = melee(
                             mental, tester, context, "legacy-1.7", new MeleeShape().sprintAttacker());
                     Outcome sprint18 = melee(
                             mental, tester, context, "legacy-1.8", new MeleeShape().sprintAttacker());
-                    // Measured: vanilla 1.7.10 ships (0.491, 0.373) and flies
-                    // ~2.5 blocks; 1.8.9 ships (0.9, 0.461) and flies ~4.95.
-                    context.expectNear(2.54, sprint17.liveDistance(), 0.4,
+                    // Measured: both eras ship (0.9, 0.461) on the full-stamp
+                    // wire and fly ~4.95 blocks (vanilla 1.7.10 confirmed
+                    // with the victim-joined-first staging).
+                    context.expectNear(4.95, sprint17.liveDistance(), 0.4,
                             "1.7.10 sprint-hit distance (measured era value)");
                     context.expectNear(4.95, sprint18.liveDistance(), 0.4,
                             "1.8.9 sprint-hit distance (measured era value)");
@@ -146,11 +147,16 @@ public final class EraParitySuite {
                             new MeleeShape().secondHitAfter(4));
                     Outcome combo18 = melee(mental, tester, context, "legacy-1.8",
                             new MeleeShape().secondHitAfter(4));
-                    // The era discriminator is the WIRE SHAPE, measured on the
-                    // real servers: 1.8.9 restores pre-hit fields, so both
-                    // hits ship the same horizontal (0.9/0.9/0.9 measured);
-                    // 1.7.10 never restores, so the second hit compounds the
-                    // first's residual (0.268 -> 0.510 measured).
+                    // The era discriminator is the WIRE SHAPE: 1.8.9 restores
+                    // pre-hit fields, so both hits ship the same horizontal
+                    // (0.9/0.9/0.9 measured); 1.7.10 never restores, so the
+                    // second hit carries the first's decayed residual through
+                    // the ÷2 friction. How MUCH survives at a 4-tick gap is
+                    // ground-state-phase dependent (0.018-0.08 across the
+                    // version range), so the pin is the ERA GAP itself: the
+                    // 1.7.10 stamps must grow where the 1.8.9 stamps stay
+                    // flat — not a fixed ratio (the old 1.5x was calibrated
+                    // to the artifact decayed wire's small first stamp).
                     double h17first = horizontal(combo17.stamps().get(0).velocity());
                     double h17second = horizontal(combo17.stamps().get(1).velocity());
                     double h18first = horizontal(combo18.stamps().get(0).velocity());
@@ -159,9 +165,10 @@ public final class EraParitySuite {
                             "era-difference[combo] 1.7.10 wire h %.3f -> %.3f (compounds),"
                                     + " 1.8.9 wire h %.3f -> %.3f (flat)",
                             h17first, h17second, h18first, h18second));
-                    context.expect(h17second > h17first * 1.5,
-                            "the 1.7.10 second hit must compound the residual (h "
-                                    + h17first + " -> " + h17second + ")");
+                    context.expect((h17second - h17first) > (h18second - h18first) + 0.01,
+                            "the 1.7.10 second hit must compound the residual where 1.8.9"
+                                    + " ships flat (1.7: h " + h17first + " -> " + h17second
+                                    + ", 1.8: h " + h18first + " -> " + h18second + ")");
                     context.expectNear(h18first, h18second, 0.05,
                             "the 1.8.9 second hit must ship flat (restore semantics)");
                 }),
@@ -670,14 +677,15 @@ public final class EraParitySuite {
                 return;
             }
             Vector packet = event.getVelocity().clone();
-            stamps.add(new Stamp(Bukkit.getCurrentTick(), packet));
+            int stampTick = Bukkit.getCurrentTick();
+            stamps.add(new Stamp(stampTick, packet));
             // Nothing the server computed mid-tick may leak into the
             // trajectory; the packet is the only truth a client sees.
             // Horizontal only — zeroing motY un-grounds a standing victim
             // (onGround refreshes only while moving down) and would flip
             // the launch tick to air friction.
             victim.setMotion(0, event.getPlayer().getVelocity().getY(), 0);
-            scheduling.runOn(event.getPlayer(), () -> applyIfLost(packet), () -> {});
+            scheduling.runOn(event.getPlayer(), () -> applyIfLost(packet, stampTick), () -> {});
         }
 
         /** Stamps motion applied directly (walk/jump setup) — no event fires for it. */
@@ -698,9 +706,15 @@ public final class EraParitySuite {
          * vector (raw, or decayed one tick in air or on ground — the
          * persisted-motion paths, whichever task order ran first), leave it.
          * Anything else means the server restored or replaced it, and the
-         * client's application wins.
+         * client's application wins. Under matrix load the scheduled check
+         * can run several ticks late, when the motion has LEGITIMATELY
+         * decayed past one step — re-stamping the launch packet then would
+         * inflate the trajectory, so a late check is a no-op instead.
          */
-        private void applyIfLost(Vector packet) {
+        private void applyIfLost(Vector packet, int stampTick) {
+            if (Bukkit.getCurrentTick() - stampTick > 2) {
+                return;
+            }
             Vector current = victim.player().getVelocity();
             if (matches(current, packet)
                     || matches(current, decayed(packet, 0.91))
