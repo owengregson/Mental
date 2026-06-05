@@ -61,6 +61,21 @@ description: Use when writing or debugging integration suites in tester/ — Fak
   discriminator (fires only for Mental-owned knocks).
 - Fresh players per scenario (the residual ledger contaminates across hits);
   always remove players and unregister listeners in `finally`.
+- **Captors are last-write-wins; spawn placement emits its own velocity
+  event.** `captors.reset()` immediately before the staged attack, then
+  `context.awaitUntil(velocityOf != null)` — a fixed `awaitTicks(3)` races
+  matrix load and reads the stale spawn-window event (a float-cast
+  −0.0784 equilibrium vector is the signature).
+- **Arena actors must stay inside the original chunk (x,z < 112)**: 1.20.6
+  does not tick clientless players in the neighbouring chunk — an unticked
+  victim never settles onto the floor and reads an airborne ZERO baseline
+  (vy 0.5 sprint / 0.35 kohi instead of the 0.4608/0.3108 equilibrium
+  values). Extend the platform only along the knock direction.
+- **The matrix run worlds spawn hostile mobs** on a dark stone platform; a
+  zombie's 2.5 damage and full-strength 0.4 knock at an arbitrary bearing
+  read exactly like phantom velocity events / doubled flights. Arena forces
+  `doMobSpawning false` and purges nearby Monsters every prepare — keep it
+  that way.
 
 ## Wire-level verification (legacy-lab)
 

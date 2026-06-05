@@ -75,6 +75,15 @@ knockback:
     factor: 0.025           # Melee only — rods and projectiles never taper.
     offset: 1.2
     max-reduction: 0.12
+  delivery:                 # the wire half of era accuracy. tracker ships
+    melee: tracker          # the full stamp (vanilla's 1.7.10 tracker wire
+    projectile: tracker     # was CONNECTION-ORDER bimodal — measured both
+                            # orders on real vanilla — and the dominant mode
+                            # shipped undecayed, identical to 1.8.9);
+                            # tracker-decayed opts into the later-joiner
+                            # wire (one victim physics tick of decay, ground
+                            # hits lose ×0.546 horizontal); immediate = the
+                            # 1.8.9 in-attack send
   modifiers:
     sprint: 1.0             # bonus levels granted by sprinting
     combos: true            # 1.7.10 ledger stacking; false = 1.8.9 flat

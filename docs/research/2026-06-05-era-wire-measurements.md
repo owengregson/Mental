@@ -155,3 +155,123 @@ the community remembers as comboable ran on modified spigots (Kohi, MCSG,
 eSports forks) with roughly 1.8-strength horizontal. Servers wanting
 combo-friendly trades should run `legacy-1.8` (the full 1.8.9 wire,
 era-verified) or `kohi`; `legacy-1.7` is the vanilla-1.7.10 museum piece.
+
+---
+
+## Addendum 2 (2026-06-05, third pass): the tracker decay is JOIN-ORDER
+## BIMODAL — every claim above that reads "1.7.10 ships every knock
+## tracker-decayed" is half the truth
+
+A live report ("legacy presets barely knock back — players in 1.8 did not
+end up 1 block away") forced a re-audit of the campaign itself. The original
+runs only ever staged ONE connection order — `measure.js` hard-connected the
+attacker first, the victim second — and that order turns out to select which
+of two wires vanilla 1.7.10 ships.
+
+### The mechanism (decompiled: `MinecraftServer.v()`, `nc.c()`, `ej.a()`, `nh.a(jd)`, `mw.h()/i()`)
+
+Per 1.7.10 tick: the `"levels"` phase ticks worlds and then the per-world
+entity **tracker** (`mt2.r().a()`) — which ships any pending
+`velocityChanged` motion — and only THEN the `"connection"` phase
+(`nc.c()`) iterates connections **in join order**, each slot draining that
+connection's queued packets and then running that player's physics
+(`nh.a(jd)` → `mw.i()` → `super.h()`; the world-phase `mw.h()` is gutted).
+So after an attack stamps the victim's fields:
+
+- **victim's slot AFTER the attacker's** (victim joined later): the victim's
+  physics runs in the same connection phase, decaying the stamp once —
+  next tick's tracker ships the DECAYED wire.
+- **victim's slot BEFORE the attacker's** (victim joined first): the
+  victim's physics for that tick already ran pre-hit; the tracker ships the
+  stamp **UNDECAYED** — byte-identical to the 1.8.9 wire.
+
+### Measured (real vanilla, `JOIN=victim-first` vs default; 3/3 deterministic reps each)
+
+| scenario, 1.7.10 | victim joined AFTER attacker | victim joined BEFORE attacker |
+| --- | --- | --- |
+| standing | `(0.2184, 0.2751)` → 0.994 blocks | `(0.4000, 0.3608)` → 1.994 blocks |
+| sprint | `(0.4914, 0.3731)` → 2.54 blocks | `(0.9000, 0.4607)` → ~4.9 blocks |
+
+1.8.9 control: `(0.4, 0.3608)` / `(0.9, 0.4607)` in BOTH orders — the
+in-attack send bypasses the tracker entirely, which is exactly why 1.8.9
+knockback was remembered as *consistent* and 1.7.10's as erratic (the era's
+"relog for less knockback" folklore is literally this: relogging appends
+you to the connection list, putting your physics slot after your
+attacker's).
+
+### What this changes
+
+- "1.7.10 really did hit at roughly half of 1.8.9" (above) is true only for
+  victims who joined after their attacker — a per-pairing coin flip on a
+  real server. The dominant remembered experience, and the only consistent
+  era wire, is the FULL stamp.
+- `KnockbackDelivery.TRACKER` therefore ships the full stamp as of 1.5.0;
+  the decayed wire is preserved as the opt-in `tracker-decayed` (the
+  later-joiner mode). Determinism is the product — Mental does not
+  replicate the coin flip.
+- The 1.4.0-era suite pins to `(0.4914, 0.3731)` et al. were pins to the
+  artifact mode and have been re-pinned to the full stamp.
+- Combo compounding (the no-restore ledger residual) exists in BOTH join
+  orders and survives unchanged; it remains the genuinely-1.7 mechanic.
+
+Re-run either mode:
+
+```bash
+node measure.js 1.7 25710 standing                     # attacker-first (decayed wire)
+JOIN=victim-first node measure.js 1.7 25710 standing   # victim-first (full wire)
+```
+
+---
+
+## Addendum 3 (2026-06-05, fourth pass): the five canon 1.8 scenarios, and
+## three fast-path era bugs they flushed out
+
+Owner-supplied canon distances for vanilla 1.8 (sources + own demo testing)
+validated against the REAL 1.8.9 jar and Mental `legacy-1.8` on Paper
+1.21.11, with the harness's new `double-*` scenarios (second hit at gap 10,
+"right as invuln ends", attacker chasing) and touchdown/settle reporting:
+
+| scenario | canon | real 1.8.9 (touchdown / settle) | Mental legacy-1.8 |
+| --- | --- | --- | --- |
+| plain single | ≈1.5 | 1.788 / 1.994 | 1.994 (wire-identical) |
+| sprint single | ≈4.4 | 4.599 / 4.948 | 4.948 (wire-identical) |
+| plain double | ≈3.4 | 3.473 / 3.699 | 3.782 (landing-tick straddle) |
+| sprint double, no w-tap | ≈7.4 | 6.893 / 7.205 | 7.153 |
+| sprint double, w-tap | ≈11.6 | 10.689 / 11.648 | 11.881 |
+
+The canon numbers sit inside the touchdown↔settle envelope everywhere —
+"lands about X blocks away" eyeballs the touchdown, the settle adds the
+ground slide. Three Mental defects surfaced on the way to that table:
+
+1. **The fast path never cleared the attacker's sprint flag.**
+   `Player.attack` ends every sprint-bonus hit with `setSprinting(false)` —
+   the server half of the w-tap mechanic — and the fast path cancels
+   `Player.attack`. Before the fix, no-w-tap and w-tap doubles measured
+   IDENTICALLY (both 10.09); real 1.8.9 separates them by 4.4 blocks.
+   `KnockbackModule` now clears the flag after every accepted melee hit
+   from a sprinting player (owning thread, after every flag read).
+2. **The deferred damage read the sprint flag after the client's own
+   post-attack drop.** A faithful client sends STOP_SPRINTING in the same
+   flush as the attack; vanilla read the flag INSIDE `Player.attack`,
+   ahead of that packet — Mental's owning-thread damage ran after the
+   inbound queue and lost the race, so perfectly-timed (invuln-boundary)
+   sprint hits shipped plain. The fast path now stamps the tick-frozen
+   snapshot's sprint state at registration (`SprintTracker.stampAttackSprint`)
+   and the authoritative pass consumes it.
+3. **The ground watcher judged knock liftoffs `rising=false`.** Modern
+   servers flip a knocked player's own onGround flag on the hit tick,
+   before the client's first airborne movement packet arrives (the era
+   flag was packet-driven only); the per-tick sampler saw
+   flag-flipped-but-unmoved and anchored the ledger at the equilibrium
+   instead of stamping the 0.42 jump impulse — combo second hits shipped
+   vy ~0.07 where real 1.8.9 ships 0.2846. The watcher now defers the
+   transition until the client's position actually moves, reconstructing
+   the exact packet pair the era jump bookkeeping evaluated.
+
+Lab-hygiene findings with debugging-round costs: the matrix run worlds
+spawn hostile mobs on the dark arena platform (a zombie's 2.5 damage and
+full-strength 0.4 knock at an arbitrary bearing read as phantom velocity
+events — Arena now forces `doMobSpawning false` and purges nearby
+monsters), and 1.20.6 does not tick clientless players outside the arena's
+original chunk (actors stay below x,z 112; the platform extends only along
+the knock direction).

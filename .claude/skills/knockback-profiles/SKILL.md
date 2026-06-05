@@ -52,16 +52,21 @@ description: Use when changing the knockback engine, profile schema, presets, or
    Cite in the preset header. Research base:
    docs/research/2026-06-04-improved-knockback.md.
 
-## The delivery knobs (1.4.0)
+## The delivery knobs (1.4.0; semantics corrected 1.5.0)
 
-`delivery.melee` / `delivery.projectile`: `tracker` ships the vector one
-victim-physics-tick decayed (the measured 1.7.10 wire; rod/projectile rode
-the tracker on BOTH eras) — friction from the victim's ground state AT THE
-HIT (captured at submit; the velocity event fires after fake players have
-already physics-ticked airborne). `immediate` is the 1.8.9 melee in-attack
-send. LEGACY_17 (and parse-empty) = tracker/tracker; legacy-1.8 =
-immediate/tracker; mmc = immediate/immediate. ConfigStore patches the
-missing block into pre-1.4.0 bundled preset files (never custom.yml).
-With pre-send on, the netty path decays and ships; the authoritative pass
-ADOPTS that vector and the duplicate outbound packet is suppressed — one
-wire stamp per knock, like the era.
+`delivery.melee` / `delivery.projectile`: `tracker` and `immediate` BOTH
+ship the full stamp — vanilla 1.7.10's tracker wire was join-order bimodal
+(era-wire-measurements addendum 2) and the dominant mode shipped undecayed,
+identical to 1.8.9's in-attack send; the names document provenance, not a
+behavioral difference. `tracker-decayed` is the opt-in later-joiner wire:
+one victim-physics-tick decay, friction from the victim's ground state AT
+THE HIT (captured at submit; the velocity event fires after fake players
+have already physics-ticked airborne). Never ship the decayed wire by
+default — that artifact survived a release as "era truth" and read as
+broken knockback (~1-block standing flights). LEGACY_17 (and parse-empty)
+= tracker/tracker; legacy-1.8 = immediate/tracker; mmc =
+immediate/immediate. ConfigStore patches the missing block into pre-1.4.0
+bundled preset files (never custom.yml). With pre-send on, the netty path
+applies the profile's delivery and ships; the authoritative pass ADOPTS
+that vector and the duplicate outbound packet is suppressed — one wire
+stamp per knock, like the era.

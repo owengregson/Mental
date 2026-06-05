@@ -9,12 +9,20 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
 
 - 1.7.10 and 1.8.9 knockback MATH is byte-identical; the era differences are
   DELIVERY, measured on the real servers
-  (docs/research/2026-06-05-era-wire-measurements.md): 1.7.10 ships every
-  knock tracker-decayed one tick (ground hits lose ×0.546 horizontal) and
-  never restores (combos compound); 1.8.9 melee sends in attack() then
-  restores (flat). Measured flights: 1.8.9 plain ≈ 1.99 / sprint ≈ 4.95;
-  1.7.10 plain ≈ 0.99 / sprint ≈ 2.54 — "1.7 ≈ half of 1.8" IS the wire
-  decay. Era combo verticals DECLINE (the jump stamp free-falls: 1.8.9
+  (docs/research/2026-06-05-era-wire-measurements.md, esp. ADDENDUM 2):
+  1.7.10's tracker wire was **JOIN-ORDER BIMODAL** — a victim who joined
+  before their attacker received the FULL stamp (identical to 1.8.9:
+  standing (0.4, 0.3608) ≈ 1.99 blocks, sprint (0.9, 0.4607) ≈ 4.95), a
+  victim who joined after got one decay tick less (standing (0.2184,
+  0.2751) ≈ 0.99 blocks, sprint (0.4914, 0.3731) ≈ 2.54 — and "relog for
+  less KB" folklore). 1.7.10 never restores → combos compound in BOTH
+  orders; 1.8.9 melee sends in attack() then restores (flat, order-
+  independent — why 1.8 KB is remembered as consistent). Mental's
+  `tracker` ships the full stamp; `tracker-decayed` is the opt-in
+  later-joiner wire. A "players only move ~1 block" report means the
+  decayed wire is shipping — that is a misconfiguration or a bug, NOT
+  era truth (this verdict was reversed once already; see addendum 2).
+  Era combo verticals DECLINE (the jump stamp free-falls: 1.8.9
   combo hit two ships vy 0.3478); victims stayed LOW in era combos.
   Standing-hit vertical is 0.3608 (equilibrium baseline), never 0.4.
 - Legacy damage: sharpness 1.25/level, crit-before-enchant with no sprint
@@ -56,18 +64,20 @@ live netty path (the suites never traverse HitPacketListener — FakePlayers
 attack server-side). A claim of era accuracy without a pin in one of these
 is not yet a claim.
 
-## Era trade feel (measured 2026-06-05 — set expectations BEFORE "fixing")
+## Era trade feel (measured 2026-06-05; corrected same day, addendum 2)
 
-- Vanilla 1.7.10 sprint wire is HALF of 1.8.9: (0.4914, 0.3731) vs
-  (0.9, 0.4607). Mental's live path matches both to 4 decimals
-  (legacy-1.7 / legacy-1.8 presets). "Weak trade knockback" reports on
-  legacy-1.7 describe vanilla 1.7.10 itself, not a delivery bug.
+- The consistent era wire is the FULL stamp: standing (0.4, 0.3608),
+  sprint (0.9, 0.4607) — 1.8.9 always, and 1.7.10 whenever the victim
+  joined first. The HALF wire ((0.4914, 0.3731) sprint) was 1.7.10's
+  later-joiner mode only; shipping it universally was a measurement
+  artifact (the lab's fixed connect order) that survived one full release
+  and one "working as intended" verdict. As of 1.5.0 every preset ships
+  the full stamp; `tracker-decayed` opts back into the half wire.
 - The trade-opener opposition: base 0.4 pushes away from the ATTACKER'S
   POSITION, sprint extra 0.5 along the ATTACKER'S YAW. A victim past the
   attacker (face-hug) gets ~0.05 h — era-real, identical on actual 1.7.10.
-- The community's "comboable 1.7" memory is modified-spigot feel (Kohi,
-  MCSG: ~1.8-strength horizontal). Combo-friendly servers want legacy-1.8
-  (era-verified 1.8.9 wire) or kohi (flat 0.42 h, low vy, no compounding);
-  legacy-1.7 is the vanilla museum piece.
+- The community's "comboable 1.7" memory: Kohi/MCSG forks AND vanilla's
+  own full-stamp mode. legacy-1.7 (full stamp + ledger combos) now matches
+  it; legacy-1.8 is the flat 1.8.9 wire; kohi is the fork feel.
 - Modern vanilla reference (Paper 1.21.11 bare): standing (0.4, 0.3608),
   sprint (0.7, 0.4) — what players are calibrated to with Mental off.

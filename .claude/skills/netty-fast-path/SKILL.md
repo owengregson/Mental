@@ -54,6 +54,28 @@ everyone who tried it. Pipeline walk-through: docs/fast-path.md.
   inside PE — wrap sends whose target may be reconfiguring in catch-all and
   drop (a missed probe/feedback beats a pipeline exception).
 
+## The vanilla-attack obligations the cancelled packet leaves behind
+
+Cancelling ATTACK means `Player.attack` never runs — anything era-relevant
+it did server-side must be re-implemented or it silently vanishes:
+
+- **Sprint-flag clear**: vanilla ends every sprint-bonus hit with
+  `setSprinting(false)` (the server half of w-tap). `KnockbackModule`
+  clears it after each accepted melee hit from a sprinting player — without
+  it, no-w-tap seconds keep the sprint extra forever (measured: no-w-tap
+  and w-tap doubles both flew 10.09 blocks; real 1.8.9 separates them
+  7.2 vs 11.4).
+- **Attack-time sprint truth**: a faithful client sends STOP_SPRINTING in
+  the same flush as its attack; vanilla read the flag INSIDE
+  `Player.attack`, ahead of that packet, while the owning-thread damage
+  runs after the inbound queue. The listener stamps the tick-frozen
+  snapshot's sprint state at registration
+  (`SprintTracker.stampAttackSprint`); the authoritative pass consumes it
+  (`takeAttackSprint`) instead of a live read. Without the stamp,
+  invuln-boundary (perfect-timing) sprint hits ship plain.
+- Deliberate omissions stay deliberate: sweep, durability, statistics,
+  hunger (1.7.10 target feel).
+
 ## Reach validation (P5, default OFF)
 
 Ping-rewound sanity gate, ClubSpigot-lite: 40-sample/tick position ring per

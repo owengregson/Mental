@@ -13,6 +13,14 @@
  *   sprint        one sprint hit on a standing victim
  *   combo         sprint + w-tap hits every gapTicks (victim passive flight)
  *   charge-combo  combo while the victim holds sprint-input toward attacker
+ *   double-plain         two non-sprint hits, the second at gapTicks (default
+ *                        10 — "right as invuln ends"), attacker chases
+ *   double-sprint-nowtap sprint hit 1; NO sprint re-arm (the server consumed
+ *                        the flag and a W-holding client never resends it),
+ *                        so hit 2 lands plain — the no-w-tap reality
+ *   double-sprint-wtap   sprint hit 1, stop+start sprint (w-tap), sprint hit 2
+ * The victim reports TOUCHDOWN points (first ground contact after a knock)
+ * and the SETTLE point, both as distances from its staged start.
  */
 // nmp's lpVec3 reader byte-swaps the middle word (reads LE; Mojang writes the
 // 32-bit half big-endian — verified against net.minecraft.network.LpVec3
@@ -67,6 +75,7 @@ function mkBot(username, opts = {}) {
     physics: false,          // integrate velocity packets + gravity
     input: null,             // {dirFn, sprint} held movement keys
     velocityLog: [],         // {tick, vx, vy, vz}
+    touchdowns: [],          // {tick, x, z} first ground contact per flight
     tick: 0,
     spawned: false,
     _interval: null,
@@ -153,6 +162,7 @@ function mkBot(username, opts = {}) {
   bot.stop = () => { clearInterval(bot._interval); client.end(); };
 
   bot.setSprint = (on) => {
+    bot.sprinting = on;
     if (MODERN) {
       // 1.21.6+ compacted the entity_action enum (sneak moved into
       // player_input): start_sprinting=1, stop_sprinting=2. The old numeric
@@ -186,6 +196,19 @@ function mkBot(username, opts = {}) {
     if (IS_17) client.write('arm_animation', { entityId: bot.id, animation: 1 });
     else if (!MODERN) client.write('arm_animation', {});
     else client.write('arm_animation', { hand: 0 });
+    // A real client mirrors the attack's sprint drop locally and its state
+    // sync sends STOP_SPRINTING next tick — without it, a fast-path server
+    // (which cancels Player.attack, the vanilla flag-clear site) would see
+    // the bot sprint forever. CLIENT_SPRINT_DROP=0 disables the mirror to
+    // probe exactly that server-side behavior.
+    if (bot.sprinting && process.env.CLIENT_SPRINT_DROP !== '0') {
+      bot.sprinting = false;
+      if (MODERN) {
+        client.write('entity_action', { entityId: bot.id, actionId: 'stop_sprinting', jumpBoost: 0 });
+      } else {
+        client.write('entity_action', { entityId: bot.id, actionId: SPRINT_STOP, jumpBoost: 0 });
+      }
+    }
   };
   bot.teleportStep = (x, z) => { bot.pos.x = x; bot.pos.z = z; };
 
@@ -235,6 +258,11 @@ function stepPhysics(bot) {
   let landed = false;
   if (ny <= bot.groundY && bot.vel.y <= 0) { ny = bot.groundY; landed = true; }
   bot.pos = { x: nx, y: ny, z: nz };
+  if (landed && !wasGround && bot.velocityLog.length > 0) {
+    // the first ground contact after a knock — what "they landed there"
+    // reads as to an observer, before the ground slide finishes
+    bot.touchdowns.push({ tick: bot.tick, x: nx, z: nz });
+  }
   if (landed) bot.vel.y = 0;          // vertical collision zeroes motY before drag
   bot.onGround = landed;
   // gravity + drag; horizontal drag from the PRE-move ground state
@@ -255,15 +283,28 @@ const until = async (cond, timeoutMs, what) => {
 
 async function main() {
   const stamp = Date.now() % 100000;
-  const attacker = mkBot(`atk${stamp}`);
-  await until(() => attacker.spawned && attacker.id !== null, 15000, 'attacker spawn');
-  attacker.start();
-  await sleepTicks(10);
-
-  const victim = mkBot(`vic${stamp}`);
-  await until(() => victim.spawned && victim.id !== null, 15000, 'victim spawn');
-  victim.start();
-  await sleepTicks(10);
+  // JOIN=victim-first flips CONNECTION order only (roles unchanged). On
+  // 1.7.10 the network phase iterates connections in join order and player
+  // physics rides the player's own position-packet slot, so whether the
+  // victim's physics tick lands between the hit and the tracker send — i.e.
+  // whether the wire ships decayed — may depend on exactly this order.
+  const VICTIM_FIRST = process.env.JOIN === 'victim-first';
+  const spawnBot = async (name, what) => {
+    const bot = mkBot(name);
+    await until(() => bot.spawned && bot.id !== null, 15000, what + ' spawn');
+    bot.start();
+    await sleepTicks(10);
+    return bot;
+  };
+  let attacker, victim;
+  if (VICTIM_FIRST) {
+    victim = await spawnBot(`vic${stamp}`, 'victim');
+    attacker = await spawnBot(`atk${stamp}`, 'attacker');
+  } else {
+    attacker = await spawnBot(`atk${stamp}`, 'attacker');
+    victim = await spawnBot(`vic${stamp}`, 'victim');
+  }
+  log(`# join order: ${VICTIM_FIRST ? 'victim-first' : 'attacker-first'}`);
 
   // Place: attacker at his spawn spot; victim 3 blocks +Z from him.
   const ax = attacker.pos.x, az = attacker.pos.z;
@@ -288,15 +329,18 @@ async function main() {
   victim.physics = true;                            // from here the victim is a real client
   victim.tick = 0;
 
-  const chase = () => {
+  const chase = (cap = 0.28) => {
     // keep the attacker within reach: walk straight toward the victim's
-    // current spot, capped at sprint speed per tick, stop 2.5 blocks short
+    // current spot, capped at sprint speed per tick (the double scenarios
+    // pass a higher cap — a sprint-knocked victim outruns 0.28/tick from
+    // 3 blocks behind, and the staging only needs the attacker BEHIND the
+    // victim and in server reach at the hit), stop 2.5 blocks short
     const dx = victim.pos.x - attacker.pos.x;
     const dz = victim.pos.z - attacker.pos.z;
     const d = Math.hypot(dx, dz);
     const want = d - 2.5;
     if (want > 0.01) {
-      const step = Math.min(0.28, want);
+      const step = Math.min(cap, want);
       attacker.pos.x += (dx / d) * step;
       attacker.pos.z += (dz / d) * step;
     }
@@ -305,6 +349,33 @@ async function main() {
   if (SCENARIO === 'standing') {
     attacker.attack(targetId);
     await sleepTicks(30);
+  } else if (SCENARIO.startsWith('double')) {
+    // The canon two-hit cases: second hit thrown "right as the invuln
+    // window ends" (gap defaults to 10 ticks), the attacker chasing to
+    // stay in reach exactly like a real player following a knock.
+    const sprintFirst = SCENARIO !== 'double-plain';
+    const wtap = SCENARIO === 'double-sprint-wtap';
+    if (sprintFirst) {
+      attacker.setSprint(true);
+      await sleepTicks(2);
+      for (let i = 0; i < 4; i++) { attacker.pos.z += 0.28; await sleepTicks(1); }
+    }
+    attacker.attack(targetId);
+    log(`# hit 1 thrown at victim tick ${victim.tick}`);
+    for (let t = 0; t < GAP; t++) {
+      // A real player w-taps DURING the chase; modern servers only sustain
+      // a sprint toggle backed by movement impulse (1.8.9 is pure flag),
+      // so the re-arm happens mid-stride, a few ticks before hit 2.
+      if (wtap && t === GAP - 4) {
+        attacker.setSprint(false);
+        attacker.setSprint(true);
+      }
+      chase(0.5);
+      await sleepTicks(1);
+    }
+    attacker.attack(targetId);
+    log(`# hit 2 thrown at victim tick ${victim.tick}, dist=${Math.hypot(victim.pos.x - attacker.pos.x, victim.pos.z - attacker.pos.z).toFixed(2)}`);
+    await sleepTicks(45);
   } else if (SCENARIO === 'sprint') {
     attacker.setSprint(true);
     await sleepTicks(2);
@@ -352,9 +423,15 @@ async function main() {
     throw new Error('unknown scenario ' + SCENARIO);
   }
 
-  // Trajectory summary
-  const start = { x: attacker.pos.x, z: az + 3.0 };
+  // Trajectory summary — distances from the victim's staged start, both
+  // the touchdown points (first ground contact per flight: what an
+  // observer eyeballs as "they landed there") and the settled endpoint.
+  const startX = ax, startZ = az + 3.0;
+  const dist = (x, z) => Math.hypot(x - startX, z - startZ);
   log(`# victim final (${victim.pos.x.toFixed(3)}, ${victim.pos.y.toFixed(3)}, ${victim.pos.z.toFixed(3)})`);
+  log(`# settle distance from start: ${dist(victim.pos.x, victim.pos.z).toFixed(3)} blocks`);
+  victim.touchdowns.forEach((t, i) =>
+    log(`#   touchdown${i + 1} t=${t.tick} at ${dist(t.x, t.z).toFixed(3)} blocks`));
   log(`# velocity packets received by victim: ${victim.velocityLog.length}`);
   victim.velocityLog.forEach((v, i) =>
     log(`#   hit${i + 1} t=${v.tick} (${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`));

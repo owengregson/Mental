@@ -39,11 +39,20 @@ description: Use when reasoning about knockback, velocity, trajectories, player 
   still true today). The CLIENT integrates the trajectory. Server-side motion
   of a player victim after a melee hit is NOT the trajectory.
 - **Knockback math never changed; the WIRE did** (measured on real vanilla:
-  docs/research/2026-06-05-era-wire-measurements.md). 1.7.10 shipped every
-  knock via the end-of-tick tracker — one decay tick late (ground hits lose
-  ×0.546 horizontal!); 1.8.9 melee sent inside attack() then RESTORED the
-  pre-hit fields. 1.7.10 never restored → combos compounded. Rod/projectile
-  rode the tracker on BOTH eras. `KnockbackDelivery` models this per profile.
+  docs/research/2026-06-05-era-wire-measurements.md). 1.7.10 shipped knocks
+  via the next tick's tracker, and the wire was **JOIN-ORDER BIMODAL**
+  (addendum 2, measured both orders): the tracker runs BEFORE the
+  per-connection phase, whose slots run in join order with each player's
+  physics fused to their own slot — a victim who joined BEFORE their
+  attacker received the FULL stamp (identical to 1.8.9), a victim who
+  joined AFTER got it one decay tick late (ground hits lose ×0.546
+  horizontal — the era's "relog for less KB" folklore). 1.8.9 melee sent
+  inside attack() then RESTORED the pre-hit fields — order-independent,
+  hence "consistent" in era memory. 1.7.10 never restored → combos
+  compounded (both orders). Rod/projectile rode the tracker on BOTH eras.
+  `KnockbackDelivery` models this per profile: `tracker` ships the full
+  stamp (the dominant mode); `tracker-decayed` opts into the later-joiner
+  wire; never both — determinism is the product.
 - **The era vy baseline is a state machine, not the delivered knock**:
   servers ticked player physics input-free, so standing victims park at the
   −0.0784 equilibrium (standing-hit vertical = 0.3608, NOT 0.4), and the
@@ -53,9 +62,11 @@ description: Use when reasoning about knockback, velocity, trajectories, player 
   0.42 nine gravity steps later, measured to four decimals). VictimMotion +
   GroundTransitionWatcher replicate exactly this; era combo verticals
   DECLINE, which is why combo victims stayed low.
-- Reference flights (flat ground, measured): 1.8.9 plain ≈ 1.99 blocks,
-  sprint ≈ 4.95; 1.7.10 plain ≈ 0.99, sprint ≈ 2.54 — "1.7 hits half of
-  1.8" is literally the wire decay. Jump impulse alone rises ≈ 1.25.
+- Reference flights (flat ground, measured): full stamp plain ≈ 1.99
+  blocks, sprint ≈ 4.95 (1.8.9 always; 1.7.10 victim-joined-first);
+  decayed wire plain ≈ 0.99, sprint ≈ 2.54 (1.7.10 victim-joined-after
+  only — an artifact-prone half; a "players move ~1 block" report means
+  the decayed wire is shipping). Jump impulse alone rises ≈ 1.25.
 - Mental's `friction` knobs are SURVIVING-FRACTION multipliers (vanilla ÷2 ≡
   0.5, the NachoSpigot convention). Forks publishing divisors (Panda/Sport/
   Wind, typically 2.0) port as 1/d — pasting a divisor unchanged inverts the
