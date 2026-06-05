@@ -61,3 +61,14 @@ description: Use when writing or debugging integration suites in tester/ — Fak
   discriminator (fires only for Mental-owned knocks).
 - Fresh players per scenario (the residual ledger contaminates across hits);
   always remove players and unregister listeners in `finally`.
+
+## Wire-level verification (legacy-lab)
+
+The suites verify EVENT-level behavior; fake players cannot verify the
+WIRE (voided outbound, no PE injection). Packet-level claims — single-stamp
+suppression, pre-send bundles, actual shipped values, hint behavior at real
+ping — are verified with `legacy-lab/harness/measure.js`: protocol fake
+clients against a real local server (vanilla 1.7.10/1.8.9 for era ground
+truth, Paper+Mental for acceptance), with injectable ping via delayed pong
+responses. See docs/research/2026-06-05-era-wire-measurements.md for the
+measured era values and the harness's protocol traps.
