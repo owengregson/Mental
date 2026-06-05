@@ -30,6 +30,12 @@ description: Use when writing or debugging integration suites in tester/ — Fak
   melee knockback (send-then-restore) never moves them. Trajectory tests must
   client-emulate: apply each velocity packet to the entity exactly once
   (`setMotion`, no events), skipping persisted-motion paths (decay-matching).
+- Fake players also join **directly in Play state** — they never emit the
+  handshake/login/configuration traffic a real client does, so packet
+  listeners that misbehave pre-Play (e.g. downcasting `getPacketType()` to a
+  Play type) pass every suite and explode on real joins. Pin that contract in
+  UNIT tests against synthetic events (see `ProbeListenerStateTest`), not in
+  the live matrix.
 - After `attack()`, clear the victim's HORIZONTAL motion only — the restore
   would leak one tick of pre-knock motion; zeroing motY un-grounds them
   (see legacy-motion-physics).

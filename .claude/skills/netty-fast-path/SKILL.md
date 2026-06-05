@@ -40,6 +40,19 @@ everyone who tried it. Pipeline walk-through: docs/fast-path.md.
   terminated after they unregister.
 - `getUser(player)` is null for synthetic/disconnecting players — guard and
   skip; never assume a live connection.
+- **Listeners fire for EVERY connection state** (handshaking, status, login,
+  configuration, play). NEVER downcast `event.getPacketType()` to
+  `PacketType.Play.*` — a real client's join traffic throws CCE per packet
+  (shipped in 1.3.0; integration suites can't catch it because FakePlayers
+  inject in Play state). Compare by REFERENCE against specific constants:
+  Configuration has its own KEEP_ALIVE/PONG which must not match the Play
+  guard — cancelling one times the client out mid-(re)configuration.
+  Regression pin: `ProbeListenerStateTest` (stub `PacketEvents.setAPI` +
+  `NettyManagerImpl` + netty on the test classpath make events constructible
+  in plain unit tests).
+- Sending a Play wrapper to a player mid-(re)configuration (1.20.2+) throws
+  inside PE — wrap sends whose target may be reconfiguring in catch-all and
+  drop (a missed probe/feedback beats a pipeline exception).
 
 ## Reach validation (P5, default OFF)
 
