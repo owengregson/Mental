@@ -94,14 +94,18 @@ knockback:
   # ── delivery ─────────────────────────────────────────────────────────
   # WHEN the victim's client receives the knock relative to their physics
   # tick — the wire half of era accuracy, independent of the math above.
-  #   tracker    the 1.7.10 wire: the velocity packet left with the
-  #              end-of-tick entity tracker, AFTER the victim's connection
-  #              tick had decayed the just-written fields once. Ground hits
-  #              lose a full ground-friction step (x0.546 horizontal!)
-  #              before the client sees them — measured on vanilla 1.7.10:
-  #              a standing sprint hit ships (0.491, 0.373), not the
-  #              formula's (0.9, 0.461).
-  #   immediate  the 1.8.9 melee path: sent in the attack itself, no decay.
+  # The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on real
+  # vanilla, both orders): the tracker ran before the per-connection network
+  # phase, so whether the victim's physics decayed the just-written fields
+  # first depended on who joined first.
+  #   tracker          ships the full stamp — what a victim who joined
+  #                    BEFORE their attacker received, identical to 1.8.9
+  #                    for single hits; the dominant era experience.
+  #   tracker-decayed  the later-joiner wire: one victim physics tick of
+  #                    decay. Ground hits lose a full ground-friction step
+  #                    (x0.546 horizontal!) — a standing sprint hit ships
+  #                    (0.491, 0.373) instead of the formula's (0.9, 0.461).
+  #   immediate        the 1.8.9 melee path: sent in the attack itself.
   # Rod and projectile knocks rode the tracker on BOTH eras.
   delivery:
     melee: tracker

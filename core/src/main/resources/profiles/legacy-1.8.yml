@@ -48,8 +48,9 @@ knockback:
     offset: 1.2
     max-reduction: 0.12
   # 1.8.9 melee sent the packet straight from the attack (no decay), then
-  # restored the pre-hit fields; rod/projectile knocks still rode the
-  # tracker and ship one decay tick late.
+  # restored the pre-hit fields. Rod/projectile knocks rode the tracker on
+  # both eras — connection-order bimodal on vanilla; tracker ships the full
+  # stamp (tracker-decayed opts into the later-joiner wire).
   delivery:
     melee: immediate
     projectile: tracker

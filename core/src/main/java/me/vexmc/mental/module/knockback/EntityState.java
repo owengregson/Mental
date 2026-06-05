@@ -28,8 +28,19 @@ public record EntityState(
         double knockbackResistance) {
 
     /** Captures live state; must run on the entity's owning thread. */
-    @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value drives air multipliers
     public static @NotNull EntityState capture(@NotNull LivingEntity entity) {
+        return capture(entity, entity instanceof Player player && player.isSprinting());
+    }
+
+    /**
+     * Captures live state with an explicit sprint flag — the flag the ATTACK
+     * saw. Vanilla read it inside {@code Player.attack}, ahead of the
+     * client's own post-attack sprint-drop sync; the fast path's deferred
+     * damage runs after the inbound queue, so a live read loses that race
+     * and a perfectly-timed sprint hit ships plain.
+     */
+    @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value drives air multipliers
+    public static @NotNull EntityState capture(@NotNull LivingEntity entity, boolean sprinting) {
         Vector velocity = entity.getVelocity();
         return new EntityState(
                 entity.getLocation().getX(),
@@ -40,7 +51,7 @@ public record EntityState(
                 velocity.getY(),
                 velocity.getZ(),
                 entity.isOnGround(),
-                entity instanceof Player player && player.isSprinting(),
+                sprinting,
                 heldKnockbackLevel(entity),
                 clampedResistance(entity));
     }

@@ -8,6 +8,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerToggleSprintEvent;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Sprint freshness per attacker — the signal behind a profile's
@@ -27,7 +28,13 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class SprintTracker implements Listener {
 
+    /** A faithful client's post-attack sprint drop lands within ~a tick. */
+    private static final long ATTACK_STAMP_TTL_NANOS = 150_000_000L;
+
+    private record AttackStamp(boolean sprinting, long nanos) {}
+
     private final Set<UUID> fresh = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<UUID, AttackStamp> attackStamps = new ConcurrentHashMap<>();
 
     @EventHandler
     public void onToggleSprint(@NotNull PlayerToggleSprintEvent event) {
@@ -39,6 +46,32 @@ public final class SprintTracker implements Listener {
     @EventHandler
     public void onQuit(@NotNull PlayerQuitEvent event) {
         fresh.remove(event.getPlayer().getUniqueId());
+        attackStamps.remove(event.getPlayer().getUniqueId());
+    }
+
+    /**
+     * Stamps the attacker's sprint state as the cancelled attack packet saw
+     * it (the tick-frozen snapshot, netty thread). Vanilla read the flag
+     * INSIDE {@code Player.attack} — ahead of the client's own post-attack
+     * STOP_SPRINTING sync — while the fast path's deferred damage runs after
+     * the inbound queue and would lose that race: a perfectly-timed sprint
+     * hit would ship plain.
+     */
+    public void stampAttackSprint(@NotNull UUID attacker, boolean sprinting) {
+        attackStamps.put(attacker, new AttackStamp(sprinting, System.nanoTime()));
+    }
+
+    /**
+     * One-shot read of the attack-time sprint state; {@code null} when no
+     * fast-path stamp exists (vanilla-path hits read the live flag, which
+     * vanilla's inline attack already evaluated correctly).
+     */
+    public @Nullable Boolean takeAttackSprint(@NotNull UUID attacker) {
+        AttackStamp stamp = attackStamps.remove(attacker);
+        if (stamp == null || System.nanoTime() - stamp.nanos() > ATTACK_STAMP_TTL_NANOS) {
+            return null;
+        }
+        return stamp.sprinting();
     }
 
     /** Arms freshness directly — the toggle-event path, exposed for tests. */

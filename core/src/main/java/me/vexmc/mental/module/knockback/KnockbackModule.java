@@ -73,52 +73,88 @@ public final class KnockbackModule extends CombatModule implements Listener {
             return;
         }
         KnockbackProfile profile = services.knockbackProfiles().resolve(victim);
-        if (profile.shieldBlockingCancels()
-                && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
-                && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0) {
-            debug.log(() -> victim.getName() + " blocked with a shield — knockback skipped");
-            return;
-        }
-        // OCM's ownership rule for offensive mechanics: the attacker's modeset
-        // decides (the victim's when a mob attacks). Where OCM's
-        // old-player-knockback governs this hit, its LOWEST velocity handler
-        // applies the 1.8 knock unopposed — Mental submits nothing.
-        Player decider = attacker instanceof Player attackerPlayer ? attackerPlayer : victim;
-        if (services.ocmGate().handles(OcmMechanic.MELEE_KNOCKBACK, decider)) {
-            debug.log(() -> "OCM owns melee knockback for " + decider.getName() + " — yielding");
-            return;
-        }
-
-        // The netty fast path may have already computed AND wire-delivered
-        // this hit's vector; adopt it rather than recomputing — recomputing
-        // here would double-stamp the client with a slightly different value
-        // (the era servers stamped once). Spend the sprint freshness the
-        // pre-send only peeked at, so the tracker state stays truthful.
-        if (pipeline.hasFreshPreDelivered(victim)) {
-            if (attacker instanceof Player attackerPlayer && attackerPlayer.isSprinting()) {
-                services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
+        try {
+            if (profile.shieldBlockingCancels()
+                    && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
+                    && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0) {
+                debug.log(() -> victim.getName() + " blocked with a shield — knockback skipped");
+                return;
             }
-            debug.log(() -> "adopting pre-delivered knockback for " + victim.getName());
-            return;
+            // OCM's ownership rule for offensive mechanics: the attacker's modeset
+            // decides (the victim's when a mob attacks). Where OCM's
+            // old-player-knockback governs this hit, its LOWEST velocity handler
+            // applies the 1.8 knock unopposed — Mental submits nothing.
+            Player decider = attacker instanceof Player attackerPlayer ? attackerPlayer : victim;
+            if (services.ocmGate().handles(OcmMechanic.MELEE_KNOCKBACK, decider)) {
+                debug.log(() -> "OCM owns melee knockback for " + decider.getName() + " — yielding");
+                return;
+            }
+
+            // The sprint flag as the ATTACK saw it: the fast path stamps the
+            // tick-frozen snapshot at registration, because a faithful
+            // client's own post-attack sprint drop beats the deferred damage
+            // to the server (vanilla read the flag inline in Player.attack,
+            // ahead of that packet). No stamp = vanilla-path hit = the live
+            // flag is the one vanilla's own attack already evaluated.
+            Boolean sprintAtAttack = attacker instanceof Player attackerPlayer
+                    ? services.sprintTracker().takeAttackSprint(attackerPlayer.getUniqueId())
+                    : null;
+            boolean attackerSprinting = attacker instanceof Player attackerPlayer
+                    && (sprintAtAttack != null ? sprintAtAttack : attackerPlayer.isSprinting());
+
+            // The netty fast path may have already computed AND wire-delivered
+            // this hit's vector; adopt it rather than recomputing — recomputing
+            // here would double-stamp the client with a slightly different value
+            // (the era servers stamped once). Spend the sprint freshness the
+            // pre-send only peeked at, so the tracker state stays truthful.
+            if (pipeline.hasFreshPreDelivered(victim)) {
+                if (attackerSprinting && attacker instanceof Player attackerPlayer) {
+                    services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
+                }
+                debug.log(() -> "adopting pre-delivered knockback for " + victim.getName());
+                return;
+            }
+
+            Double victimYOverride = hints.takeYOverride(victim.getUniqueId());
+            EntityState victimState = EntityState.captureVictim(victim, ledger, System.nanoTime());
+            // The authoritative read spends the attacker's sprint freshness — the
+            // pre-send only peeked, so both paths see the same answer this tick.
+            boolean freshSprint = attackerSprinting
+                    && attacker instanceof Player attackerPlayer
+                    && services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
+            KnockbackVector vector = KnockbackEngine.compute(
+                    EntityState.capture(attacker, attackerSprinting), victimState, profile,
+                    victimYOverride, ThreadLocalRandom.current(), freshSprint);
+
+            pipeline.submit(victim, vector, attacker, KnockbackPipeline.Cause.MELEE);
+            debug.log(() -> vector == null
+                    ? "legacy resistance cancelled knockback for " + victim.getName()
+                    : "queued for " + victim.getName()
+                            + (victimYOverride != null ? " [compensated vy=" + victimYOverride + "]" : "")
+                            + " residual=(" + victimState.vx() + ", " + victimState.vy() + ", " + victimState.vz() + ")"
+                            + " -> (" + vector.x() + ", " + vector.y() + ", " + vector.z() + ")");
+        } finally {
+            clearVanillaSprint(attacker);
         }
+    }
 
-        Double victimYOverride = hints.takeYOverride(victim.getUniqueId());
-        EntityState victimState = EntityState.captureVictim(victim, ledger, System.nanoTime());
-        // The authoritative read spends the attacker's sprint freshness — the
-        // pre-send only peeked, so both paths see the same answer this tick.
-        boolean freshSprint = attacker instanceof Player attackerPlayer
-                && attackerPlayer.isSprinting()
-                && services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
-        KnockbackVector vector = KnockbackEngine.compute(
-                EntityState.capture(attacker), victimState, profile, victimYOverride,
-                ThreadLocalRandom.current(), freshSprint);
-
-        pipeline.submit(victim, vector, attacker, KnockbackPipeline.Cause.MELEE);
-        debug.log(() -> vector == null
-                ? "legacy resistance cancelled knockback for " + victim.getName()
-                : "queued for " + victim.getName()
-                        + (victimYOverride != null ? " [compensated vy=" + victimYOverride + "]" : "")
-                        + " residual=(" + victimState.vx() + ", " + victimState.vy() + ", " + victimState.vz() + ")"
-                        + " -> (" + vector.x() + ", " + vector.y() + ", " + vector.z() + ")");
+    /**
+     * Vanilla parity for the hit the fast path swallowed: {@code Player.attack}
+     * ends every sprint-bonus hit with {@code setSprinting(false)} — the
+     * server half of the w-tap mechanic. The fast path cancels the attack
+     * packet, so {@code Player.attack} never runs and the flag would stay
+     * true for every follow-up hit: a no-w-tap second hit then keeps the
+     * sprint extra that the era denied it (measured on real 1.8.9: hit 2
+     * without a w-tap ships h 0.4, not 0.9 — w-tapping must matter).
+     * A real client also drops its own state and re-syncs via entity-action,
+     * but only a ping later — the era cleared it within the hit's tick.
+     * Runs after every use of the flag in this handler (engine input and
+     * freshness reads happen above), on the attacker's owning thread.
+     */
+    private void clearVanillaSprint(@NotNull LivingEntity attacker) {
+        if (attacker instanceof Player attackerPlayer && attackerPlayer.isSprinting()) {
+            services.scheduling().runOn(
+                    attackerPlayer, () -> attackerPlayer.setSprinting(false), () -> {});
+        }
     }
 }

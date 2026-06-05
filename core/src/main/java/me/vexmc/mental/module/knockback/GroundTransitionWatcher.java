@@ -3,6 +3,7 @@ package me.vexmc.mental.module.knockback;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.MentalServices;
+import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.platform.Attributes;
 import org.bukkit.Location;
@@ -96,12 +97,32 @@ public final class GroundTransitionWatcher implements Listener {
         if (previous == null || previous.grounded() == grounded) {
             return;
         }
+        if (!grounded && location.getY() == previous.y()) {
+            // Modern servers flip a knocked player's own onGround flag on
+            // the hit tick, before the client's first airborne movement
+            // packet arrives — the era flag was packet-driven only. With
+            // the position still at its grounded value, rising cannot be
+            // judged era-faithfully: restore the grounded state and decide
+            // on the next sample, when the client's first airborne position
+            // (the exact packet the era jump bookkeeping evaluated) is in.
+            // Without this, every knock liftoff reads rising=false and the
+            // ledger free-falls from equilibrium instead of stamping the
+            // 0.42 jump impulse (measured: combo hit 2 then ships vy ~0.07
+            // where real 1.8.9 ships 0.2846).
+            lastStates.put(id, previous);
+            return;
+        }
         long now = System.nanoTime();
         double gravity = Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY);
         if (grounded) {
+            services.debug().log(DebugCategory.KNOCKBACK,
+                    () -> "ground-watch " + player.getName() + " LANDING y=" + location.getY());
             ledger.recordLanding(id, now, gravity);
         } else {
             boolean rising = location.getY() > previous.y();
+            services.debug().log(DebugCategory.KNOCKBACK,
+                    () -> "ground-watch " + player.getName() + " LIFTOFF rising=" + rising
+                            + " y=" + location.getY() + " prevY=" + previous.y());
             ledger.recordLiftoff(id, rising, player.isSprinting(), location.getYaw(), now, gravity);
         }
     }

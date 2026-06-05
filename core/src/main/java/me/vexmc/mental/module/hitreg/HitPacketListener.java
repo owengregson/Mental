@@ -143,6 +143,15 @@ final class HitPacketListener implements PacketListener {
                 preSendCombatFeedback(attacker, victim, now, settings);
             }
 
+            // The sprint flag as the ATTACK saw it (tick-frozen snapshot):
+            // a faithful client drops its own sprint right after attacking
+            // and the sync packet beats the deferred damage to the server —
+            // a live read there would deny the era's sprint bonus to every
+            // perfectly-timed authoritative hit.
+            PlayerStateCache.Snapshot attackerSnap = stateCache.get(attackerId);
+            if (attackerSnap != null) {
+                services.sprintTracker().stampAttackSprint(attackerId, attackerSnap.sprinting());
+            }
             services.scheduling().runOn(
                     damageable,
                     () -> applier.apply(attackerId, targetId),
@@ -214,10 +223,12 @@ final class HitPacketListener implements PacketListener {
                     attackerSnap.toEntityState(), victimSnap.toEntityState(), profile,
                     victimYOverride, ThreadLocalRandom.current(), freshSprint);
             if (vector != null) {
-                // The era wire decay (KnockbackDelivery.TRACKER): the packet
-                // ships one victim physics tick late.
+                // The opt-in later-joiner wire (TRACKER_DECAYED): the packet
+                // ships one victim physics tick late. TRACKER ships the full
+                // stamp — vanilla's tracker only decayed when the victim's
+                // connection slot ran between the hit and the send.
                 KnockbackVector shipped = vector;
-                if (profile.meleeDelivery() == KnockbackDelivery.TRACKER) {
+                if (profile.meleeDelivery() == KnockbackDelivery.TRACKER_DECAYED) {
                     VictimMotion.Motion decayed = VictimMotion.decayOnce(
                             vector.x(), vector.y(), vector.z(),
                             victimSnap.grounded(), victimSnap.gravity());

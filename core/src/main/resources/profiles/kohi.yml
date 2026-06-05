@@ -47,10 +47,13 @@ knockback:
     offset: 1.2
     max-reduction: 0.12
   # When the victim's client receives the knock relative to their physics
-  # tick. tracker = the 1.7.10 wire (one decay tick before the packet ships
-  # — ground hits lose a full friction step; measured on vanilla). immediate
-  # = the 1.8.9 melee path. Rod/projectile knocks rode the tracker on BOTH
-  # eras.
+  # tick. The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on
+  # vanilla, both orders: a victim who joined before their attacker received
+  # the full stamp — identical to 1.8.9 — a victim who joined after, one
+  # friction step less). tracker ships the full stamp, the dominant era
+  # experience; tracker-decayed opts into the later-joiner wire (ground
+  # hits lose ×0.546 horizontal); immediate = the 1.8.9 in-attack send.
+  # Rod/projectile knocks rode the tracker on BOTH eras.
   delivery:
     melee: tracker
     projectile: tracker

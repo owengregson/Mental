@@ -213,9 +213,11 @@ public final class KnockbackPipeline implements Listener {
     }
 
     /**
-     * The era wire decay ({@link KnockbackDelivery}): a TRACKER-delivered
-     * vector ships one victim physics tick late, so it decays once with
-     * friction from the victim's ground state at the knock.
+     * The opt-in later-joiner wire ({@link KnockbackDelivery#TRACKER_DECAYED}):
+     * the vector ships one victim physics tick late, so it decays once with
+     * friction from the victim's ground state at the knock. TRACKER ships the
+     * full stamp — vanilla's tracker only decayed when the victim's connection
+     * slot ran between the hit and the send (join-order bimodal, measured).
      */
     private @NotNull Vector deliveryAdjusted(
             Player victim, Vector velocity, Cause cause, boolean groundedAtSubmit) {
@@ -223,7 +225,7 @@ public final class KnockbackPipeline implements Listener {
         KnockbackDelivery delivery = cause == Cause.MELEE
                 ? profile.meleeDelivery()
                 : profile.projectileDelivery();
-        if (delivery != KnockbackDelivery.TRACKER) {
+        if (delivery != KnockbackDelivery.TRACKER_DECAYED) {
             return velocity;
         }
         VictimMotion.Motion decayed = VictimMotion.decayOnce(
