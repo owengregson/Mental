@@ -69,7 +69,8 @@ public final class PlayerStateCache {
                 profiles.resolve(player),
                 player.getPing(),
                 player.getGameMode() == GameMode.CREATIVE,
-                Attributes.valueOr(player, Attributes.entityInteractionRange(), 3.0)));
+                Attributes.valueOr(player, Attributes.entityInteractionRange(), 3.0),
+                Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY)));
     }
 
     public @Nullable Snapshot get(@NotNull UUID uuid) {
@@ -118,7 +119,8 @@ public final class PlayerStateCache {
             @NotNull KnockbackProfile profile,
             int pingMillis,
             boolean creative,
-            double attackReach) {
+            double attackReach,
+            double gravity) {
 
         /**
          * Vanilla's double-hit guard: inside this window a fresh hit carries
@@ -127,6 +129,11 @@ public final class PlayerStateCache {
          */
         public boolean isDamageImmune() {
             return noDamageTicks > maxNoDamageTicks / 2;
+        }
+
+        /** The snapshot's alias for {@code onGround}, named for delivery-decay call sites. */
+        public boolean grounded() {
+            return onGround;
         }
 
         public @NotNull EntityState toEntityState() {

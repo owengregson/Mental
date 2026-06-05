@@ -14,11 +14,15 @@ import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.api.event.AsyncHitRegisterEvent;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.config.HitRegSettings;
+import me.vexmc.mental.config.KnockbackDelivery;
 import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.config.KnockbackSettings;
 import me.vexmc.mental.config.ResistancePolicy;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
+import me.vexmc.mental.module.knockback.KnockbackHints;
+import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.module.knockback.VictimMotion;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Damageable;
@@ -49,6 +53,8 @@ final class HitPacketListener implements PacketListener {
     private final HitFeedbackGate feedbackGate;
     private final FeedbackSenders senders;
     private final PositionHistory positionHistory;
+    private final KnockbackPipeline pipeline;
+    private final KnockbackHints hints;
 
     HitPacketListener(
             @NotNull MentalServices services,
@@ -57,7 +63,9 @@ final class HitPacketListener implements PacketListener {
             @NotNull PlayerStateCache stateCache,
             @NotNull HitFeedbackGate feedbackGate,
             @NotNull FeedbackSenders senders,
-            @NotNull PositionHistory positionHistory) {
+            @NotNull PositionHistory positionHistory,
+            @NotNull KnockbackPipeline pipeline,
+            @NotNull KnockbackHints hints) {
         this.services = services;
         this.limiter = limiter;
         this.applier = applier;
@@ -65,6 +73,8 @@ final class HitPacketListener implements PacketListener {
         this.feedbackGate = feedbackGate;
         this.senders = senders;
         this.positionHistory = positionHistory;
+        this.pipeline = pipeline;
+        this.hints = hints;
     }
 
     @Override
@@ -194,14 +204,30 @@ final class HitPacketListener implements PacketListener {
             debug(attacker, () -> "velocity pre-send skipped: legacy resistance roll pending");
         } else {
             // Peek (never consume) sprint freshness — the authoritative
-            // owning-thread compute spends it later this tick.
+            // owning-thread pass spends it when it adopts this vector.
             boolean freshSprint = attackerSnap.sprinting()
                     && services.sprintTracker().peekFresh(attacker.getUniqueId());
+            // The compensation hint is published per tick; whoever computes
+            // the hit's final vector consumes it — here, when pre-sending.
+            Double victimYOverride = hints.takeYOverride(victim.getUniqueId());
             KnockbackVector vector = KnockbackEngine.compute(
-                    attackerSnap.toEntityState(), victimSnap.toEntityState(), profile, null,
-                    ThreadLocalRandom.current(), freshSprint);
+                    attackerSnap.toEntityState(), victimSnap.toEntityState(), profile,
+                    victimYOverride, ThreadLocalRandom.current(), freshSprint);
             if (vector != null) {
-                velocity = vector.toBukkit();
+                // The era wire decay (KnockbackDelivery.TRACKER): the packet
+                // ships one victim physics tick late.
+                KnockbackVector shipped = vector;
+                if (profile.meleeDelivery() == KnockbackDelivery.TRACKER) {
+                    VictimMotion.Motion decayed = VictimMotion.decayOnce(
+                            vector.x(), vector.y(), vector.z(),
+                            victimSnap.grounded(), victimSnap.gravity());
+                    shipped = new KnockbackVector(decayed.vx(), decayed.vy(), decayed.vz());
+                }
+                velocity = shipped.toBukkit();
+                // The authoritative pass adopts this exact delivery and the
+                // duplicate end-of-tick packet is suppressed — one wire stamp
+                // per hit, like the era servers.
+                pipeline.submitPreDelivered(victim, vector, shipped, attacker);
             }
         }
 

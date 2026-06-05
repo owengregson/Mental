@@ -6,6 +6,9 @@ import java.util.function.Supplier;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.api.event.KnockbackApplyEvent;
 import me.vexmc.mental.common.debug.DebugCategory;
+import me.vexmc.mental.config.KnockbackDelivery;
+import me.vexmc.mental.config.KnockbackProfile;
+import me.vexmc.mental.platform.Attributes;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -58,6 +61,7 @@ public final class KnockbackPipeline implements Listener {
 
     private record Pending(
             @Nullable KnockbackVector vector,
+            @Nullable KnockbackVector preDelivered,
             @Nullable LivingEntity attacker,
             @NotNull Cause cause,
             long stampNanos) {
@@ -73,10 +77,16 @@ public final class KnockbackPipeline implements Listener {
     private final VictimMotion ledger;
     private final ConcurrentHashMap<UUID, Pending> pending = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, AppliedTag> applied = new ConcurrentHashMap<>();
+    private volatile @Nullable VelocityDuplicateSuppressor suppressor;
 
     public KnockbackPipeline(@NotNull MentalServices services, @NotNull VictimMotion ledger) {
         this.services = services;
         this.ledger = ledger;
+    }
+
+    /** Wired by the bootstrap once PacketEvents is initialized. */
+    public void suppressor(@Nullable VelocityDuplicateSuppressor suppressor) {
+        this.suppressor = suppressor;
     }
 
     public @NotNull VictimMotion ledger() {
@@ -93,12 +103,39 @@ public final class KnockbackPipeline implements Listener {
             @Nullable KnockbackVector vector,
             @Nullable LivingEntity attacker,
             @NotNull Cause cause) {
-        pending.put(victim.getUniqueId(), new Pending(vector, attacker, cause, System.nanoTime()));
+        pending.put(victim.getUniqueId(), new Pending(vector, null, attacker, cause, System.nanoTime()));
+    }
+
+    /**
+     * Queues a vector whose wire delivery already happened (the netty
+     * pre-send): {@code vector} is the formula value the API sees,
+     * {@code preDelivered} the delivery-decayed velocity the client received.
+     * If no API listener modifies the apply event, the velocity event adopts
+     * {@code preDelivered} and the duplicate outbound packet is suppressed —
+     * one wire stamp per hit, exactly like the era servers.
+     */
+    public void submitPreDelivered(
+            @NotNull Player victim,
+            @NotNull KnockbackVector vector,
+            @NotNull KnockbackVector preDelivered,
+            @Nullable LivingEntity attacker) {
+        pending.put(victim.getUniqueId(),
+                new Pending(vector, preDelivered, attacker, Cause.MELEE, System.nanoTime()));
     }
 
     /** Drops a pending vector — a protection plugin cancelled the hit it belonged to. */
     public void withdraw(@NotNull Player victim) {
         pending.remove(victim.getUniqueId());
+    }
+
+    /**
+     * Whether a live pre-delivered vector is queued for the victim — the
+     * authoritative damage pass adopts it instead of recomputing, so both
+     * stamps of one hit can never disagree.
+     */
+    public boolean hasFreshPreDelivered(@NotNull Player victim) {
+        Pending stored = pending.get(victim.getUniqueId());
+        return stored != null && stored.preDelivered() != null && !stored.expired(System.nanoTime());
     }
 
     /**
@@ -120,36 +157,75 @@ public final class KnockbackPipeline implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value selects the delivery decay
     public void onPlayerVelocity(@NotNull PlayerVelocityEvent event) {
-        UUID victimId = event.getPlayer().getUniqueId();
+        Player victim = event.getPlayer();
+        UUID victimId = victim.getUniqueId();
         Pending stored = pending.remove(victimId);
         if (stored == null) {
             return;
         }
         long now = System.nanoTime();
         if (stored.expired(now)) {
-            debug(() -> "dropped expired " + stored.cause() + " vector for " + event.getPlayer().getName());
+            debug(() -> "dropped expired " + stored.cause() + " vector for " + victim.getName());
             return;
         }
         if (stored.vector() == null) {
             event.setCancelled(true);
-            debug(() -> "suppressed knockback for " + event.getPlayer().getName()
+            debug(() -> "suppressed knockback for " + victim.getName()
                     + " (legacy resistance roll)");
             return;
         }
 
         KnockbackApplyEvent apply = new KnockbackApplyEvent(
-                event.getPlayer(), stored.attacker(), stored.vector().toBukkit());
+                victim, stored.attacker(), stored.vector().toBukkit());
         if (!apply.callEvent()) {
-            debug(() -> "apply event cancelled for " + event.getPlayer().getName());
+            debug(() -> "apply event cancelled for " + victim.getName());
             return;
         }
-        event.setVelocity(apply.velocity());
+
+        Vector shipped;
+        if (stored.preDelivered() != null && apply.velocity().equals(stored.vector().toBukkit())) {
+            // The wire already carried this knock from the netty thread; mirror
+            // it server-side and cancel the duplicate outbound packet — one
+            // stamp per hit, like the era servers. An API listener changing
+            // the vector falls through to a normal (corrective) send instead.
+            shipped = stored.preDelivered().toBukkit();
+            if (suppressor != null) {
+                suppressor.armFor(victim);
+            }
+        } else {
+            shipped = deliveryAdjusted(victim, apply.velocity(), stored.cause());
+        }
+        event.setVelocity(shipped);
         applied.put(victimId, new AppliedTag(stored.cause(), now));
-        debug(() -> "applied " + stored.cause() + " knockback to " + event.getPlayer().getName());
+        debug(() -> "applied " + stored.cause() + " knockback to " + victim.getName()
+                + " -> (" + shipped.getX() + ", " + shipped.getY() + ", " + shipped.getZ() + ")");
+    }
+
+    /**
+     * The era wire decay ({@link KnockbackDelivery}): a TRACKER-delivered
+     * vector ships one victim physics tick late, so it decays once with
+     * friction from the victim's current ground state.
+     */
+    @SuppressWarnings("deprecation") // Entity#isOnGround
+    private @NotNull Vector deliveryAdjusted(Player victim, Vector velocity, Cause cause) {
+        KnockbackProfile profile = services.knockbackProfiles().resolve(victim);
+        KnockbackDelivery delivery = cause == Cause.MELEE
+                ? profile.meleeDelivery()
+                : profile.projectileDelivery();
+        if (delivery != KnockbackDelivery.TRACKER) {
+            return velocity;
+        }
+        VictimMotion.Motion decayed = VictimMotion.decayOnce(
+                velocity.getX(), velocity.getY(), velocity.getZ(),
+                victim.isOnGround(),
+                Attributes.valueOr(victim, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
+        return new Vector(decayed.vx(), decayed.vy(), decayed.vz());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value selects the segment drag
     public void onPlayerVelocityRecord(@NotNull PlayerVelocityEvent event) {
         UUID victimId = event.getPlayer().getUniqueId();
         long now = System.nanoTime();
@@ -162,7 +238,8 @@ public final class KnockbackPipeline implements Listener {
         }
 
         Vector velocity = event.getVelocity();
-        ledger.record(victimId, velocity.getX(), velocity.getY(), velocity.getZ(), now);
+        ledger.record(victimId, velocity.getX(), velocity.getY(), velocity.getZ(),
+                event.getPlayer().isOnGround(), now);
     }
 
     @EventHandler

@@ -47,6 +47,12 @@ knockback:
     factor: 0.025
     offset: 1.2
     max-reduction: 0.12
+  # 1.8.9 melee sent the packet straight from the attack (no decay), then
+  # restored the pre-hit fields; rod/projectile knocks still rode the
+  # tracker and ship one decay tick late.
+  delivery:
+    melee: immediate
+    projectile: tracker
   modifiers:
     sprint: 1.0
     combos: false

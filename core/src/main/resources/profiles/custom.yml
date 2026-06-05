@@ -91,6 +91,21 @@ knockback:
     offset: 1.2
     max-reduction: 0.12
 
+  # ── delivery ─────────────────────────────────────────────────────────
+  # WHEN the victim's client receives the knock relative to their physics
+  # tick — the wire half of era accuracy, independent of the math above.
+  #   tracker    the 1.7.10 wire: the velocity packet left with the
+  #              end-of-tick entity tracker, AFTER the victim's connection
+  #              tick had decayed the just-written fields once. Ground hits
+  #              lose a full ground-friction step (x0.546 horizontal!)
+  #              before the client sees them — measured on vanilla 1.7.10:
+  #              a standing sprint hit ships (0.491, 0.373), not the
+  #              formula's (0.9, 0.461).
+  #   immediate  the 1.8.9 melee path: sent in the attack itself, no decay.
+  # Rod and projectile knocks rode the tracker on BOTH eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
   modifiers:
     # Bonus levels granted by sprinting.
     sprint: 1.0

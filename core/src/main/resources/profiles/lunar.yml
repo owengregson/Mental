@@ -53,6 +53,14 @@ knockback:
     factor: 0.025
     offset: 1.2
     max-reduction: 0.12
+  # When the victim's client receives the knock relative to their physics
+  # tick. tracker = the 1.7.10 wire (one decay tick before the packet ships
+  # — ground hits lose a full friction step; measured on vanilla). immediate
+  # = the 1.8.9 melee path. Rod/projectile knocks rode the tracker on BOTH
+  # eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
   modifiers:
     sprint: 1.0
     combos: false

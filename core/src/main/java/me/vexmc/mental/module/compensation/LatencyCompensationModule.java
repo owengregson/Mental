@@ -13,7 +13,6 @@ import me.vexmc.mental.config.CompensationSettings;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.module.knockback.KnockbackHints;
 import me.vexmc.mental.module.knockback.VictimMotion;
-import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Attributes;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -47,7 +46,7 @@ import org.jetbrains.annotations.Nullable;
 public final class LatencyCompensationModule extends CombatModule implements Listener, KnockbackHints {
 
     private static final double DEFAULT_GRAVITY = 0.08;
-    private static final long HINT_TTL_MILLIS = 250L;
+    private static final long HINT_TTL_MILLIS = 300L; // outlives one probe interval (5 ticks)
     private static final double SPIKE_DISPLAY_THRESHOLD_MILLIS = 20.0;
 
     /** One-shot hint: the Y value the engine should treat as the victim's motion. */
@@ -157,23 +156,20 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
                 || victim.getGameMode() == GameMode.SPECTATOR) {
             return;
         }
-
-        UUID victimId = victim.getUniqueId();
+        // Combat marking only — the hints themselves are published per probe
+        // tick (see tickProbes), because under the fast path the netty
+        // pre-send consumes them BEFORE any damage event runs.
         long now = System.currentTimeMillis();
-        combat.mark(victimId, now);
+        combat.mark(victim.getUniqueId(), now);
         if (event.getDamager() instanceof Player attacker) {
             combat.mark(attacker.getUniqueId(), now);
         }
+    }
 
-        // The hint corrects input to Mental's knockback engine; when OCM owns
-        // this hit's knockback there is nothing to correct. Combat marking
-        // stays — ping stats remain live for the dashboard.
-        Player ocmDecider = event.getDamager() instanceof Player attacker ? attacker : victim;
-        if (services.ocmGate().handles(
-                OcmMechanic.MELEE_KNOCKBACK, ocmDecider)) {
-            return;
-        }
-
+    /** Recomputes and publishes a victim's hint; runs on the victim's owning thread. */
+    private void publishHint(@NotNull Player victim) {
+        CompensationSettings settings = services.config().compensation();
+        UUID victimId = victim.getUniqueId();
         Double pingMillis = tracker.forPlayer(victimId).pingMillis();
         if (pingMillis == null) {
             return;
@@ -182,7 +178,6 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
         if (compensated <= 0) {
             return;
         }
-
         Hint hint = computeHint(victim, settings, compensated);
         if (hint != null) {
             hints.put(victimId, hint);
@@ -213,6 +208,9 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
                 continue;
             }
             currentProbe.send(player);
+            // Hint publication rides the probe cadence (TTL outlives one
+            // interval); the raytrace and ledger read need the owning thread.
+            services.scheduling().runOn(player, () -> publishHint(player), () -> {});
         }
     }
 
@@ -246,7 +244,10 @@ public final class LatencyCompensationModule extends CombatModule implements Lis
             if (victim.getNoDamageTicks() > 8) {
                 return null; // double-hit guard (KnockbackSync heritage)
             }
-            return new Hint(0.0, true, System.currentTimeMillis());
+            // The value the era server's fields would hold once it learned of
+            // the landing: the grounded equilibrium, never zero — a zero here
+            // re-inflated combo verticals by the missing −0.0784/2 (measured).
+            return new Hint(VictimMotion.groundedEquilibrium(gravity), true, System.currentTimeMillis());
         }
 
         if (settings.offGroundSync()) {

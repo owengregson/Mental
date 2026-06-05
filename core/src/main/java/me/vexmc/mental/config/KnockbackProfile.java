@@ -34,6 +34,8 @@ public record KnockbackProfile(
         @NotNull RangeReduction rangeReduction,
         double sprintFactor,
         boolean combos,
+        @NotNull KnockbackDelivery meleeDelivery,
+        @NotNull KnockbackDelivery projectileDelivery,
         @NotNull ResistancePolicy resistance,
         boolean shieldBlockingCancels) {
 
@@ -108,6 +110,8 @@ public record KnockbackProfile(
             RangeReduction.DISABLED,
             1.0,
             true,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
             ResistancePolicy.NONE,
             true);
 
@@ -124,6 +128,8 @@ public record KnockbackProfile(
                 && rangeReduction.equals(other.rangeReduction)
                 && sprintFactor == other.sprintFactor
                 && combos == other.combos
+                && meleeDelivery == other.meleeDelivery
+                && projectileDelivery == other.projectileDelivery
                 && resistance == other.resistance
                 && shieldBlockingCancels == other.shieldBlockingCancels;
     }
@@ -147,6 +153,7 @@ public record KnockbackProfile(
         ConfigReader add = reader.sub("add");
         ConfigReader range = reader.sub("range-reduction");
         ConfigReader modifiers = reader.sub("modifiers");
+        ConfigReader delivery = reader.sub("delivery");
         return new KnockbackProfile(
                 name,
                 displayName,
@@ -184,6 +191,8 @@ public record KnockbackProfile(
                         range.numberAtLeast("max-reduction", RangeReduction.DISABLED.maxReduction(), 0)),
                 modifiers.numberAtLeast("sprint", LEGACY_17.sprintFactor, 0),
                 modifiers.flag("combos", LEGACY_17.combos),
+                delivery.oneOf("melee", LEGACY_17.meleeDelivery, KnockbackDelivery.class),
+                delivery.oneOf("projectile", LEGACY_17.projectileDelivery, KnockbackDelivery.class),
                 modifiers.oneOf("armor-resistance", LEGACY_17.resistance, ResistancePolicy.class),
                 modifiers.flag("shield-blocking-cancels", LEGACY_17.shieldBlockingCancels));
     }

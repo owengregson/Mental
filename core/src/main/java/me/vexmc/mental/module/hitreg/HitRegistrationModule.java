@@ -9,6 +9,8 @@ import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.engine.CombatModule;
+import me.vexmc.mental.module.knockback.KnockbackHints;
+import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -35,14 +37,22 @@ public final class HitRegistrationModule extends CombatModule implements Listene
     private final PositionHistory positionHistory = new PositionHistory();
     private final ConcurrentHashMap<UUID, TaskHandle> snapshotTasks = new ConcurrentHashMap<>();
     private final VictimMotion ledger;
+    private final KnockbackPipeline pipeline;
+    private final KnockbackHints hints;
 
     private PacketListenerCommon handle;
 
-    public HitRegistrationModule(@NotNull MentalServices services, @NotNull VictimMotion ledger) {
+    public HitRegistrationModule(
+            @NotNull MentalServices services,
+            @NotNull VictimMotion ledger,
+            @NotNull KnockbackPipeline pipeline,
+            @NotNull KnockbackHints hints) {
         super(services, "hit-registration", "Hit Registration",
                 "Netty-thread attack interception with owning-thread damage and pre-sent feedback.",
                 DebugCategory.HITREG);
         this.ledger = ledger;
+        this.pipeline = pipeline;
+        this.hints = hints;
     }
 
     @Override
@@ -55,7 +65,7 @@ public final class HitRegistrationModule extends CombatModule implements Listene
         listen(this);
         HitPacketListener listener = new HitPacketListener(
                 services, limiter, new HitApplier(services), stateCache, feedbackGate,
-                new FeedbackSenders(), positionHistory);
+                new FeedbackSenders(), positionHistory, pipeline, hints);
         handle = PacketEvents.getAPI().getEventManager()
                 .registerListener(listener, PacketListenerPriority.NORMAL);
         for (Player player : Bukkit.getOnlinePlayers()) {

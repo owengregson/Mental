@@ -1,6 +1,7 @@
 package me.vexmc.mental;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,10 +26,12 @@ import me.vexmc.mental.module.compensation.LatencyCompensationModule;
 import me.vexmc.mental.module.fishing.FishingKnockbackModule;
 import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
+import me.vexmc.mental.module.knockback.GroundTransitionWatcher;
 import me.vexmc.mental.module.knockback.KnockbackModule;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackProfiles;
 import me.vexmc.mental.module.knockback.SprintTracker;
+import me.vexmc.mental.module.knockback.VelocityDuplicateSuppressor;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.ocm.OcmCompatModule;
 import me.vexmc.mental.module.ocm.OcmGate;
@@ -64,6 +67,8 @@ public final class MentalPlugin extends JavaPlugin {
     private ModuleRegistry modules;
     private PlayerDebugSink playerDebugSink;
     private KnockbackPipeline knockbackPipeline;
+    private GroundTransitionWatcher groundWatcher;
+    private VelocityDuplicateSuppressor velocitySuppressor;
     private Metrics metrics;
 
     @Override
@@ -131,6 +136,13 @@ public final class MentalPlugin extends JavaPlugin {
         metrics.addCustomChart(new SimplePie("ocm_coordination",
                 () -> services.ocmGate().mode().name().toLowerCase(Locale.ROOT)));
 
+        // Registered before init like the module listeners; idle unless the
+        // pipeline arms it for a pre-delivered knock.
+        velocitySuppressor = new VelocityDuplicateSuppressor();
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(velocitySuppressor, PacketListenerPriority.HIGHEST);
+        knockbackPipeline.suppressor(velocitySuppressor);
+
         PacketEvents.getAPI().init();
 
         getLogger().info(() -> "Mental enabled — server " + environment.describe()
@@ -147,6 +159,14 @@ public final class MentalPlugin extends JavaPlugin {
         }
         if (modules != null) {
             modules.disableAll();
+        }
+        if (groundWatcher != null) {
+            groundWatcher.shutdown();
+            groundWatcher = null;
+        }
+        if (velocitySuppressor != null) {
+            velocitySuppressor.clear();
+            velocitySuppressor = null;
         }
         if (knockbackPipeline != null) {
             knockbackPipeline.clear();
@@ -204,6 +224,12 @@ public final class MentalPlugin extends JavaPlugin {
         // Observation only — feeds the wtap-extra freshness branch; with the
         // knob disabled (every default) it changes nothing.
         getServer().getPluginManager().registerEvents(services.sprintTracker(), this);
+        // Pure observation as well: replicates the era movement-packet
+        // bookkeeping (jump stamps, landings) into the ledger so knockback
+        // verticals see the same baselines a legacy server's fields held.
+        groundWatcher = new GroundTransitionWatcher(services, victimMotion);
+        getServer().getPluginManager().registerEvents(groundWatcher, this);
+        groundWatcher.watchOnlinePlayers();
 
         KnockbackModule knockback = new KnockbackModule(services, victimMotion, knockbackPipeline);
         LatencyCompensationModule compensation = new LatencyCompensationModule(services, victimMotion);
@@ -211,7 +237,7 @@ public final class MentalPlugin extends JavaPlugin {
 
         modules.register(new AnticheatCompatModule(services));
         modules.register(new OcmCompatModule(services, services.ocmGate()));
-        modules.register(new HitRegistrationModule(services, victimMotion));
+        modules.register(new HitRegistrationModule(services, victimMotion, knockbackPipeline, compensation));
         modules.register(knockback);
         modules.register(compensation);
         modules.register(new FishingKnockbackModule(services, knockbackPipeline));

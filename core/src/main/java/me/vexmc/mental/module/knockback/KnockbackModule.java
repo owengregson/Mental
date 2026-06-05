@@ -89,6 +89,19 @@ public final class KnockbackModule extends CombatModule implements Listener {
             return;
         }
 
+        // The netty fast path may have already computed AND wire-delivered
+        // this hit's vector; adopt it rather than recomputing — recomputing
+        // here would double-stamp the client with a slightly different value
+        // (the era servers stamped once). Spend the sprint freshness the
+        // pre-send only peeked at, so the tracker state stays truthful.
+        if (pipeline.hasFreshPreDelivered(victim)) {
+            if (attacker instanceof Player attackerPlayer && attackerPlayer.isSprinting()) {
+                services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
+            }
+            debug.log(() -> "adopting pre-delivered knockback for " + victim.getName());
+            return;
+        }
+
         Double victimYOverride = hints.takeYOverride(victim.getUniqueId());
         EntityState victimState = EntityState.captureVictim(victim, ledger, System.nanoTime());
         // The authoritative read spends the attacker's sprint freshness — the

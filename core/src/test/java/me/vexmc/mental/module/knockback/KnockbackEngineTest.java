@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.random.RandomGenerator;
+import me.vexmc.mental.config.KnockbackDelivery;
 import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.config.ResistancePolicy;
 import me.vexmc.mental.config.VerticalMode;
@@ -36,7 +37,8 @@ class KnockbackEngineTest {
                 base.name(), base.displayName(), base.description(),
                 base.base(), base.verticalMode(), base.extra(), base.wtapExtra(),
                 base.friction(), base.limits(), base.air(), base.add(), base.rangeReduction(),
-                sprintFactor, base.combos(), resistance, base.shieldBlockingCancels());
+                sprintFactor, base.combos(), base.meleeDelivery(), base.projectileDelivery(),
+                resistance, base.shieldBlockingCancels());
     }
 
     private static EntityState attacker(double x, double z, float yaw, boolean sprinting, int enchant) {
@@ -154,7 +156,7 @@ class KnockbackEngineTest {
                 DEFAULTS.base(), DEFAULTS.verticalMode(), DEFAULTS.extra(), DEFAULTS.wtapExtra(),
                 DEFAULTS.friction(), new KnockbackProfile.Limits(0.4, -3.9, 0.3),
                 DEFAULTS.air(), DEFAULTS.add(), DEFAULTS.rangeReduction(),
-                1.0, DEFAULTS.combos(), ResistancePolicy.NONE, DEFAULTS.shieldBlockingCancels());
+                1.0, DEFAULTS.combos(), KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER, ResistancePolicy.NONE, DEFAULTS.shieldBlockingCancels());
 
         KnockbackVector vector = computed(
                 attacker(0, 0, 0.0f, false, 0), victim(3, 4, 0, 0, 0, 0), capped, null);
@@ -238,7 +240,7 @@ class KnockbackEngineTest {
                 "set", "Set", "", new KnockbackProfile.Push(0.4, 0.25), VerticalMode.SET,
                 DEFAULTS.extra(), DEFAULTS.wtapExtra(), DEFAULTS.friction(),
                 new KnockbackProfile.Limits(4.0, -3.9, -1.0), DEFAULTS.air(), DEFAULTS.add(),
-                DEFAULTS.rangeReduction(), 1.0, false, ResistancePolicy.NONE, true);
+                DEFAULTS.rangeReduction(), 1.0, false, KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
 
         // Rising, falling, resting, and latency-hinted victims all launch identically.
         KnockbackVector rising = computed(
@@ -262,7 +264,7 @@ class KnockbackEngineTest {
                 DEFAULTS.extra(), DEFAULTS.wtapExtra(), DEFAULTS.friction(), DEFAULTS.limits(),
                 DEFAULTS.air(), DEFAULTS.add(),
                 new KnockbackProfile.RangeReduction(true, 3.0, 0.025, 1.2, 0.12),
-                1.0, true, ResistancePolicy.NONE, true);
+                1.0, true, KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
 
         // 2.5 blocks: inside the start distance — full push.
         KnockbackVector close = computed(
@@ -301,7 +303,7 @@ class KnockbackEngineTest {
                 "wtap", "Wtap", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
                 new KnockbackProfile.WtapExtra(true, 0.8, 0.05),
                 DEFAULTS.friction(), DEFAULTS.limits(), DEFAULTS.air(), DEFAULTS.add(),
-                DEFAULTS.rangeReduction(), 1.0, true, ResistancePolicy.NONE, true);
+                DEFAULTS.rangeReduction(), 1.0, true, KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
         EntityState sprintingAttacker = attacker(0, 0, 0.0f, true, 1); // sprint + Knockback I
         EntityState restingVictim = victim(0, 4, 0, 0, 0, 0);
         RandomGenerator random = RandomGenerator.of("L64X128MixRandom");
@@ -337,7 +339,7 @@ class KnockbackEngineTest {
                 "air", "Air", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
                 DEFAULTS.wtapExtra(), DEFAULTS.friction(), DEFAULTS.limits(),
                 new KnockbackProfile.Push(0.6, 0.8), DEFAULTS.add(), DEFAULTS.rangeReduction(),
-                1.0, true, ResistancePolicy.NONE, true);
+                1.0, true, KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
 
         KnockbackVector grounded = computed(
                 attacker(0, 0, 0.0f, false, 0), victim(3, 4, 0, 0, 0, 0), aired, null);
@@ -358,7 +360,7 @@ class KnockbackEngineTest {
                 "add", "Add", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
                 DEFAULTS.wtapExtra(), DEFAULTS.friction(), DEFAULTS.limits(), DEFAULTS.air(),
                 new KnockbackProfile.Push(0.1, 0.05), DEFAULTS.rangeReduction(),
-                1.0, true, ResistancePolicy.NONE, true);
+                1.0, true, KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
 
         // Base vector (0.24, 0.4, 0.32): shares 0.24/0.56 and 0.32/0.56.
         KnockbackVector vector = computed(
@@ -385,7 +387,7 @@ class KnockbackEngineTest {
                 "floor", "Floor", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
                 DEFAULTS.wtapExtra(), DEFAULTS.friction(),
                 new KnockbackProfile.Limits(0.4, -0.2, -1.0), DEFAULTS.air(), DEFAULTS.add(),
-                DEFAULTS.rangeReduction(), 1.0, true, ResistancePolicy.NONE, true);
+                DEFAULTS.rangeReduction(), 1.0, true, KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
 
         // A hard downward residual: 0.5 × −2.0 + 0.4 = −0.6 → floored at −0.2.
         KnockbackVector vector = computed(

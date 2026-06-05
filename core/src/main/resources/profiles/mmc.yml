@@ -65,6 +65,11 @@ knockback:
     factor: 0.025
     offset: 1.2
     max-reduction: 0.12
+  # The MMC remake is 1.8.9-fork-era feel: flat assigned values, no wire
+  # decay anywhere.
+  delivery:
+    melee: immediate
+    projectile: immediate
   modifiers:
     sprint: 1.0
     combos: false
