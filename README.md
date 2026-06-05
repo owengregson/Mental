@@ -1,5 +1,7 @@
 # Mental
 
+## WARNING: This plugin is still in beta. MMC KB Recreation is WIP.
+
 **Async Hit-reg, Ping compensation, & Legacy Knockback for modern Paper servers.**
 
 Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits, and snowball trades. It also registers hits faster than vanilla and evens out the playing field for players on higher ping.
