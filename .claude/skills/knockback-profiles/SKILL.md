@@ -51,3 +51,17 @@ description: Use when changing the knockback engine, profile schema, presets, or
    (label-swap resolved; not the private server's values); lunar is [likely].
    Cite in the preset header. Research base:
    docs/research/2026-06-04-improved-knockback.md.
+
+## The delivery knobs (1.4.0)
+
+`delivery.melee` / `delivery.projectile`: `tracker` ships the vector one
+victim-physics-tick decayed (the measured 1.7.10 wire; rod/projectile rode
+the tracker on BOTH eras) — friction from the victim's ground state AT THE
+HIT (captured at submit; the velocity event fires after fake players have
+already physics-ticked airborne). `immediate` is the 1.8.9 melee in-attack
+send. LEGACY_17 (and parse-empty) = tracker/tracker; legacy-1.8 =
+immediate/tracker; mmc = immediate/immediate. ConfigStore patches the
+missing block into pre-1.4.0 bundled preset files (never custom.yml).
+With pre-send on, the netty path decays and ships; the authoritative pass
+ADOPTS that vector and the duplicate outbound packet is suppressed — one
+wire stamp per knock, like the era.

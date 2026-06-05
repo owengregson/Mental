@@ -38,11 +38,24 @@ description: Use when reasoning about knockback, velocity, trajectories, player 
   and the server's own motion copy is restored immediately (1.8.9+ vanilla,
   still true today). The CLIENT integrates the trajectory. Server-side motion
   of a player victim after a melee hit is NOT the trajectory.
-- **Knockback math never changed**; 1.7.10 vs 1.8.9 differ only in delivery —
-  1.7.10 never reverted the victim's fields, so hits compounded (combos). The
-  VictimMotion ledger reproduces this; `getVelocity()` cannot.
-- Reference distances (flat ground): plain 0.4/0.4 knock ≈ 2.06 blocks;
-  sprint hit ≈ 5.07; jump impulse alone rises ≈ 1.25.
+- **Knockback math never changed; the WIRE did** (measured on real vanilla:
+  docs/research/2026-06-05-era-wire-measurements.md). 1.7.10 shipped every
+  knock via the end-of-tick tracker — one decay tick late (ground hits lose
+  ×0.546 horizontal!); 1.8.9 melee sent inside attack() then RESTORED the
+  pre-hit fields. 1.7.10 never restored → combos compounded. Rod/projectile
+  rode the tracker on BOTH eras. `KnockbackDelivery` models this per profile.
+- **The era vy baseline is a state machine, not the delivered knock**:
+  servers ticked player physics input-free, so standing victims park at the
+  −0.0784 equilibrium (standing-hit vertical = 0.3608, NOT 0.4), and the
+  movement handlers' jump bookkeeping OVERWRITES motY = 0.42 at any rising
+  liftoff (+0.2 facing push if sprinting) — a knocked victim's baseline one
+  tick later is jump-impulse FREE-FALL (1.8.9 combo hit 2 ships vy 0.3478 =
+  0.42 nine gravity steps later, measured to four decimals). VictimMotion +
+  GroundTransitionWatcher replicate exactly this; era combo verticals
+  DECLINE, which is why combo victims stayed low.
+- Reference flights (flat ground, measured): 1.8.9 plain ≈ 1.99 blocks,
+  sprint ≈ 4.95; 1.7.10 plain ≈ 0.99, sprint ≈ 2.54 — "1.7 hits half of
+  1.8" is literally the wire decay. Jump impulse alone rises ≈ 1.25.
 - Mental's `friction` knobs are SURVIVING-FRACTION multipliers (vanilla ÷2 ≡
   0.5, the NachoSpigot convention). Forks publishing divisors (Panda/Sport/
   Wind, typically 2.0) port as 1/d — pasting a divisor unchanged inverts the

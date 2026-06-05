@@ -72,16 +72,20 @@ public final class ProfileSuite {
                 context.expect("kohi".equals(resolved.name()),
                         "override did not win resolution (got " + resolved.name() + ")");
                 victim.player().setNoDamageTicks(0);
+                var victimState = KnockbackSuite.restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()),
-                        KnockbackSuite.restingVictim(victim), resolved, null);
+                        victimState, resolved, null);
                 attacker.attack(victim.player());
-                return vector;
+                return SuiteDelivery.melee(vector, resolved, victimState.grounded());
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
             // The kohi base differs from legacy-1.7 — matching it proves the
-            // profile actually switched, not just that a knock arrived.
-            context.expectNear(0.35, expected.y(), EPSILON, "kohi expectation sanity (base vertical)");
+            // profile actually switched, not just that a knock arrived. The
+            // expectation is the WIRE value: equilibrium baseline + kohi base,
+            // through the tracker delivery decay.
+            context.expectNear((-0.0784 * 0.5 + 0.35 - 0.08) * 0.98, expected.y(), EPSILON,
+                    "kohi expectation sanity (wire vertical)");
 
             context.awaitTicks(3);
             Vector applied = captors.velocityOf(victim.uuid());

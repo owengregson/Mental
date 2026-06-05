@@ -57,12 +57,16 @@ public final class ProjectileSuite {
                     Snowball snowball = victimSpot.getWorld().spawn(launch, Snowball.class);
                     snowball.setShooter(shooter.player());
                     snowball.setVelocity(new Vector(0, 0.0, 0.5));
-                    return KnockbackEngine.computeBase(
-                            KnockbackSuite.restingVictim(victim),
-                            shooter.player().getLocation().getX(),
-                            shooter.player().getLocation().getZ(),
-                            mental.services().knockbackProfiles().resolve(victim.player()), null,
-                            ThreadLocalRandom.current());
+                    var victimState = KnockbackSuite.restingVictim(victim);
+                    var profile = mental.services().knockbackProfiles().resolve(victim.player());
+                    return SuiteDelivery.projectile(
+                            KnockbackEngine.computeBase(
+                                    victimState,
+                                    shooter.player().getLocation().getX(),
+                                    shooter.player().getLocation().getZ(),
+                                    profile, null,
+                                    ThreadLocalRandom.current()),
+                            profile, victimState.grounded());
                 });
                 context.expect(expected != null, "engine returned no vector for an unresisted hit");
 

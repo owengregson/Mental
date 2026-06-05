@@ -115,12 +115,12 @@ public final class OcmCoexistenceSuite {
 
             KnockbackVector expected = context.sync(() -> {
                 freshVictim.player().setNoDamageTicks(0);
+                var victimState = KnockbackSuite.restingVictim(freshVictim);
+                var profile = mental.services().knockbackProfiles().resolve(freshVictim.player());
                 KnockbackVector vector = KnockbackEngine.compute(
-                        EntityState.capture(attacker.player()),
-                        KnockbackSuite.restingVictim(freshVictim),
-                        mental.services().knockbackProfiles().resolve(freshVictim.player()), null);
+                        EntityState.capture(attacker.player()), victimState, profile, null);
                 attacker.attack(freshVictim.player());
-                return vector;
+                return SuiteDelivery.melee(vector, profile, victimState.grounded());
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
             context.awaitTicks(3);

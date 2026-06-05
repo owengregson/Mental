@@ -53,3 +53,9 @@ replay_pid*.log
 # Claude Code — session artifacts stay local; skills are project config
 .claude/*
 !.claude/skills/
+
+# legacy-lab: measurement harness is tracked; servers, worlds, decompiles are not
+legacy-lab/*
+!legacy-lab/harness/
+legacy-lab/harness/node_modules/
+legacy-lab/harness/package-lock.json

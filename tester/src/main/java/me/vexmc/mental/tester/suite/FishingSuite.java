@@ -77,12 +77,18 @@ public final class FishingSuite {
                 // The fresh victim has an empty residual ledger and neither
                 // player has moved, so the rod vector is fully deterministic:
                 // bare base knock away from where the angler stands.
-                KnockbackVector expected = context.sync(() -> KnockbackEngine.computeBase(
-                        KnockbackSuite.restingVictim(victim),
-                        rodder.player().getLocation().getX(),
-                        rodder.player().getLocation().getZ(),
-                        mental.services().knockbackProfiles().resolve(victim.player()), null,
-                        ThreadLocalRandom.current()));
+                KnockbackVector expected = context.sync(() -> {
+                    var victimState = KnockbackSuite.restingVictim(victim);
+                    var profile = mental.services().knockbackProfiles().resolve(victim.player());
+                    return SuiteDelivery.projectile(
+                            KnockbackEngine.computeBase(
+                                    victimState,
+                                    rodder.player().getLocation().getX(),
+                                    rodder.player().getLocation().getZ(),
+                                    profile, null,
+                                    ThreadLocalRandom.current()),
+                            profile, victimState.grounded());
+                });
                 context.expect(expected != null, "engine returned no vector for an unresisted rod hit");
 
                 Vector applied = captors.velocityOf(victim.uuid());

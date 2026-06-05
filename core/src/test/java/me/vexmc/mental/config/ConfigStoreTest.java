@@ -54,9 +54,19 @@ class ConfigStoreTest {
 
         store.ensureDefaultFiles();
 
-        assertEquals("display-name: Mine\n",
-                Files.readString(kohi.toPath(), StandardCharsets.UTF_8));
+        // Owner edits survive — but a pre-1.4.0 preset (no delivery block)
+        // gets exactly the missing section added, once.
+        String patchedKohi = Files.readString(kohi.toPath(), StandardCharsets.UTF_8);
+        assertTrue(patchedKohi.startsWith("display-name: Mine"),
+                "owner edit must survive: " + patchedKohi);
+        assertTrue(patchedKohi.contains("delivery:")
+                        && patchedKohi.contains("melee: tracker"),
+                "missing delivery section must be added: " + patchedKohi);
         assertTrue(lunar.isFile(), "deleted preset must regenerate");
+
+        // Idempotent: a third pass changes nothing.
+        store.ensureDefaultFiles();
+        assertEquals(patchedKohi, Files.readString(kohi.toPath(), StandardCharsets.UTF_8));
     }
 
     @Test

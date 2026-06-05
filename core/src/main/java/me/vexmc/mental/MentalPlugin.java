@@ -217,6 +217,11 @@ public final class MentalPlugin extends JavaPlugin {
         return modules;
     }
 
+    /** The delivery pipeline (and through it the victim-motion ledger) — test access. */
+    public @NotNull KnockbackPipeline knockbackPipeline() {
+        return knockbackPipeline;
+    }
+
     private void registerModules() {
         VictimMotion victimMotion = new VictimMotion();
         knockbackPipeline = new KnockbackPipeline(services, victimMotion);

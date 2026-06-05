@@ -81,13 +81,29 @@ public final class EraParitySuite {
                 new TestCase("era: plain hit lands where the 1.7.10 and 1.8.9 models say", context -> {
                     Outcome legacy17 = melee(mental, tester, context, "legacy-1.7", new MeleeShape());
                     Outcome legacy18 = melee(mental, tester, context, "legacy-1.8", new MeleeShape());
-                    // Single-hit math is era-identical; only delivery differed.
-                    context.expectNear(legacy17.liveDistance(), legacy18.liveDistance(), 0.1,
-                            "single plain hit must travel the same distance in both eras");
+                    // The math is era-identical but the WIRE was not: 1.7.10
+                    // shipped via the tracker (one decay tick — ground hits
+                    // lose x0.546 horizontal), 1.8.9 melee sent immediately.
+                    // Measured on the real servers: 0.99 vs 1.99 blocks.
+                    context.expectNear(0.99, legacy17.liveDistance(), 0.3,
+                            "1.7.10 plain-hit distance (measured era value)");
+                    context.expectNear(1.99, legacy18.liveDistance(), 0.3,
+                            "1.8.9 plain-hit distance (measured era value)");
+                    context.expect(legacy17.liveDistance() < legacy18.liveDistance() * 0.65,
+                            "1.7.10 wire decay must roughly halve the 1.8.9 distance (got "
+                                    + legacy17.liveDistance() + " vs " + legacy18.liveDistance() + ")");
                 }),
                 new TestCase("era: sprint hit lands where both era models say", context -> {
-                    melee(mental, tester, context, "legacy-1.7", new MeleeShape().sprintAttacker());
-                    melee(mental, tester, context, "legacy-1.8", new MeleeShape().sprintAttacker());
+                    Outcome sprint17 = melee(
+                            mental, tester, context, "legacy-1.7", new MeleeShape().sprintAttacker());
+                    Outcome sprint18 = melee(
+                            mental, tester, context, "legacy-1.8", new MeleeShape().sprintAttacker());
+                    // Measured: vanilla 1.7.10 ships (0.491, 0.373) and flies
+                    // ~2.5 blocks; 1.8.9 ships (0.9, 0.461) and flies ~4.95.
+                    context.expectNear(2.54, sprint17.liveDistance(), 0.4,
+                            "1.7.10 sprint-hit distance (measured era value)");
+                    context.expectNear(4.95, sprint18.liveDistance(), 0.4,
+                            "1.8.9 sprint-hit distance (measured era value)");
                 }),
                 new TestCase("era: a victim walking at the attacker keeps trajectory parity", context -> {
                     // Holds W the whole engagement: approach, flight, landing.
@@ -130,13 +146,24 @@ public final class EraParitySuite {
                             new MeleeShape().secondHitAfter(4));
                     Outcome combo18 = melee(mental, tester, context, "legacy-1.8",
                             new MeleeShape().secondHitAfter(4));
+                    // The era discriminator is the WIRE SHAPE, measured on the
+                    // real servers: 1.8.9 restores pre-hit fields, so both
+                    // hits ship the same horizontal (0.9/0.9/0.9 measured);
+                    // 1.7.10 never restores, so the second hit compounds the
+                    // first's residual (0.268 -> 0.510 measured).
+                    double h17first = horizontal(combo17.stamps().get(0).velocity());
+                    double h17second = horizontal(combo17.stamps().get(1).velocity());
+                    double h18first = horizontal(combo18.stamps().get(0).velocity());
+                    double h18second = horizontal(combo18.stamps().get(1).velocity());
                     context.note(String.format(Locale.ROOT,
-                            "era-difference[combo] 1.7.10 travels %.3f blocks, 1.8.9 travels %.3f"
-                                    + " — the residual stack is the era gap",
-                            combo17.liveDistance(), combo18.liveDistance()));
-                    context.expect(combo17.liveDistance() > combo18.liveDistance() + 0.1,
-                            "a 1.7.10 combo must out-travel 1.8.9 flat delivery (got "
-                                    + combo17.liveDistance() + " vs " + combo18.liveDistance() + ")");
+                            "era-difference[combo] 1.7.10 wire h %.3f -> %.3f (compounds),"
+                                    + " 1.8.9 wire h %.3f -> %.3f (flat)",
+                            h17first, h17second, h18first, h18second));
+                    context.expect(h17second > h17first * 1.5,
+                            "the 1.7.10 second hit must compound the residual (h "
+                                    + h17first + " -> " + h17second + ")");
+                    context.expectNear(h18first, h18second, 0.05,
+                            "the 1.8.9 second hit must ship flat (restore semantics)");
                 }),
                 new TestCase("era: a rod knock trajectory matches the legacy model", context ->
                         rod(mental, tester, context)),
@@ -200,7 +227,13 @@ public final class EraParitySuite {
         }
     }
 
-    private record Outcome(double liveDistance, double oracleDistance) {}
+    private static double horizontal(Vector velocity) {
+        return Math.hypot(velocity.getX(), velocity.getZ());
+    }
+
+    private record Outcome(
+            double liveDistance, double oracleDistance,
+            List<ClientEmulator.Stamp> stamps) {}
 
     /** Clears horizontal motion, preserving the grounded gravity cycle. */
     private static void clearHorizontalMotion(FakePlayer player) {
@@ -481,7 +514,7 @@ public final class EraParitySuite {
                         + " model (%.4f, %.4f, %.4f), worst axis %.4f > %.4f",
                 label, live.getX(), live.getY(), live.getZ(),
                 best.x(), best.y(), best.z(), bestDelta, tolerance));
-        return new Outcome(liveDistance, oracleDistance);
+        return new Outcome(liveDistance, oracleDistance, stamps);
     }
 
     /**

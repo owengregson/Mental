@@ -64,6 +64,7 @@ public final class KnockbackPipeline implements Listener {
             @Nullable KnockbackVector preDelivered,
             @Nullable LivingEntity attacker,
             @NotNull Cause cause,
+            boolean groundedAtSubmit,
             long stampNanos) {
 
         boolean expired(long nowNanos) {
@@ -98,12 +99,18 @@ public final class KnockbackPipeline implements Listener {
      * vector means "suppress the knockback entirely" — the legacy resistance
      * roll succeeded, so the event is cancelled and no packet leaves.
      */
+    @SuppressWarnings("deprecation") // Entity#isOnGround: the hit-time state drives the era delivery decay
     public void submit(
             @NotNull Player victim,
             @Nullable KnockbackVector vector,
             @Nullable LivingEntity attacker,
             @NotNull Cause cause) {
-        pending.put(victim.getUniqueId(), new Pending(vector, null, attacker, cause, System.nanoTime()));
+        // Ground state is captured NOW: the velocity event fires after the
+        // victim's own physics tick may have lifted them (always, for the
+        // tester's fake players), but the era tracker decayed with the
+        // victim's state at the knock.
+        pending.put(victim.getUniqueId(), new Pending(
+                vector, null, attacker, cause, victim.isOnGround(), System.nanoTime()));
     }
 
     /**
@@ -114,13 +121,14 @@ public final class KnockbackPipeline implements Listener {
      * {@code preDelivered} and the duplicate outbound packet is suppressed —
      * one wire stamp per hit, exactly like the era servers.
      */
+    @SuppressWarnings("deprecation") // Entity#isOnGround (see submit)
     public void submitPreDelivered(
             @NotNull Player victim,
             @NotNull KnockbackVector vector,
             @NotNull KnockbackVector preDelivered,
             @Nullable LivingEntity attacker) {
-        pending.put(victim.getUniqueId(),
-                new Pending(vector, preDelivered, attacker, Cause.MELEE, System.nanoTime()));
+        pending.put(victim.getUniqueId(), new Pending(
+                vector, preDelivered, attacker, Cause.MELEE, victim.isOnGround(), System.nanoTime()));
     }
 
     /** Drops a pending vector — a protection plugin cancelled the hit it belonged to. */
@@ -195,7 +203,8 @@ public final class KnockbackPipeline implements Listener {
                 suppressor.armFor(victim);
             }
         } else {
-            shipped = deliveryAdjusted(victim, apply.velocity(), stored.cause());
+            shipped = deliveryAdjusted(
+                    victim, apply.velocity(), stored.cause(), stored.groundedAtSubmit());
         }
         event.setVelocity(shipped);
         applied.put(victimId, new AppliedTag(stored.cause(), now));
@@ -206,10 +215,10 @@ public final class KnockbackPipeline implements Listener {
     /**
      * The era wire decay ({@link KnockbackDelivery}): a TRACKER-delivered
      * vector ships one victim physics tick late, so it decays once with
-     * friction from the victim's current ground state.
+     * friction from the victim's ground state at the knock.
      */
-    @SuppressWarnings("deprecation") // Entity#isOnGround
-    private @NotNull Vector deliveryAdjusted(Player victim, Vector velocity, Cause cause) {
+    private @NotNull Vector deliveryAdjusted(
+            Player victim, Vector velocity, Cause cause, boolean groundedAtSubmit) {
         KnockbackProfile profile = services.knockbackProfiles().resolve(victim);
         KnockbackDelivery delivery = cause == Cause.MELEE
                 ? profile.meleeDelivery()
@@ -219,7 +228,7 @@ public final class KnockbackPipeline implements Listener {
         }
         VictimMotion.Motion decayed = VictimMotion.decayOnce(
                 velocity.getX(), velocity.getY(), velocity.getZ(),
-                victim.isOnGround(),
+                groundedAtSubmit,
                 Attributes.valueOr(victim, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
         return new Vector(decayed.vx(), decayed.vy(), decayed.vz());
     }

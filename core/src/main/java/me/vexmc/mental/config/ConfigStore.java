@@ -76,8 +76,44 @@ public final class ConfigStore {
             return;
         }
         for (String preset : BUNDLED_PROFILES) {
-            extractIfMissing(PROFILES_DIR + "/" + preset + ".yml",
-                    new File(profilesDir, preset + ".yml"));
+            File file = new File(profilesDir, preset + ".yml");
+            extractIfMissing(PROFILES_DIR + "/" + preset + ".yml", file);
+            ensureDeliverySection(preset, file);
+        }
+    }
+
+    /**
+     * 1.4.0 introduced the per-profile {@code delivery} block; a preset file
+     * from an earlier install lacks it and would parse to the legacy-1.7
+     * defaults — wrong for legacy-1.8 and mmc. Bundled presets that predate
+     * the knob get exactly the missing section inserted; every user-edited
+     * value in the file stays untouched (custom.yml is never modified).
+     */
+    private void ensureDeliverySection(@NotNull String preset, @NotNull File file) {
+        String melee = switch (preset) {
+            case "legacy-1.8" -> "immediate";
+            case "mmc" -> "immediate";
+            default -> "tracker";
+        };
+        String projectile = "mmc".equals(preset) ? "immediate" : "tracker";
+        if ("custom".equals(preset) || !file.exists()) {
+            return;
+        }
+        try {
+            String content = Files.readString(file.toPath(), StandardCharsets.UTF_8);
+            if (content.contains("delivery:")) {
+                return;
+            }
+            String block = "  delivery:\n    melee: " + melee
+                    + "\n    projectile: " + projectile + "\n";
+            int anchor = content.indexOf("  modifiers:");
+            String updated = anchor >= 0
+                    ? content.substring(0, anchor) + block + content.substring(anchor)
+                    : content + "\n" + block;
+            Files.writeString(file.toPath(), updated, StandardCharsets.UTF_8);
+            log.accept("Added the 1.4.0 delivery section to profiles/" + preset + ".yml");
+        } catch (IOException failure) {
+            log.accept("Could not update profiles/" + preset + ".yml: " + failure);
         }
     }
 

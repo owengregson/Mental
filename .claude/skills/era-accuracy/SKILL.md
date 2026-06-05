@@ -7,10 +7,16 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
 
 ## Ground truths (decompiled, in-repo: SYNOPSIS.md + docs/legacy-combat.md)
 
-- 1.7.10 and 1.8.9 knockback MATH is byte-identical; the era difference is
-  DELIVERY (1.7.10 compounded residuals → combos; 1.8.9 send-then-revert →
-  flat). Measured distances: plain ≈ 1.98–2.06, sprint ≈ 4.94–5.07,
-  1.7 ≈ half of 1.8, projectiles a constant ≈ 1.98.
+- 1.7.10 and 1.8.9 knockback MATH is byte-identical; the era differences are
+  DELIVERY, measured on the real servers
+  (docs/research/2026-06-05-era-wire-measurements.md): 1.7.10 ships every
+  knock tracker-decayed one tick (ground hits lose ×0.546 horizontal) and
+  never restores (combos compound); 1.8.9 melee sends in attack() then
+  restores (flat). Measured flights: 1.8.9 plain ≈ 1.99 / sprint ≈ 4.95;
+  1.7.10 plain ≈ 0.99 / sprint ≈ 2.54 — "1.7 ≈ half of 1.8" IS the wire
+  decay. Era combo verticals DECLINE (the jump stamp free-falls: 1.8.9
+  combo hit two ships vy 0.3478); victims stayed LOW in era combos.
+  Standing-hit vertical is 0.3608 (equilibrium baseline), never 0.4.
 - Legacy damage: sharpness 1.25/level, crit-before-enchant with no sprint
   exclusion, pre-1.9 tool tables (diamond sword = 8), rod/projectile knocks
   from the SHOOTER'S POSITION, probabilistic armor resistance.

@@ -3,6 +3,7 @@ package me.vexmc.mental.tester.suite;
 import java.util.ArrayList;
 import java.util.List;
 import me.vexmc.mental.MentalPlugin;
+import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackVector;
@@ -19,10 +20,10 @@ import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * A real hit between two synthetic players must produce exactly the vector
- * the engine computes from the same pre-hit state — the full event chain
- * (damage → module stash → velocity event) verified end to end on a live
- * server.
+ * End-to-end knockback delivery: the velocity a victim's velocity event
+ * carries must equal the engine's vector pushed through the profile's wire
+ * delivery (legacy-1.7 default: one tracker decay tick — the measured
+ * 1.7.10 behavior), with combo residuals served by the live ledger.
  */
 public final class KnockbackSuite {
 
@@ -33,11 +34,11 @@ public final class KnockbackSuite {
     public static @NotNull List<TestCase> tests(
             @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
-                new TestCase("knockback: plain hit matches the engine vector", context ->
+                new TestCase("knockback: plain hit matches engine + tracker delivery", context ->
                         runScenario(mental, tester, context, false)),
-                new TestCase("knockback: sprint hit matches the engine vector", context ->
+                new TestCase("knockback: sprint hit matches engine + tracker delivery", context ->
                         runScenario(mental, tester, context, true)),
-                new TestCase("knockback: second hit stacks the decayed residual (1.7.10 combos)", context ->
+                new TestCase("knockback: second hit stacks the ledger residual (1.7.10 combos)", context ->
                         runComboScenario(mental, tester, context)));
     }
 
@@ -61,15 +62,17 @@ public final class KnockbackSuite {
                 attacker.player().setSprinting(sprinting);
                 victim.player().setNoDamageTicks(0);
                 EntityState attackerState = EntityState.capture(attacker.player());
-                // A fresh victim has no residual: the ledger the module
-                // consumes reads zero motion, exactly as a 1.7.10 server's
-                // untouched fields would.
+                // A fresh grounded victim reads the gravity equilibrium —
+                // the era servers ticked player physics, so motY parked at
+                // −0.0784, never zero (measured: standing hits are 0.3608-
+                // based, sprint 0.4608, before the wire decay).
                 EntityState victimState = restingVictim(victim);
+                KnockbackProfile profile =
+                        mental.services().knockbackProfiles().resolve(victim.player());
                 KnockbackVector vector = KnockbackEngine.compute(
-                        attackerState, victimState,
-                        mental.services().knockbackProfiles().resolve(victim.player()), null);
+                        attackerState, victimState, profile, null);
                 attacker.attack(victim.player());
-                return vector;
+                return SuiteDelivery.melee(vector, profile, victimState.grounded());
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
 
@@ -83,8 +86,9 @@ public final class KnockbackSuite {
             context.expectNear(expected.y(), applied.getY(), EPSILON, "knockback y");
             context.expectNear(expected.z(), applied.getZ(), EPSILON, "knockback z");
             if (sprinting) {
-                context.expect(applied.getY() > 0.45,
-                        "sprint hit must exceed the 0.4 vertical limit (got " + applied.getY() + ")");
+                // the measured 1.7.10 wire value for a standing sprint hit
+                context.expectNear(0.3731, applied.getY(), 5.0e-3,
+                        "sprint hit vertical (era wire value)");
             }
         } finally {
             context.syncRun(() -> {
@@ -96,16 +100,11 @@ public final class KnockbackSuite {
     }
 
     /**
-     * The 1.7.10 combo: a second hit shortly after the first must compute
-     * from the first knock's friction-decayed residual, landing harder than
-     * the first. Fake players tick real physics and read grounded, so the
-     * residual decays with ground drag — the gap stays short enough for the
-     * stack to remain well above the epsilon.
-     *
-     * <p>The ledger decays on wall-clock ticks while the suite waits on
-     * game ticks, so the expectation is computed for the elapsed tick count
-     * ±1; the candidates sit ~8e-3 apart, far beyond the 1e-3 epsilon, so
-     * exactly one can match.</p>
+     * The 1.7.10 combo: the second hit computes from the live ledger —
+     * which, after the first knock's liftoff, holds the JUMP STAMP free-fall
+     * (the era movement handler overwrote motY with 0.42 at liftoff), not
+     * the delivered vertical. Expectations read the same ledger the module
+     * consumes, at the elapsed tick ±1 (wall/game skew).
      */
     private static void runComboScenario(
             MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -123,13 +122,16 @@ public final class KnockbackSuite {
             // Land and settle — spawn invulnerability is cleared at spawn.
             context.awaitTicks(5);
 
+            KnockbackProfile profile = context.sync(
+                    () -> mental.services().knockbackProfiles().resolve(victim.player()));
+
             KnockbackVector first = context.sync(() -> {
                 victim.player().setNoDamageTicks(0);
+                EntityState victimState = restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
-                        EntityState.capture(attacker.player()), restingVictim(victim),
-                        mental.services().knockbackProfiles().resolve(victim.player()), null);
+                        EntityState.capture(attacker.player()), victimState, profile, null);
                 attacker.attack(victim.player());
-                return vector;
+                return SuiteDelivery.melee(vector, profile, victimState.grounded());
             });
             context.expect(first != null, "engine returned no vector for the first hit");
 
@@ -140,25 +142,30 @@ public final class KnockbackSuite {
             context.expectNear(first.y(), appliedFirst.getY(), EPSILON, "first hit y");
             captors.reset();
 
+            VictimMotion ledger = mental.knockbackPipeline().ledger();
             List<KnockbackVector> candidates = context.sync(() -> {
                 boolean grounded = victim.player().isOnGround();
                 victim.player().setNoDamageTicks(0);
                 EntityState attackerState = EntityState.capture(attacker.player());
                 EntityState resting = restingVictim(victim);
+                long now = System.nanoTime();
                 List<KnockbackVector> expected = new ArrayList<>();
-                for (int elapsed = gapTicks - 1; elapsed <= gapTicks + 1; elapsed++) {
-                    VictimMotion.Motion residual = VictimMotion.decay(
-                            first.x(), first.y(), first.z(), elapsed, grounded,
+                // The live ledger at now and ±1 tick — it already carries the
+                // first knock, the liftoff jump stamp, and any landing.
+                for (int offset = -1; offset <= 1; offset++) {
+                    VictimMotion.Motion residual = ledger.current(
+                            victim.uuid(), now + offset * 50_000_000L, grounded,
                             VictimMotion.DEFAULT_GRAVITY);
-                    expected.add(KnockbackEngine.compute(
+                    KnockbackVector vector = KnockbackEngine.compute(
                             attackerState,
                             new EntityState(
                                     resting.x(), resting.y(), resting.z(), resting.yaw(),
                                     residual.vx(), residual.vy(), residual.vz(),
-                                    resting.grounded(), resting.sprinting(),
+                                    grounded, resting.sprinting(),
                                     resting.knockbackEnchantLevel(),
                                     resting.knockbackResistance()),
-                            mental.services().knockbackProfiles().resolve(victim.player()), null));
+                            profile, null);
+                    expected.add(SuiteDelivery.melee(vector, profile, grounded));
                 }
                 attacker.attack(victim.player());
                 return expected;
@@ -180,9 +187,13 @@ public final class KnockbackSuite {
                 bestDelta = Math.min(bestDelta, delta);
             }
             context.expect(bestDelta < EPSILON,
-                    "second hit did not match any residual candidate (best delta " + bestDelta
+                    "second hit did not match any ledger candidate (best delta " + bestDelta
                             + ", applied " + appliedSecond + ")");
-            context.expect(appliedSecond.getZ() > appliedFirst.getZ() + 0.005,
+            // The residual margin after two tracker decays is small when the
+            // victim reads grounded at both hits (legacy versions keep
+            // onGround true while rising) — strictly-greater proves the
+            // compounding; the candidate match above pins the exact value.
+            context.expect(appliedSecond.getZ() > appliedFirst.getZ() + 1.0e-3,
                     "second hit must stack past the first (z " + appliedFirst.getZ()
                             + " -> " + appliedSecond.getZ() + ")");
         } finally {
@@ -194,11 +205,14 @@ public final class KnockbackSuite {
         }
     }
 
-    /** The victim's engine input with an empty residual ledger: zero motion. */
+    /** The victim's engine input with a fresh ledger: grounded equilibrium motion. */
     static EntityState restingVictim(FakePlayer victim) {
         EntityState live = EntityState.capture(victim.player());
+        double vy = live.grounded()
+                ? VictimMotion.groundedEquilibrium(VictimMotion.DEFAULT_GRAVITY)
+                : 0.0;
         return new EntityState(
-                live.x(), live.y(), live.z(), live.yaw(), 0.0, 0.0, 0.0,
+                live.x(), live.y(), live.z(), live.yaw(), 0.0, vy, 0.0,
                 live.grounded(), live.sprinting(),
                 live.knockbackEnchantLevel(), live.knockbackResistance());
     }
