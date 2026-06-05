@@ -4,6 +4,7 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListener;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientKeepAlive;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPong;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerKeepAlive;
@@ -60,14 +61,21 @@ final class ProbeListener implements PacketListener {
             tracker.forPlayer(player.getUniqueId()).onProbeSent(id, System.nanoTime());
             PacketEvents.getAPI().getPlayerManager().sendPacket(player,
                     (com.github.retrooper.packetevents.wrapper.PacketWrapper<?>) packet);
-        } catch (Throwable disconnected) {
-            // Player vanished between selection and send — drop silently.
+        } catch (Throwable failure) {
+            // Player vanished between selection and send, or sits in the
+            // 1.20.2+ reconfiguration phase where a Play packet can't encode —
+            // a silently dropped probe is the right outcome either way.
         }
     }
 
     @Override
     public void onPacketReceive(@NotNull PacketReceiveEvent event) {
-        PacketType.Play.Client type = (PacketType.Play.Client) event.getPacketType();
+        // Listeners see every connection state — a joining client emits
+        // handshake/login/configuration packets before Play, so match by
+        // reference against the Play constants instead of downcasting.
+        // This also keeps CONFIGURATION's own KEEP_ALIVE out: cancelling one
+        // of those would time the client out mid-(re)configuration.
+        PacketTypeCommon type = event.getPacketType();
         if (type != PacketType.Play.Client.KEEP_ALIVE && type != PacketType.Play.Client.PONG) {
             return;
         }

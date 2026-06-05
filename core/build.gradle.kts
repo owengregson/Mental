@@ -19,6 +19,9 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.launcher)
     testImplementation(libs.paper.api.floor)
+    // The server supplies netty at runtime; packet-event construction in
+    // unit tests needs a real allocator on the classpath.
+    testRuntimeOnly(libs.netty.all)
 }
 
 tasks.processResources {
