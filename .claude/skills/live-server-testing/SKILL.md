@@ -72,3 +72,27 @@ clients against a real local server (vanilla 1.7.10/1.8.9 for era ground
 truth, Paper+Mental for acceptance), with injectable ping via delayed pong
 responses. See docs/research/2026-06-05-era-wire-measurements.md for the
 measured era values and the harness's protocol traps.
+
+## Modern-bot staging traps (each cost a debugging round)
+
+- **1.21.6+ compacted `entity_action`**: `start_sprinting` = 1, not 3 (sneak
+  moved to `player_input`; numeric 3 = `start_horse_jump`, silently ignored
+  off a horse). nmp models the field as a protodef MAPPER — write the NAME
+  (`'start_sprinting'`), never a number.
+- **Attack BEFORE swing**: Paper's `ServerPlayer.swing()` resets the
+  attack-strength ticker. A swing-first bot attacks with a ~0.1 meter and
+  vanilla skips the sprint-knockback/crit branches even while sprinting.
+  Real clients send use_entity first, arm_animation after — every era.
+- **The sound oracle** (`WATCH_SOUND=1`): which `entity.player.attack.*`
+  the victim hears names the attack branch the server took
+  (weak = uncharged meter, knockback = sprint bonus, crit, sweep) — branch
+  visibility with zero server access. Map ids via the server's own
+  `--reports` registry dump; minecraft-data's `sounds.json` drifts.
+- **Sanitize every lab server** before measuring: `difficulty peaceful` +
+  kill non-players. Slimes chewing the victim mid-scenario produce death
+  sounds and perturbed ledgers that masquerade as delivery bugs.
+- **Stage trade hits at reach-entry (~2.4–2.8 blocks)**: a charging victim
+  allowed to overrun the attacker measures the era-real base-vs-sprint-extra
+  opposition (~0.05 h) instead of the representative trade opener.
+- Shell cwd resets between Bash calls — `cd` into `legacy-lab/harness`
+  inside the SAME command that runs node, every time.

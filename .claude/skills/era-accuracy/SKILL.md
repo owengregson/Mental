@@ -51,5 +51,23 @@ construction and must keep doing so:
 Vector-level: KnockbackSuite/ProfileSuite (engine expectation == applied
 velocity). Position-level: EraParitySuite (settled endpoint vs the EraOracle
 legacy integrator, ≤0.005-block tolerance; combo era gap and held-input
-effects demonstrated live). A claim of era accuracy without a pin in one of
-these is not yet a claim.
+effects demonstrated live). Wire-level: the legacy-lab harness against the
+live netty path (the suites never traverse HitPacketListener — FakePlayers
+attack server-side). A claim of era accuracy without a pin in one of these
+is not yet a claim.
+
+## Era trade feel (measured 2026-06-05 — set expectations BEFORE "fixing")
+
+- Vanilla 1.7.10 sprint wire is HALF of 1.8.9: (0.4914, 0.3731) vs
+  (0.9, 0.4607). Mental's live path matches both to 4 decimals
+  (legacy-1.7 / legacy-1.8 presets). "Weak trade knockback" reports on
+  legacy-1.7 describe vanilla 1.7.10 itself, not a delivery bug.
+- The trade-opener opposition: base 0.4 pushes away from the ATTACKER'S
+  POSITION, sprint extra 0.5 along the ATTACKER'S YAW. A victim past the
+  attacker (face-hug) gets ~0.05 h — era-real, identical on actual 1.7.10.
+- The community's "comboable 1.7" memory is modified-spigot feel (Kohi,
+  MCSG: ~1.8-strength horizontal). Combo-friendly servers want legacy-1.8
+  (era-verified 1.8.9 wire) or kohi (flat 0.42 h, low vy, no compounding);
+  legacy-1.7 is the vanilla museum piece.
+- Modern vanilla reference (Paper 1.21.11 bare): standing (0.4, 0.3608),
+  sprint (0.7, 0.4) — what players are calibrated to with Mental off.

@@ -116,9 +116,20 @@ function mkBot(username, opts = {}) {
   if (process.env.WATCH_META) {
     client.on('entity_metadata', (p) => {
       for (const m of p.metadata || []) {
-        if (m.key === 0) log(`[${username}] t=${bot.tick} META id=${p.entityId} flags=0x${(m.value & 0xff).toString(16)} sprint=${!!(m.value & 0x08)}`);
+        // slot 0 is the shared flags byte; 0x08 = sprinting
+        if (m.key === 0) {
+          log(`[${username}] t=${bot.tick} FLAGS id=${p.entityId} value=0x${Number(m.value).toString(16)} sprint=${!!(Number(m.value) & 0x08)}`);
+        }
       }
     });
+  }
+  if (process.env.WATCH_SOUND) {
+    // The attack-branch oracle: vanilla plays entity.player.attack.knockback
+    // on the sprint-bonus branch and .strong/.weak otherwise — the victim
+    // hears exactly which branch the server took, no metadata needed.
+    const soundLog = (p, kind) => log(`[${username}] t=${bot.tick} SOUND ${kind} ${JSON.stringify(p.sound)}`);
+    client.on('sound_effect', (p) => soundLog(p, 'world'));
+    client.on('entity_sound_effect', (p) => soundLog(p, 'entity'));
   }
   client.on('entity_velocity', (p) => {
     log(`[${username}] t=${bot.tick} RAW-VEL id=${p.entityId} (mine=${bot.id}) shorts=(${p.velocity.x}, ${p.velocity.y}, ${p.velocity.z})`);
@@ -142,23 +153,39 @@ function mkBot(username, opts = {}) {
   bot.stop = () => { clearInterval(bot._interval); client.end(); };
 
   bot.setSprint = (on) => {
-    client.write('entity_action', {
-      entityId: bot.id, actionId: on ? SPRINT_START : SPRINT_STOP, jumpBoost: 0,
-    });
     if (MODERN) {
-      // 1.21.4+ servers derive sprint intent from the input-flags packet
+      // 1.21.6+ compacted the entity_action enum (sneak moved into
+      // player_input): start_sprinting=1, stop_sprinting=2. The old numeric
+      // 3/4 land on start/stop_horse_jump — silently ignored off a horse,
+      // which is why modern sprint "never engaged". nmp models the field as
+      // a protodef mapper, so the write side takes the NAME.
+      client.write('entity_action', {
+        entityId: bot.id, actionId: on ? 'start_sprinting' : 'stop_sprinting', jumpBoost: 0,
+      });
+      // the server derives movement impulse (and sprint sustain) from the
+      // input-flags packet — hold forward alongside the sprint command
       client.write('player_input', {
         inputs: { forward: on, backward: false, left: false, right: false, jump: false, shift: false, sprint: on },
+      });
+    } else {
+      client.write('entity_action', {
+        entityId: bot.id, actionId: on ? SPRINT_START : SPRINT_STOP, jumpBoost: 0,
       });
     }
   };
   bot.attack = (targetId) => {
-    if (IS_17) client.write('arm_animation', { entityId: bot.id, animation: 1 });
-    else if (!MODERN) client.write('arm_animation', {});
-    else client.write('arm_animation', { hand: 0 });
+    // Real clients send the attack BEFORE the swing on every era
+    // (Minecraft.clickMouse: attackEntity, then swingItem). The order is
+    // load-bearing on modern servers: Paper's ServerPlayer.swing() resets
+    // the attack-strength ticker, so a swing-first bot attacks with a
+    // ~0.1 meter — vanilla then skips the sprint-knockback and crit
+    // branches entirely (entity.player.attack.weak instead of .knockback).
     const packet = { target: targetId, mouse: 1 };
     if (MODERN) { packet.sneaking = false; }
     client.write('use_entity', packet);
+    if (IS_17) client.write('arm_animation', { entityId: bot.id, animation: 1 });
+    else if (!MODERN) client.write('arm_animation', {});
+    else client.write('arm_animation', { hand: 0 });
   };
   bot.teleportStep = (x, z) => { bot.pos.x = x; bot.pos.z = z; };
 
@@ -298,11 +325,20 @@ async function main() {
         },
       };
       victim.setSprint(true);
-      // run to terminal sprint speed before the first hit
-      await sleepTicks(15);
     }
     attacker.setSprint(true);
     await sleepTicks(3);
+    if (SCENARIO === 'charge-combo') {
+      // Throw hit 1 at reach-entry like a real first trade hit — a fixed
+      // ramp lets the charging victim run PAST the attacker, where the base
+      // push (away from attacker) and the sprint extra (along attacker yaw)
+      // oppose and the first knock measures ~0.05 instead of ~0.9.
+      for (let t = 0; t < 40; t++) {
+        const d = Math.hypot(victim.pos.x - attacker.pos.x, victim.pos.z - attacker.pos.z);
+        if (d <= 2.8) break;
+        await sleepTicks(1);
+      }
+    }
     for (let h = 0; h < HITS; h++) {
       attacker.attack(targetId);
       log(`# hit ${h + 1} thrown at victim tick ${victim.tick}, dist=${Math.hypot(victim.pos.x - attacker.pos.x, victim.pos.z - attacker.pos.z).toFixed(2)}`);
