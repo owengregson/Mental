@@ -1,8 +1,11 @@
 package me.vexmc.mental.tester.fake;
 
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.ReferenceCountUtil;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -319,6 +322,25 @@ public final class FakePlayer {
         this.connection = connectionClass.getConstructor(packetFlowClass).newInstance(packetFlow);
 
         EmbeddedChannel channel = new EmbeddedChannel(new ChannelInboundHandlerAdapter());
+        // Swallow ALL outbound traffic before it reaches the embedded
+        // channel's internal buffer. EmbeddedChannel is a single-threaded
+        // test construct; the live server writes to player connections from
+        // several threads (1.19/1.20's PlayerChunkLoader streams chunks
+        // mid-tick), which corrupts that buffer (null-promise NPEs) and can
+        // wedge the main thread inside the send loop. Packets to a player
+        // with no client go nowhere by definition — complete them instantly.
+        channel.pipeline().addFirst("mental-void-outbound", new ChannelOutboundHandlerAdapter() {
+            @Override
+            public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) {
+                ReferenceCountUtil.release(message);
+                if (promise != null && !promise.isVoid()) {
+                    promise.trySuccess();
+                }
+            }
+
+            @Override
+            public void flush(ChannelHandlerContext context) {}
+        });
         if (channel.pipeline().get("decoder") == null) {
             channel.pipeline().addLast("decoder", new ChannelInboundHandlerAdapter());
         }
