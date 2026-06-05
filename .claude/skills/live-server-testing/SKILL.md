@@ -18,6 +18,14 @@ description: Use when writing or debugging integration suites in tester/ — Fak
   timer; 26.x listener `clientLoadedTimeoutTimer`+`waitingForRespawn`, read
   back off the player because placeNewPlayer replaced our listener). Suites
   therefore wait only ~5 ticks after spawn, not 70.
+- The fake pipeline VOIDS all outbound traffic (release + complete promise):
+  EmbeddedChannel is single-threaded, and 1.19/1.20's PlayerChunkLoader
+  writes to player connections cross-thread mid-tick — without the void
+  handler its buffer corrupts (null-promise NPEs) and wedges the main
+  thread forever. Likewise the Gradle run tasks pass
+  `-Ddisable.watchdog=true`: a slow-runner tick stall trips the legacy
+  watchdog, whose forced shutdown deadlocks old servers into hung
+  processes. Both only ever reproduced on cold CI runners.
 - Fake players tick real physics via their task — but they are **clientless**:
   melee knockback (send-then-restore) never moves them. Trajectory tests must
   client-emulate: apply each velocity packet to the entity exactly once

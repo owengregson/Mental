@@ -17,8 +17,12 @@ scripts/integration-matrix.sh --versions 1.17.1,26.1.2 --no-ocm   # targeted
 ```
 
 The script exists because Gradle serializes tasks within a project. On CI,
-the auto-release workflow runs the full matrix in parallel across runners
-and only tags/releases when version-bumped and fully green. It reuses
+the auto-release workflow (.github/workflows/release.yml) runs the full
+matrix in parallel across runners and only tags/releases when the version
+is bumped (no v<version> tag yet) and fully green — pushing a version bump
+to main IS the release action. Integration jobs carry 20-minute timeouts
+and upload server logs on every outcome: a hung server's log is the only
+evidence it leaves. It reuses
 run-paper's cached paperclip jars (`~/.gradle/caches/run-task-jars/paper/jars`)
 with `-add-plugin=` injection, one port per server from 25600. OCM runs are
 included automatically when the OCM jar is staged.
