@@ -10,6 +10,7 @@ import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -44,8 +45,16 @@ public final class PlayerStateCache {
             @NotNull OcmGate ocmGate, @NotNull KnockbackProfiles profiles) {
         Location location = player.getLocation();
         boolean onGround = player.isOnGround();
-        VictimMotion.Motion motion = ledger.current(
+        // The boundary read: a ground transition whose packet arrived THIS
+        // tick is excluded, so the frozen motion is the state as of the end
+        // of the previous tick — the exact state an era server's attack slot
+        // judged for a same-tick hit (the attacker's connection slot ran
+        // before the victim's). Without it, a knock thrown the instant its
+        // victim touches down reads post-landing equilibrium and ships the
+        // grounded 0.3608 vertical where the era ships the pre-landing ~0.25.
+        VictimMotion.Motion motion = ledger.currentExcludingTick(
                 player.getUniqueId(),
+                Bukkit.getCurrentTick(),
                 System.nanoTime(),
                 onGround,
                 Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
@@ -126,9 +135,23 @@ public final class PlayerStateCache {
          * Vanilla's double-hit guard: inside this window a fresh hit carries
          * no knockback unless it out-damages the previous one, so the fast
          * path must not pre-send velocity for it.
+         *
+         * <p>The {@code + 1} is the snapshot's staleness allowance. This value
+         * froze at the start of the tick, BEFORE that tick's decrement, so a
+         * legal perfect-cadence combo hit — thrown the instant the window
+         * halves, the spam-combo norm — reads one tick high here while
+         * vanilla's own judgment at processing reads exactly {@code max/2}.
+         * Without the allowance every boundary hit skips its pre-send and
+         * falls to the authoritative next-tick send, which computes from
+         * post-landing state (measured: those hits ship the grounded 0.3608
+         * vertical where the era ships the pre-landing ~0.25 — the
+         * floaty-combo signature). Phantom-safe by construction: the deferred
+         * damage runs at least one tick after this snapshot froze, so any hit
+         * admitted here arrives there with {@code nd <= max/2} and is
+         * accepted — the wire and the damage verdict cannot disagree.</p>
          */
         public boolean isDamageImmune() {
-            return noDamageTicks > maxNoDamageTicks / 2;
+            return noDamageTicks > maxNoDamageTicks / 2 + 1;
         }
 
         /** The snapshot's alias for {@code onGround}, named for delivery-decay call sites. */

@@ -188,11 +188,19 @@ final class HitPacketListener implements PacketListener {
             debug(attacker, () -> "pre-send skipped: " + victim.getName() + " still invulnerable");
             return;
         }
-        // auto follows the victim's live hurt window (vanilla 20 ticks -> 500ms;
-        // attack-frequency style retuning shortens it in step with the server).
+        // auto follows the victim's live hurt window MINUS ONE TICK. Vanilla
+        // applies a knockback-bearing hit the moment noDamageTicks falls to
+        // max/2, so a perfect-cadence combo throws legal hits exactly one
+        // half-window apart — a gate equal to that cadence makes every such
+        // hit race the boundary on millisecond jitter, and each loser falls
+        // back to the authoritative next-tick send computed from POST-landing
+        // state (measured on the wire: boundary combo hits then ship the
+        // grounded 0.3608 vertical where era servers ship the pre-landing
+        // ~0.25 — the floaty-combo signature). The gate's real job is only
+        // sub-window spam and same-window multi-attacker bursts.
         long minIntervalMillis = settings.feedbackMinIntervalMillis() >= 0
                 ? settings.feedbackMinIntervalMillis()
-                : victimSnap.maxNoDamageTicks() * 50L / 2L;
+                : Math.max(0, victimSnap.maxNoDamageTicks() / 2 - 1) * 50L;
         if (!feedbackGate.tryPreSend(victim.getUniqueId(), now, minIntervalMillis)) {
             debug(attacker, () -> "pre-send gated: " + victim.getName()
                     + " inside " + minIntervalMillis + "ms window");

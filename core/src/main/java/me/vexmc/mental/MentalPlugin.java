@@ -26,6 +26,7 @@ import me.vexmc.mental.module.compensation.LatencyCompensationModule;
 import me.vexmc.mental.module.fishing.FishingKnockbackModule;
 import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
+import me.vexmc.mental.module.knockback.GroundPacketTap;
 import me.vexmc.mental.module.knockback.GroundTransitionWatcher;
 import me.vexmc.mental.module.knockback.KnockbackModule;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
@@ -142,6 +143,13 @@ public final class MentalPlugin extends JavaPlugin {
         PacketEvents.getAPI().getEventManager()
                 .registerListener(velocitySuppressor, PacketListenerPriority.HIGHEST);
         knockbackPipeline.suppressor(velocitySuppressor);
+
+        // The era movement-packet bookkeeping ran per packet, in arrival
+        // order; the tap feeds the watcher the same events so jump stamps
+        // land the tick the client's packet does, not a sample later
+        // (read-only — observes after every other listener has had its say).
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new GroundPacketTap(groundWatcher), PacketListenerPriority.MONITOR);
 
         PacketEvents.getAPI().init();
 

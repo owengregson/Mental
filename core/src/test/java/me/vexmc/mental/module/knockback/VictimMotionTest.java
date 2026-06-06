@@ -172,6 +172,78 @@ class VictimMotionTest {
         assertTrue(ledger.current(victim, 200 * TICK_NANOS, false, GRAVITY).isZero());
     }
 
+    // ── The era attack-ordering contract (tick-stamped packet records) ──
+    // Legacy servers processed an attack in the attacker's connection slot
+    // BEFORE the victim's same-tick movement packets applied: a knock thrown
+    // the instant its victim touches down reads the PRE-landing flight.
+    // Measured on real vanilla 1.8.9 (both join orders): boundary combo hits
+    // ship the declining ~0.25 vertical, never a grounded 0.3608 re-stamp.
+
+    @Test
+    void excludingTheLandingTickReadsThePreLandingFlight() {
+        // Liftoff stamp at tick 1 (the knocked client's first risen packet),
+        // landing packet at tick 10 — the boundary-hit staging.
+        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, 1);
+        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY, 10);
+        VictimMotion.Motion asOf = ledger.currentExcludingTick(
+                victim, 10, 10 * TICK_NANOS, true, GRAVITY);
+        // 0.42 free-falling nine steps: the residual behind the era's
+        // measured boundary vertical (0.2492 = -0.30153.../2 + 0.4).
+        double expected = 0.42;
+        for (int i = 0; i < 9; i++) {
+            expected = (expected - GRAVITY) * 0.98;
+        }
+        assertEquals(expected, asOf.vy(), EPSILON);
+        // The inclusive view sees the landing, like the era victim slot did
+        // for any attack processed after it.
+        assertEquals(VictimMotion.groundedEquilibrium(GRAVITY),
+                ledger.current(victim, 10 * TICK_NANOS, true, GRAVITY).vy(), EPSILON);
+    }
+
+    @Test
+    void previousTickLandingsAreNotExcluded() {
+        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, 1);
+        ledger.recordLanding(victim, 9 * TICK_NANOS, GRAVITY, 9);
+        VictimMotion.Motion asOf = ledger.currentExcludingTick(
+                victim, 10, 10 * TICK_NANOS, true, GRAVITY);
+        // Landed a tick before the attack: the era read it grounded too.
+        assertEquals(VictimMotion.groundedEquilibrium(GRAVITY), asOf.vy(), EPSILON);
+    }
+
+    @Test
+    void tickAgnosticRecordsAreNeverExcluded() {
+        // The per-tick sampler (packetless fake players) writes NO_TICK
+        // records; the boundary read must keep today's inclusive behavior.
+        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY);
+        VictimMotion.Motion asOf = ledger.currentExcludingTick(
+                victim, 10, 10 * TICK_NANOS, true, GRAVITY);
+        assertEquals(VictimMotion.groundedEquilibrium(GRAVITY), asOf.vy(), EPSILON);
+    }
+
+    @Test
+    void sameTickGrazePreservesTheBoundaryState() {
+        // Landing then immediate re-liftoff inside one tick (a graze): the
+        // boundary read still sees the pre-tick flight, not the intermediate.
+        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, 1);
+        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY, 10);
+        ledger.recordLiftoff(victim, true, false, 0.0f, 10 * TICK_NANOS, GRAVITY, 10);
+        VictimMotion.Motion asOf = ledger.currentExcludingTick(
+                victim, 10, 10 * TICK_NANOS, false, GRAVITY);
+        double expected = 0.42;
+        for (int i = 0; i < 9; i++) {
+            expected = (expected - GRAVITY) * 0.98;
+        }
+        assertEquals(expected, asOf.vy(), EPSILON);
+    }
+
+    @Test
+    void excludedFirstRecordFallsBackToNoSampleSemantics() {
+        ledger.recordLiftoff(victim, true, false, 0.0f, 10 * TICK_NANOS, GRAVITY, 10);
+        VictimMotion.Motion asOf = ledger.currentExcludingTick(
+                victim, 10, 10 * TICK_NANOS, true, GRAVITY);
+        assertEquals(VictimMotion.groundedEquilibrium(GRAVITY), asOf.vy(), EPSILON);
+    }
+
     @Test
     void forgetDropsTheResidual() {
         ledger.record(victim, 0.9, 0.5, 0.0, false, 0L);

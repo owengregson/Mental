@@ -3,6 +3,7 @@ package me.vexmc.mental.module.knockback;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The legacy server's view of a victim's motion, replicated per player.
@@ -54,6 +55,14 @@ public final class VictimMotion {
     private static final int DEAD_AFTER_TICKS = 200;
     private static final long NANOS_PER_TICK = 50_000_000L;
 
+    /**
+     * Tick stamp for writers with no era ordering contract (the per-tick
+     * sampler, the velocity-event recorder): their records are never
+     * excluded by {@link #currentExcludingTick}, preserving the pre-1.5.1
+     * behavior the suites pin for packetless fake players.
+     */
+    public static final int NO_TICK = Integer.MIN_VALUE;
+
     /** A decayed read; all-zero when no residual survives an airborne read. */
     public record Motion(double vx, double vy, double vz) {
 
@@ -69,9 +78,32 @@ public final class VictimMotion {
         return -gravity * VERTICAL_DRAG;
     }
 
-    private record Sample(double vx, double vy, double vz, boolean grounded, long nanos) {}
+    /**
+     * {@code tick} is the server tick the record arrived in ({@link #NO_TICK}
+     * for tick-agnostic writers); {@code previous} holds the displaced
+     * older-tick sample so a boundary read can see the state as of the end of
+     * the previous tick — depth one, never a chain.
+     */
+    private record Sample(
+            double vx, double vy, double vz, boolean grounded, long nanos,
+            int tick, @Nullable Sample previous) {
+
+        Sample stripped() {
+            return previous == null ? this
+                    : new Sample(vx, vy, vz, grounded, nanos, tick, null);
+        }
+    }
 
     private final ConcurrentHashMap<UUID, Sample> samples = new ConcurrentHashMap<>();
+
+    /** The displaced-state slot: a new tick's first record keeps the old sample as "previous". */
+    private @Nullable Sample displaced(
+            @Nullable Sample existing, int tick) {
+        if (existing == null) {
+            return null;
+        }
+        return existing.tick() != tick ? existing.stripped() : existing.previous();
+    }
 
     /**
      * Records a velocity that was actually delivered to the victim's client.
@@ -80,28 +112,45 @@ public final class VictimMotion {
      */
     public void record(
             @NotNull UUID victim, double vx, double vy, double vz, boolean grounded, long nowNanos) {
-        samples.put(victim, new Sample(vx, vy, vz, grounded, nowNanos));
+        record(victim, vx, vy, vz, grounded, nowNanos, NO_TICK);
+    }
+
+    public void record(
+            @NotNull UUID victim, double vx, double vy, double vz, boolean grounded,
+            long nowNanos, int tick) {
+        samples.compute(victim, (id, existing) -> new Sample(
+                vx, vy, vz, grounded, nowNanos, tick, displaced(existing, tick)));
     }
 
     /**
      * The legacy jump bookkeeping: a grounded→airborne transition moving
      * upward overwrote the server vertical with the jump impulse, plus the
-     * sprint facing push. Call from the per-tick ground watcher; this is what
-     * a knocked victim's liftoff looked like to the era server.
+     * sprint facing push. Fed per movement packet (real clients) or per tick
+     * sample (packetless players); this is what a knocked victim's liftoff
+     * looked like to the era server.
      */
     public void recordLiftoff(
             @NotNull UUID victim, boolean rising, boolean sprinting, float yawDegrees,
             long nowNanos, double gravity) {
+        recordLiftoff(victim, rising, sprinting, yawDegrees, nowNanos, gravity, NO_TICK);
+    }
+
+    public void recordLiftoff(
+            @NotNull UUID victim, boolean rising, boolean sprinting, float yawDegrees,
+            long nowNanos, double gravity, int tick) {
         Motion current = current(victim, nowNanos, false, gravity);
-        double vx = current.vx();
-        double vz = current.vz();
-        double vy = rising ? JUMP_IMPULSE : groundedEquilibrium(gravity);
+        double pushX = 0.0;
+        double pushZ = 0.0;
         if (rising && sprinting) {
             double yawRadians = Math.toRadians(yawDegrees);
-            vx += -Math.sin(yawRadians) * SPRINT_JUMP_PUSH;
-            vz += Math.cos(yawRadians) * SPRINT_JUMP_PUSH;
+            pushX = -Math.sin(yawRadians) * SPRINT_JUMP_PUSH;
+            pushZ = Math.cos(yawRadians) * SPRINT_JUMP_PUSH;
         }
-        samples.put(victim, new Sample(vx, vy, vz, false, nowNanos));
+        double vx = current.vx() + pushX;
+        double vy = rising ? JUMP_IMPULSE : groundedEquilibrium(gravity);
+        double vz = current.vz() + pushZ;
+        samples.compute(victim, (id, existing) -> new Sample(
+                vx, vy, vz, false, nowNanos, tick, displaced(existing, tick)));
     }
 
     /**
@@ -110,9 +159,14 @@ public final class VictimMotion {
      * ground drag from here on.
      */
     public void recordLanding(@NotNull UUID victim, long nowNanos, double gravity) {
+        recordLanding(victim, nowNanos, gravity, NO_TICK);
+    }
+
+    public void recordLanding(@NotNull UUID victim, long nowNanos, double gravity, int tick) {
         Motion current = current(victim, nowNanos, false, gravity);
-        samples.put(victim, new Sample(
-                current.vx(), groundedEquilibrium(gravity), current.vz(), true, nowNanos));
+        samples.compute(victim, (id, existing) -> new Sample(
+                current.vx(), groundedEquilibrium(gravity), current.vz(), true,
+                nowNanos, tick, displaced(existing, tick)));
     }
 
     /**
@@ -121,7 +175,40 @@ public final class VictimMotion {
      * stamp when the watcher has not caught a landing yet.
      */
     public @NotNull Motion current(@NotNull UUID victim, long nowNanos, boolean groundedNow, double gravity) {
+        return read(samples.get(victim), nowNanos, groundedNow, gravity);
+    }
+
+    /**
+     * The residual as of the END OF THE PREVIOUS TICK: a record that arrived
+     * during {@code excludeTick} is skipped in favor of the sample it
+     * displaced. This is the era's attack-ordering contract — legacy servers
+     * processed an attack in the attacker's connection slot BEFORE the
+     * victim's same-tick movement packets applied, so a knock thrown the
+     * instant its victim touches down reads the pre-landing flight (measured
+     * on real 1.8.9, both join orders: boundary combo hits ship the declining
+     * ~0.25 vertical, never a grounded re-stamp). Only packet-fed records
+     * carry real ticks; sampler records ({@link #NO_TICK}) are never
+     * excluded, so packetless players keep the inclusive view.
+     */
+    public @NotNull Motion currentExcludingTick(
+            @NotNull UUID victim, int excludeTick, long nowNanos, boolean groundedNow, double gravity) {
         Sample sample = samples.get(victim);
+        if (sample != null && sample.tick() != NO_TICK && sample.tick() == excludeTick) {
+            Sample previous = sample.previous();
+            // The boundary sample's own grounded state is the as-of truth;
+            // the caller's live view would smuggle the excluded transition
+            // back in. No previous means no pre-transition knowledge — fall
+            // back to the no-sample semantics.
+            return previous == null
+                    ? (groundedNow ? new Motion(0.0, groundedEquilibrium(gravity), 0.0) : Motion.ZERO)
+                    : read(previous, nowNanos, previous.grounded(), gravity);
+        }
+        return read(sample, nowNanos, groundedNow, gravity);
+    }
+
+    private @NotNull Motion read(
+            @Nullable Sample sample,
+            long nowNanos, boolean groundedNow, double gravity) {
         if (sample == null) {
             return groundedNow ? new Motion(0.0, groundedEquilibrium(gravity), 0.0) : Motion.ZERO;
         }
