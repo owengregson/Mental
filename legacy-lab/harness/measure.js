@@ -19,8 +19,12 @@
  *                        the flag and a W-holding client never resends it),
  *                        so hit 2 lands plain — the no-w-tap reality
  *   double-sprint-wtap   sprint hit 1, stop+start sprint (w-tap), sprint hit 2
+ *   chain-plain          HITS plain hits every gapTicks, attacker chasing —
+ *                        the combo-vertical probe: each hit's wire vy is the
+ *                        era machine's verdict on the victim's state then
  * The victim reports TOUCHDOWN points (first ground contact after a knock)
- * and the SETTLE point, both as distances from its staged start.
+ * and the SETTLE point, both as distances from its staged start, plus the
+ * apex height of every knock flight (the "how floaty" number).
  */
 // nmp's lpVec3 reader byte-swaps the middle word (reads LE; Mojang writes the
 // 32-bit half big-endian — verified against net.minecraft.network.LpVec3
@@ -76,6 +80,8 @@ function mkBot(username, opts = {}) {
     input: null,             // {dirFn, sprint} held movement keys
     velocityLog: [],         // {tick, vx, vy, vz}
     touchdowns: [],          // {tick, x, z} first ground contact per flight
+    apexes: [],              // max feet-Y per knock flight
+    _flightApex: null,
     tick: 0,
     spawned: false,
     _interval: null,
@@ -148,7 +154,12 @@ function mkBot(username, opts = {}) {
     const v = { x: p.velocity.x * scale, y: p.velocity.y * scale, z: p.velocity.z * scale };
     bot.velocityLog.push({ tick: bot.tick, ...v });
     log(`[${username}] t=${bot.tick} VELOCITY (${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`);
-    if (bot.physics) { bot.vel = { ...v }; }
+    if (bot.physics) {
+      // close the previous knock's flight and open this one's apex window
+      if (bot._flightApex !== null) bot.apexes.push(bot._flightApex);
+      bot._flightApex = bot.pos ? bot.pos.y : null;
+      bot.vel = { ...v };
+    }
   });
 
   bot.start = () => {
@@ -265,6 +276,7 @@ function stepPhysics(bot) {
   }
   if (landed) bot.vel.y = 0;          // vertical collision zeroes motY before drag
   bot.onGround = landed;
+  if (bot._flightApex !== null && bot.pos.y > bot._flightApex) bot._flightApex = bot.pos.y;
   // gravity + drag; horizontal drag from the PRE-move ground state
   bot.vel.y = (bot.vel.y - GRAVITY) * VDRAG;
   const drag = wasGround ? GROUND : AIR;
@@ -376,6 +388,16 @@ async function main() {
     attacker.attack(targetId);
     log(`# hit 2 thrown at victim tick ${victim.tick}, dist=${Math.hypot(victim.pos.x - attacker.pos.x, victim.pos.z - attacker.pos.z).toFixed(2)}`);
     await sleepTicks(45);
+  } else if (SCENARIO === 'chain-plain') {
+    // The combo-vertical probe: plain hits isolate the base vertical (no
+    // sprint extra), the gap models a spam-clicking attacker (hits register
+    // the tick the hurt window halves: 10 on vanilla 20, 9 on OCM's 18).
+    for (let h = 0; h < HITS; h++) {
+      attacker.attack(targetId);
+      log(`# hit ${h + 1} thrown at victim tick ${victim.tick}, dist=${Math.hypot(victim.pos.x - attacker.pos.x, victim.pos.z - attacker.pos.z).toFixed(2)}`);
+      if (h < HITS - 1) { for (let t = 0; t < GAP; t++) { chase(0.5); await sleepTicks(1); } }
+    }
+    await sleepTicks(45);
   } else if (SCENARIO === 'sprint') {
     attacker.setSprint(true);
     await sleepTicks(2);
@@ -435,6 +457,9 @@ async function main() {
   log(`# velocity packets received by victim: ${victim.velocityLog.length}`);
   victim.velocityLog.forEach((v, i) =>
     log(`#   hit${i + 1} t=${v.tick} (${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`));
+  if (victim._flightApex !== null) victim.apexes.push(victim._flightApex);
+  log(`# flight apexes above ground: ${victim.apexes
+    .map((a) => (a - victim.groundY).toFixed(3)).join(', ') || 'none'}`);
 
   attacker.stop(); victim.stop();
   process.exit(0);
