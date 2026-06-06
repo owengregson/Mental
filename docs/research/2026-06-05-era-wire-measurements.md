@@ -275,3 +275,97 @@ events — Arena now forces `doMobSpawning false` and purges nearby
 monsters), and 1.20.6 does not tick clientless players outside the arena's
 original chunk (actors stay below x,z 112; the platform extends only along
 the knock direction).
+
+## Addendum 4 (2026-06-06, fifth pass): combo VERTICALS and the era's
+## within-tick attack ordering — plus the two OCM defaults that bury it all
+
+The owner's live report ("too much vertical knockback when trying to
+combo" on legacy-1.8 + OCM, and legacy-1.7 likewise) prompted a per-hit
+vertical sweep none of the earlier passes had run: `chain-plain` (N plain
+hits at the legal cadence, attacker chasing) with per-hit wire vy and
+per-flight apex tracking.
+
+### The era truth: combo verticals DECLINE, and the boundary hit reads
+### the PRE-landing flight
+
+Real vanilla 1.8.9, plain 4-chain at gap 10 (both join orders):
+
+| | vy per hit | apexes | settle |
+| --- | --- | --- | --- |
+| attacker-first | 0.3608, **0.2477**, 0.3608, **0.2477** | 0.97, **0.50**, 0.97, 0.50 | 7.145 |
+| victim-first | 0.3608, **0.2846**, 0.3608, 0.2846 | 0.97, 0.95*, 0.97, 0.95* | 9.095 |
+
+(*victim-first's flights chain mid-air — phase shift, not a higher knock;
+the wire vy still declines.) The spam-combo norm throws the next hit the
+same tick the previous flight touches down, and the era read that hit's
+victim state PRE-landing: legacy servers processed an attack in the
+attacker's connection slot BEFORE the victim's same-tick movement packets
+applied. A landing arriving a tick earlier reads grounded on era servers
+too — the boundary is phase-chaotic at sub-tick grain, but the wire NEVER
+re-stamps a grounded 0.3608 on a hit that races its own touchdown packet.
+
+### Mental's three boundary bugs (all fixed, wire-verified)
+
+Pre-fix, the same staging on Paper+Mental legacy-1.8 shipped
+0.3608/0.3608/0.2862/0.3608 (apexes ~0.97 across the board, settle 8.3
+vs era 7.1) — the floaty-combo signature, decomposed:
+
+1. **The snapshot's invulnerability predicate was stale by one tick.**
+   `noDamageTicks` freezes before the tick's decrement, so a boundary-legal
+   hit read `nd = 11 > max/2` and skipped its pre-send; the authoritative
+   next-tick fallback then computed from post-landing state. Fixed:
+   `isDamageImmune` allows the staleness (`nd > max/2 + 1`) — phantom-safe
+   because the deferred damage always runs ≥1 tick after the freeze, so
+   every admitted hit arrives there with `nd <= max/2` (gap-9 spam pin:
+   five thrown, three shipped, each paired with a damage tick).
+2. **The `auto` feedback window equaled the legal cadence.** Perfect-cadence
+   hits (500 ms apart on a 20-tick window) raced the gate boundary on
+   millisecond jitter. Fixed: auto = `(max/2 − 1)` ticks.
+3. **The tick sampler applied transitions a sample late and instantly.**
+   The jump stamp landed a tick after the era's packet-driven bookkeeping
+   (airborne verticals ran ~0.04 high; worse at ping), and a landing was
+   visible to a same-tick attack the era would have judged first. Fixed
+   structurally: `GroundPacketTap` feeds the watcher the client's own
+   movement/sprint packets on the netty thread in arrival order (the era
+   handler's exact cadence), records are tick-stamped, and the snapshot
+   freeze reads `currentExcludingTick` — the residual as of the END of the
+   previous tick, which is precisely the era's attack-slot view. The
+   sampler stays as the fallback for packetless players (fake-player
+   records carry NO_TICK and keep the inclusive view, so the suites pin
+   unchanged behavior).
+
+Post-fix wire (same staging): 0.3608, **0.2492** (era 0.2477 — one short
+quantum), 0.3608, 0.3608 with settle 7.317; the canon five all hold or
+tighten (standing 1.994, sprint 4.948, plain double 3.78, no-wtap double
+**7.205** vs era 7.21, wtap double **11.671** vs era 11.65 — the double
+seconds now ship era airborne verticals, 0.2862/0.3861, instead of
+0.4-capped re-stamps).
+
+### The OCM defaults that reproduce the symptom on a live box
+
+Both ship enabled out of the box and both read as "Mental's profile is
+wrong":
+
+- **`old-player-knockback` is in OCM's default `old` modeset** (and
+  `__default__` worlds default to `old`): OCM owns every melee knock,
+  Mental yields by design, and BOTH profiles go inert for melee. OCM's
+  formula reads `victim.getVelocity()` — the server's stale deltaMovement,
+  a zombie field for real clients — measured wire: vy 0.3608/0.3608/
+  0.1889/0.3608 with horizontals wandering 0.40→0.45. Erratic, never the
+  era decline. Fix: remove `old-player-knockback` from the modeset lists
+  (the fork validates placement — move the line into `disabled_modules`).
+- **`attack-frequency` ships `playerDelay: 18` in `always_enabled_modules`**
+  — a 9-tick combo cadence server-wide where native 1.8 is 20/10. One less
+  free-fall tick per gap raises every combo vertical even when Mental owns
+  the knock. Fix: `playerDelay: 20`.
+
+Mental now warns at startup when either condition holds (OcmCompatModule
+`warnFeelOverlaps`) and `/mental kb` flags melee-knockback ownership.
+
+### Harness notes
+
+`chain-plain` + per-flight apex tracking live in `measure.js`. PING_MS
+delays only the play-ping probe channel (the server's MEASURED latency,
+which drives the compensation hints) — it is not transport delay; the
+boundary-ordering model is transport-invariant because it keys on packet
+ARRIVAL order, which ping shifts uniformly.

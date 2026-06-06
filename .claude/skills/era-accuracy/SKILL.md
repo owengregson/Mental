@@ -23,8 +23,22 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
   decayed wire is shipping — that is a misconfiguration or a bug, NOT
   era truth (this verdict was reversed once already; see addendum 2).
   Era combo verticals DECLINE (the jump stamp free-falls: 1.8.9
-  combo hit two ships vy 0.3478); victims stayed LOW in era combos.
+  combo hit two ships vy ~0.25–0.28 depending on stamp phase); victims
+  stayed LOW in era combos (apex dips to ~0.5 every other hit).
   Standing-hit vertical is 0.3608 (equilibrium baseline), never 0.4.
+- **The era's within-tick attack ordering** (addendum 4): an attack was
+  processed in the attacker's connection slot BEFORE the victim's
+  same-tick movement packets — a combo hit thrown the instant its victim
+  touches down (the spam norm) reads the PRE-landing flight and ships the
+  declining vertical, never a grounded 0.3608 re-stamp. Mental replicates
+  via tick-stamped packet records + `VictimMotion.currentExcludingTick`
+  (the snapshot freeze = end-of-previous-tick state), the +1 staleness
+  allowance in `Snapshot.isDamageImmune`, and the `auto` feedback window
+  at `(max/2 − 1)` ticks. "Combos feel floaty / too much vertical" =
+  boundary hits shipping grounded re-stamps = one of those three broke,
+  or OCM owns the knock (see ocm-coexistence: old-player-knockback ships
+  ENABLED in OCM's default modeset and playerDelay ships 18, not the
+  era's 20 — both reproduce the symptom with zero Mental defect).
 - Legacy damage: sharpness 1.25/level, crit-before-enchant with no sprint
   exclusion, pre-1.9 tool tables (diamond sword = 8), rod/projectile knocks
   from the SHOOTER'S POSITION, probabilistic armor resistance.

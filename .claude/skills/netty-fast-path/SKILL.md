@@ -76,6 +76,31 @@ it did server-side must be re-implemented or it silently vanishes:
 - Deliberate omissions stay deliberate: sweep, durability, statistics,
   hunger (1.7.10 target feel).
 
+## The boundary contracts (perfect-cadence combos — addendum 4)
+
+A spam combo throws each hit EXACTLY when the hurt window halves and the
+previous flight touches down; three boundary contracts keep those hits
+era-exact (each was measured broken once):
+
+- `Snapshot.isDamageImmune` carries a +1 staleness allowance: the frozen
+  `noDamageTicks` predates its tick's decrement, so the boundary-legal hit
+  reads `max/2 + 1`. Phantom-safe: the deferred damage runs ≥1 tick after
+  the freeze, so every admitted hit is accepted there (pinned by gap-9
+  spam: velocities == damage events).
+- The `auto` feedback window is `(max/2 − 1)` ticks — a window equal to
+  the legal cadence makes every legal hit race the gate on ms jitter.
+- The pre-send's victim state is the snapshot, and the snapshot's ledger
+  read is `currentExcludingTick` — the residual as of the END of the
+  previous tick. Era servers processed the attack in the attacker's
+  connection slot before the victim's same-tick movement packets; a
+  same-tick landing must stay invisible or boundary hits ship grounded
+  0.3608 verticals where the era ships the pre-landing ~0.25.
+- `GroundPacketTap` (plugin-level, read-only, MONITOR) feeds the watcher
+  the client's own movement + sprint-action packets in arrival order —
+  the era bookkeeping's exact cadence; the tick sampler only serves
+  packetless players (fake players; their NO_TICK records keep the
+  inclusive view the suites pin).
+
 ## Reach validation (P5, default OFF)
 
 Ping-rewound sanity gate, ClubSpigot-lite: 40-sample/tick position ring per

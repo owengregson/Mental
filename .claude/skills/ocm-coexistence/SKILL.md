@@ -38,6 +38,26 @@ components at the attacker's live cooldown charge and re-composes. The fast
 path never resets the charge, so the round-trip is lossless (the era pin:
 sharpness-5 diamond sword ⇒ 14.25, not 17.5).
 
+## The two OCM defaults that silently bury Mental's feel (addendum 4)
+
+Both ship ENABLED in OCM's default config and both read as "the selected
+Mental profile is wrong" — check them FIRST on any live feel report:
+
+- **`old-player-knockback` is in the default `old` modeset** (and
+  `worlds.__default__` defaults players into `old`): OCM owns every melee
+  knock, Mental yields by design, both profiles go inert for melee. OCM's
+  formula reads `victim.getVelocity()` — the server's stale deltaMovement,
+  a zombie field for real clients — so combo verticals are erratic
+  0.19–0.40 and never decline. Removing the module: the fork validates
+  placement, so MOVE the line into `disabled_modules` (deleting it throws
+  "Module not assigned to any list").
+- **`attack-frequency` ships `playerDelay: 18` in `always_enabled_modules`**
+  (native 1.8 = 20): 9-tick combo cadence, one less free-fall tick, every
+  combo vertical runs high even when Mental owns the knock.
+
+Mental warns at startup on both (`OcmCompatModule.warnFeelOverlaps`) and
+`/mental kb` flags melee ownership.
+
 ## Testing it
 
 - Stage the fork jar: build `~/Documents/BukkitOldCombatMechanics`
@@ -46,4 +66,6 @@ sharpness-5 diamond sword ⇒ 14.25, not 17.5).
   OcmCoexistenceSuite.
 - The ownership discriminator is `KnockbackApplyEvent` (fires only for
   Mental-owned knocks) — Mental-1.7.10 and OCM-1.8 first-hit vectors are
-  identical by design, so values alone prove nothing.
+  identical by design, so values alone prove nothing. On the wire, OCM-owned
+  hits betray themselves by drifting horizontals (stale `/2` feed-through:
+  0.40→0.45) where Mental ships clean profile values.

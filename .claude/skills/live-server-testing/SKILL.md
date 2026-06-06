@@ -88,6 +88,18 @@ truth, Paper+Mental for acceptance), with injectable ping via delayed pong
 responses. See docs/research/2026-06-05-era-wire-measurements.md for the
 measured era values and the harness's protocol traps.
 
+- `chain-plain` (N plain hits at gap G + per-hit wire vy + per-flight
+  apexes) is the combo-vertical probe; boundary behavior is phase-chaotic
+  at sub-tick grain (era too), so judge the PATTERN (declining vs flat
+  verticals, dipping vs flat apexes, settle distance), not a single run.
+- PING_MS delays only the play-ping PROBE channel — it changes the
+  server's MEASURED latency (drives compensation hints), not transport.
+  Numbers shifting at PING_MS>0 are the compensation module working, not
+  an era-ordering signal.
+- Fake players never reach `GroundPacketTap` (no inbound packets): the
+  suites exercise the tick-sampler fallback by construction; packet-path
+  era claims live in unit pins (`VictimMotionTest`) + this harness only.
+
 ## Modern-bot staging traps (each cost a debugging round)
 
 - **1.21.6+ compacted `entity_action`**: `start_sprinting` = 1, not 3 (sneak
