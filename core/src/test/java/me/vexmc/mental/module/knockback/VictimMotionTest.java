@@ -110,8 +110,11 @@ class VictimMotionTest {
 
         VictimMotion.Motion motion = ledger.current(victim, TICK_NANOS, false, GRAVITY);
         assertEquals(VictimMotion.JUMP_IMPULSE, motion.vy(), EPSILON);
-        // horizontal carried over (decayed one tick at the knock's ground state)
-        assertEquals(0.9 * 0.546, motion.vx(), 1.0e-6);
+        // The horizontal carries through TWO grounded decays: the knock
+        // tick's elapsed decay plus the liftoff tick's own pre-move ground
+        // friction (era chains measure 0.4 × slip² × 0.91^k — real-1.7.10
+        // ice hit 2 = 0.4821 = 0.4 × 0.8918² × 0.91⁷ exactly).
+        assertEquals(0.9 * 0.546 * 0.546, motion.vx(), 1.0e-6);
     }
 
     @Test
@@ -183,8 +186,8 @@ class VictimMotionTest {
     void excludingTheLandingTickReadsThePreLandingFlight() {
         // Liftoff stamp at tick 1 (the knocked client's first risen packet),
         // landing packet at tick 10 — the boundary-hit staging.
-        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, 1);
-        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY, 10);
+        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, VictimMotion.JUMP_IMPULSE, 1);
+        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY, VictimMotion.DEFAULT_SLIPPERINESS, 10);
         VictimMotion.Motion asOf = ledger.currentExcludingTick(
                 victim, 10, 10 * TICK_NANOS, true, GRAVITY);
         // 0.42 free-falling nine steps: the residual behind the era's
@@ -202,8 +205,8 @@ class VictimMotionTest {
 
     @Test
     void previousTickLandingsAreNotExcluded() {
-        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, 1);
-        ledger.recordLanding(victim, 9 * TICK_NANOS, GRAVITY, 9);
+        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, VictimMotion.JUMP_IMPULSE, 1);
+        ledger.recordLanding(victim, 9 * TICK_NANOS, GRAVITY, VictimMotion.DEFAULT_SLIPPERINESS, 9);
         VictimMotion.Motion asOf = ledger.currentExcludingTick(
                 victim, 10, 10 * TICK_NANOS, true, GRAVITY);
         // Landed a tick before the attack: the era read it grounded too.
@@ -224,9 +227,9 @@ class VictimMotionTest {
     void sameTickGrazePreservesTheBoundaryState() {
         // Landing then immediate re-liftoff inside one tick (a graze): the
         // boundary read still sees the pre-tick flight, not the intermediate.
-        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, 1);
-        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY, 10);
-        ledger.recordLiftoff(victim, true, false, 0.0f, 10 * TICK_NANOS, GRAVITY, 10);
+        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, VictimMotion.JUMP_IMPULSE, 1);
+        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY, VictimMotion.DEFAULT_SLIPPERINESS, 10);
+        ledger.recordLiftoff(victim, true, false, 0.0f, 10 * TICK_NANOS, GRAVITY, VictimMotion.JUMP_IMPULSE, 10);
         VictimMotion.Motion asOf = ledger.currentExcludingTick(
                 victim, 10, 10 * TICK_NANOS, false, GRAVITY);
         double expected = 0.42;
@@ -238,10 +241,60 @@ class VictimMotionTest {
 
     @Test
     void excludedFirstRecordFallsBackToNoSampleSemantics() {
-        ledger.recordLiftoff(victim, true, false, 0.0f, 10 * TICK_NANOS, GRAVITY, 10);
+        ledger.recordLiftoff(victim, true, false, 0.0f, 10 * TICK_NANOS, GRAVITY,
+                VictimMotion.JUMP_IMPULSE, 10);
         VictimMotion.Motion asOf = ledger.currentExcludingTick(
                 victim, 10, 10 * TICK_NANOS, true, GRAVITY);
         assertEquals(VictimMotion.groundedEquilibrium(GRAVITY), asOf.vy(), EPSILON);
+    }
+
+    // ── slipperiness, the jump-boost stamp, and the attacker self-slow ──
+    // (compendium §5b — all wire-measured on the real era jars 2026-06-06)
+
+    @Test
+    void iceDeliveryDecayMatchesTheMeasuredWire() {
+        // Real 1.7.10, packed-ice lane, hit 1: 0.4 × (0.98 × 0.91) = 0.3567.
+        VictimMotion.Motion shipped = VictimMotion.decayOnce(0.0, 0.3608, 0.4, true, 0.98, GRAVITY);
+        assertEquals(0.4 * 0.98 * 0.91, shipped.vz(), EPSILON);
+        assertEquals((0.3608 - GRAVITY) * 0.98, shipped.vy(), EPSILON); // vertical is slip-free
+    }
+
+    @Test
+    void groundedResidualDecaysAtTheLandedBlocksSlipperiness() {
+        ledger.recordLanding(victim, 0L, GRAVITY, 0.98, VictimMotion.NO_TICK);
+        ledger.record(victim, 0.0, 0.3608, 0.4, true, 0.98, 0L, VictimMotion.NO_TICK);
+        VictimMotion.Motion after = ledger.current(victim, 3 * TICK_NANOS, true, GRAVITY);
+        assertEquals(0.4 * Math.pow(0.98 * 0.91, 3), after.vz(), EPSILON);
+    }
+
+    @Test
+    void jumpBoostRaisesTheLiftoffStamp() {
+        // Real 1.8.9, Jump Boost I victim: combo hit 2 ships vy 0.3286 — the
+        // 0.52 stamp (0.42 + 0.1×(0+1)) eight gravity steps later, halved
+        // into the formula: residual −0.14259 → −0.14259/2 + 0.4 = 0.3287.
+        ledger.recordLiftoff(victim, true, false, 0.0f, 0L, GRAVITY, 0.52, VictimMotion.NO_TICK);
+        VictimMotion.Motion at8 = ledger.current(victim, 8 * TICK_NANOS, false, GRAVITY);
+        double expected = 0.52;
+        for (int i = 0; i < 8; i++) {
+            expected = (expected - GRAVITY) * 0.98;
+        }
+        assertEquals(expected, at8.vy(), EPSILON);
+        assertEquals(0.3287, at8.vy() / 2 + 0.4, 5.0e-4);
+    }
+
+    @Test
+    void scaleHorizontalMirrorsTheAttackSelfSlow() {
+        // attack() ends every bonus-knockback hit with motX *= 0.6;
+        // motZ *= 0.6 on the server's fields — vertical untouched.
+        ledger.record(victim, 0.3, 0.2, 0.5, false, 0L);
+        ledger.scaleHorizontal(victim, 0.6, 2 * TICK_NANOS, GRAVITY);
+        VictimMotion.Motion after = ledger.current(victim, 2 * TICK_NANOS, false, GRAVITY);
+        assertEquals(0.3 * 0.91 * 0.91 * 0.6, after.vx(), EPSILON);
+        assertEquals(0.5 * 0.91 * 0.91 * 0.6, after.vz(), EPSILON);
+        double vy = 0.2;
+        vy = (vy - GRAVITY) * 0.98;
+        vy = (vy - GRAVITY) * 0.98;
+        assertEquals(vy, after.vy(), EPSILON); // decayed to now, then untouched
     }
 
     @Test

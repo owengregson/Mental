@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.module.knockback.EntityState;
+import me.vexmc.mental.module.knockback.GroundFriction;
 import me.vexmc.mental.module.knockback.KnockbackProfiles;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.ocm.OcmGate;
@@ -79,7 +80,11 @@ public final class PlayerStateCache {
                 player.getPing(),
                 player.getGameMode() == GameMode.CREATIVE,
                 Attributes.valueOr(player, Attributes.entityInteractionRange(), 3.0),
-                Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY)));
+                Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY),
+                // The era ground drag is slipperiness × 0.91 from the block
+                // under the victim's feet — the 1.7.10 delivery decay ships
+                // ×0.8918 on ice, not ×0.546 (measured: ice hit 1 = 0.3567).
+                GroundFriction.under(player)));
     }
 
     public @Nullable Snapshot get(@NotNull UUID uuid) {
@@ -129,7 +134,8 @@ public final class PlayerStateCache {
             int pingMillis,
             boolean creative,
             double attackReach,
-            double gravity) {
+            double gravity,
+            double groundSlipperiness) {
 
         /**
          * Vanilla's double-hit guard: inside this window a fresh hit carries

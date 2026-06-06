@@ -9,6 +9,8 @@ import me.vexmc.mental.platform.Attributes;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
@@ -16,6 +18,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Replica of the legacy movement-packet bookkeeping that wrote the server's
@@ -60,12 +63,36 @@ public final class GroundTransitionWatcher implements Listener {
     /** Last judged client-packet state; {@code yaw} is the last rotation-bearing packet's. */
     private record PacketState(boolean grounded, double y, float yaw) {}
 
+    /**
+     * Cross-version Jump Boost handle (the era stamp adds 0.1 × (amp + 1)).
+     * The constant was {@code JUMP} through 1.20.4 and {@code JUMP_BOOST}
+     * after the registry rename — resolved by name once at class load, the
+     * {@link me.vexmc.mental.platform.Attributes} pattern.
+     */
+    private static final @Nullable PotionEffectType JUMP_BOOST = resolveJumpBoost();
+
+    private static @Nullable PotionEffectType resolveJumpBoost() {
+        for (String name : new String[] {"JUMP_BOOST", "JUMP"}) {
+            try {
+                Object value = PotionEffectType.class.getField(name).get(null);
+                if (value instanceof PotionEffectType type) {
+                    return type;
+                }
+            } catch (ReflectiveOperationException renamed) {
+                // try the other era's spelling
+            }
+        }
+        return null;
+    }
+
     private final MentalServices services;
     private final VictimMotion ledger;
     private final ConcurrentHashMap<UUID, GroundState> lastStates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, PacketState> packetStates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Boolean> clientSprint = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Double> gravityCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Double> slipCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Double> jumpImpulseCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, TaskHandle> tasks = new ConcurrentHashMap<>();
 
     public GroundTransitionWatcher(@NotNull MentalServices services, @NotNull VictimMotion ledger) {
@@ -87,6 +114,8 @@ public final class GroundTransitionWatcher implements Listener {
         packetStates.clear();
         clientSprint.clear();
         gravityCache.clear();
+        slipCache.clear();
+        jumpImpulseCache.clear();
     }
 
     @EventHandler
@@ -104,6 +133,8 @@ public final class GroundTransitionWatcher implements Listener {
         forgetStates(id);
         clientSprint.remove(id);
         gravityCache.remove(id);
+        slipCache.remove(id);
+        jumpImpulseCache.remove(id);
     }
 
     @EventHandler
@@ -133,8 +164,18 @@ public final class GroundTransitionWatcher implements Listener {
         float knownYaw = hasRotation ? yaw : previous != null ? previous.yaw() : 0.0f;
         if (previous == null) {
             // First packet marks the player packet-fed (the sampler stands
-            // down); judgments start once a baseline exists.
+            // down); judgments start once a baseline exists. A grounded
+            // first packet also seeds the machine grounded — the live flag
+            // is useless as a fallback at knock time because modern servers
+            // flip it on the hit tick, and the era launch-tick friction
+            // (ground drag, pre-move) hangs off this state.
             packetStates.put(id, new PacketState(grounded, hasPosition ? y : 0.0, knownYaw));
+            if (grounded) {
+                ledger.recordLanding(id, nowNanos,
+                        gravityCache.getOrDefault(id, VictimMotion.DEFAULT_GRAVITY),
+                        slipCache.getOrDefault(id, VictimMotion.DEFAULT_SLIPPERINESS),
+                        VictimMotion.NO_TICK);
+            }
             return;
         }
         double knownY = hasPosition ? y : previous.y();
@@ -161,13 +202,15 @@ public final class GroundTransitionWatcher implements Listener {
         int tick = Bukkit.getCurrentTick();
         if (grounded) {
             debugLog(id, () -> "ground-tap LANDING y=" + knownY);
-            ledger.recordLanding(id, nowNanos, gravity, tick);
+            ledger.recordLanding(id, nowNanos, gravity,
+                    slipCache.getOrDefault(id, VictimMotion.DEFAULT_SLIPPERINESS), tick);
         } else {
             boolean rising = y > previous.y();
             boolean sprinting = clientSprint.getOrDefault(id, false);
             debugLog(id, () -> "ground-tap LIFTOFF rising=" + rising + " sprint=" + sprinting
                     + " y=" + y + " prevY=" + previous.y());
-            ledger.recordLiftoff(id, rising, sprinting, knownYaw, nowNanos, gravity, tick);
+            ledger.recordLiftoff(id, rising, sprinting, knownYaw, nowNanos, gravity,
+                    jumpImpulseCache.getOrDefault(id, VictimMotion.JUMP_IMPULSE), tick);
         }
     }
 
@@ -204,15 +247,32 @@ public final class GroundTransitionWatcher implements Listener {
     @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value, exactly what the era handler read
     private void sample(@NotNull Player player) {
         UUID id = player.getUniqueId();
+        // Owning-thread state the netty packet feed cannot read itself:
+        // gravity, the block-under-feet slipperiness (the era ground drag is
+        // slipperiness × 0.91 — ice 0.8918), and the era jump stamp (0.42
+        // plus 0.1 × (amplifier + 1) under Jump Boost — measured: a boosted
+        // victim's combo hit 2 ships vy 0.3286, the 0.52 stamp free-falling).
         gravityCache.put(id, Attributes.valueOr(
                 player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
+        slipCache.put(id, GroundFriction.under(player));
+        jumpImpulseCache.put(id, jumpImpulse(player));
         if (packetStates.containsKey(id)) {
             return; // packet-fed: the netty tap owns this player's transitions
         }
         Location location = player.getLocation();
         boolean grounded = player.isOnGround();
         GroundState previous = lastStates.put(id, new GroundState(grounded, location.getY()));
-        if (previous == null || previous.grounded() == grounded) {
+        if (previous == null) {
+            if (grounded) {
+                // Seed the machine grounded for packetless players too (the
+                // first knock's launch-tick friction reads this state).
+                ledger.recordLanding(id, System.nanoTime(),
+                        Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY),
+                        GroundFriction.under(player), VictimMotion.NO_TICK);
+            }
+            return;
+        }
+        if (previous.grounded() == grounded) {
             return;
         }
         if (!grounded && location.getY() == previous.y()) {
@@ -234,13 +294,25 @@ public final class GroundTransitionWatcher implements Listener {
         double gravity = Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY);
         if (grounded) {
             debugLog(id, () -> "ground-watch " + player.getName() + " LANDING y=" + location.getY());
-            ledger.recordLanding(id, now, gravity);
+            ledger.recordLanding(id, now, gravity, GroundFriction.under(player), VictimMotion.NO_TICK);
         } else {
             boolean rising = location.getY() > previous.y();
             debugLog(id, () -> "ground-watch " + player.getName() + " LIFTOFF rising=" + rising
                     + " y=" + location.getY() + " prevY=" + previous.y());
-            ledger.recordLiftoff(id, rising, player.isSprinting(), location.getYaw(), now, gravity);
+            ledger.recordLiftoff(id, rising, player.isSprinting(), location.getYaw(), now, gravity,
+                    jumpImpulse(player), VictimMotion.NO_TICK);
         }
+    }
+
+    /** The era jump stamp for this victim: 0.42 plus the Jump Boost term. */
+    private static double jumpImpulse(@NotNull Player player) {
+        if (JUMP_BOOST == null) {
+            return VictimMotion.JUMP_IMPULSE;
+        }
+        PotionEffect effect = player.getPotionEffect(JUMP_BOOST);
+        return effect == null
+                ? VictimMotion.JUMP_IMPULSE
+                : VictimMotion.JUMP_IMPULSE + 0.1 * (effect.getAmplifier() + 1);
     }
 
     private void debugLog(@NotNull UUID id, @NotNull java.util.function.Supplier<String> message) {

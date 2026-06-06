@@ -239,7 +239,8 @@ final class HitPacketListener implements PacketListener {
                 if (profile.meleeDelivery() == KnockbackDelivery.TRACKER_DECAYED) {
                     VictimMotion.Motion decayed = VictimMotion.decayOnce(
                             vector.x(), vector.y(), vector.z(),
-                            victimSnap.grounded(), victimSnap.gravity());
+                            victimSnap.grounded(), victimSnap.groundSlipperiness(),
+                            victimSnap.gravity());
                     shipped = new KnockbackVector(decayed.vx(), decayed.vy(), decayed.vz());
                 }
                 velocity = shipped.toBukkit();

@@ -72,7 +72,8 @@ public final class KnockbackPipeline implements Listener {
         }
     }
 
-    private record AppliedTag(@NotNull Cause cause, long stampNanos) {}
+    /** {@code grounded} is the launch state captured at SUBMIT — the era's pre-move friction state. */
+    private record AppliedTag(@NotNull Cause cause, boolean grounded, long stampNanos) {}
 
     private final MentalServices services;
     private final VictimMotion ledger;
@@ -105,12 +106,15 @@ public final class KnockbackPipeline implements Listener {
             @Nullable KnockbackVector vector,
             @Nullable LivingEntity attacker,
             @NotNull Cause cause) {
-        // Ground state is captured NOW: the velocity event fires after the
-        // victim's own physics tick may have lifted them (always, for the
-        // tester's fake players), but the era tracker decayed with the
-        // victim's state at the knock.
+        // Ground state is captured NOW — from the machine's own view: the
+        // velocity event fires after the victim's own physics tick may have
+        // lifted them (always, for the tester's fake players) and modern
+        // servers flip the flag on the hit tick itself, but the era tracker
+        // decayed with the victim's state AT the knock.
         pending.put(victim.getUniqueId(), new Pending(
-                vector, null, attacker, cause, victim.isOnGround(), System.nanoTime()));
+                vector, null, attacker, cause,
+                ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
+                System.nanoTime()));
     }
 
     /**
@@ -128,7 +132,9 @@ public final class KnockbackPipeline implements Listener {
             @NotNull KnockbackVector preDelivered,
             @Nullable LivingEntity attacker) {
         pending.put(victim.getUniqueId(), new Pending(
-                vector, preDelivered, attacker, Cause.MELEE, victim.isOnGround(), System.nanoTime()));
+                vector, preDelivered, attacker, Cause.MELEE,
+                ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
+                System.nanoTime()));
     }
 
     /** Drops a pending vector — a protection plugin cancelled the hit it belonged to. */
@@ -207,7 +213,7 @@ public final class KnockbackPipeline implements Listener {
                     victim, apply.velocity(), stored.cause(), stored.groundedAtSubmit());
         }
         event.setVelocity(shipped);
-        applied.put(victimId, new AppliedTag(stored.cause(), now));
+        applied.put(victimId, new AppliedTag(stored.cause(), stored.groundedAtSubmit(), now));
         debug(() -> "applied " + stored.cause() + " knockback to " + victim.getName()
                 + " -> (" + shipped.getX() + ", " + shipped.getY() + ", " + shipped.getZ() + ")");
     }
@@ -231,6 +237,7 @@ public final class KnockbackPipeline implements Listener {
         VictimMotion.Motion decayed = VictimMotion.decayOnce(
                 velocity.getX(), velocity.getY(), velocity.getZ(),
                 groundedAtSubmit,
+                GroundFriction.under(victim),
                 Attributes.valueOr(victim, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
         return new Vector(decayed.vx(), decayed.vy(), decayed.vz());
     }
@@ -242,15 +249,30 @@ public final class KnockbackPipeline implements Listener {
         long now = System.nanoTime();
 
         AppliedTag tag = applied.remove(victimId);
-        Cause cause = tag != null && now - tag.stampNanos() < APPLIED_TAG_TTL_NANOS ? tag.cause() : null;
+        boolean tagged = tag != null && now - tag.stampNanos() < APPLIED_TAG_TTL_NANOS;
+        Cause cause = tagged ? tag.cause() : null;
         if (cause == Cause.MELEE
                 && !services.knockbackProfiles().resolve(event.getPlayer()).combos()) {
             return; // 1.8.9 send-then-revert: the melee residual never persists
         }
 
         Vector velocity = event.getVelocity();
+        // The residual's grounded segment decays at the block-under-feet
+        // slipperiness (the era ground physics): a knock recorded on packed
+        // ice survives at ×0.8918/tick and compounds into the next hit —
+        // measured on real 1.7.10, ice raises chain hits 0.4 → 0.48 → 0.49
+        // where stone re-kills the residual every flight. The launch state
+        // comes from SUBMIT time (the era pre-move friction: the victim had
+        // not moved yet) — the live flag has already flipped, and the
+        // machine view can lose the race against the client's first risen
+        // packet on the netty tap.
+        boolean grounded = tagged
+                ? tag.grounded()
+                : ledger.groundedView(victimId, event.getPlayer().isOnGround());
         ledger.record(victimId, velocity.getX(), velocity.getY(), velocity.getZ(),
-                event.getPlayer().isOnGround(), now);
+                grounded,
+                GroundFriction.under(event.getPlayer()),
+                now, VictimMotion.NO_TICK);
     }
 
     @EventHandler

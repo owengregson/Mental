@@ -27,7 +27,7 @@ class PlayerStateCacheTest {
                 true, false, 0.0, 0,
                 noDamageTicks, 20,
                 false, 1, KnockbackProfile.LEGACY_17, 0, false, 3.0,
-                0.08);
+                0.08, 0.6);
     }
 
     @Test

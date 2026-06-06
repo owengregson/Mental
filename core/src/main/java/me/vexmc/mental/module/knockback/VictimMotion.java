@@ -49,8 +49,17 @@ public final class VictimMotion {
 
     private static final double VERTICAL_DRAG = 0.98;
     private static final double AIR_DRAG = 0.91;
-    private static final double GROUND_DRAG = 0.91 * 0.6;
     private static final double TERMINAL_VELOCITY = 3.92;
+
+    /**
+     * The era default block slipperiness (stone & almost everything else).
+     * The legacy ground drag is {@code slipperiness × 0.91}: 0.546 on stone,
+     * 0.8918 on ice — measured on real 1.7.10: a packed-ice lane ships
+     * hit 1 at 0.4 × 0.8918 = 0.3567 (the decay-on-send friction IS the
+     * block) and residuals compound between hits (settle 5.37 vs stone's
+     * 2.99 — ice nearly doubles era knockback distances).
+     */
+    public static final double DEFAULT_SLIPPERINESS = 0.6;
     private static final double REST_THRESHOLD = 0.005;
     private static final int DEAD_AFTER_TICKS = 200;
     private static final long NANOS_PER_TICK = 50_000_000L;
@@ -82,15 +91,16 @@ public final class VictimMotion {
      * {@code tick} is the server tick the record arrived in ({@link #NO_TICK}
      * for tick-agnostic writers); {@code previous} holds the displaced
      * older-tick sample so a boundary read can see the state as of the end of
-     * the previous tick — depth one, never a chain.
+     * the previous tick — depth one, never a chain. {@code slip} is the
+     * block-under-feet slipperiness governing this grounded segment's drag.
      */
     private record Sample(
-            double vx, double vy, double vz, boolean grounded, long nanos,
+            double vx, double vy, double vz, boolean grounded, double slip, long nanos,
             int tick, @Nullable Sample previous) {
 
         Sample stripped() {
             return previous == null ? this
-                    : new Sample(vx, vy, vz, grounded, nanos, tick, null);
+                    : new Sample(vx, vy, vz, grounded, slip, nanos, tick, null);
         }
     }
 
@@ -112,14 +122,14 @@ public final class VictimMotion {
      */
     public void record(
             @NotNull UUID victim, double vx, double vy, double vz, boolean grounded, long nowNanos) {
-        record(victim, vx, vy, vz, grounded, nowNanos, NO_TICK);
+        record(victim, vx, vy, vz, grounded, DEFAULT_SLIPPERINESS, nowNanos, NO_TICK);
     }
 
     public void record(
             @NotNull UUID victim, double vx, double vy, double vz, boolean grounded,
-            long nowNanos, int tick) {
+            double slipperiness, long nowNanos, int tick) {
         samples.compute(victim, (id, existing) -> new Sample(
-                vx, vy, vz, grounded, nowNanos, tick, displaced(existing, tick)));
+                vx, vy, vz, grounded, slipperiness, nowNanos, tick, displaced(existing, tick)));
     }
 
     /**
@@ -132,13 +142,30 @@ public final class VictimMotion {
     public void recordLiftoff(
             @NotNull UUID victim, boolean rising, boolean sprinting, float yawDegrees,
             long nowNanos, double gravity) {
-        recordLiftoff(victim, rising, sprinting, yawDegrees, nowNanos, gravity, NO_TICK);
+        recordLiftoff(victim, rising, sprinting, yawDegrees, nowNanos, gravity, JUMP_IMPULSE, NO_TICK);
     }
 
+    /**
+     * {@code jumpImpulse} is the era stamp for THIS victim: 0.42 plus
+     * 0.1 × (amplifier + 1) under Jump Boost — vanilla's jump() adds the
+     * potion before the sprint push (measured on real 1.8.9: a Jump Boost I
+     * victim's combo hit 2 ships vy 0.3286 = the 0.52 stamp eight decays
+     * later).
+     */
     public void recordLiftoff(
             @NotNull UUID victim, boolean rising, boolean sprinting, float yawDegrees,
-            long nowNanos, double gravity, int tick) {
+            long nowNanos, double gravity, double jumpImpulse, int tick) {
         Motion current = current(victim, nowNanos, false, gravity);
+        Sample previous = samples.get(victim);
+        // The liftoff tick's own pre-move friction is still GROUND drag (the
+        // era selected friction before the move that lifted the victim), so
+        // the carried horizontals take one more grounded decay before the
+        // airborne segment starts. Measured on real 1.7.10: chain residuals
+        // run 0.4 × slip² × 0.91^k — two grounded decays (knock tick +
+        // liftoff tick), e.g. ice hit 2 = 0.4821 = 0.4 × 0.8918² × 0.91⁷.
+        double launchDrag = previous != null && previous.grounded()
+                ? previous.slip() * AIR_DRAG
+                : 1.0;
         double pushX = 0.0;
         double pushZ = 0.0;
         if (rising && sprinting) {
@@ -146,27 +173,44 @@ public final class VictimMotion {
             pushX = -Math.sin(yawRadians) * SPRINT_JUMP_PUSH;
             pushZ = Math.cos(yawRadians) * SPRINT_JUMP_PUSH;
         }
-        double vx = current.vx() + pushX;
-        double vy = rising ? JUMP_IMPULSE : groundedEquilibrium(gravity);
-        double vz = current.vz() + pushZ;
+        double vx = current.vx() * launchDrag + pushX;
+        double vy = rising ? jumpImpulse : groundedEquilibrium(gravity);
+        double vz = current.vz() * launchDrag + pushZ;
         samples.compute(victim, (id, existing) -> new Sample(
-                vx, vy, vz, false, nowNanos, tick, displaced(existing, tick)));
+                vx, vy, vz, false, DEFAULT_SLIPPERINESS, nowNanos, tick, displaced(existing, tick)));
     }
 
     /**
      * An airborne→grounded transition: the simulated move collides, the
      * vertical zeroes and re-equilibrates, and horizontal decay switches to
-     * ground drag from here on.
+     * ground drag — at the LANDED block's slipperiness — from here on.
      */
     public void recordLanding(@NotNull UUID victim, long nowNanos, double gravity) {
-        recordLanding(victim, nowNanos, gravity, NO_TICK);
+        recordLanding(victim, nowNanos, gravity, DEFAULT_SLIPPERINESS, NO_TICK);
     }
 
-    public void recordLanding(@NotNull UUID victim, long nowNanos, double gravity, int tick) {
+    public void recordLanding(
+            @NotNull UUID victim, long nowNanos, double gravity, double slipperiness, int tick) {
         Motion current = current(victim, nowNanos, false, gravity);
         samples.compute(victim, (id, existing) -> new Sample(
-                current.vx(), groundedEquilibrium(gravity), current.vz(), true,
+                current.vx(), groundedEquilibrium(gravity), current.vz(), true, slipperiness,
                 nowNanos, tick, displaced(existing, tick)));
+    }
+
+    /**
+     * The attacker-side self-multiply: vanilla's attack ends every
+     * bonus-knockback hit with {@code motX *= 0.6; motZ *= 0.6} on the
+     * SERVER's copy of the attacker's motion (both eras, beside the sprint
+     * clear). For a player knocked mid-trade who counter-hits, the next
+     * knock they receive compounds off the smaller residual.
+     */
+    public void scaleHorizontal(@NotNull UUID player, double factor, long nowNanos, double gravity) {
+        samples.computeIfPresent(player, (id, sample) -> {
+            Motion now = read(sample, nowNanos, sample.grounded(), gravity);
+            return new Sample(
+                    now.vx() * factor, now.vy(), now.vz() * factor,
+                    sample.grounded(), sample.slip(), nowNanos, NO_TICK, sample.stripped());
+        });
     }
 
     /**
@@ -218,17 +262,29 @@ public final class VictimMotion {
         }
         boolean grounded = sample.grounded() || groundedNow;
         Motion decayed = decay(
-                sample.vx(), sample.vy(), sample.vz(), (int) elapsed, sample.grounded(), gravity);
+                sample.vx(), sample.vy(), sample.vz(), (int) elapsed, sample.grounded(),
+                sample.slip(), gravity);
         if (grounded) {
             return new Motion(decayed.vx(), groundedEquilibrium(gravity), decayed.vz());
         }
         return decayed;
     }
 
-    /** The pure decay model — exposed for the engine tests and the test suites. */
+    /** The pure decay model at the era default slipperiness (stone). */
     public static @NotNull Motion decay(
             double vx, double vy, double vz, int ticks, boolean grounded, double gravity) {
-        double drag = grounded ? GROUND_DRAG : AIR_DRAG;
+        return decay(vx, vy, vz, ticks, grounded, DEFAULT_SLIPPERINESS, gravity);
+    }
+
+    /**
+     * The pure decay model — exposed for the engine tests and the test
+     * suites. Grounded drag is {@code slipperiness × 0.91} (the era read the
+     * block under the entity's feet: stone 0.546, ice 0.8918, slime 0.728).
+     */
+    public static @NotNull Motion decay(
+            double vx, double vy, double vz, int ticks, boolean grounded,
+            double slipperiness, double gravity) {
+        double drag = grounded ? slipperiness * AIR_DRAG : AIR_DRAG;
         for (int i = 0; i < ticks; i++) {
             vx *= drag;
             vz *= drag;
@@ -249,16 +305,38 @@ public final class VictimMotion {
         return new Motion(vx, vy, vz);
     }
 
+    /** Delivery decay at the era default slipperiness (stone). */
+    public static @NotNull Motion decayOnce(
+            double vx, double vy, double vz, boolean grounded, double gravity) {
+        return decayOnce(vx, vy, vz, grounded, DEFAULT_SLIPPERINESS, gravity);
+    }
+
     /**
      * One tick of the legacy victim physics applied to a vector about to
      * ship — the 1.7.10 tracker delivery decay (the victim's connection
      * ticked between the knock mutating the fields and the end-of-tick
-     * tracker send). Friction comes from the victim's pre-move ground state.
+     * tracker send). Friction comes from the victim's pre-move ground state
+     * AND the block under their feet: a grounded knock on packed ice ships
+     * ×0.8918, not ×0.546 (measured: real 1.7.10 ice hit 1 = 0.3567).
      */
     public static @NotNull Motion decayOnce(
-            double vx, double vy, double vz, boolean grounded, double gravity) {
-        double drag = grounded ? GROUND_DRAG : AIR_DRAG;
+            double vx, double vy, double vz, boolean grounded, double slipperiness, double gravity) {
+        double drag = grounded ? slipperiness * AIR_DRAG : AIR_DRAG;
         return new Motion(vx * drag, (vy - gravity) * VERTICAL_DRAG, vz * drag);
+    }
+
+    /**
+     * The machine's own grounded view — the last recorded segment's state.
+     * Callers recording a fresh knock use this over the live server flag:
+     * modern servers flip a knocked player's onGround to airborne on the hit
+     * tick itself, but the era's pre-move friction decayed the launch tick
+     * at GROUND drag (the victim had not moved yet) — recording the knock
+     * airborne skips that decay and ships hot residuals into the next hit
+     * (measured: stone chain hit 2 read 0.494 where era ships 0.428).
+     */
+    public boolean groundedView(@NotNull UUID victim, boolean fallback) {
+        Sample sample = samples.get(victim);
+        return sample == null ? fallback : sample.grounded();
     }
 
     public void forget(@NotNull UUID victim) {
