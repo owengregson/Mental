@@ -22,6 +22,23 @@
  *   chain-plain          HITS plain hits every gapTicks, attacker chasing —
  *                        the combo-vertical probe: each hit's wire vy is the
  *                        era machine's verdict on the victim's state then
+ *   kb-sword             one standing hit with whatever SETUP_CMDS put in the
+ *                        attacker's hand (knockback-enchant extras probe)
+ *   crit-plain           attacker rises then attacks mid-descent (fallDistance
+ *                        accrued server-side) — crits must NOT change knockback
+ *   throw-then-sword     attacker throws the held projectile (snowball/egg),
+ *                        then melees GAP ticks after the hit — the 0-damage
+ *                        full-knock + difference-rule probe
+ *   rod-sword            attacker casts the held rod (bobber hooks victim),
+ *                        melees at GAP, melees again at GAP+12 — rod knock +
+ *                        no-knock difference window + post-window full knock
+ *   blocking-victim      victim holds use_item (sword block) through one hit —
+ *                        era blocking takes FULL knockback, reduced damage
+ *   double-counter       double-plain, but the victim (given a KB sword by
+ *                        SETUP_CMDS) counter-clicks the attacker between hits —
+ *                        the attacker-side server 0.6 self-multiply probe
+ * Env: SETUP_CMDS="cmd;;cmd" rcon'd after staging ({atk}/{vic} = bot names,
+ * {gy} = ground Y as int); RCON_PORT/RCON_PASS (default lab).
  * The victim reports TOUCHDOWN points (first ground contact after a knock)
  * and the SETTLE point, both as distances from its staged start, plus the
  * apex height of every knock flight (the "how floaty" number).
@@ -223,6 +240,28 @@ function mkBot(username, opts = {}) {
   };
   bot.teleportStep = (x, z) => { bot.pos.x = x; bot.pos.z = z; };
 
+  bot.holdSlot = (n) => client.write('held_item_slot', { slotId: n });
+  bot._seq = 0;
+  // "Use the held item" — the era's right-click-air form (block_place with
+  // the -1 sentinel position); modern has a dedicated use_item packet.
+  bot.useItem = () => {
+    if (IS_17) {
+      client.write('block_place', {
+        location: { x: -1, y: 255, z: -1 }, direction: -1,
+        heldItem: { blockId: -1 }, cursorX: 0, cursorY: 0, cursorZ: 0,
+      });
+    } else if (!MODERN) {
+      client.write('block_place', {
+        location: { x: -1, y: -1, z: -1 }, direction: -1,
+        heldItem: { blockId: -1 }, cursorX: 0, cursorY: 0, cursorZ: 0,
+      });
+    } else {
+      client.write('use_item', {
+        hand: 0, sequence: ++bot._seq, rotation: { x: bot.yaw, y: bot.pitch },
+      });
+    }
+  };
+
   return bot;
 }
 
@@ -293,6 +332,47 @@ const until = async (cond, timeoutMs, what) => {
   }
 };
 
+/** Minimal rcon client for staging commands (gear, effects, terrain). */
+function rconSend(port, pass, commands) {
+  const net = require('net');
+  return new Promise((resolve, reject) => {
+    const frame = (id, type, body) => {
+      const payload = Buffer.concat([Buffer.from(body, 'utf8'), Buffer.from([0, 0])]);
+      const buf = Buffer.alloc(12 + payload.length);
+      buf.writeInt32LE(8 + payload.length, 0);
+      buf.writeInt32LE(id, 4);
+      buf.writeInt32LE(type, 8);
+      payload.copy(buf, 12);
+      return buf;
+    };
+    const sock = net.connect(port, '127.0.0.1');
+    let buffer = Buffer.alloc(0);
+    let queue = [...commands];
+    let authed = false;
+    const fail = (e) => { sock.destroy(); reject(e); };
+    sock.on('error', fail);
+    sock.on('connect', () => sock.write(frame(1, 3, pass)));
+    sock.on('data', (d) => {
+      buffer = Buffer.concat([buffer, d]);
+      while (buffer.length >= 4) {
+        const len = buffer.readInt32LE(0);
+        if (buffer.length < 4 + len) return;
+        const id = buffer.readInt32LE(4);
+        const body = buffer.slice(12, 4 + len - 2).toString('utf8');
+        buffer = buffer.slice(4 + len);
+        if (!authed) {
+          if (id === -1) return fail(new Error('rcon auth failed'));
+          authed = true;
+        } else if (body.trim()) {
+          log(`# rcon> ${body.trim().slice(0, 120)}`);
+        }
+        if (queue.length === 0) { sock.end(); return resolve(); }
+        sock.write(frame(2, 2, queue.shift()));
+      }
+    });
+  });
+}
+
 async function main() {
   const stamp = Date.now() % 100000;
   // JOIN=victim-first flips CONNECTION order only (roles unchanged). On
@@ -332,6 +412,36 @@ async function main() {
   // settle + outlive the 60-tick join invulnerability (EntityPlayerMP)
   await sleepTicks(75);
 
+  // Staging commands (gear, effects, terrain) — rcon'd in before the
+  // scenario so the servers stay vanilla-configured between runs.
+  if (process.env.SETUP_CMDS) {
+    const cmds = process.env.SETUP_CMDS.split(';;').flatMap((raw) => {
+      const c = raw
+        .replaceAll('{atk}', attacker.username)
+        .replaceAll('{vic}', victim.username)
+        .replaceAll('{gy}', String(Math.floor(victim.groundY)))
+        .replaceAll('{vx}', String(Math.floor(victim.pos.x)))
+        .replaceAll('{vz}', String(Math.floor(victim.pos.z)));
+      // LANE:<block> — pave the victim's knock path (straight +Z) so the
+      // block-under-feet slipperiness governs the whole flight.
+      if (c.startsWith('LANE:')) {
+        const block = c.slice(5);
+        const y = Math.floor(victim.groundY) - 1;
+        const out = [];
+        for (let dz = -2; dz <= 14; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            out.push(`setblock ${Math.floor(victim.pos.x) + dx} ${y} ${Math.floor(victim.pos.z) + dz} ${block}`);
+          }
+        }
+        return out;
+      }
+      return [c];
+    });
+    await rconSend(
+      parseInt(process.env.RCON_PORT, 10), process.env.RCON_PASS || 'lab', cmds);
+    await sleepTicks(10);
+  }
+
   // The victim's entity id as seen by the attacker is the global id.
   const targetId = victim.id;
   log(`# scenario=${SCENARIO} version=${VERSION} gap=${GAP} hits=${HITS}`);
@@ -358,9 +468,92 @@ async function main() {
     }
   };
 
-  if (SCENARIO === 'standing') {
+  if (SCENARIO === 'standing' || SCENARIO === 'kb-sword') {
+    // kb-sword differs only by what SETUP_CMDS put in the attacker's hand.
+    attacker.holdSlot(0);
+    await sleepTicks(2);
     attacker.attack(targetId);
     await sleepTicks(30);
+  } else if (SCENARIO === 'crit-plain') {
+    // Rise airborne, then attack mid-descent: the handler's move replication
+    // accrues fallDistance from the descending packets, so the server takes
+    // the crit branch (1.5× damage) — knockback must be UNCHANGED.
+    attacker.onGround = false;
+    for (const dy of [0.42, 0.33, -0.2, -0.3]) {
+      attacker.pos.y += dy;
+      await sleepTicks(1);
+    }
+    attacker.attack(targetId);
+    await sleepTicks(2);
+    attacker.pos.y = attacker.groundY;
+    attacker.onGround = true;
+    await sleepTicks(30);
+  } else if (SCENARIO === 'throw-then-sword' || SCENARIO === 'rod-sword') {
+    // The 0-damage knock probe: the projectile/bobber knocks at full
+    // strength AND arms the whole 20-tick hurt window, so a melee inside
+    // the half-window deals difference damage with NO knockback; a melee
+    // after it knocks in full.
+    attacker.holdSlot(0);
+    attacker.pitch = SCENARIO === 'rod-sword' ? 8 : 2; // drop onto the torso
+    await sleepTicks(2);
+    attacker.useItem();
+    log(`# projectile cast at victim tick ${victim.tick}`);
+    await until(() => victim.velocityLog.length >= 1, 5000, 'projectile knock');
+    const hitTick = victim.tick;
+    attacker.pitch = 0;
+    log(`# projectile knock at victim tick ${hitTick}`);
+    while (victim.tick < hitTick + GAP) { chase(0.5); await sleepTicks(1); }
+    attacker.attack(targetId);
+    log(`# sword 1 thrown at victim tick ${victim.tick} (mid-window: expect damage, NO velocity)`);
+    for (let t = 0; t < 12; t++) { chase(0.5); await sleepTicks(1); }
+    attacker.attack(targetId);
+    log(`# sword 2 thrown at victim tick ${victim.tick} (post-window: expect full velocity)`);
+    await sleepTicks(40);
+  } else if (SCENARIO === 'weak-strong') {
+    // The difference rule, pure melee: a fist hit arms the window at
+    // lastDamage 1; a sword hit GAP ticks later out-damages it and deals
+    // the difference with NO knockback (era: fullHit=false skips knockBack,
+    // the flinch, and the sound). Expect exactly ONE velocity packet.
+    attacker.holdSlot(8); // empty hand
+    await sleepTicks(2);
+    attacker.attack(targetId);
+    log(`# fist thrown at victim tick ${victim.tick}`);
+    for (let t = 0; t < GAP; t++) { chase(0.5); await sleepTicks(1); }
+    attacker.holdSlot(0); // the SETUP_CMDS sword
+    await sleepTicks(1);
+    attacker.attack(targetId);
+    log(`# sword thrown at victim tick ${victim.tick} (mid-window: expect damage, NO velocity)`);
+    await sleepTicks(40);
+  } else if (SCENARIO === 'blocking-victim') {
+    // Era sword-blocking halves damage AFTER knockBack already ran: the
+    // victim must take FULL knockback and reduced damage.
+    victim.holdSlot(0);
+    await sleepTicks(2);
+    victim.useItem();
+    await sleepTicks(4);
+    attacker.attack(targetId);
+    log(`# hit on blocking victim at tick ${victim.tick}`);
+    await sleepTicks(30);
+  } else if (SCENARIO === 'double-counter') {
+    // double-plain, but the victim counter-clicks the attacker between the
+    // hits holding a KB sword (kbLevels > 0): the era server multiplies the
+    // VICTIM'S OWN motion fields ×0.6 on their swing, so on 1.7.10 hit 2's
+    // residual term shrinks vs the double-plain control.
+    victim.holdSlot(0);
+    await sleepTicks(2);
+    attacker.attack(targetId);
+    log(`# hit 1 thrown at victim tick ${victim.tick}`);
+    for (let t = 0; t < GAP; t++) {
+      if (t === 4) {
+        victim.attack(attacker.id);
+        log(`# victim counter-click at tick ${victim.tick}`);
+      }
+      chase(0.5);
+      await sleepTicks(1);
+    }
+    attacker.attack(targetId);
+    log(`# hit 2 thrown at victim tick ${victim.tick}`);
+    await sleepTicks(45);
   } else if (SCENARIO.startsWith('double')) {
     // The canon two-hit cases: second hit thrown "right as the invuln
     // window ends" (gap defaults to 10 ticks), the attacker chasing to
