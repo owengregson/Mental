@@ -18,6 +18,7 @@ import me.vexmc.mental.debug.PlayerDebugSink;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.engine.ModuleRegistry;
 import me.vexmc.mental.module.compensation.LatencyCompensationModule;
+import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.text.Brand;
 import me.vexmc.mental.text.Messages;
 import net.kyori.adventure.text.Component;
@@ -218,6 +219,17 @@ public final class MentalCommands {
                             ? profile == null ? "?" : profile.displayName()
                             : profile.description(), Brand.TEXT));
         });
+        // The question every "profile feels wrong" report starts with: is the
+        // profile even shaping melee hits, or has OCM's modeset claimed them?
+        if (services.ocmGate().handles(OcmMechanic.MELEE_KNOCKBACK, null)
+                || services.ocmGate().coordinated().contains(OcmMechanic.MELEE_KNOCKBACK)) {
+            builder.append(Component.newline())
+                    .append(Component.text("  ⚠ ", Brand.FAILURE))
+                    .append(Component.text("OCM's old-player-knockback can own melee knockback here"
+                            + " (modeset-decided) — profiles do not shape OCM-owned hits."
+                            + " Remove it from OldCombatMechanics/config.yml modesets to let"
+                            + " these profiles apply.", Brand.MUTED));
+        }
         context.reply(builder.build());
     }
 

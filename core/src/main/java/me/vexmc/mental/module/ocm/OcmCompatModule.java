@@ -111,8 +111,56 @@ public final class OcmCompatModule extends CombatModule implements Listener {
 
         if (gate.mode() != before || !gate.coordinated().equals(coordinatedBefore)) {
             logCoordination(trigger);
+            warnFeelOverlaps(ocm);
         }
         debug.log(() -> "evaluated on " + trigger + " -> " + gate.describe());
+    }
+
+    /**
+     * The two OCM defaults that change combat feel out from under Mental's
+     * profiles, surfaced loudly because neither is visible in gameplay and
+     * both read as "the selected profile is wrong" (each took a wire harness
+     * to find once): old-player-knockback ships in OCM's default modeset and
+     * computes from the server's stale player velocity (combo verticals stop
+     * declining — floaty), and attack-frequency ships playerDelay 18 where
+     * the 1.8 era hit window is 20 (combo cadence, and with it combo
+     * verticals, run fast even when Mental owns the knock).
+     */
+    private void warnFeelOverlaps(@NotNull Plugin ocm) {
+        if (!services.config().knockback().enabled()) {
+            return; // no Mental profile is in play; nothing to be surprised by
+        }
+        var logger = services.plugin().getLogger();
+        if (gate.coordinated().contains(OcmMechanic.MELEE_KNOCKBACK)) {
+            logger.warning("OCM's old-player-knockback governs melee knockback "
+                    + (gate.mode() == OcmGate.Mode.BOUND
+                            ? "for every player whose OCM modeset enables it"
+                            : "globally (no service API — config verdict)")
+                    + ": those hits use OCM's 1.8 formula on the server's stale velocity,"
+                    + " NOT the victim's Mental knockback profile.");
+            logger.warning("  To let Mental's profiles shape melee knockback, remove"
+                    + " \"old-player-knockback\" from the modeset lists in"
+                    + " OldCombatMechanics/config.yml.");
+        }
+        File ocmConfig = new File(ocm.getDataFolder(), "config.yml");
+        if (!ocmConfig.isFile()) {
+            return;
+        }
+        try {
+            YamlConfiguration yaml = YamlConfiguration.loadConfiguration(ocmConfig);
+            if (yaml.getStringList("disabled_modules").contains("attack-frequency")) {
+                return;
+            }
+            int playerDelay = yaml.getInt("attack-frequency.playerDelay", 20);
+            if (playerDelay != 20) {
+                logger.warning("OCM attack-frequency sets playerDelay " + playerDelay
+                        + " (OCM ships 18 by default); the 1.8 era hit window is 20 ticks."
+                        + " Combo cadence — and with it combo knockback verticals — will run"
+                        + " off the era values until it is set to 20.");
+            }
+        } catch (RuntimeException unreadable) {
+            // scanOcmConfig already warned about an unreadable config
+        }
     }
 
     /** Resolves OCM's service API and binds the per-player query; false when unavailable. */
