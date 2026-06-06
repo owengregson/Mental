@@ -77,6 +77,27 @@ description: Use when reasoning about knockback, velocity, trajectories, player 
   decayed wire plain ≈ 0.99, sprint ≈ 2.54 (1.7.10 victim-joined-after
   only — an artifact-prone half; a "players move ~1 block" report means
   the decayed wire is shipping). Jump impulse alone rises ≈ 1.25.
+- **Ground drag is slipperiness × 0.91 from the block UNDER the feet**
+  (compendium §2): stone 0.546, ICE/packed ice 0.8918, slime 0.728 — a
+  1.7.10 packed-ice lane ships hit 1 at 0.4 × 0.8918 = 0.3567 (decayed
+  wire) and residuals compound between hits (settle 5.37 vs stone 2.99 —
+  ice nearly DOUBLES era knockback). The ledger reads it per segment
+  (GroundFriction); the bot harness does NOT model floor slip, so its
+  SETTLE under-reads on ice — trust the per-hit wire values there.
+- **A knock's residual takes TWO grounded pre-move decays** (knock tick +
+  liftoff tick) before the air segment: era chains pin
+  0.4 × slip² × 0.91^k exactly (ice hit 2 = 0.4821 = 0.4×0.8918²×0.91⁷).
+  Ledger implementation: submit-time launch state (the live flag flips on
+  the hit tick!), launch-tick drag in recordLiftoff, grounded seed on a
+  player's first observed state.
+- **The era jump stamp includes Jump Boost**: motY = 0.42 + 0.1×(amp+1) +
+  the 0.2 sprint push (decompiled jump(), both eras; measured: a boosted
+  victim's combo hit 2 ships vy 0.3286). The watcher caches the impulse
+  per player.
+- **attack() also multiplies the ATTACKER's server fields ×0.6** on every
+  bonus-knockback hit (beside the sprint clear, both eras): a player
+  knocked mid-trade who counter-hits compounds the next received knock off
+  the smaller residual. Ledger: scaleHorizontal on accepted bonus-KB hits.
 - Mental's `friction` knobs are SURVIVING-FRACTION multipliers (vanilla ÷2 ≡
   0.5, the NachoSpigot convention). Forks publishing divisors (Panda/Sport/
   Wind, typically 2.0) port as 1/d — pasting a divisor unchanged inverts the

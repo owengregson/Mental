@@ -42,6 +42,19 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
 - Legacy damage: sharpness 1.25/level, crit-before-enchant with no sprint
   exclusion, pre-1.9 tool tables (diamond sword = 8), rod/projectile knocks
   from the SHOOTER'S POSITION, probabilistic armor resistance.
+- The combat compendium (docs/research/2026-06-06-combat-compendium.md) is
+  the authoritative mechanic-by-mechanic reference: knockBack ignores its
+  strength param (0.4 hardcoded); sprint and KB-enchant are LEVELS of one
+  extra (0.5 h/level + flat 0.1 v — KB II ships 1.4, sprint+KB II 1.9);
+  crits add ZERO knockback; blocking halves damage AFTER knockback (era
+  blocked hits knock FULL — Mental cancels only FULL blocks); a stronger
+  hit mid-invuln deals difference damage with NO knock and no flinch;
+  PURE-vanilla snowballs/eggs/rod bobbers never knock PLAYERS (the
+  EntityPlayer zero-damage gate, both eras) — era rodding is CraftBukkit-
+  lineage behavior, which Mental's rod/projectile modules target; the era
+  jump stamp includes Jump Boost; ice nearly doubles 1.7 knockback
+  (slipperiness × 0.91 ground drag); attack() ×0.6's the attacker's own
+  server fields. Each claim is decompile-cited and wire-measured there.
 
 ## The client-side technique contract (NEVER touch server-side)
 
