@@ -179,6 +179,29 @@ function mkBot(username, opts = {}) {
     }
   });
 
+  // Boxer scenarios: the target is a server-side player (not a harness
+  // bot) — map player-info names to uuids and catch its entity spawn.
+  bot.targetEid = null;
+  if (process.env.TARGET_NAME) {
+    const uuidName = {};
+    client.on('player_info', (p) => {
+      for (const e of (p.data || [])) {
+        const name = (e.player && e.player.name) || e.name;
+        const uuid = e.uuid || e.UUID;
+        if (name && uuid) uuidName[String(uuid)] = name;
+      }
+    });
+    const onSpawn = (p) => {
+      const uuid = String(p.objectUUID || p.entityUUID || p.playerUUID || '');
+      if (uuid && uuidName[uuid] === process.env.TARGET_NAME) {
+        bot.targetEid = p.entityId;
+        log(`[${username}] target ${process.env.TARGET_NAME} eid=${p.entityId}`);
+      }
+    };
+    client.on('spawn_entity', onSpawn);
+    client.on('named_entity_spawn', onSpawn);
+  }
+
   bot.start = () => {
     bot._interval = setInterval(() => {
       if (!bot.spawned) return;
@@ -349,6 +372,7 @@ function rconSend(port, pass, commands) {
     let buffer = Buffer.alloc(0);
     let queue = [...commands];
     let authed = false;
+    const bodies = [];
     const fail = (e) => { sock.destroy(); reject(e); };
     sock.on('error', fail);
     sock.on('connect', () => sock.write(frame(1, 3, pass)));
@@ -364,13 +388,74 @@ function rconSend(port, pass, commands) {
           if (id === -1) return fail(new Error('rcon auth failed'));
           authed = true;
         } else if (body.trim()) {
+          bodies.push(body.trim());
           log(`# rcon> ${body.trim().slice(0, 120)}`);
         }
-        if (queue.length === 0) { sock.end(); return resolve(); }
+        if (queue.length === 0) { sock.end(); return resolve(bodies); }
         sock.write(frame(2, 2, queue.shift()));
       }
     });
   });
+}
+
+/**
+ * Cross-validation against SimpleBoxer: 'attack-boxer' has this REAL
+ * protocol client melee a boxer (its ATTACK runs the full netty fast path;
+ * the boxer's received wire + settled flight are the measurements);
+ * 'boxer-attacks' stands passive while an aimbot boxer works us over and
+ * records the velocity packets a real client receives from boxer hits.
+ */
+async function runBoxerScenario(attacker) {
+  const RPORT = parseInt(process.env.RCON_PORT, 10);
+  const RPASS = process.env.RCON_PASS || 'lab';
+  const NAME = process.env.TARGET_NAME || 'Sparring';
+  const rcon = (cmds) => rconSend(RPORT, RPASS, cmds);
+  const posOf = async () => {
+    const bodies = await rcon([`data get entity ${NAME} Pos`]);
+    const m = /\[(-?[\d.]+)d?, (-?[\d.]+)d?, (-?[\d.]+)d?\]/.exec(bodies.join(' '));
+    return m ? { x: +m[1], y: +m[2], z: +m[3] } : null;
+  };
+  attacker.yaw = 0; attacker.pitch = 0;
+  await sleepTicks(40);
+  const ax = attacker.pos.x, ay = attacker.groundY, az = attacker.pos.z;
+  const preset = SCENARIO === 'boxer-attacks' ? 'aimbot' : 'dummy';
+  const offset = SCENARIO === 'boxer-attacks' ? 2.8 : 3.0;
+  // Pave the knock lane: world-spawn terrain (village paths, dips) costs
+  // exact settles — same flat-stone discipline as the era scenarios.
+  const gy = Math.floor(ay) - 1;
+  const bx = Math.floor(ax), bz = Math.floor(az);
+  await rcon([
+    `fill ${bx - 2} ${gy} ${bz - 2} ${bx + 2} ${gy} ${bz + 16} stone`,
+    `fill ${bx - 2} ${gy + 1} ${bz - 2} ${bx + 2} ${gy + 3} ${bz + 16} air`,
+    `boxer remove ${NAME}`,
+    `boxer spawn ${NAME} ${preset} at ${ax.toFixed(2)} ${ay.toFixed(2)} ${(az + offset).toFixed(2)}`,
+  ]);
+  await sleepTicks(30);
+  if (SCENARIO === 'attack-boxer') {
+    await until(() => attacker.targetEid !== null, 10000, 'boxer entity spawn');
+    const before = await posOf();
+    log(`# boxer pre-hit at (${before.x.toFixed(3)}, ${before.y.toFixed(3)}, ${before.z.toFixed(3)})`);
+    attacker.holdSlot(0);
+    await sleepTicks(2);
+    for (let h = 0; h < HITS; h++) {
+      attacker.attack(attacker.targetEid);
+      log(`# hit ${h + 1} thrown at attacker tick ${attacker.tick}`);
+      await sleepTicks(GAP);
+    }
+    await sleepTicks(60);
+    const after = await posOf();
+    log(`# boxer settled at (${after.x.toFixed(3)}, ${after.y.toFixed(3)}, ${after.z.toFixed(3)})`);
+    log(`# SETTLE dx=${(after.x - before.x).toFixed(3)} dz=${(after.z - before.z).toFixed(3)} d=${Math.hypot(after.x - before.x, after.z - before.z).toFixed(3)}`);
+  } else {
+    attacker.physics = true; // a real victim: knocks fly us, we report positions
+    await rcon([`boxer target ${NAME} ${attacker.username}`]);
+    await sleepTicks(200);
+    log(`# received ${attacker.velocityLog.length} velocity packets from boxer hits`);
+    for (const v of attacker.velocityLog.slice(0, 12)) {
+      log(`# RECV t=${v.tick} (${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`);
+    }
+  }
+  await rcon([`boxer remove ${NAME}`]);
 }
 
 async function main() {
@@ -388,6 +473,15 @@ async function main() {
     await sleepTicks(10);
     return bot;
   };
+  if (SCENARIO === 'attack-boxer' || SCENARIO === 'boxer-attacks') {
+    const attacker = await spawnBot(`atk${stamp}`, 'attacker');
+    await runBoxerScenario(attacker);
+    log('# scenario complete');
+    attacker.stop();
+    setTimeout(() => process.exit(0), 300);
+    return;
+  }
+
   let attacker, victim;
   if (VICTIM_FIRST) {
     victim = await spawnBot(`vic${stamp}`, 'victim');
