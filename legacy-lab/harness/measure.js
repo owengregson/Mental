@@ -423,8 +423,16 @@ async function runBoxerScenario(attacker) {
   attacker.yaw = 0; attacker.pitch = 0;
   await sleepTicks(40);
   const ax = attacker.pos.x, ay = attacker.groundY, az = attacker.pos.z;
-  const preset = SCENARIO === 'boxer-attacks' ? 'aimbot' : 'dummy';
-  const offset = SCENARIO === 'boxer-attacks' ? 2.8 : 3.0;
+  const ACTIVE = SCENARIO === 'attack-boxer-active';
+  // attack-boxer-active spawns with NO preset token — the plugin's config
+  // defaults (rush + sprint, w-tap false, 0 ping), the exact bot a bare
+  // `/boxer spawn <name>` gives a sparring owner.
+  const preset = SCENARIO === 'boxer-attacks' ? 'aimbot' : ACTIVE ? '' : 'dummy';
+  // SPAWN_OFFSET widens the staging gap (an active boxer rushes the rest) —
+  // a long pure-approach window isolates command-driven sprint flag changes
+  // from the attack-proc clears that start at contact.
+  const offset = SCENARIO === 'boxer-attacks' ? 2.8
+      : ACTIVE ? parseFloat(process.env.SPAWN_OFFSET || '3.0') : 3.0;
   // Pave the knock lane: world-spawn terrain (village paths, dips) costs
   // exact settles — same flat-stone discipline as the era scenarios.
   const gy = Math.floor(ay) - 1;
@@ -433,7 +441,7 @@ async function runBoxerScenario(attacker) {
     `fill ${bx - 2} ${gy} ${bz - 2} ${bx + 2} ${gy} ${bz + 16} stone`,
     `fill ${bx - 2} ${gy + 1} ${bz - 2} ${bx + 2} ${gy + 3} ${bz + 16} air`,
     `boxer remove ${NAME}`,
-    `boxer spawn ${NAME} ${preset} at ${ax.toFixed(2)} ${ay.toFixed(2)} ${(az + offset).toFixed(2)}`,
+    `boxer spawn ${NAME} ${preset} ${ACTIVE ? `target:${attacker.username} ` : ''}at ${ax.toFixed(2)} ${ay.toFixed(2)} ${(az + offset).toFixed(2)}`.replace(/\s+/g, ' '),
   ]);
   await sleepTicks(30);
   if (SCENARIO === 'attack-boxer') {
@@ -451,6 +459,55 @@ async function runBoxerScenario(attacker) {
     const after = await posOf();
     log(`# boxer settled at (${after.x.toFixed(3)}, ${after.y.toFixed(3)}, ${after.z.toFixed(3)})`);
     log(`# SETTLE dx=${(after.x - before.x).toFixed(3)} dz=${(after.z - before.z).toFixed(3)} d=${Math.hypot(after.x - before.x, after.z - before.z).toFixed(3)}`);
+  } else if (ACTIVE) {
+    // The live sparring shape: the config-default boxer charges the
+    // attacker while sprint+w-tap hits land on the era cadence — the
+    // 'charge-combo' control re-run against a boxer instead of a protocol
+    // client. The boxer's distance-from-attacker trail is the measurement:
+    // how far each hit actually moves a victim that counter-holds W with
+    // machine discipline, and how fast it re-closes. The attacker's own
+    // velocityLog doubles as the return-fire probe — every stamp the
+    // wtap-false boxer's punches carry comes back in RECV lines.
+    await until(() => attacker.targetEid !== null, 10000, 'boxer entity spawn');
+    attacker.holdSlot(0);
+    await sleepTicks(2);
+    const distNow = async () => {
+      const p = await posOf();
+      return p ? Math.hypot(p.x - attacker.pos.x, p.z - attacker.pos.z) : Infinity;
+    };
+    // Let the rush close in before the first swing.
+    for (let t = 0; t < 100 && (await distNow()) > 2.8; t++) {
+      await sleepTicks(1);
+    }
+    log(`# boxer in the pocket at attacker tick ${attacker.tick}`);
+    attacker.setSprint(true);
+    await sleepTicks(2);
+    for (let h = 0; h < HITS; h++) {
+      // wait (bounded) for the boxer to be back inside reach — the trade
+      // rhythm: nobody swings at a target three blocks out
+      for (let t = 0; t < 40 && (await distNow()) > 2.9; t++) {
+        await sleepTicks(1);
+      }
+      attacker.setSprint(false);
+      attacker.setSprint(true);          // the w-tap re-arm
+      attacker.attack(attacker.targetEid);
+      const atHit = await posOf();
+      log(`# hit ${h + 1} thrown at attacker tick ${attacker.tick}, boxer at d=${Math.hypot(atHit.x - attacker.pos.x, atHit.z - attacker.pos.z).toFixed(3)}`);
+      // trail the knock window: distance from the attacker every 2 ticks
+      let maxD = 0;
+      for (let t = 0; t < GAP; t += 2) {
+        await sleepTicks(2);
+        const d = await distNow();
+        if (d !== Infinity && d > maxD) maxD = d;
+        log(`#   trail t=+${t + 2} d=${d.toFixed(3)}`);
+      }
+      log(`# hit ${h + 1} window max distance ${maxD.toFixed(3)}`);
+    }
+    await sleepTicks(20);
+    log(`# return fire received: ${attacker.velocityLog.length} velocity packets`);
+    for (const v of attacker.velocityLog.slice(0, 16)) {
+      log(`# RECV t=${v.tick} (${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`);
+    }
   } else {
     attacker.physics = true; // a real victim: knocks fly us, we report positions
     await rcon([`boxer target ${NAME} ${attacker.username}`]);
@@ -478,7 +535,8 @@ async function main() {
     await sleepTicks(10);
     return bot;
   };
-  if (SCENARIO === 'attack-boxer' || SCENARIO === 'boxer-attacks') {
+  if (SCENARIO === 'attack-boxer' || SCENARIO === 'attack-boxer-active'
+      || SCENARIO === 'boxer-attacks') {
     const attacker = await spawnBot(`atk${stamp}`, 'attacker');
     await runBoxerScenario(attacker);
     log('# scenario complete');
