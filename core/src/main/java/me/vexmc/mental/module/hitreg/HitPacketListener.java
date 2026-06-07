@@ -22,6 +22,7 @@ import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackHints;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.module.knockback.SprintTracker;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -139,18 +140,47 @@ final class HitPacketListener implements PacketListener {
 
             event.setCancelled(true);
 
-            if (settings.preSendFeedback() && damageable instanceof Player victim) {
-                preSendCombatFeedback(attacker, victim, now, settings);
+            // The sprint answer this ATTACK gets. With wtap-registration on,
+            // the wire view: the attacker's own STOP/START packets replayed
+            // in arrival order on this very thread — the era queue's
+            // contract, under which a w-tap that beat this packet to the
+            // socket counts however fast the tap was, and an s-tap's release
+            // denies the bonus the way the era denied it. Without it (module
+            // off, or synthetic players who send no packets), the
+            // tick-frozen snapshot — sprint state as of the boundary, up to
+            // a tick older than the era read.
+            PlayerStateCache.Snapshot attackerSnap = stateCache.get(attackerId);
+            SprintTracker.WireVerdict wire = services.sprintTracker().peekWire(attackerId);
+            boolean attackerSprinting = wire != null
+                    ? wire.sprinting()
+                    : attackerSnap != null && attackerSnap.sprinting();
+            boolean bukkitFresh = services.sprintTracker().peekFresh(attackerId);
+            // The wire's freshness still honors a Bukkit-armed toggle: a
+            // plugin's own setSprinting grant never crosses the wire.
+            Boolean wireFresh = wire != null ? wire.fresh() || bukkitFresh : null;
+            boolean freshSprint = attackerSprinting
+                    && (wireFresh != null ? wireFresh : bukkitFresh);
+            if (wire != null && attackerSnap != null
+                    && wire.sprinting() != attackerSnap.sprinting()) {
+                debug(attacker, () -> "wire sprint " + wire.sprinting()
+                        + " overrides tick-frozen " + attackerSnap.sprinting()
+                        + " — in-order w-tap/s-tap registration");
             }
 
-            // The sprint flag as the ATTACK saw it (tick-frozen snapshot):
-            // a faithful client drops its own sprint right after attacking
-            // and the sync packet beats the deferred damage to the server —
-            // a live read there would deny the era's sprint bonus to every
-            // perfectly-timed authoritative hit.
-            PlayerStateCache.Snapshot attackerSnap = stateCache.get(attackerId);
-            if (attackerSnap != null) {
-                services.sprintTracker().stampAttackSprint(attackerId, attackerSnap.sprinting());
+            if (settings.preSendFeedback() && damageable instanceof Player victim) {
+                preSendCombatFeedback(attacker, attackerSnap, victim, now, settings,
+                        attackerSprinting, freshSprint);
+            }
+
+            // Stamped for the deferred damage pass: a faithful client drops
+            // its own sprint right after attacking and the sync packet beats
+            // the deferred damage to the server — a live read there would
+            // deny the era's sprint bonus to every perfectly-timed
+            // authoritative hit. The wire-resolved freshness rides along;
+            // null keeps the authoritative pass on its Bukkit ledger.
+            if (attackerSnap != null || wire != null) {
+                services.sprintTracker().stampAttackVerdict(
+                        attackerId, attackerSprinting, wireFresh, System.nanoTime());
             }
             services.scheduling().runOn(
                     damageable,
@@ -170,13 +200,14 @@ final class HitPacketListener implements PacketListener {
      * window, and the per-victim gate enforces vanilla's once-per-window
      * cadence across attackers and sub-tick bursts.
      */
-    private void preSendCombatFeedback(Player attacker, Player victim, long now, HitRegSettings settings) {
+    private void preSendCombatFeedback(Player attacker, PlayerStateCache.Snapshot attackerSnap,
+            Player victim, long now, HitRegSettings settings,
+            boolean attackerSprinting, boolean freshSprint) {
         KnockbackSettings knockback = services.config().knockback();
         if (!knockback.enabled()) {
             return;
         }
 
-        PlayerStateCache.Snapshot attackerSnap = stateCache.get(attacker.getUniqueId());
         PlayerStateCache.Snapshot victimSnap = stateCache.get(victim.getUniqueId());
         if (attackerSnap == null || victimSnap == null) {
             return;
@@ -220,16 +251,16 @@ final class HitPacketListener implements PacketListener {
             // pre-sent vector the roll then suppresses would be a phantom.
             debug(attacker, () -> "velocity pre-send skipped: legacy resistance roll pending");
         } else {
-            // Peek (never consume) sprint freshness — the authoritative
-            // owning-thread pass spends it when it adopts this vector.
-            boolean freshSprint = attackerSnap.sprinting()
-                    && services.sprintTracker().peekFresh(attacker.getUniqueId());
+            // Sprint and freshness arrive resolved from registration (the
+            // wire view when the wtap module is on; peeked, never consumed —
+            // the authoritative owning-thread pass spends the ledgers when
+            // it adopts this vector).
             // The compensation hint is published per tick; whoever computes
             // the hit's final vector consumes it — here, when pre-sending.
             Double victimYOverride = hints.takeYOverride(victim.getUniqueId());
             KnockbackVector vector = KnockbackEngine.compute(
-                    attackerSnap.toEntityState(), victimSnap.toEntityState(), profile,
-                    victimYOverride, ThreadLocalRandom.current(), freshSprint);
+                    attackerSnap.toEntityState(attackerSprinting), victimSnap.toEntityState(),
+                    profile, victimYOverride, ThreadLocalRandom.current(), freshSprint);
             if (vector != null) {
                 // The opt-in later-joiner wire (TRACKER_DECAYED): the packet
                 // ships one victim physics tick late. TRACKER ships the full

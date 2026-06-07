@@ -256,6 +256,11 @@ public final class GroundTransitionWatcher implements Listener {
                 player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
         slipCache.put(id, GroundFriction.under(player));
         jumpImpulseCache.put(id, jumpImpulse(player));
+        // The wire sprint view's owning-thread tether: seeds first-sighted
+        // players and re-adopts the live flag after server-initiated changes
+        // (which never cross the wire), while fresh packet writes keep
+        // winning the within-tick window the wtap-registration module reads.
+        services.sprintTracker().reconcileWire(id, player.isSprinting(), System.nanoTime());
         if (packetStates.containsKey(id)) {
             return; // packet-fed: the netty tap owns this player's transitions
         }

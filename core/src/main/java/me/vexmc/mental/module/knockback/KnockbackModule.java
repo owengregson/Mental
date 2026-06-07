@@ -103,17 +103,20 @@ public final class KnockbackModule extends CombatModule implements Listener {
                 return;
             }
 
-            // The sprint flag as the ATTACK saw it: the fast path stamps the
-            // tick-frozen snapshot at registration, because a faithful
-            // client's own post-attack sprint drop beats the deferred damage
-            // to the server (vanilla read the flag inline in Player.attack,
-            // ahead of that packet). No stamp = vanilla-path hit = the live
-            // flag is the one vanilla's own attack already evaluated.
-            Boolean sprintAtAttack = attacker instanceof Player attackerPlayer
-                    ? services.sprintTracker().takeAttackSprint(attackerPlayer.getUniqueId())
+            // The sprint verdict as the ATTACK saw it: the fast path stamps
+            // it at registration — the wire view in packet-arrival order
+            // when the wtap-registration module is on, the tick-frozen
+            // snapshot otherwise — because a faithful client's own
+            // post-attack sprint drop beats the deferred damage to the
+            // server (vanilla read the flag inline in Player.attack, ahead
+            // of that packet). No stamp = vanilla-path hit = the live flag
+            // is the one vanilla's own attack already evaluated.
+            SprintTracker.AttackVerdict verdict = attacker instanceof Player attackerPlayer
+                    ? services.sprintTracker().takeAttackVerdict(
+                            attackerPlayer.getUniqueId(), System.nanoTime())
                     : null;
             boolean attackerSprinting = attacker instanceof Player attackerPlayer
-                    && (sprintAtAttack != null ? sprintAtAttack : attackerPlayer.isSprinting());
+                    && (verdict != null ? verdict.sprinting() : attackerPlayer.isSprinting());
 
             // The netty fast path may have already computed AND wire-delivered
             // this hit's vector; adopt it rather than recomputing — recomputing
@@ -122,7 +125,7 @@ public final class KnockbackModule extends CombatModule implements Listener {
             // pre-send only peeked at, so the tracker state stays truthful.
             if (pipeline.hasFreshPreDelivered(victim)) {
                 if (attackerSprinting && attacker instanceof Player attackerPlayer) {
-                    services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
+                    spendFreshness(attackerPlayer);
                 }
                 mirrorAttackerSelfSlow(attacker, attackerSprinting);
                 debug.log(() -> "adopting pre-delivered knockback for " + victim.getName());
@@ -131,11 +134,17 @@ public final class KnockbackModule extends CombatModule implements Listener {
 
             Double victimYOverride = hints.takeYOverride(victim.getUniqueId());
             EntityState victimState = EntityState.captureVictim(victim, ledger, System.nanoTime());
-            // The authoritative read spends the attacker's sprint freshness — the
-            // pre-send only peeked, so both paths see the same answer this tick.
-            boolean freshSprint = attackerSprinting
+            // The authoritative read spends the attacker's sprint freshness
+            // (both ledgers — the pre-send only peeked) and prefers the
+            // registration-stamped wire answer over the Bukkit ledger, so
+            // prediction and truth see one answer however the tap raced the
+            // tick boundary.
+            boolean bukkitFresh = attackerSprinting
                     && attacker instanceof Player attackerPlayer
-                    && services.sprintTracker().consumeFresh(attackerPlayer.getUniqueId());
+                    && spendFreshness(attackerPlayer);
+            boolean freshSprint = verdict != null && verdict.fresh() != null
+                    ? attackerSprinting && verdict.fresh()
+                    : bukkitFresh;
             KnockbackVector vector = KnockbackEngine.compute(
                     EntityState.capture(attacker, attackerSprinting), victimState, profile,
                     victimYOverride, ThreadLocalRandom.current(), freshSprint);
@@ -177,6 +186,16 @@ public final class KnockbackModule extends CombatModule implements Listener {
                 Attributes.valueOr(attackerPlayer, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));
     }
 
+    /**
+     * Spends both freshness ledgers — the Bukkit-armed set and the wire
+     * view's armed flag — reporting the Bukkit one's answer for hits whose
+     * registration left no wire opinion.
+     */
+    private boolean spendFreshness(@NotNull Player attacker) {
+        services.sprintTracker().consumeWireFresh(attacker.getUniqueId());
+        return services.sprintTracker().consumeFresh(attacker.getUniqueId());
+    }
+
     private static int heldKnockbackLevel(@NotNull Player player) {
         ItemStack main = player.getInventory().getItemInMainHand();
         if (main != null && main.getType() != Material.AIR) {
@@ -204,6 +223,12 @@ public final class KnockbackModule extends CombatModule implements Listener {
      */
     private void clearVanillaSprint(@NotNull LivingEntity attacker) {
         if (attacker instanceof Player attackerPlayer && attackerPlayer.isSprinting()) {
+            // The wire view clears immediately — the era flag dropped the
+            // instant the bonus branch ran, while the runOn task may land a
+            // tick later; without this an attack registering in the gap
+            // would read a sprint the era had already spent.
+            services.sprintTracker().clearWireSprint(
+                    attackerPlayer.getUniqueId(), System.nanoTime());
             services.scheduling().runOn(
                     attackerPlayer, () -> attackerPlayer.setSprinting(false), () -> {});
         }

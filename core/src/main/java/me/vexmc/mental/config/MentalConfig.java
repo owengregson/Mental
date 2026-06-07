@@ -18,6 +18,7 @@ public final class MentalConfig {
 
     public record Snapshot(
             @NotNull HitRegSettings hitReg,
+            @NotNull WtapSettings wtap,
             @NotNull KnockbackSettings knockback,
             @NotNull CompensationSettings compensation,
             @NotNull FishingKnockbackSettings fishingKnockback,
@@ -30,6 +31,7 @@ public final class MentalConfig {
         static @NotNull Snapshot defaults() {
             return new Snapshot(
                     HitRegSettings.DEFAULTS,
+                    WtapSettings.DEFAULTS,
                     KnockbackSettings.DEFAULTS,
                     CompensationSettings.DEFAULTS,
                     FishingKnockbackSettings.DEFAULTS,
@@ -52,6 +54,7 @@ public final class MentalConfig {
                 HitRegSettings.parse(
                         modules.flag("hit-registration", true),
                         reader(sources.hitReg(), "hit-registration", ConfigStore.HIT_REG_FILE, issues)),
+                new WtapSettings(modules.flag("wtap-registration", true)),
                 KnockbackSettings.parse(
                         modules.flag("knockback", true),
                         reader(sources.knockback(), "knockback", ConfigStore.KNOCKBACK_FILE, issues),
@@ -80,6 +83,10 @@ public final class MentalConfig {
 
     public @NotNull HitRegSettings hitReg() {
         return snapshot.get().hitReg();
+    }
+
+    public @NotNull WtapSettings wtap() {
+        return snapshot.get().wtap();
     }
 
     public @NotNull KnockbackSettings knockback() {

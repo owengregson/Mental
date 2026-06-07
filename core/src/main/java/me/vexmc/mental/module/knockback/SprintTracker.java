@@ -11,30 +11,82 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Sprint freshness per attacker — the signal behind a profile's
- * {@code wtap-extra} split.
+ * The attacker's sprint state, kept two ways: the {@code wtap-extra}
+ * freshness ledger (Bukkit toggle events, every path) and the <b>wire
+ * view</b> — the flag replayed in packet-arrival order for the
+ * {@code wtap-registration} module.
  *
- * <p>An attacker is "fresh" when they have (re-)engaged sprint since their
- * last sprint hit: the START_SPRINTING that follows a w-tap (or the server's
- * own post-hit sprint reset) arms the flag, and the next sprint hit consumes
- * it. A sprint held continuously across hits therefore reads as not-fresh —
- * exactly WindSpigot's {@code isExtraKnockback} branch, derived from the only
- * honest server-side signal there is.</p>
+ * <p><b>Freshness</b>: an attacker is "fresh" when they have (re-)engaged
+ * sprint since their last sprint hit: the START_SPRINTING that follows a
+ * w-tap (or the server's own post-hit sprint reset) arms the flag, and the
+ * next sprint hit consumes it. A sprint held continuously across hits
+ * therefore reads as not-fresh — exactly WindSpigot's
+ * {@code isExtraKnockback} branch, derived from the only honest server-side
+ * signal there is.</p>
  *
- * <p>Observation only: with every profile's {@code wtap-extra} disabled this
- * tracker changes nothing, preserving the zero-touch guarantee. Writes happen
- * on owning threads (Bukkit events); the netty pre-send merely peeks, which
- * the concurrent set makes safe.</p>
+ * <p><b>The wire view</b>: the era server applied inbound packets in arrival
+ * order, so an attack always read its attacker's sprint flag with every
+ * earlier STOP/START already applied — a w-tap registered no matter how
+ * little wall-clock separated the re-press from the click. The fast path
+ * registers attacks mid-tick, ahead of the main thread's packet
+ * application, so the tick-frozen snapshot it would otherwise read is up to
+ * a tick OLDER than the era contract: a fast w-tap shipped plain, an s-tap
+ * kept a bonus the era denied. The wire view replays the entity-action
+ * packets at arrival (fed by the ground tap, written and read on the
+ * attacker's own netty thread — program order with their ATTACK by
+ * construction) and mirrors vanilla's in-attack sprint clear, restoring the
+ * in-order read at any tap speed. Taps shorter than one client tick never
+ * produce packets at all — that floor is the client's, identical on era
+ * servers.</p>
+ *
+ * <p>Bukkit toggle events deliberately never write the wire view: they fire
+ * at packet <em>application</em>, so a boundary-applied STOP would overwrite
+ * a newer wire START with older information. Server-initiated
+ * {@code setSprinting} drift is instead adopted by {@link #reconcileWire}
+ * once the wire has been quiet — fresh wire writes always win the
+ * within-tick window they exist for.</p>
+ *
+ * <p>Observation only: with every profile's {@code wtap-extra} disabled and
+ * the {@code wtap-registration} module off this tracker changes nothing,
+ * preserving the zero-touch guarantee. Writes happen on owning threads
+ * (Bukkit events, reconcile) and netty threads (the tap); the concurrent
+ * maps make the cross-thread reads safe.</p>
  */
 public final class SprintTracker implements Listener {
 
     /** A faithful client's post-attack sprint drop lands within ~a tick. */
     private static final long ATTACK_STAMP_TTL_NANOS = 150_000_000L;
 
-    private record AttackStamp(boolean sprinting, long nanos) {}
+    /**
+     * Wire silence after which the server's own flag wins a disagreement —
+     * long enough that every within-tick ordering the wire exists to
+     * preserve stays untouched, short enough that plugin-granted sprint
+     * (which never crosses the wire) converges within a few ticks.
+     */
+    static final long WIRE_QUIET_NANOS = 150_000_000L;
+
+    /**
+     * The sprint answer a registered attack saw, carried from the netty
+     * registration to the owning-thread damage pass. {@code fresh} is the
+     * wire-ordered freshness, or {@code null} when no wire view existed at
+     * registration — the authoritative pass then falls back to consuming
+     * the Bukkit-armed ledger, today's behavior.
+     */
+    public record AttackVerdict(boolean sprinting, @Nullable Boolean fresh) {}
+
+    /** The wire view at one instant: the in-order flag plus armed freshness. */
+    public record WireVerdict(boolean sprinting, boolean fresh) {}
+
+    private record AttackStamp(boolean sprinting, @Nullable Boolean fresh, long nanos) {}
+
+    private record WireState(boolean sprinting, boolean armed, long nanos) {}
 
     private final Set<UUID> fresh = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<UUID, AttackStamp> attackStamps = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, WireState> wire = new ConcurrentHashMap<>();
+
+    /** Flipped by the wtap-registration module; gates reads, never writes. */
+    private volatile boolean consultWire;
 
     @EventHandler
     public void onToggleSprint(@NotNull PlayerToggleSprintEvent event) {
@@ -47,32 +99,115 @@ public final class SprintTracker implements Listener {
     public void onQuit(@NotNull PlayerQuitEvent event) {
         fresh.remove(event.getPlayer().getUniqueId());
         attackStamps.remove(event.getPlayer().getUniqueId());
+        wire.remove(event.getPlayer().getUniqueId());
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  The wire view (wtap-registration)                                  */
+    /* ------------------------------------------------------------------ */
+
+    /** Gates {@link #peekWire} on the module's live state. */
+    public void consultWire(boolean enabled) {
+        this.consultWire = enabled;
     }
 
     /**
-     * Stamps the attacker's sprint state as the cancelled attack packet saw
-     * it (the tick-frozen snapshot, netty thread). Vanilla read the flag
-     * INSIDE {@code Player.attack} — ahead of the client's own post-attack
-     * STOP_SPRINTING sync — while the fast path's deferred damage runs after
-     * the inbound queue and would lose that race: a perfectly-timed sprint
-     * hit would ship plain.
+     * One entity-action packet, at arrival on the player's netty thread.
+     * A START both sets the flag and arms freshness (the re-engage IS the
+     * w-tap signal); a STOP only drops the flag — freshness, once armed,
+     * is spent by a hit, never by the release half of the tap.
      */
-    public void stampAttackSprint(@NotNull UUID attacker, boolean sprinting) {
-        attackStamps.put(attacker, new AttackStamp(sprinting, System.nanoTime()));
+    public void onWireSprint(@NotNull UUID player, boolean sprinting, long nanos) {
+        wire.compute(player, (id, state) -> new WireState(
+                sprinting,
+                sprinting || (state != null && state.armed()),
+                nanos));
     }
 
     /**
-     * One-shot read of the attack-time sprint state; {@code null} when no
+     * The owning-thread per-tick reconcile: seeds first-sighted players from
+     * the live flag and adopts server-initiated changes (plugin
+     * {@code setSprinting}, which never crosses the wire) once the wire has
+     * been quiet for {@link #WIRE_QUIET_NANOS}. A fresh wire write always
+     * wins the within-tick disagreement window — that window is the module.
+     */
+    public void reconcileWire(@NotNull UUID player, boolean liveSprinting, long nanos) {
+        wire.compute(player, (id, state) -> {
+            if (state == null) {
+                return new WireState(liveSprinting, false, nanos);
+            }
+            if (state.sprinting() != liveSprinting && nanos - state.nanos() > WIRE_QUIET_NANOS) {
+                return new WireState(liveSprinting, state.armed(), nanos);
+            }
+            return state;
+        });
+    }
+
+    /**
+     * The in-order read for a registering attack; {@code null} when the
+     * module is off or the player has never been seen (synthetic players
+     * send no packets and get no reconcile) — callers fall back to the
+     * tick-frozen snapshot, the pre-module behavior.
+     */
+    public @Nullable WireVerdict peekWire(@NotNull UUID player) {
+        if (!consultWire) {
+            return null;
+        }
+        WireState state = wire.get(player);
+        return state == null ? null : new WireVerdict(state.sprinting(), state.armed());
+    }
+
+    /**
+     * Mirrors vanilla's in-attack {@code setSprinting(false)} into the wire
+     * view, beside the live-flag clear the knockback module already issues.
+     * Stamped with {@code nanos} so the reconcile's quiet window measures
+     * from this write — the not-yet-cleared live flag must not win it back.
+     */
+    public void clearWireSprint(@NotNull UUID player, long nanos) {
+        wire.computeIfPresent(player, (id, state) ->
+                new WireState(false, state.armed(), nanos));
+    }
+
+    /** Spends the wire-armed freshness, beside {@link #consumeFresh}. */
+    public void consumeWireFresh(@NotNull UUID player) {
+        wire.computeIfPresent(player, (id, state) -> state.armed()
+                ? new WireState(state.sprinting(), false, state.nanos())
+                : state);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Registration stamps                                                */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Stamps the sprint answer the cancelled attack packet saw — the wire
+     * view when the module supplied one, the tick-frozen snapshot otherwise.
+     * Vanilla read the flag INSIDE {@code Player.attack} — ahead of the
+     * client's own post-attack STOP_SPRINTING sync — while the fast path's
+     * deferred damage runs after the inbound queue and would lose that race:
+     * a perfectly-timed sprint hit would ship plain.
+     */
+    public void stampAttackVerdict(
+            @NotNull UUID attacker, boolean sprinting, @Nullable Boolean fresh, long nanos) {
+        attackStamps.put(attacker, new AttackStamp(sprinting, fresh, nanos));
+    }
+
+    /**
+     * One-shot read of the registration-time verdict; {@code null} when no
      * fast-path stamp exists (vanilla-path hits read the live flag, which
      * vanilla's inline attack already evaluated correctly).
      */
-    public @Nullable Boolean takeAttackSprint(@NotNull UUID attacker) {
+    public @Nullable AttackVerdict takeAttackVerdict(@NotNull UUID attacker, long nowNanos) {
         AttackStamp stamp = attackStamps.remove(attacker);
-        if (stamp == null || System.nanoTime() - stamp.nanos() > ATTACK_STAMP_TTL_NANOS) {
+        if (stamp == null || nowNanos - stamp.nanos() > ATTACK_STAMP_TTL_NANOS) {
             return null;
         }
-        return stamp.sprinting();
+        return new AttackVerdict(stamp.sprinting(), stamp.fresh());
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  Freshness (every path)                                             */
+    /* ------------------------------------------------------------------ */
 
     /** Arms freshness directly — the toggle-event path, exposed for tests. */
     public void arm(@NotNull UUID attacker) {
@@ -91,5 +226,7 @@ public final class SprintTracker implements Listener {
 
     public void clear() {
         fresh.clear();
+        attackStamps.clear();
+        wire.clear();
     }
 }

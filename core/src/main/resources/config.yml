@@ -21,6 +21,14 @@ modules:
   # Asynchronous hit registration — attack packets validated on the netty
   # thread, damage dispatched straight to the victim's owning thread.
   hit-registration: true
+  # W-tap registration — the fast path reads the attacker's sprint state in
+  # packet-arrival order, the way the era's inbound queue did: a w-tap or
+  # s-tap counts even when its sprint toggles land in the same tick as the
+  # follow-up attack, however fast the tap. Disabled, sprint state comes
+  # from the tick-frozen snapshot and a tap must beat the tick boundary to
+  # register (taps shorter than one client tick send no packets at all —
+  # that limit is the client's, identical on the era servers).
+  wtap-registration: true
   # Melee knockback through the velocity pipeline, shaped by the selected
   # knockback profile (knockback.yml).
   knockback: true

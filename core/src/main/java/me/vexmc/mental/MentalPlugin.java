@@ -26,6 +26,7 @@ import me.vexmc.mental.module.compensation.LatencyCompensationModule;
 import me.vexmc.mental.module.fishing.FishingKnockbackModule;
 import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
+import me.vexmc.mental.module.hitreg.WtapRegistrationModule;
 import me.vexmc.mental.module.knockback.GroundPacketTap;
 import me.vexmc.mental.module.knockback.GroundTransitionWatcher;
 import me.vexmc.mental.module.knockback.KnockbackModule;
@@ -146,10 +147,13 @@ public final class MentalPlugin extends JavaPlugin {
 
         // The era movement-packet bookkeeping ran per packet, in arrival
         // order; the tap feeds the watcher the same events so jump stamps
-        // land the tick the client's packet does, not a sample later
-        // (read-only — observes after every other listener has had its say).
+        // land the tick the client's packet does, not a sample later, and
+        // feeds the sprint tracker's wire view so attack registration can
+        // read sprint toggles the same way (read-only — observes after
+        // every other listener has had its say).
         PacketEvents.getAPI().getEventManager()
-                .registerListener(new GroundPacketTap(groundWatcher), PacketListenerPriority.MONITOR);
+                .registerListener(new GroundPacketTap(groundWatcher, services.sprintTracker()),
+                        PacketListenerPriority.MONITOR);
 
         PacketEvents.getAPI().init();
 
@@ -251,6 +255,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new AnticheatCompatModule(services));
         modules.register(new OcmCompatModule(services, services.ocmGate()));
         modules.register(new HitRegistrationModule(services, victimMotion, knockbackPipeline, compensation));
+        modules.register(new WtapRegistrationModule(services));
         modules.register(knockback);
         modules.register(compensation);
         modules.register(new FishingKnockbackModule(services, knockbackPipeline));

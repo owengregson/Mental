@@ -71,6 +71,8 @@ class MentalConfigTest {
 
         assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
         assertEquals(HitRegSettings.DEFAULTS, config.hitReg());
+        assertEquals(WtapSettings.DEFAULTS, config.wtap());
+        assertTrue(config.wtap().enabled(), "in-order sprint reads are the era default");
         assertEquals(KnockbackSettings.DEFAULTS, config.knockback());
         assertEquals(CompensationSettings.DEFAULTS, config.compensation());
         assertEquals(FishingKnockbackSettings.DEFAULTS, config.fishingKnockback());
@@ -89,6 +91,7 @@ class MentalConfigTest {
 
         assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
         assertEquals(HitRegSettings.DEFAULTS, config.hitReg());
+        assertEquals(WtapSettings.DEFAULTS, config.wtap());
         assertEquals(CompensationSettings.DEFAULTS, config.compensation());
         assertEquals(FishingKnockbackSettings.DEFAULTS, config.fishingKnockback());
         assertEquals(RodVelocitySettings.DEFAULTS, config.rodVelocity());
@@ -228,11 +231,13 @@ class MentalConfigTest {
                 modules:
                   knockback: false
                   rod-velocity: false
+                  wtap-registration: false
                 """, "", "", "", Map.of()));
 
         assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
         assertFalse(config.knockback().enabled());
         assertFalse(config.rodVelocity().enabled());
+        assertFalse(config.wtap().enabled());
         assertTrue(config.hitReg().enabled());
         assertTrue(config.fishingKnockback().enabled());
     }

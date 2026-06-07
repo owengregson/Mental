@@ -166,9 +166,18 @@ public final class PlayerStateCache {
         }
 
         public @NotNull EntityState toEntityState() {
+            return toEntityState(sprinting);
+        }
+
+        /**
+         * The snapshot with its sprint flag replaced — for attacker states
+         * whose sprint the wtap-registration wire view resolved in packet
+         * order, ahead of this snapshot's tick-boundary freeze.
+         */
+        public @NotNull EntityState toEntityState(boolean sprintingOverride) {
             return new EntityState(
                     x, y, z, yaw, vx, vy, vz, onGround,
-                    sprinting, mainHandKnockbackLevel, knockbackResistance);
+                    sprintingOverride, mainHandKnockbackLevel, knockbackResistance);
         }
     }
 }

@@ -13,9 +13,12 @@ import org.jetbrains.annotations.NotNull;
  * Feeds the {@link GroundTransitionWatcher} the client's own movement and
  * sprint packets at arrival, on the victim's netty thread — the exact event
  * the legacy movement handler ran its jump/landing bookkeeping on, in the
- * exact order. Read-only: never cancels, never mutates, registered at plugin
- * level beside the watcher because the {@link VictimMotion} ledger needs
- * era-correct baselines even while individual modules are toggled.
+ * exact order. The same sprint packets feed the {@link SprintTracker}'s
+ * wire view, which restores the era's in-order sprint read to the attack
+ * fast path (the wtap-registration module). Read-only: never cancels, never
+ * mutates, registered at plugin level beside the watcher because the
+ * {@link VictimMotion} ledger and the wire view need era-correct baselines
+ * even while individual modules are toggled.
  *
  * <p>Packet types are compared by reference against {@code Play.Client}
  * constants — this listener fires for every connection state, and a
@@ -25,9 +28,12 @@ import org.jetbrains.annotations.NotNull;
 public final class GroundPacketTap implements PacketListener {
 
     private final GroundTransitionWatcher watcher;
+    private final SprintTracker sprintTracker;
 
-    public GroundPacketTap(@NotNull GroundTransitionWatcher watcher) {
+    public GroundPacketTap(@NotNull GroundTransitionWatcher watcher,
+            @NotNull SprintTracker sprintTracker) {
         this.watcher = watcher;
+        this.sprintTracker = sprintTracker;
     }
 
     @Override
@@ -58,8 +64,10 @@ public final class GroundPacketTap implements PacketListener {
                 WrapperPlayClientEntityAction packet = new WrapperPlayClientEntityAction(event);
                 if (packet.getAction() == WrapperPlayClientEntityAction.Action.START_SPRINTING) {
                     watcher.onClientSprint(player.getUniqueId(), true);
+                    sprintTracker.onWireSprint(player.getUniqueId(), true, System.nanoTime());
                 } else if (packet.getAction() == WrapperPlayClientEntityAction.Action.STOP_SPRINTING) {
                     watcher.onClientSprint(player.getUniqueId(), false);
+                    sprintTracker.onWireSprint(player.getUniqueId(), false, System.nanoTime());
                 }
             }
         } catch (Throwable failure) {
