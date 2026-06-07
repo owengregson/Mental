@@ -62,6 +62,7 @@ public final class KnockbackPipeline implements Listener {
     private record Pending(
             @Nullable KnockbackVector vector,
             @Nullable KnockbackVector preDelivered,
+            boolean wireDelivered,
             @Nullable LivingEntity attacker,
             @NotNull Cause cause,
             boolean groundedAtSubmit,
@@ -112,7 +113,7 @@ public final class KnockbackPipeline implements Listener {
         // servers flip the flag on the hit tick itself, but the era tracker
         // decayed with the victim's state AT the knock.
         pending.put(victim.getUniqueId(), new Pending(
-                vector, null, attacker, cause,
+                vector, null, false, attacker, cause,
                 ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
                 System.nanoTime()));
     }
@@ -132,7 +133,28 @@ public final class KnockbackPipeline implements Listener {
             @NotNull KnockbackVector preDelivered,
             @Nullable LivingEntity attacker) {
         pending.put(victim.getUniqueId(), new Pending(
-                vector, preDelivered, attacker, Cause.MELEE,
+                vector, preDelivered, true, attacker, Cause.MELEE,
+                ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
+                System.nanoTime()));
+    }
+
+    /**
+     * Queues a registration-time vector for a victim with no connection
+     * (in-process bots, synthetic players): nothing was pre-sent — there is
+     * no wire to carry it — but the registration-time compute read the
+     * victim's snapshot at the era's in-order processing moment, so its
+     * values are the era answer the authoritative pass must adopt rather
+     * than recompute against post-landing state. The velocity event ships
+     * {@code shipped} normally; no duplicate exists to suppress.
+     */
+    @SuppressWarnings("deprecation") // Entity#isOnGround (see submit)
+    public void submitPinned(
+            @NotNull Player victim,
+            @NotNull KnockbackVector vector,
+            @NotNull KnockbackVector shipped,
+            @Nullable LivingEntity attacker) {
+        pending.put(victim.getUniqueId(), new Pending(
+                vector, shipped, false, attacker, Cause.MELEE,
                 ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
                 System.nanoTime()));
     }
@@ -200,12 +222,14 @@ public final class KnockbackPipeline implements Listener {
 
         Vector shipped;
         if (stored.preDelivered() != null && apply.velocity().equals(stored.vector().toBukkit())) {
-            // The wire already carried this knock from the netty thread; mirror
-            // it server-side and cancel the duplicate outbound packet — one
-            // stamp per hit, like the era servers. An API listener changing
-            // the vector falls through to a normal (corrective) send instead.
+            // The registration-time value wins: for wire-delivered knocks the
+            // client already has it and the duplicate outbound packet is
+            // cancelled — one stamp per hit, like the era servers; for pinned
+            // knocks (no connection to pre-send on) the same era-moment value
+            // ships through this event normally, nothing to suppress. An API
+            // listener changing the vector falls through to a corrective send.
             shipped = stored.preDelivered().toBukkit();
-            if (suppressor != null) {
+            if (stored.wireDelivered() && suppressor != null) {
                 suppressor.armFor(victim);
             }
         } else {

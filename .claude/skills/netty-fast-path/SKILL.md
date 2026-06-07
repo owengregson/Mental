@@ -24,6 +24,15 @@ everyone who tried it. Pipeline walk-through: docs/fast-path.md.
 - Velocity suppressors (hurt still ships): AnticheatGate, OCM owning the
   attacker's knockback, pending LEGACY resistance roll, missing snapshots,
   the per-victim feedback window (`auto` = live maxNoDamageTicks/2).
+- A victim with NO PacketEvents user (in-process bots like SimpleBoxer,
+  synthetic players) gets NO burst and must never be accounted
+  wire-delivered — the registration-time vector is `submitPinned` instead:
+  the authoritative pass adopts the era-moment VALUES (snapshot-read, the
+  in-order processing instant) but ships them through the normal velocity
+  event, no suppressor armed. `submitPreDelivered` (wire carried it, dup
+  suppressed) vs `submitPinned` (no wire, ship once) is load-bearing: a
+  pre-delivered marker for an unsendable burst would let any non-PE-level
+  suppression mechanism silently eat the victim's knockback.
 - Pre-send HURT_ANIMATION (explicit yaw = directional tilt), **never
   DAMAGE_EVENT**: clients couple damage-type effects to DAMAGE_EVENT and the
   authoritative re-send would double-fire them. Pre-1.19.4 falls back to

@@ -177,6 +177,7 @@ never cancels flags and never requests exemptions.
 | Case | Behavior |
 | --- | --- |
 | First hit after join | Snapshot seeded on join; a missing snapshot skips the pre-send (vanilla cadence) |
+| Victim without a connection (in-process bots, synthetic players) | No burst can ship and nothing is accounted as wire-delivered; the registration-time vector is **pinned** — the authoritative pass adopts the era-moment values and ships them once, through the normal velocity event, at vanilla cadence |
 | Victim already invulnerable | Cached immunity check + per-victim window gate — no pre-send, no phantom feedback |
 | Spam past the CPS cap | Packet cancelled at the netty layer, nothing downstream |
 | Beyond rewound reach (validation on) | Packet cancelled at the netty layer, best candidate distance debug-logged |

@@ -54,6 +54,16 @@ final class FeedbackSenders {
     }
 
     /**
+     * Whether the victim has a live connection the burst could reach.
+     * Synthetic players (testers' fake players, in-process bots) have no
+     * netty channel and therefore no PacketEvents user — for them nothing
+     * here can ship, and the caller must not account a delivery.
+     */
+    boolean hasConnection(@NotNull Player victim) {
+        return PacketEvents.getAPI().getPlayerManager().getUser(victim) != null;
+    }
+
+    /**
      * The victim-bound burst: optional velocity plus the hurt animation, in
      * plan order, single flush. A null velocity means the pre-send was
      * suppressed (anticheat gate, OCM ownership, pending resistance roll) —

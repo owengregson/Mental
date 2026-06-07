@@ -212,6 +212,12 @@ final class HitPacketListener implements PacketListener {
         if (attackerSnap == null || victimSnap == null) {
             return;
         }
+        // No netty channel (in-process bots, synthetic players) means no
+        // burst can ship and nothing may be accounted as wire-delivered —
+        // but the registration-time compute still reads the era's in-order
+        // processing moment, so its VECTOR is pinned for the authoritative
+        // pass to adopt; it ships once, through the normal velocity event.
+        boolean wired = senders.hasConnection(victim);
         // The victim's profile, frozen by their per-tick snapshot — the same
         // one the authoritative owning-thread path resolves this tick.
         KnockbackProfile profile = victimSnap.profile();
@@ -232,7 +238,10 @@ final class HitPacketListener implements PacketListener {
         long minIntervalMillis = settings.feedbackMinIntervalMillis() >= 0
                 ? settings.feedbackMinIntervalMillis()
                 : Math.max(0, victimSnap.maxNoDamageTicks() / 2 - 1) * 50L;
-        if (!feedbackGate.tryPreSend(victim.getUniqueId(), now, minIntervalMillis)) {
+        if (wired && !feedbackGate.tryPreSend(victim.getUniqueId(), now, minIntervalMillis)) {
+            // The gate paces the WIRE burst only; a pinned (connectionless)
+            // hit sends nothing here, and the authoritative pass already
+            // owns its immunity pacing.
             debug(attacker, () -> "pre-send gated: " + victim.getName()
                     + " inside " + minIntervalMillis + "ms window");
             return;
@@ -274,21 +283,33 @@ final class HitPacketListener implements PacketListener {
                             victimSnap.gravity());
                     shipped = new KnockbackVector(decayed.vx(), decayed.vy(), decayed.vz());
                 }
-                velocity = shipped.toBukkit();
-                // The authoritative pass adopts this exact delivery and the
-                // duplicate end-of-tick packet is suppressed — one wire stamp
-                // per hit, like the era servers.
-                pipeline.submitPreDelivered(victim, vector, shipped, attacker);
+                if (wired) {
+                    velocity = shipped.toBukkit();
+                    // The authoritative pass adopts this exact delivery and
+                    // the duplicate end-of-tick packet is suppressed — one
+                    // wire stamp per hit, like the era servers.
+                    pipeline.submitPreDelivered(victim, vector, shipped, attacker);
+                } else {
+                    // Nothing was (or could be) sent: pin the era-moment
+                    // values for the authoritative pass and let the normal
+                    // velocity event ship them once, at vanilla cadence.
+                    pipeline.submitPinned(victim, vector, shipped, attacker);
+                    debug(attacker, () -> "pre-send pinned: " + victim.getName()
+                            + " has no connection — registration vector ships authoritatively");
+                }
             }
         }
 
         // One burst to the victim — velocity (when eligible) and hurt land in
         // a single bundle frame on 1.19.4+; the attacker's third-person view
-        // is its own connection and needs no bundling.
+        // is its own connection and needs no bundling. A connectionless
+        // victim gets no burst, but the attacker's flinch still pre-sends.
         float hurtYaw = FeedbackSenders.hurtYaw(
                 attackerSnap.x(), attackerSnap.z(), victimSnap.x(), victimSnap.z(), victimSnap.yaw());
-        senders.sendVictimBurst(
-                victim, victimSnap.entityId(), velocity, hurtYaw, settings.bundleFeedback());
+        if (wired) {
+            senders.sendVictimBurst(
+                    victim, victimSnap.entityId(), velocity, hurtYaw, settings.bundleFeedback());
+        }
         senders.sendHurt(attacker, victimSnap.entityId(), hurtYaw);
     }
 
