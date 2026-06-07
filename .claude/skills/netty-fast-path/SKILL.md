@@ -68,11 +68,25 @@ it did server-side must be re-implemented or it silently vanishes:
 - **Attack-time sprint truth**: a faithful client sends STOP_SPRINTING in
   the same flush as its attack; vanilla read the flag INSIDE
   `Player.attack`, ahead of that packet, while the owning-thread damage
-  runs after the inbound queue. The listener stamps the tick-frozen
-  snapshot's sprint state at registration
-  (`SprintTracker.stampAttackSprint`); the authoritative pass consumes it
-  (`takeAttackSprint`) instead of a live read. Without the stamp,
+  runs after the inbound queue. The listener stamps the sprint answer it
+  used at registration (`SprintTracker.stampAttackVerdict` — sprint AND
+  wire freshness); the authoritative pass consumes it
+  (`takeAttackVerdict`) instead of a live read. Without the stamp,
   invuln-boundary (perfect-timing) sprint hits ship plain.
+- **The wire sprint view (wtap-registration, default on)**: the era queue
+  applied STOP/START/ATTACK in arrival order — a w-tap registered however
+  fast the tap. The tick-frozen snapshot is up to a tick OLDER than that
+  contract, so registration reads `SprintTracker.peekWire` first: the
+  attacker's entity-action packets replayed at arrival (fed by
+  `GroundPacketTap`, same-thread program order with their ATTACK), armed
+  freshness on START arrival, vanilla's in-attack clear mirrored by
+  `clearWireSprint` beside the live-flag clear, and an owning-thread
+  per-tick `reconcileWire` (watcher sample) that seeds and re-adopts
+  server-granted `setSprinting` after 150 ms of wire silence. `peekWire`
+  null (module off, synthetic players) = snapshot fallback, byte-identical
+  to pre-1.7.0. Bukkit toggle events must NEVER write the wire view — they
+  fire at packet application, so a boundary-applied STOP would overwrite a
+  newer wire START.
 - Deliberate omissions stay deliberate: sweep, durability, statistics,
   hunger (1.7.10 target feel).
 

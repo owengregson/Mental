@@ -14,6 +14,7 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 ## Why Mental?
 
 - **Attacks register faster.** Mental processes attacks asynchronously via the netty thread, meaning there is zero server latency for hit animations. On 1.19.4+ the velocity and hurt animation arrive bundled, in the same client frame.
+- **W-taps register at any speed.** Sprint toggles are read in packet-arrival order, sub-tick — a w-tap or s-tap counts even when it lands in the same tick as the follow-up hit, where vanilla quantizes both to tick boundaries. The fastest sprint-reset detection physically possible from the server side.
 - **Knockback uses 1:1 replicated 1.7/1.8 formula**, line for line. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, critical hits and Sharpness damage.
 - **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so quick successive hits stack and launch — the mechanical core of legacy combo PvP. Fishing rods and projectiles knock away from where the shooter stands, like they used to.
 - **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, `kohi`, `mmc`, `lunar`, or your own — assignable per server, per world, and per player at runtime (`/mental kb`, or the API for practice cores).
@@ -57,7 +58,7 @@ Use **`/mental`** (or `/mtl`). It opens an interactive dashboard in chat where y
 | `/mental version` | Version, server platform and feature report. |
 | `/mental help` | Clickable list of every command you can use. |
 
-Module names for the `module` command: `hit-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`.
+Module names for the `module` command: `hit-registration`, `wtap-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`.
 
 ## Configuration
 

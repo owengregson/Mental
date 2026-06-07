@@ -97,6 +97,43 @@ the way 1.7.10 delivered them — so the netty pre-send and the
 owning-thread apply compute from one model. The era semantics live in
 [legacy-combat.md](legacy-combat.md).
 
+## Sprint on the wire (w-tap registration)
+
+The era server applied inbound packets in arrival order: an attack always
+read its attacker's sprint flag with every earlier STOP/START already
+applied, so a w-tap or s-tap counted no matter how little wall-clock
+separated it from the follow-up click. The fast path registers attacks
+*mid-tick* — faster than the era — but the tick-frozen snapshot it
+validates against holds sprint state from the last boundary, up to a tick
+**older** than the era contract. A w-tap whose re-press landed in the same
+tick as the attack shipped a plain knock; a release that should have denied
+the bonus didn't.
+
+The `wtap-registration` module (default on) restores the in-order read at
+packet granularity. The plugin-level ground tap already observes
+entity-action packets on each player's netty thread; it additionally feeds
+the sprint tracker's **wire view** — the flag replayed in arrival order,
+freshness armed the instant a START arrives, vanilla's in-attack sprint
+clear mirrored beside the live-flag clear the knockback module already
+issues. Because a player's packets all arrive on their own connection
+thread, the wire view an ATTACK reads is in program order with the toggles
+that preceded it: zero added latency, no races by construction. An
+owning-thread per-tick reconcile seeds first-sighted players and adopts
+server-initiated `setSprinting` (which never crosses the wire) once the
+wire has been quiet.
+
+Registration stamps the verdict it used — sprint and freshness — so the
+pre-sent velocity and the authoritative damage pass can never disagree
+about one hit. Synthetic players send no packets and always fall back to
+the snapshot; so does the whole pipeline when the module is disabled.
+
+This is strictly faster than the era queue, which quantized both the
+toggle application and the attack to tick boundaries (0–50 ms each).
+What remains — the client sampling its keyboard once per client tick, and
+one-way network transit — is where the information physically lives: a tap
+shorter than one client tick never produces packets on any server, era or
+modern.
+
 ## Latency compensation
 
 For the victim, the knockback that matters is the one their client expects.
