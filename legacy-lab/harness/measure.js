@@ -19,6 +19,11 @@
  *                        the flag and a W-holding client never resends it),
  *                        so hit 2 lands plain — the no-w-tap reality
  *   double-sprint-wtap   sprint hit 1, stop+start sprint (w-tap), sprint hit 2
+ *   double-sprint-fastwtap  like double-sprint-wtap, but the re-arm rides the
+ *                        SAME flush as hit 2: STOP, START, ATTACK back-to-back
+ *                        mid-tick — the fastest tap a client can wire. The era
+ *                        queue applied them in order (hit 2 ships the sprint
+ *                        stamp); a tick-frozen sprint read ships hit 2 plain
  *   chain-plain          HITS plain hits every gapTicks, attacker chasing —
  *                        the combo-vertical probe: each hit's wire vy is the
  *                        era machine's verdict on the victim's state then
@@ -654,6 +659,7 @@ async function main() {
     // stay in reach exactly like a real player following a knock.
     const sprintFirst = SCENARIO !== 'double-plain';
     const wtap = SCENARIO === 'double-sprint-wtap';
+    const fastWtap = SCENARIO === 'double-sprint-fastwtap';
     if (sprintFirst) {
       attacker.setSprint(true);
       await sleepTicks(2);
@@ -671,6 +677,15 @@ async function main() {
       }
       chase(0.5);
       await sleepTicks(1);
+    }
+    if (fastWtap) {
+      // The fastest tap a client can wire: release and re-press decided in
+      // one client tick, the click in the same flush — STOP, START, ATTACK
+      // arrive back-to-back mid-server-tick, with no boundary between the
+      // re-arm and the hit for a tick-frozen read to hide behind.
+      attacker.setSprint(false);
+      attacker.setSprint(true);
+      log(`# fast w-tap wired in hit 2's flush at victim tick ${victim.tick}`);
     }
     attacker.attack(targetId);
     log(`# hit 2 thrown at victim tick ${victim.tick}, dist=${Math.hypot(victim.pos.x - attacker.pos.x, victim.pos.z - attacker.pos.z).toFixed(2)}`);
