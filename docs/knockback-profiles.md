@@ -3,7 +3,7 @@
 A **profile** is one complete knockback feel — every knob the engine
 consumes, in one file under `plugins/Mental/profiles/`. The server picks a
 default, worlds can override it, and individual players can be pinned to a
-profile at runtime (the practice-core path). Mental ships six presets and
+profile at runtime (the practice-core path). Mental ships nine presets and
 loads every `profiles/*.yml` it finds, so you can keep as many as you like.
 
 ## Resolution
@@ -26,20 +26,29 @@ profile is irrelevant for that hit.
 ## The shipped presets
 
 Presets are extracted when missing and **never overwritten** — edits are
-yours, and deleting a preset regenerates the original.
+yours, and deleting a preset regenerates the original. One exception, in
+your favor: a preset file that still carries a *superseded bundled
+revision* verbatim (every value untouched — you never tuned it) is
+upgraded in place when research corrects the preset, with a console
+notice. Any edited value freezes the file forever.
 
 | Preset | What it is | Provenance |
 | --- | --- | --- |
 | `legacy-1.7` | The 1.7.10 model: vanilla-era values with ledger combos. **The default — zero configuration keeps today's behavior.** | Decompiled 1.7.10 (`SYNOPSIS.md`) |
 | `legacy-1.8` | Identical math, 1.8.9 flat delivery: melee never feeds itself, rod/projectile residuals still feed the next melee hit once. | Decompiled 1.8.9 |
-| `kohi` | The canonical Kohi/HCF values — lower base, gentler sprint bonus. | Confirmed across three independent sources |
-| `mmc` | The community remake of the Minemen Club feel: **assigned vertical** + **distance taper**, flat delivery, zero randomness. Not the private server's exact values — nobody outside MMC has those. | `MatiasNoble3/ClubSpigot` remake, label swap resolved (see the file's header) |
-| `lunar` | A community recreation of Lunar-network-era knockback — more residual survives each hit. | Community recreation (confidence: likely) |
+| `kohi` | The canonical Kohi/HCF values (2016 season) — lower base, gentler sprint bonus, 1.7.10 ledger combos. The 2015 season's hotter set is in the file's header. | Three independent sources + the archived `kohi2016` values, byte-identical |
+| `minehq` | MineHQ's archived HCF values — between Kohi and vanilla, ledger combos. The feel era players asked other servers for by name. | Archived values (sprytex/Knockback-Values) |
+| `badlion` | Badlion's archived NoDebuff/PotPvP values — softest base of the practice set, strong sprint differential, flat 1.8 delivery. BuildUHC/RodPvP variant in the file's header. | Two independent archives, byte-identical |
+| `velt` | VeltPvP's archived values — friction ÷10 residual **wipe**, fixed 0.36 vertical, full sprint horizontal. The late-era "dead consistent" practice shape (Ikari variant in the header). | Archived values (sprytex/Knockback-Values) |
+| `mmc` | Minemen Club's archived **dev123 (2017)** values — soft 0.32 base with the full vanilla sprint bonus, flat 1.8 delivery. Replaces the remake-derived revision (assigned vertical + taper). | Two independent archives, byte-identical |
+| `lunar` | Lunar Network's archived **Season 5** values — heavy base, split friction, the weakest sprint differential of any archived server (the era's "hold W" complaints are in the numbers, faithfully). Replaces the community-recreation revision. | Two independent archives, byte-identical |
 | `custom` | Yours. Ships as legacy-1.7 values with every knob documented in the file. | — |
 
 The full research trail behind these numbers — fork lineage, formula
 archaeology, flagged fakes — is in
-[research/2026-06-04-improved-knockback.md](research/2026-06-04-improved-knockback.md).
+[research/2026-06-04-improved-knockback.md](research/2026-06-04-improved-knockback.md)
+and the archive verification in
+[research/2026-06-12-archived-server-values.md](research/2026-06-12-archived-server-values.md).
 
 ## The knob vocabulary
 

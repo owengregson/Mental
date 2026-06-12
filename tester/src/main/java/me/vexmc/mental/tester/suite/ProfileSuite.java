@@ -26,8 +26,10 @@ import org.jetbrains.annotations.NotNull;
  * Knockback profiles end to end on a live server: a per-player override
  * (the practice-core path) must reroute the very next hit through the
  * preset's parsed values — file → parse → resolve → engine → velocity
- * event — and the mmc preset must demonstrate the two levers no flat knob
- * can fake: the assigned vertical and the distance taper.
+ * event — and the archived-server presets must demonstrate their structural
+ * levers on the wire: mmc's heavier friction survival on the soft dev123
+ * base, and lunar's vertical cap that sits BELOW its base (every grounded
+ * hit pins at the cap, a shape no base/extra pair can fake).
  */
 public final class ProfileSuite {
 
@@ -40,8 +42,10 @@ public final class ProfileSuite {
         return List.of(
                 new TestCase("profile: kohi override reroutes the next hit", context ->
                         runOverrideScenario(mental, tester, context)),
-                new TestCase("profile: mmc assigns the vertical and tapers the reach", context ->
+                new TestCase("profile: mmc carries the archived dev123 values", context ->
                         runMmcScenario(mental, tester, context)),
+                new TestCase("profile: lunar's cap pins every grounded vertical", context ->
+                        runLunarScenario(mental, tester, context)),
                 new TestCase("profile: the command path assigns and clears overrides", context ->
                         runCommandScenario(mental, tester, context)),
                 new TestCase("profile: unknown names are rejected and events fire on change", context ->
@@ -107,9 +111,10 @@ public final class ProfileSuite {
     }
 
     /**
-     * The mmc preset at four blocks: vertical is ASSIGNED (0.25635 — no
-     * residual, no era 0.4) and the horizontal push is tapered by
-     * 0.025 × (d − 1.2), capped 0.12 — the two structural levers.
+     * The mmc preset at four blocks: the archived dev123 values on the wire —
+     * the soft 0.32 base with NO distance taper (full push at max reach,
+     * the superseded remake tapered here) and the 0.5556 friction survival
+     * in the vertical term.
      */
     private static void runMmcScenario(
             MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -149,12 +154,66 @@ public final class ProfileSuite {
             context.expectNear(expected.z(), applied.getZ(), EPSILON, "mmc knockback z");
 
             // The structural pins, independent of the engine expectation:
-            context.expectNear(0.25635, applied.getY(), EPSILON,
-                    "mmc vertical must be the ASSIGNED constant");
+            // grounded-equilibrium vy × 0.5556 survival + the 0.32 base.
+            context.expectNear(-0.0784 * 0.5556 + 0.32, applied.getY(), EPSILON,
+                    "mmc vertical must be the dev123 ADD shape");
             double horizontal = Math.hypot(applied.getX(), applied.getZ());
-            context.expect(horizontal < 0.38488 - 0.01,
-                    "a four-block mmc hit must taper below the full 0.38488 push (got "
-                            + horizontal + ")");
+            context.expectNear(0.32, horizontal, EPSILON,
+                    "a four-block mmc hit ships the FULL dev123 push — no taper");
+        } finally {
+            context.syncRun(() -> {
+                mental.services().knockbackProfiles().setOverride(victim.player(), null);
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
+    }
+
+    /**
+     * The lunar preset's signature shape: base vertical 0.44 sits ABOVE the
+     * 0.361735 cap, so every grounded hit pins at exactly the cap — and the
+     * 0.54 base horizontal ships in full. The cap-below-base lever is what
+     * the superseded recreation (base 0.3535 == cap) couldn't show.
+     */
+    private static void runLunarScenario(
+            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+
+            KnockbackVector expected = context.sync(() -> {
+                context.expect(mental.services().knockbackProfiles()
+                                .setOverride(victim.player(), "lunar"),
+                        "lunar preset missing");
+                victim.player().setNoDamageTicks(0);
+                KnockbackVector vector = KnockbackEngine.compute(
+                        EntityState.capture(attacker.player()),
+                        KnockbackSuite.restingVictim(victim),
+                        mental.services().knockbackProfiles().resolve(victim.player()), null);
+                captors.reset();
+                attacker.attack(victim.player());
+                return vector;
+            });
+            context.expect(expected != null, "engine returned no vector for an unresisted hit");
+
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the lunar knock's velocity event");
+            Vector applied = captors.velocityOf(victim.uuid());
+            context.expect(applied != null, "lunar-profile hit produced no velocity event");
+            // 0.7634 × (−0.0784) + 0.44 = 0.3801 > cap — the cap must bind.
+            context.expectNear(0.361735, applied.getY(), EPSILON,
+                    "lunar grounded vertical must pin at the S5 cap");
+            context.expectNear(0.54, Math.hypot(applied.getX(), applied.getZ()), EPSILON,
+                    "lunar ships the full 0.54 base horizontal");
         } finally {
             context.syncRun(() -> {
                 mental.services().knockbackProfiles().setOverride(victim.player(), null);

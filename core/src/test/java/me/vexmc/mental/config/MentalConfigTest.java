@@ -138,6 +138,9 @@ class MentalConfigTest {
         assertEquals(KnockbackDelivery.IMMEDIATE, legacy18.meleeDelivery());
         assertEquals(KnockbackDelivery.TRACKER, legacy18.projectileDelivery());
 
+        // kohi == the archived kohi2016 values (friction divisor 2.0 → 0.5),
+        // on the 1.7.10 era model: ledger combos, tracker wire, no
+        // resistance roll (the 1.7 item pool had nothing resistant).
         KnockbackProfile kohi = profiles.get("kohi");
         assertNotNull(kohi);
         assertEquals(new KnockbackProfile.Push(0.35, 0.35), kohi.base());
@@ -145,28 +148,74 @@ class MentalConfigTest {
         assertEquals(new KnockbackProfile.Friction(0.5, 0.5, 0.5), kohi.friction());
         assertEquals(0.4, kohi.limits().vertical());
         assertEquals(VerticalMode.ADD, kohi.verticalMode());
-        assertFalse(kohi.combos());
+        assertTrue(kohi.combos());
+        assertEquals(KnockbackDelivery.TRACKER, kohi.meleeDelivery());
+        assertEquals(KnockbackDelivery.TRACKER, kohi.projectileDelivery());
+        assertEquals(ResistancePolicy.NONE, kohi.resistance());
 
+        // mmc == the archived dev123.minemen.club (2017) values, confirmed
+        // byte-identical across two independent archives: friction divisor
+        // 1.8 → 0.5556, vanilla ADD shape, full vanilla sprint bonus. The
+        // remake-derived SET vertical and distance taper are superseded.
         KnockbackProfile mmc = profiles.get("mmc");
         assertNotNull(mmc);
         assertEquals(KnockbackDelivery.IMMEDIATE, mmc.meleeDelivery());
-        assertEquals(KnockbackDelivery.IMMEDIATE, mmc.projectileDelivery());
-        assertEquals(VerticalMode.SET, mmc.verticalMode());
-        assertEquals(new KnockbackProfile.Push(0.38488, 0.25635), mmc.base());
-        assertTrue(mmc.rangeReduction().enabled());
-        assertEquals(3.0, mmc.rangeReduction().startDistance());
-        assertEquals(0.025, mmc.rangeReduction().factor());
-        assertEquals(1.2, mmc.rangeReduction().offset());
-        assertEquals(0.12, mmc.rangeReduction().maxReduction());
-        assertEquals(4.0, mmc.limits().vertical());
+        assertEquals(KnockbackDelivery.TRACKER, mmc.projectileDelivery());
+        assertEquals(VerticalMode.ADD, mmc.verticalMode());
+        assertEquals(new KnockbackProfile.Push(0.32, 0.32), mmc.base());
+        assertEquals(new KnockbackProfile.Push(0.5, 0.1), mmc.extra());
+        assertEquals(new KnockbackProfile.Friction(0.5556, 0.5556, 0.5556), mmc.friction());
+        assertFalse(mmc.rangeReduction().enabled());
+        assertEquals(0.4, mmc.limits().vertical());
         assertFalse(mmc.combos());
+        assertEquals(ResistancePolicy.NONE, mmc.resistance());
 
+        // lunar == the archived Lunar S5 values, confirmed byte-identical
+        // across two independent archives: split friction (÷1.46 h, ÷1.31 v),
+        // heavy base, weak sprint differential, cap below the base vertical.
         KnockbackProfile lunar = profiles.get("lunar");
         assertNotNull(lunar);
-        assertEquals(new KnockbackProfile.Push(0.46, 0.3535), lunar.base());
-        assertEquals(new KnockbackProfile.Friction(0.6667, 0.6667, 0.6667), lunar.friction());
-        assertEquals(0.3535, lunar.limits().vertical());
+        assertEquals(new KnockbackProfile.Push(0.54, 0.44), lunar.base());
+        assertEquals(new KnockbackProfile.Push(0.38, 0.0), lunar.extra());
+        assertEquals(new KnockbackProfile.Friction(0.6849, 0.7634, 0.6849), lunar.friction());
+        assertEquals(0.361735, lunar.limits().vertical());
         assertFalse(lunar.combos());
+        assertEquals(KnockbackDelivery.IMMEDIATE, lunar.meleeDelivery());
+        assertEquals(KnockbackDelivery.TRACKER, lunar.projectileDelivery());
+        assertEquals(ResistancePolicy.NONE, lunar.resistance());
+
+        // minehq == the archived MineHQ values: between kohi and vanilla,
+        // 1.7.10 era model like kohi.
+        KnockbackProfile minehq = profiles.get("minehq");
+        assertNotNull(minehq);
+        assertEquals(new KnockbackProfile.Push(0.36, 0.36), minehq.base());
+        assertEquals(new KnockbackProfile.Push(0.45, 0.09), minehq.extra());
+        assertEquals(new KnockbackProfile.Friction(0.5, 0.5, 0.5), minehq.friction());
+        assertEquals(0.4, minehq.limits().vertical());
+        assertTrue(minehq.combos());
+        assertEquals(KnockbackDelivery.TRACKER, minehq.meleeDelivery());
+
+        // badlion == the archived NoDebuff/PotPvP values (both archives):
+        // softest base of the practice set, 1.8 flat delivery.
+        KnockbackProfile badlion = profiles.get("badlion");
+        assertNotNull(badlion);
+        assertEquals(new KnockbackProfile.Push(0.34, 0.34), badlion.base());
+        assertEquals(new KnockbackProfile.Push(0.48, 0.085), badlion.extra());
+        assertEquals(new KnockbackProfile.Friction(0.5, 0.5, 0.5), badlion.friction());
+        assertEquals(0.4, badlion.limits().vertical());
+        assertFalse(badlion.combos());
+        assertEquals(KnockbackDelivery.IMMEDIATE, badlion.meleeDelivery());
+
+        // velt == the archived VeltPvP values: friction divisor 10 → 0.1
+        // residual wipe, fixed 0.36 vertical (cap == base), zero sprint
+        // vertical — the late-era "dead consistent" practice shape.
+        KnockbackProfile velt = profiles.get("velt");
+        assertNotNull(velt);
+        assertEquals(new KnockbackProfile.Push(0.325, 0.36), velt.base());
+        assertEquals(new KnockbackProfile.Push(0.5, 0.0), velt.extra());
+        assertEquals(new KnockbackProfile.Friction(0.1, 0.1, 0.1), velt.friction());
+        assertEquals(0.36, velt.limits().vertical());
+        assertFalse(velt.combos());
 
         // custom ships as legacy-1.7 values — selecting it changes nothing
         // until the owner edits the file.

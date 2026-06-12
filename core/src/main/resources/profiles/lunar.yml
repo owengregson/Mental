@@ -1,44 +1,53 @@
 # ──────────────────────────────────────────────────────────────────────────
-#  lunar — a community recreation of Lunar-network-era knockback
+#  lunar — Lunar Network's archived Season 5 values
 #
-#  From the most-circulated community recreation (confidence: likely, not
-#  confirmed). Published as friction DIVISOR 1.5 — Mental's friction is the
-#  surviving fraction, so 1.5 ÷ becomes 0.6667 here: noticeably more of the
-#  victim's motion survives each hit than vanilla's 0.5, which is what
-#  makes this profile feel "carry-y". Flat 1.8 delivery.
+#  The real config, not a recreation: archived from lunar.gg (S5) and
+#  cross-confirmed byte-identical in two independent archives
+#  (threeamnewacc/Server-Archive and sprytex/Knockback-Values, fetched and
+#  verified 2026-06-12). Lunar split its friction by axis — horizontal
+#  DIVISOR 1.46, vertical 1.31 — so the surviving fractions here differ:
+#  0.6849 horizontal, 0.7634 vertical. Far more residual survives each hit
+#  than vanilla's 0.5, the "carry-y" Lunar signature.
 #
-#  Original knobs:  friction 1.5 ÷ · h 0.46 · v 0.3535 · limit 0.3535 ·
-#                   sprint-h ×1.3 · slowdown-h 0.6
-#  Translation notes:
-#    · sprint ×1.3 is a multiplier on the push there; Mental's sprint bonus
-#      is additive along the attacker's facing — extra.horizontal 0.138
-#      (= 0.3 × 0.46) matches the fresh-hit distance.
-#    · slowdown-h (attacker recoil) is client-predicted on every server;
-#      a plugin neither can nor should touch it.
+#  Original knobs:  h-friction 1.46 ÷ · v-friction 1.31 ÷ · h 0.54 ·
+#                   v 0.44 · vertical-limit 0.361735 · extra-h 0.38 ·
+#                   extra-v 0.0
+#
+#  Read the shape honestly before tuning: base 0.54 with a sprint extra of
+#  only 0.38 means sprinting adds LESS than the base — the weakest w-tap
+#  reward of any archived server — and the 0.3617 cap sits BELOW the 0.44
+#  base vertical, so every grounded hit pins at the cap and sprint adds no
+#  height at all. Era players complained you could "hold W and trade" on
+#  Lunar; that complaint is IN these numbers, faithfully. If you want
+#  Lunar-but-comboable, raise extra-h toward 0.5 in a copy of this file.
+#  The previous revision of this preset carried a community recreation
+#  (0.46/0.3535, extra 0.138) — superseded by the real archive.
 #
 #  This preset is regenerated when the file is missing; your edits stay.
 # ──────────────────────────────────────────────────────────────────────────
 display-name: Lunar
-description: "Community recreation of Lunar-network-era knockback — higher friction survival, soft vertical."
+description: "Lunar Network's archived S5 values — heavy base, high residual survival, weak sprint differential."
 
 knockback:
   base:
-    horizontal: 0.46
-    vertical: 0.3535
+    horizontal: 0.54
+    vertical: 0.44
   vertical-mode: add
   extra:
-    horizontal: 0.138
+    horizontal: 0.38
     vertical: 0.0
   wtap-extra:
     enabled: false
-    horizontal: 0.138
+    horizontal: 0.38
     vertical: 0.0
   friction:
-    x: 0.6667
-    y: 0.6667
-    z: 0.6667
+    x: 0.6849
+    # Lunar split friction by axis: vertical divisor 1.31 → 0.7634.
+    y: 0.7634
+    z: 0.6849
   limits:
-    vertical: 0.3535
+    # Below the 0.44 base on purpose: every grounded hit pins at the cap.
+    vertical: 0.361735
     vertical-min: -3.9
     horizontal: -1
   air:
@@ -53,19 +62,19 @@ knockback:
     factor: 0.025
     offset: 1.2
     max-reduction: 0.12
-  # When the victim's client receives the knock relative to their physics
-  # tick. The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on
-  # vanilla, both orders: a victim who joined before their attacker received
-  # the full stamp — identical to 1.8.9 — a victim who joined after, one
-  # friction step less). tracker ships the full stamp, the dominant era
-  # experience; tracker-decayed opts into the later-joiner wire (ground
-  # hits lose ×0.546 horizontal); immediate = the 1.8.9 in-attack send.
-  # Rod/projectile knocks rode the tracker on BOTH eras.
+  # Lunar Network was a 1.8-fork-era practice server: melee sends in
+  # attack() (immediate); rod/projectile knocks rode the tracker on BOTH
+  # eras.
   delivery:
-    melee: tracker
+    melee: immediate
     projectile: tracker
   modifiers:
     sprint: 1.0
+    # 1.8 lineage: melee never feeds itself; rod/projectile residuals still
+    # feed the next hit — and at 0.6849/0.7634 survival they feed HARD.
     combos: false
-    armor-resistance: legacy
+    # The fork code carried 1.8's probabilistic resistance roll, but no item
+    # on its pool could ever trigger it — `none` preserves the on-server
+    # feel on modern item pools.
+    armor-resistance: none
     shield-blocking-cancels: true

@@ -8,9 +8,13 @@ description: Use when changing the knockback engine, profile schema, presets, or
 ## Model
 
 - A profile = one complete feel (`KnockbackProfile` record), one file under
-  `profiles/<name>.yml`. Six shipped presets: `legacy-1.7` (default),
-  `legacy-1.8`, `kohi`, `mmc`, `lunar`, `custom`. Presets are extracted only
-  when missing — owner edits are sacred, deleting regenerates pristine.
+  `profiles/<name>.yml`. Nine shipped presets: `legacy-1.7` (default),
+  `legacy-1.8`, `kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar`,
+  `custom`. Presets are extracted only when missing — owner edits are
+  sacred, deleting regenerates pristine — with ONE exception: a file still
+  matching a superseded bundled revision verbatim (`SupersededPresets`,
+  value-equality not bytes) is upgraded in place when research corrects a
+  preset. Any tuned value freezes the file forever.
 - Resolution is by the **VICTIM**: player override → per-world map
   (knockback.yml) → default. Overrides survive world changes, clear on quit,
   validate against the live set; `PlayerKnockbackProfileChangeEvent` fires on
@@ -47,10 +51,19 @@ description: Use when changing the knockback engine, profile schema, presets, or
    the no-op-at-default property.
 4. Preset era pins live in MentalConfigTest (`bundledPresetsCarryTheir
    CanonicalValues`) — a regenerated preset can never drift.
-5. Provenance: kohi values are confirmed ×3; mmc is the community REMAKE
-   (label-swap resolved; not the private server's values); lunar is [likely].
-   Cite in the preset header. Research base:
-   docs/research/2026-06-04-improved-knockback.md.
+5. Provenance: every fork preset is ported from ARCHIVED server configs
+   (two independent archives, byte-identical where they overlap; kohi also
+   confirmed ×3 + matches the archive): kohi/minehq = 1.7.10 HCF lineage
+   (combos true, tracker), badlion/mmc/lunar = 1.8 practice lineage (combos
+   false, immediate melee), velt = friction-wipe practice shape. mmc = the
+   real dev123 (2017) values — the pre-2026-06-12 remake revision (SET
+   0.25635 + taper) is superseded; lunar = the real S5 values — the
+   recreation revision (0.46/0.138) is superseded. Fork presets ship
+   armor-resistance: none (era pools couldn't trigger the roll; legacy
+   randomizes zero-knocks on modern gear). Cite in the preset header.
+   Research base: docs/research/2026-06-04-improved-knockback.md +
+   docs/research/2026-06-12-archived-server-values.md (the porting and
+   lineage decisions, the measured before/after).
 
 ## The delivery knobs (1.4.0; semantics corrected 1.5.0)
 
@@ -64,8 +77,10 @@ THE HIT (captured at submit; the velocity event fires after fake players
 have already physics-ticked airborne). Never ship the decayed wire by
 default — that artifact survived a release as "era truth" and read as
 broken knockback (~1-block standing flights). LEGACY_17 (and parse-empty)
-= tracker/tracker; legacy-1.8 = immediate/tracker; mmc =
-immediate/immediate. ConfigStore patches the missing block into pre-1.4.0
+= tracker/tracker; 1.8-lineage presets (legacy-1.8, badlion, mmc, lunar) =
+immediate melee; projectile = tracker EVERYWHERE (rod/projectile knocks
+rode the tracker on both eras — the old mmc immediate/immediate was wrong
+and is superseded). ConfigStore patches the missing block into pre-1.4.0
 bundled preset files (never custom.yml). With pre-send on, the netty path
 applies the profile's delivery and ships; the authoritative pass ADOPTS
 that vector and the duplicate outbound packet is suppressed — one wire

@@ -1,0 +1,77 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  velt — VeltPvP's archived HCF knockback
+#
+#  Archived values from VeltPvP (sprytex/Knockback-Values, fetched and
+#  verified 2026-06-12). Published as a friction DIVISOR of 10.0 — Mental's
+#  friction is the SURVIVING FRACTION, so 10.0 ÷ becomes 0.1 here: the
+#  victim's residual motion is essentially WIPED on every hit.
+#
+#  Original knobs:  friction 10.0 ÷ · horizontal 0.325 · vertical 0.36 ·
+#                   vertical-limit 0.36 · extra-h 0.5 · extra-v 0.0
+#
+#  This is the late-era "dead consistent" practice shape — the consistency
+#  triad in one config: near-total residual wipe (nothing ever stacks), a
+#  vertical pinned at exactly 0.36 every grounded hit (cap == base, sprint
+#  adds zero height), and the full 0.5 sprint horizontal so w-tapping still
+#  decides trades. Every hit lands identically; rod boosts die on arrival.
+#  Ikari ran the same set with friction 3.5 ÷ (0.2857) — copy this file and
+#  change friction to run it.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Velt
+description: "VeltPvP's archived values — residual wipe (0.1 survival), fixed 0.36 vertical, full sprint horizontal."
+
+knockback:
+  base:
+    horizontal: 0.325
+    vertical: 0.36
+  vertical-mode: add
+  extra:
+    horizontal: 0.5
+    vertical: 0.0
+  wtap-extra:
+    enabled: false
+    horizontal: 0.5
+    vertical: 0.0
+  friction:
+    x: 0.1
+    y: 0.1
+    z: 0.1
+  limits:
+    # Equal to the base on purpose: every grounded hit pins at 0.36.
+    vertical: 0.36
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # When the victim's client receives the knock relative to their physics
+  # tick. The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on
+  # vanilla, both orders: a victim who joined before their attacker received
+  # the full stamp — identical to 1.8.9 — a victim who joined after, one
+  # friction step less). tracker ships the full stamp, the dominant era
+  # experience; tracker-decayed opts into the later-joiner wire (ground
+  # hits lose ×0.546 horizontal); immediate = the 1.8.9 in-attack send.
+  # Rod/projectile knocks rode the tracker on BOTH eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    # Velt's HCF lineage is unconfirmed, but at 0.1 survival the question is
+    # academic: a ledger residual contributes under 0.03 blocks of push.
+    # false matches the flat feel the friction wipe was built for.
+    combos: false
+    # `none` avoids surprise zero-knock cancels on modern gear.
+    armor-resistance: none
+    shield-blocking-cancels: true
