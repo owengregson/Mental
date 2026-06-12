@@ -69,6 +69,82 @@ class ConfigStoreTest {
         assertEquals(patchedKohi, Files.readString(kohi.toPath(), StandardCharsets.UTF_8));
     }
 
+    /**
+     * The old bundled mmc body, values-complete: what a 1.3.0–1.7.0 install
+     * carries when the owner never tuned it (comments stripped — the
+     * upgrade matches parsed values, not bytes).
+     */
+    private static final String MMC_1_3_BODY = """
+            display-name: MMC
+            description: "Community remake of the Minemen Club feel: assigned vertical, distance taper, flat delivery."
+            knockback:
+              base:
+                horizontal: 0.38488
+                vertical: 0.25635
+              vertical-mode: set
+              extra:
+                horizontal: 0.5
+                vertical: 0.1
+              friction:
+                x: 0.5248
+                y: 0.5248
+                z: 0.5248
+              limits:
+                vertical: 4.0
+              range-reduction:
+                enabled: true
+              modifiers:
+                combos: false
+                armor-resistance: legacy
+            """;
+
+    @Test
+    void unTunedSupersededPresetIsUpgradedInPlace() throws Exception {
+        ConfigStore store = store();
+        File mmc = new File(dataFolder, ConfigStore.PROFILES_DIR + "/mmc.yml");
+        assertTrue(mmc.getParentFile().mkdirs());
+        // A pre-1.4.0 install: old values, no delivery block. The chain must
+        // first complete it to its old canonical form (delivery
+        // immediate/immediate), then recognize and upgrade it.
+        Files.writeString(mmc.toPath(), MMC_1_3_BODY, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration upgraded = YamlConfiguration.loadConfiguration(mmc);
+        assertEquals(0.32, upgraded.getDouble("knockback.base.horizontal"),
+                "superseded mmc must carry the archived dev123 values");
+        assertEquals("add", upgraded.getString("knockback.vertical-mode"));
+        assertTrue(logged.stream().anyMatch(line ->
+                        line.contains("mmc.yml") && line.contains("upgraded")),
+                () -> "expected an upgrade report, logged: " + logged);
+
+        // Idempotent: the corrected file no longer matches any superseded
+        // revision, so a second pass leaves it byte-identical.
+        String afterFirst = Files.readString(mmc.toPath(), StandardCharsets.UTF_8);
+        store.ensureDefaultFiles();
+        assertEquals(afterFirst, Files.readString(mmc.toPath(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void tunedSupersededPresetIsNeverTouched() throws Exception {
+        ConfigStore store = store();
+        File mmc = new File(dataFolder, ConfigStore.PROFILES_DIR + "/mmc.yml");
+        assertTrue(mmc.getParentFile().mkdirs());
+        // One tuned value (base.horizontal 0.38488 → 0.42) = an owner edit.
+        String tuned = MMC_1_3_BODY.replace("horizontal: 0.38488", "horizontal: 0.42");
+        Files.writeString(mmc.toPath(), tuned, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration kept = YamlConfiguration.loadConfiguration(mmc);
+        assertEquals(0.42, kept.getDouble("knockback.base.horizontal"),
+                "owner-tuned values must survive every upgrade pass");
+        assertEquals("set", kept.getString("knockback.vertical-mode"));
+        assertFalse(logged.stream().anyMatch(line ->
+                        line.contains("mmc.yml") && line.contains("upgraded")),
+                () -> "no upgrade may be reported for a tuned file, logged: " + logged);
+    }
+
     @Test
     void loadSourcesTreatsUnparseableFilesAsEmptyAndReportsThem() throws Exception {
         ConfigStore store = store();

@@ -48,8 +48,9 @@ public final class ConfigStore {
     public static final String V1_BACKUP_FILE = "config-v1-backup.yml";
 
     /** Presets shipped in the jar; regenerated individually when missing. */
-    public static final List<String> BUNDLED_PROFILES =
-            List.of("legacy-1.7", "legacy-1.8", "kohi", "mmc", "lunar", "custom");
+    public static final List<String> BUNDLED_PROFILES = List.of(
+            "legacy-1.7", "legacy-1.8", "kohi", "minehq", "badlion", "velt",
+            "mmc", "lunar", "custom");
 
     private final File dataFolder;
     private final Function<String, InputStream> resources;
@@ -79,6 +80,46 @@ public final class ConfigStore {
             File file = new File(profilesDir, preset + ".yml");
             extractIfMissing(PROFILES_DIR + "/" + preset + ".yml", file);
             ensureDeliverySection(preset, file);
+            upgradeSupersededPreset(preset, file);
+        }
+    }
+
+    /**
+     * Replaces a bundled preset file whose parsed values still match a
+     * superseded shipped revision verbatim ({@link SupersededPresets}) — the
+     * owner never tuned it, so it is the old bundle and only research
+     * corrections separate it from the current one. Any value difference
+     * means an owner edit and the file is never touched; comment-only edits
+     * are the one casualty (values identical → upgraded). Runs after
+     * {@link #ensureDeliverySection} so a pre-1.4.0 file is first completed
+     * to its old canonical form, then recognized here.
+     */
+    private void upgradeSupersededPreset(@NotNull String preset, @NotNull File file) {
+        if (SupersededPresets.of(preset).isEmpty() || !file.isFile()) {
+            return;
+        }
+        ConfigurationSection yaml = loadYaml(file, PROFILES_DIR + "/" + preset + ".yml");
+        KnockbackProfile parsed = KnockbackProfile.parse(
+                preset,
+                yaml.getString("display-name", preset),
+                yaml.getString("description", ""),
+                new ConfigReader(yaml.getConfigurationSection("knockback"), "", new ConfigIssues()));
+        if (!SupersededPresets.isSupersededVerbatim(preset, parsed)) {
+            return;
+        }
+        String current = readResource(PROFILES_DIR + "/" + preset + ".yml");
+        if (current == null) {
+            log.accept("Bundled resource " + PROFILES_DIR + "/" + preset
+                    + ".yml is missing from the jar");
+            return;
+        }
+        try {
+            Files.writeString(file.toPath(), current, StandardCharsets.UTF_8);
+            log.accept("profiles/" + preset + ".yml carried a superseded bundled revision"
+                    + " unedited — upgraded to the corrected values"
+                    + " (research 2026-06-12; delete the file to regenerate anytime)");
+        } catch (IOException failure) {
+            log.accept("Could not upgrade profiles/" + preset + ".yml: " + failure);
         }
     }
 
