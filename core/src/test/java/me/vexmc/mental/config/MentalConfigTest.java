@@ -196,15 +196,16 @@ class MentalConfigTest {
         assertEquals(KnockbackDelivery.TRACKER, minehq.meleeDelivery());
 
         // badlion == the archived NoDebuff/PotPvP values (both archives):
-        // softest base of the practice set, 1.8 flat delivery.
+        // softest base of the practice set, on the 1.7 back-end Badlion ran
+        // through its NoDebuff prime (ledger combos, tracker wire).
         KnockbackProfile badlion = profiles.get("badlion");
         assertNotNull(badlion);
         assertEquals(new KnockbackProfile.Push(0.34, 0.34), badlion.base());
         assertEquals(new KnockbackProfile.Push(0.48, 0.085), badlion.extra());
         assertEquals(new KnockbackProfile.Friction(0.5, 0.5, 0.5), badlion.friction());
         assertEquals(0.4, badlion.limits().vertical());
-        assertFalse(badlion.combos());
-        assertEquals(KnockbackDelivery.IMMEDIATE, badlion.meleeDelivery());
+        assertTrue(badlion.combos());
+        assertEquals(KnockbackDelivery.TRACKER, badlion.meleeDelivery());
 
         // velt == the archived VeltPvP values: friction divisor 10 → 0.1
         // residual wipe, fixed 0.36 vertical (cap == base), zero sprint

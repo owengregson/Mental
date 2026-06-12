@@ -53,12 +53,16 @@ description: Use when changing the knockback engine, profile schema, presets, or
    CanonicalValues`) — a regenerated preset can never drift.
 5. Provenance: every fork preset is ported from ARCHIVED server configs
    (two independent archives, byte-identical where they overlap; kohi also
-   confirmed ×3 + matches the archive): kohi/minehq = 1.7.10 HCF lineage
-   (combos true, tracker), badlion/mmc/lunar = 1.8 practice lineage (combos
-   false, immediate melee), velt = friction-wipe practice shape. mmc = the
-   real dev123 (2017) values — the pre-2026-06-12 remake revision (SET
-   0.25635 + taper) is superseded; lunar = the real S5 values — the
-   recreation revision (0.46/0.138) is superseded. Fork presets ship
+   confirmed ×3 + matches the archive). Lineage (verified round 2):
+   kohi/minehq 1.7 base SOURCE-verified (prplz/kohi-april-2016 v1_7_R4;
+   HCTeams v1_7_R3) and badlion ran a 1.7 back-end → combos true + tracker;
+   mmc = 1.8.8 ClubSpigot → combos false + immediate; lunar base UNKNOWN
+   (gatekept LunarSpigot) → flat as the era norm; velt = friction-wipe
+   shape (combos moot at 0.1 survival). CAVEAT all 1.7 calls: the
+   SportBukkit revert was backported into late-era 1.7.10 forks (Kaijo
+   carries it) — combos:true ships the attested prime feel, not their
+   code. mmc's dev123 (2017) attribution rests on the archivists ("dev123"
+   is also a MineHQ dev-host convention). Fork presets ship
    armor-resistance: none (era pools couldn't trigger the roll; legacy
    randomizes zero-knocks on modern gear). Cite in the preset header.
    Research base: docs/research/2026-06-04-improved-knockback.md +
@@ -77,7 +81,7 @@ THE HIT (captured at submit; the velocity event fires after fake players
 have already physics-ticked airborne). Never ship the decayed wire by
 default — that artifact survived a release as "era truth" and read as
 broken knockback (~1-block standing flights). LEGACY_17 (and parse-empty)
-= tracker/tracker; 1.8-lineage presets (legacy-1.8, badlion, mmc, lunar) =
+= tracker/tracker; 1.8-lineage presets (legacy-1.8, mmc, lunar) =
 immediate melee; projectile = tracker EVERYWHERE (rod/projectile knocks
 rode the tracker on both eras — the old mmc immediate/immediate was wrong
 and is superseded). ConfigStore patches the missing block into pre-1.4.0

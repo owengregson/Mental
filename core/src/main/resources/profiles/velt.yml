@@ -68,9 +68,10 @@ knockback:
     projectile: tracker
   modifiers:
     sprint: 1.0
-    # Velt's HCF lineage is unconfirmed, but at 0.1 survival the question is
-    # academic: a ledger residual contributes under 0.03 blocks of push.
-    # false matches the flat feel the friction wipe was built for.
+    # Velt advertised a 1.7.10 base, but whether its custom fork kept or
+    # reverted melee residuals is unverifiable — and at 0.1 survival the
+    # question is academic: a ledger residual contributes under 0.03
+    # blocks of push. false matches the flat feel the wipe was built for.
     combos: false
     # `none` avoids surprise zero-knock cancels on modern gear.
     armor-resistance: none

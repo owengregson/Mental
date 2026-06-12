@@ -62,16 +62,19 @@ knockback:
     factor: 0.025
     offset: 1.2
     max-reduction: 0.12
-  # Lunar Network was a 1.8-fork-era practice server: melee sends in
-  # attack() (immediate); rod/projectile knocks rode the tracker on BOTH
+  # Lunar Network (2019–2023) ran a custom, never-released "LunarSpigot";
+  # its 1.7-vs-1.8 base is genuinely unknown. Flat in-attack melee is the
+  # era norm for its years (even late 1.7-base forks carried the
+  # SportBukkit revert); rod/projectile knocks rode the tracker on BOTH
   # eras.
   delivery:
     melee: immediate
     projectile: tracker
   modifiers:
     sprint: 1.0
-    # 1.8 lineage: melee never feeds itself; rod/projectile residuals still
-    # feed the next hit — and at 0.6849/0.7634 survival they feed HARD.
+    # Flat melee per the late-practice-era norm (base unverified — see the
+    # delivery note); rod/projectile residuals still feed the next hit —
+    # and at 0.6849/0.7634 survival they feed HARD.
     combos: false
     # The fork code carried 1.8's probabilistic resistance roll, but no item
     # on its pool could ever trigger it — `none` preserves the on-server

@@ -12,10 +12,15 @@
 #  The 2015 season ran slightly hotter: friction 1.9 ÷ (0.5263) · 0.36 ·
 #  0.36 · limit 0.36 · extra 0.45/0.09 — copy this file to run that year.
 #
-#  Kohi was THE 1.7.10 HCF server — the server the community's "comboable
-#  1.7" memory is about. Its CraftBukkit lineage never reverted victim
-#  motion after melee, so combos compound through the residual ledger:
-#  combos stays true and delivery rides the 1.7.10 tracker wire.
+#  Kohi was THE 1.7.10 HCF server — its own plugin source (released by its
+#  developer prplz) imports v1_7_R4, and it admitted 1.8 clients through a
+#  protocol hack. Stock 1.7.10 lineage never reverts victim motion after
+#  melee, so combos compound through the residual ledger — the "Kohi
+#  combo" the community remembers — and delivery rides the 1.7.10 tracker
+#  wire. One honest caveat: some late-era 1.7.10 forks backported the
+#  SportBukkit velocity revert (flat melee), and Kohi's production fork
+#  was never public — combos: true ships the attested feel, not a read of
+#  their code.
 #
 #  This preset is regenerated when the file is missing; your edits stay.
 # ──────────────────────────────────────────────────────────────────────────

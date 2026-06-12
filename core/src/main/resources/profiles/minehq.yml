@@ -10,9 +10,11 @@
 #
 #  Sits exactly between Kohi 2016 (0.35/0.425) and vanilla (0.4/0.5):
 #  the slightly-hotter HCF trade feel players asked Lunar for by name
-#  ("kb like MineHQ kitmap"). MineHQ was a 1.7.10-era HCF server —
-#  CraftBukkit lineage, no melee motion revert, so combos compound through
-#  the residual ledger like Kohi's.
+#  ("kb like MineHQ kitmap"). MineHQ's 1.7 base is source-verified — its
+#  HCF core (HCTeams/foxtrot) imports v1_7_R3 and its PotPvP build
+#  depends on a 1.7.10 server artifact — so melee residuals persist and
+#  combos compound through the ledger like Kohi's (same late-era-revert
+#  caveat as kohi.yml).
 #
 #  This preset is regenerated when the file is missing; your edits stay.
 # ──────────────────────────────────────────────────────────────────────────

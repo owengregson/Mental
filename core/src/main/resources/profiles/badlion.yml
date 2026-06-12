@@ -16,10 +16,16 @@
 #  era players compared it to Kohi as "less knockback distance and air
 #  time", which is exactly the 0.34-vs-0.35/0.36 base on display.
 #
+#  Badlion ran a 1.7 BACK-END through its NoDebuff/PotPvP prime (the July
+#  2016 cross-versioning announcement reverted to "a 1.7 back-end"; in Feb
+#  2015 70–80% of its players refused 1.8) — so melee residuals persist
+#  and combos ride the ledger, like Kohi. Confidence: medium (forum
+#  snippets, the fork itself was never public).
+#
 #  This preset is regenerated when the file is missing; your edits stay.
 # ──────────────────────────────────────────────────────────────────────────
 display-name: Badlion
-description: "Badlion's archived NoDebuff values — soft base 0.34, strong sprint differential, flat 1.8 delivery."
+description: "Badlion's archived NoDebuff values — soft base 0.34, strong sprint differential, 1.7 ledger combos."
 
 knockback:
   base:
@@ -53,16 +59,15 @@ knockback:
     factor: 0.025
     offset: 1.2
     max-reduction: 0.12
-  # Badlion's practice era ran 1.8-lineage forks: melee sends in attack()
-  # (immediate); rod/projectile knocks rode the tracker on BOTH eras.
+  # Badlion's NoDebuff prime ran a 1.7 back-end: the tracker wire, like
+  # legacy-1.7. Rod/projectile knocks rode the tracker on BOTH eras.
   delivery:
-    melee: immediate
+    melee: tracker
     projectile: tracker
   modifiers:
     sprint: 1.0
-    # 1.8 lineage: melee never feeds itself; rod/projectile residuals still
-    # feed the next melee hit once.
-    combos: false
+    # 1.7 back-end: melee residuals persist — ledger combos compound.
+    combos: true
     # The fork code carried 1.8's probabilistic resistance roll, but no item
     # on its pool could ever trigger it — `none` preserves the on-server
     # feel on modern item pools.

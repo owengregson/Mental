@@ -1,13 +1,16 @@
 # ──────────────────────────────────────────────────────────────────────────
 #  mmc — Minemen Club's archived dev123 values (2017)
 #
-#  The real config, not a remake: archived from dev123.minemen.club and
-#  cross-confirmed byte-identical in two independent archives
-#  (threeamnewacc/Server-Archive and sprytex/Knockback-Values, fetched and
-#  verified 2026-06-12). Published as a friction DIVISOR of 1.8 — Mental's
-#  friction is the SURVIVING FRACTION, so 1.8 ÷ becomes 0.5556 here: more
-#  of the victim's motion survives than vanilla's 0.5, a slightly heavier
-#  carry between rod boosts and pearls.
+#  Archived values, not a remake: both independent archives carry this set
+#  byte-identically as Minemen's older config ("dev123.minemen.club
+#  (2017)" in threeamnewacc/Server-Archive; dev123.json in
+#  sprytex/Knockback-Values; fetched and verified 2026-06-12). One
+#  attribution caveat, recorded honestly: "dev123" is also a documented
+#  MineHQ dev-host convention, so the Minemen labeling rests on the
+#  archivists. Published as a friction DIVISOR of 1.8 — Mental's friction
+#  is the SURVIVING FRACTION, so 1.8 ÷ becomes 0.5556 here: more of the
+#  victim's motion survives than vanilla's 0.5, a slightly heavier carry
+#  between rod boosts and pearls.
 #
 #  Original knobs:  friction 1.8 ÷ · horizontal 0.32 · vertical 0.32 ·
 #                   vertical-limit 0.4 · extra-h 0.5 · extra-v 0.1
@@ -61,8 +64,9 @@ knockback:
     factor: 0.025
     offset: 1.2
     max-reduction: 0.12
-  # MMC is a 1.8.8-lineage practice server: melee sends in attack()
-  # (immediate), and rod/projectile knocks rode the tracker on BOTH eras.
+  # MMC's 1.8.8 base (the ClubSpigot fork) is well-attested: melee sends
+  # in attack() (immediate), and rod/projectile knocks rode the tracker on
+  # BOTH eras.
   delivery:
     melee: immediate
     projectile: tracker

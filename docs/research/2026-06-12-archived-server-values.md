@@ -88,20 +88,48 @@ header says so instead of silently "fixing" history.
 ## Era-model calls (combos / delivery), per preset
 
 The six-knob values say nothing about delivery or melee-residual handling —
-those are fork-lineage calls:
+those are fork-lineage calls. A second verification round (same date)
+pinned the lineages from primary source where one exists:
 
-- **kohi, minehq — 1.7.10 lineage → `combos: true`, tracker wire.** Kohi and
-  MineHQ are THE 1.7.10 HCF servers; the repo's own era research
-  (era-accuracy: "the community's 'comboable 1.7' memory: Kohi/MCSG forks")
-  and the 1.7.10 CraftBukkit lineage (no melee motion revert → residual
-  compounding) both point the same way. Confidence: high for the era model,
-  by-construction rather than by-measurement for these specific servers.
-- **badlion, mmc, lunar — 1.8 practice lineage → `combos: false`,
-  immediate melee.** 1.8.8-fork practice networks; attack() sends then
-  restores, melee never feeds itself.
-- **velt — `combos: false`, documented as near-moot:** at 0.1 survival a
-  ledger residual contributes < 0.03 blocks; the friction wipe IS the
+- **kohi — 1.7.10 base, source-verified → `combos: true`, tracker wire.**
+  Kohi's own plugin code (released by its developer prplz,
+  `prplz/kohi-april-2016`) imports `v1_7_R4`; contemporaries describe "runs
+  1.7.10 with a protocol hack that lets 1.8 players in". Stock 1.7.10 has
+  no melee revert (decompile-verified on the real jar this round).
+- **minehq — 1.7 base, source-verified → `combos: true`, tracker wire.**
+  Its HCF core (`jwne/HCTeams`, foxtrot) imports `v1_7_R3`; FrozenOrb's
+  PotPvP build depends on `net.hylist:spigot-server:1.7.10-R0.1-SNAPSHOT`.
+- **badlion — 1.7 back-end through the NoDebuff/PotPvP prime →
+  `combos: true`, tracker wire.** July 2016 announcement reverted
+  cross-versioning to "a 1.7 back-end"; Feb 2015: 70–80% of its players
+  refused 1.8. Confidence: medium (forum snippets; the fork was never
+  public). Initially shipped as 1.8-flat on assumption — corrected.
+- **mmc — 1.8.8 base (ClubSpigot), well-attested → `combos: false`,
+  immediate melee.** The FulfillSpigot README names ClubSpigot a 1.8.8
+  fork; 1.7 clients ride a protocol layer. The melee revert is verbatim in
+  every public 1.8.8 fork source (Nacho/Wind/KnockbackSpigot) and no fork
+  removes it.
+- **lunar — base UNKNOWN → `combos: false` as the late-era norm,
+  documented as such.** Lunar Network (2019–2023) ran a gatekept, never-
+  released "LunarSpigot"; no public evidence of its base exists. Flat
+  melee is the era norm for its years.
+- **velt — 1.7.10-advertised (medium), revert status unknowable →
+  `combos: false`, documented as near-moot:** at 0.1 survival a ledger
+  residual contributes < 0.03 blocks; the friction wipe IS the
   anti-combo-stacking design.
+- **The standing caveat on every 1.7-lineage call:** the SportBukkit
+  velocity revert (restore motX/Y/Z after sending the velocity packet) was
+  backported into late-era 1.7.10 PvP forks — the IPVP Paper-1.7 lineage
+  carries it (Aug 2016) and the best-known Kohi replica (Kaijo) layers the
+  Kohi knobs ON TOP of it. Production forks were never public, so
+  `combos: true` on kohi/minehq/badlion ships the community-attested
+  comboable feel of those servers' primes, not a read of their code. The
+  preset headers say so.
+- **dev123 attribution caveat:** "dev123" is a documented MineHQ/FrozenOrb
+  dev-host convention (dev123.potpvp.com = "MineHQ SG Dev");
+  dev123.minemen.club has no public footprint. Both archives store the set
+  as Minemen's — the attribution rests on the archivists' labeling, and
+  the mmc preset header records that.
 - **projectile delivery — tracker everywhere.** Rod/projectile knocks rode
   the tracker on BOTH eras (2026-06-05 wire round); the old mmc preset's
   `projectile: immediate` contradicted the repo's own measurement and is
@@ -140,10 +168,11 @@ and documented.
 
 ## Loose ends, recorded honestly
 
-- The lineage calls for velt (and the delivery choice for lunar) rest on
-  era context, not direct evidence about those servers' forks; at velt's
-  friction the call is imperceptible, at lunar's it only moves boundary-hit
-  timing (tracker ≡ immediate at the wire since 1.5.0).
+- Whether the production Kohi/MineHQ/Badlion forks carried the SportBukkit
+  revert in their late eras is unknowable from public sources (prplz's
+  knockback gist is deleted); the `combos: true` calls ship the attested
+  prime-era feel. Lunar's base is fully unknown; velt's revert status is
+  imperceptible either way.
 - Kihar, Zonix, edater, Badlion BuildUHC are archived but not shipped as
   presets — values live in this doc and the preset headers (copy a file to
   run them). Zonix has NO vertical limit in the archive — port as `-1`.
