@@ -8,12 +8,16 @@
 
 knockback:
   # The profile applied everywhere no override says otherwise. Must match a
-  # file name in profiles/ (without .yml). Shipped presets:
+  # file name in profiles/ (without .yml). Shipped presets (the fork sets
+  # are ported from archived era configs — provenance in each file):
   #   legacy-1.7   the 1.7.10 model with ledger combos (the default)
   #   legacy-1.8   identical math, 1.8.9 flat delivery (no melee combos)
-  #   kohi         the canonical Kohi/HCF values
-  #   mmc          the community remake of the Minemen Club feel
-  #   lunar        a community recreation of Lunar-network-era knockback
+  #   kohi         Kohi's archived 2016 values, 1.7.10 ledger combos
+  #   minehq       MineHQ's archived values — between kohi and vanilla
+  #   badlion      Badlion's archived NoDebuff values, 1.8 flat delivery
+  #   velt         VeltPvP's archived values — the residual-wipe shape
+  #   mmc          Minemen Club's archived dev123 (2017) values
+  #   lunar        Lunar Network's archived Season 5 values
   #   custom       yours — a fully commented schema to edit freely
   profile: legacy-1.7
 

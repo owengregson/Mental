@@ -17,7 +17,7 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 - **W-taps register at any speed.** Sprint toggles are read in packet-arrival order, sub-tick — a w-tap or s-tap counts even when it lands in the same tick as the follow-up hit, where vanilla quantizes both to tick boundaries. The fastest sprint-reset detection physically possible from the server side.
 - **Knockback uses 1:1 replicated 1.7/1.8 formula**, line for line. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, critical hits and Sharpness damage.
 - **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so quick successive hits stack and launch — the mechanical core of legacy combo PvP. Fishing rods and projectiles knock away from where the shooter stands, like they used to.
-- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, `kohi`, `mmc`, `lunar`, or your own — assignable per server, per world, and per player at runtime (`/mental kb`, or the API for practice cores).
+- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, the archived configs of the era's best servers (`kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar` — real archived values, not remakes), or your own — assignable per server, per world, and per player at runtime (`/mental kb`, or the API for practice cores).
 - **The "Ping Problem" is fixed.** Mental measures each player's connection during combat and corrects the knockback they receive, so getting hit feels the same on 20 ms as it does on 150 ms.
 - **Fishing rods restored to legacy mechanics.** Hooks damage and shove players on contact, casts fly like in 1.8, and the reel-in pull is gone.
 - **Projectiles knock back.** Snowballs, eggs and ender pearls push players.
@@ -75,12 +75,13 @@ Split by concern under `plugins/Mental/`, every option explained in its file:
 ```yaml
 # knockback.yml — pick the feel
 knockback:
-  profile: legacy-1.7        # legacy-1.7 · legacy-1.8 · kohi · mmc · lunar · custom
+  profile: legacy-1.7        # legacy-1.7 · legacy-1.8 · kohi · minehq ·
+                             # badlion · velt · mmc · lunar · custom
   per-world:
     duels: kohi              # optional per-world overrides
 ```
 
-Profiles are the whole engine knob set — base/extra pushes, friction, vertical assign-vs-add, the MMC distance taper, air multipliers, w-tap bonuses and more. The guide (with the preset provenance and the fork-porting hazard table) is [docs/knockback-profiles.md](docs/knockback-profiles.md).
+Profiles are the whole engine knob set — base/extra pushes, friction, vertical assign-vs-add, distance taper, air multipliers, w-tap bonuses and more. The guide (with the preset provenance and the fork-porting hazard table) is [docs/knockback-profiles.md](docs/knockback-profiles.md).
 
 `/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config. A v1 single-file `config.yml` migrates automatically on first start: tuned knockback values become `profiles/custom.yml` and stay selected, and the original file is kept as `config-v1-backup.yml`.
 
