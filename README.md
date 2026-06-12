@@ -1,6 +1,6 @@
 # Mental
 
-## WARNING: This plugin is still in beta. MMC KB Recreation is WIP.
+## WARNING: This plugin is still in beta. The `mmc` preset ships Minemen's archived 2017 values; their post-2019 engine is a different knob family and remains unreplicated.
 
 **Async Hit-reg, Ping compensation, & Legacy Knockback for modern Paper servers.**
 
