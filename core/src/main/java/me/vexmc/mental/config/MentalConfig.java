@@ -30,7 +30,8 @@ public final class MentalConfig {
             @NotNull CooldownSettings cooldown,
             @NotNull AttackSoundSettings attackSound,
             @NotNull SweepSettings sweep,
-            @NotNull CraftingSettings crafting) {
+            @NotNull CraftingSettings crafting,
+            @NotNull OffhandSettings offhand) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -47,7 +48,8 @@ public final class MentalConfig {
                     CooldownSettings.DEFAULTS,
                     AttackSoundSettings.DEFAULTS,
                     SweepSettings.DEFAULTS,
-                    CraftingSettings.DEFAULTS);
+                    CraftingSettings.DEFAULTS,
+                    OffhandSettings.DEFAULTS);
         }
     }
 
@@ -86,7 +88,10 @@ public final class MentalConfig {
                 new SweepSettings(modules.flag("disable-sword-sweep", false)),
                 CraftingSettings.parse(
                         modules.flag("disable-crafting", false),
-                        reader(sources.main(), "disable-crafting", "config.yml", issues)));
+                        reader(sources.main(), "disable-crafting", "config.yml", issues)),
+                OffhandSettings.parse(
+                        modules.flag("disable-offhand", false),
+                        reader(sources.main(), "disable-offhand", "config.yml", issues)));
         snapshot.set(next);
         return issues.all();
     }
@@ -149,6 +154,10 @@ public final class MentalConfig {
 
     public @NotNull CraftingSettings crafting() {
         return snapshot.get().crafting();
+    }
+
+    public @NotNull OffhandSettings offhand() {
+        return snapshot.get().offhand();
     }
 
     private static @NotNull ConfigReader reader(

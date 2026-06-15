@@ -63,6 +63,32 @@ modules:
   # slot via the crafting table output on modern Paper. Configure the blocked
   # list in the disable-crafting section below. Default OFF (era-exact no-op).
   disable-crafting: false
+  # Blocks players from placing or using items in the off-hand slot (slot 40).
+  # The off-hand was added in 1.9; on a 1.7/1.8 era server the slot does not
+  # exist. When enabled, all paths through which an item can enter the off-hand
+  # are intercepted: the F-key swap, inventory clicks, number-key hotbar swaps,
+  # drags, and the strip-on-join/world-change fallback. Configure which items
+  # are affected in the disable-offhand section below. Default OFF (era-exact
+  # no-op when disabled).
+  disable-offhand: false
+
+# Off-hand slot filter, active when modules.disable-offhand is true.
+#
+# whitelist: true  → only materials listed in 'items' are permitted in the
+#                    off-hand; anything else is blocked.  An empty list blocks
+#                    ALL items (the maximally restrictive era default).
+# whitelist: false → materials listed in 'items' are blocked; everything else
+#                    is allowed.  An empty list allows everything.
+#
+# Any material name recognised by Bukkit's Material.matchMaterial() is valid.
+# Unknown names warn on reload and are skipped — the rest of the list applies.
+#
+# denied-message: the message shown when an action is denied ('' to suppress).
+#   '&' colour codes are translated.
+#disable-offhand:
+#  whitelist: true
+#  items: []
+#  denied-message: "&cOff-hand is disabled"
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.
