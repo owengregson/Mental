@@ -70,7 +70,16 @@ public final class DebugLog {
         if (!enabled || !active.contains(category)) {
             return;
         }
-        String rendered = message.get();
+        String rendered;
+        try {
+            rendered = message.get();
+        } catch (Throwable failure) {
+            // A debug message must never break its caller. On Folia a supplier
+            // that reads live entity state (e.g. Player#getName) off the owning
+            // region thread throws — swallow it here so a diagnostic can never
+            // turn into a functional regression on the netty / region paths.
+            rendered = "<debug message threw: " + failure.getClass().getSimpleName() + ">";
+        }
         for (Sink sink : sinks) {
             sink.accept(category, rendered);
         }

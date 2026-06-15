@@ -84,6 +84,15 @@ public final class SprintTracker implements Listener {
     private final Set<UUID> fresh = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<UUID, AttackStamp> attackStamps = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, WireState> wire = new ConcurrentHashMap<>();
+    /**
+     * The client's RAW sprint flag, straight from its START/STOP entity-action
+     * packets — never touched by the post-hit clears the wire view and the
+     * freshness ledger apply. It is the only signal that survives Mental's own
+     * {@code setSprinting(false)} after a sprint hit, so it alone can answer "is
+     * this client actually sprinting right now?" — the sword-block sprint reset
+     * consults it so a stationary, defensive block never grants a phantom bonus.
+     */
+    private final Set<UUID> clientSprinting = ConcurrentHashMap.newKeySet();
 
     /** Flipped by the wtap-registration module; gates reads, never writes. */
     private volatile boolean consultWire;
@@ -100,6 +109,7 @@ public final class SprintTracker implements Listener {
         fresh.remove(event.getPlayer().getUniqueId());
         attackStamps.remove(event.getPlayer().getUniqueId());
         wire.remove(event.getPlayer().getUniqueId());
+        clientSprinting.remove(event.getPlayer().getUniqueId());
     }
 
     /* ------------------------------------------------------------------ */
@@ -122,6 +132,32 @@ public final class SprintTracker implements Listener {
                 sprinting,
                 sprinting || (state != null && state.armed()),
                 nanos));
+        if (sprinting) {
+            clientSprinting.add(player);
+        } else {
+            clientSprinting.remove(player);
+        }
+    }
+
+    /** Whether the client's raw sprint flag (its last START/STOP) is set. */
+    public boolean isClientSprinting(@NotNull UUID player) {
+        return clientSprinting.contains(player);
+    }
+
+    /**
+     * Re-engages sprint the way a 1.7/1.8 sword block did — a deliberate sprint
+     * reset, driven from the owning thread rather than a wire packet. Sets the
+     * wire flag and arms both freshness ledgers, standing in for the
+     * START_SPRINTING a modern client omits around an item-use block (it keeps
+     * the sprint flag through the block, so the era STOP/START never crosses the
+     * wire and block-hitting silently stopped re-arming the sprint bonus). The
+     * caller (the sword-block module) gates this on {@link #isClientSprinting}
+     * so only a genuinely sprinting attacker is re-armed; a later real
+     * STOP_SPRINTING still overrides it.
+     */
+    public void armSprintReset(@NotNull UUID player, long nanos) {
+        wire.compute(player, (id, state) -> new WireState(true, true, nanos));
+        fresh.add(player);
     }
 
     /**
@@ -228,5 +264,6 @@ public final class SprintTracker implements Listener {
         fresh.clear();
         attackStamps.clear();
         wire.clear();
+        clientSprinting.clear();
     }
 }
