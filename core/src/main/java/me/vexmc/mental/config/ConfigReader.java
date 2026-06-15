@@ -1,5 +1,6 @@
 package me.vexmc.mental.config;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import org.bukkit.configuration.ConfigurationSection;
@@ -104,6 +105,30 @@ record ConfigReader(@Nullable ConfigurationSection section, @NotNull String pref
                     issues.warn(path(key), "unknown value '" + section.getString(key) + "'", fallback);
                     return fallback;
                 });
+    }
+
+    /**
+     * Returns a list of strings at {@code key}, or {@code fallback} if the
+     * section is absent, the key is not set, or the value is not a list.
+     *
+     * <p>Each element is included as-is (no trimming or case folding — callers
+     * that need normalisation, such as {@link CraftingSettings}, do it
+     * themselves).  This primitive is intentionally general so that item-list
+     * config knobs (whitelist, blacklist, blocked items) can all share it.</p>
+     *
+     * <p>If the key is present but its value is not a list, a warning is
+     * recorded in the same style as the other methods and {@code fallback} is
+     * returned.</p>
+     */
+    @NotNull List<String> stringList(@NotNull String key, @NotNull List<String> fallback) {
+        if (section == null || !section.isSet(key)) {
+            return fallback;
+        }
+        if (!section.isList(key)) {
+            issues.warn(path(key), "expected a list, found '" + section.get(key) + "'", fallback);
+            return fallback;
+        }
+        return section.getStringList(key);
     }
 
     @NotNull ConfigReader sub(@NotNull String key) {

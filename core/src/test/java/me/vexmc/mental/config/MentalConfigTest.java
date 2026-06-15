@@ -81,6 +81,24 @@ class MentalConfigTest {
         assertEquals(AnticheatSettings.DEFAULTS, config.anticheat());
         assertEquals(CompatibilitySettings.DEFAULTS, config.compatibility());
         assertEquals(DebugSettings.DEFAULTS, config.debug());
+        assertEquals(CraftingSettings.DEFAULTS, config.crafting());
+        assertEquals(OffhandSettings.DEFAULTS, config.offhand());
+        assertEquals(GoldenAppleSettings.DEFAULTS, config.goldenApple());
+        assertEquals(EnderPearlSettings.DEFAULTS, config.enderPearl());
+        assertEquals(RegenSettings.DEFAULTS, config.regen());
+        assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
+        assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
+        assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
+        assertEquals(PotionValueSettings.DEFAULTS, config.potionValues());
+        assertFalse(config.potionValues().enabled(), "old-potion-values defaults OFF");
+        assertEquals(CritSettings.DEFAULTS, config.crit());
+        assertFalse(config.crit().enabled(), "old-critical-hits defaults OFF");
+        assertEquals(ToolDurabilitySettings.DEFAULTS, config.toolDurability());
+        assertFalse(config.toolDurability().enabled(), "old-tool-durability defaults OFF");
+        assertEquals(SwordBlockingSettings.DEFAULTS, config.swordBlocking());
+        assertFalse(config.swordBlocking().enabled(), "sword-blocking defaults OFF");
+        assertEquals(HitboxSettings.DEFAULTS, config.hitbox());
+        assertFalse(config.hitbox().enabled(), "old-hitboxes defaults OFF");
     }
 
     @Test
@@ -99,6 +117,19 @@ class MentalConfigTest {
         assertEquals(AnticheatSettings.DEFAULTS, config.anticheat());
         assertEquals(CompatibilitySettings.DEFAULTS, config.compatibility());
         assertEquals(DebugSettings.DEFAULTS, config.debug());
+        assertEquals(CraftingSettings.DEFAULTS, config.crafting());
+        assertEquals(OffhandSettings.DEFAULTS, config.offhand());
+        assertEquals(GoldenAppleSettings.DEFAULTS, config.goldenApple());
+        assertEquals(EnderPearlSettings.DEFAULTS, config.enderPearl());
+        assertEquals(RegenSettings.DEFAULTS, config.regen());
+        assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
+        assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
+        assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
+        assertEquals(PotionValueSettings.DEFAULTS, config.potionValues());
+        assertEquals(CritSettings.DEFAULTS, config.crit());
+        assertEquals(ToolDurabilitySettings.DEFAULTS, config.toolDurability());
+        assertEquals(SwordBlockingSettings.DEFAULTS, config.swordBlocking());
+        assertEquals(HitboxSettings.DEFAULTS, config.hitbox());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());
@@ -290,6 +321,76 @@ class MentalConfigTest {
         assertFalse(config.wtap().enabled());
         assertTrue(config.hitReg().enabled());
         assertTrue(config.fishingKnockback().enabled());
+    }
+
+    @Test
+    void oldPotionValuesFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  old-potion-values: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.potionValues().enabled());
+    }
+
+    @Test
+    void oldCriticalHitsFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  old-critical-hits: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.crit().enabled());
+    }
+
+    @Test
+    void oldToolDurabilityFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  old-tool-durability: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.toolDurability().enabled());
+    }
+
+    @Test
+    void swordBlockingFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  sword-blocking: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.swordBlocking().enabled());
+    }
+
+    @Test
+    void oldHitboxesFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  old-hitboxes: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.hitbox().enabled());
     }
 
     @Test

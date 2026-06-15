@@ -26,7 +26,23 @@ public final class MentalConfig {
             @NotNull ProjectileKnockbackSettings projectileKnockback,
             @NotNull AnticheatSettings anticheat,
             @NotNull CompatibilitySettings compatibility,
-            @NotNull DebugSettings debug) {
+            @NotNull DebugSettings debug,
+            @NotNull CooldownSettings cooldown,
+            @NotNull AttackSoundSettings attackSound,
+            @NotNull SweepSettings sweep,
+            @NotNull CraftingSettings crafting,
+            @NotNull OffhandSettings offhand,
+            @NotNull GoldenAppleSettings goldenApple,
+            @NotNull EnderPearlSettings enderPearl,
+            @NotNull RegenSettings regen,
+            @NotNull ArmourStrengthSettings armourStrength,
+            @NotNull ArmourDurabilitySettings armourDurability,
+            @NotNull PotionDurationSettings potionDuration,
+            @NotNull PotionValueSettings potionValues,
+            @NotNull CritSettings crit,
+            @NotNull ToolDurabilitySettings toolDurability,
+            @NotNull SwordBlockingSettings swordBlocking,
+            @NotNull HitboxSettings hitbox) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -39,7 +55,23 @@ public final class MentalConfig {
                     ProjectileKnockbackSettings.DEFAULTS,
                     AnticheatSettings.DEFAULTS,
                     CompatibilitySettings.DEFAULTS,
-                    DebugSettings.DEFAULTS);
+                    DebugSettings.DEFAULTS,
+                    CooldownSettings.DEFAULTS,
+                    AttackSoundSettings.DEFAULTS,
+                    SweepSettings.DEFAULTS,
+                    CraftingSettings.DEFAULTS,
+                    OffhandSettings.DEFAULTS,
+                    GoldenAppleSettings.DEFAULTS,
+                    EnderPearlSettings.DEFAULTS,
+                    RegenSettings.DEFAULTS,
+                    ArmourStrengthSettings.DEFAULTS,
+                    ArmourDurabilitySettings.DEFAULTS,
+                    PotionDurationSettings.DEFAULTS,
+                    PotionValueSettings.DEFAULTS,
+                    CritSettings.DEFAULTS,
+                    ToolDurabilitySettings.DEFAULTS,
+                    SwordBlockingSettings.DEFAULTS,
+                    HitboxSettings.DEFAULTS);
         }
     }
 
@@ -72,7 +104,27 @@ public final class MentalConfig {
                         reader(sources.knockback(), "projectile-knockback", ConfigStore.KNOCKBACK_FILE, issues)),
                 AnticheatSettings.parse(reader(sources.main(), "anticheat", "config.yml", issues)),
                 CompatibilitySettings.parse(reader(sources.main(), "compatibility", "config.yml", issues)),
-                DebugSettings.parse(reader(sources.main(), "debug", "config.yml", issues)));
+                DebugSettings.parse(reader(sources.main(), "debug", "config.yml", issues)),
+                new CooldownSettings(modules.flag("attack-cooldown", false)),
+                new AttackSoundSettings(modules.flag("disable-attack-sounds", false)),
+                new SweepSettings(modules.flag("disable-sword-sweep", false)),
+                CraftingSettings.parse(
+                        modules.flag("disable-crafting", false),
+                        reader(sources.main(), "disable-crafting", "config.yml", issues)),
+                OffhandSettings.parse(
+                        modules.flag("disable-offhand", false),
+                        reader(sources.main(), "disable-offhand", "config.yml", issues)),
+                new GoldenAppleSettings(modules.flag("old-golden-apples", false)),
+                new EnderPearlSettings(modules.flag("disable-enderpearl-cooldown", false)),
+                new RegenSettings(modules.flag("old-player-regen", false)),
+                new ArmourStrengthSettings(modules.flag("old-armour-strength", false)),
+                new ArmourDurabilitySettings(modules.flag("old-armour-durability", false)),
+                new PotionDurationSettings(modules.flag("old-potion-durations", false)),
+                new PotionValueSettings(modules.flag("old-potion-values", false)),
+                new CritSettings(modules.flag("old-critical-hits", false)),
+                new ToolDurabilitySettings(modules.flag("old-tool-durability", false)),
+                new SwordBlockingSettings(modules.flag("sword-blocking", false)),
+                new HitboxSettings(modules.flag("old-hitboxes", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -119,6 +171,70 @@ public final class MentalConfig {
 
     public @NotNull DebugSettings debug() {
         return snapshot.get().debug();
+    }
+
+    public @NotNull CooldownSettings cooldown() {
+        return snapshot.get().cooldown();
+    }
+
+    public @NotNull AttackSoundSettings attackSound() {
+        return snapshot.get().attackSound();
+    }
+
+    public @NotNull SweepSettings sweep() {
+        return snapshot.get().sweep();
+    }
+
+    public @NotNull CraftingSettings crafting() {
+        return snapshot.get().crafting();
+    }
+
+    public @NotNull OffhandSettings offhand() {
+        return snapshot.get().offhand();
+    }
+
+    public @NotNull GoldenAppleSettings goldenApple() {
+        return snapshot.get().goldenApple();
+    }
+
+    public @NotNull EnderPearlSettings enderPearl() {
+        return snapshot.get().enderPearl();
+    }
+
+    public @NotNull RegenSettings regen() {
+        return snapshot.get().regen();
+    }
+
+    public @NotNull ArmourStrengthSettings armourStrength() {
+        return snapshot.get().armourStrength();
+    }
+
+    public @NotNull ArmourDurabilitySettings armourDurability() {
+        return snapshot.get().armourDurability();
+    }
+
+    public @NotNull PotionDurationSettings potionDuration() {
+        return snapshot.get().potionDuration();
+    }
+
+    public @NotNull PotionValueSettings potionValues() {
+        return snapshot.get().potionValues();
+    }
+
+    public @NotNull CritSettings crit() {
+        return snapshot.get().crit();
+    }
+
+    public @NotNull ToolDurabilitySettings toolDurability() {
+        return snapshot.get().toolDurability();
+    }
+
+    public @NotNull SwordBlockingSettings swordBlocking() {
+        return snapshot.get().swordBlocking();
+    }
+
+    public @NotNull HitboxSettings hitbox() {
+        return snapshot.get().hitbox();
     }
 
     private static @NotNull ConfigReader reader(

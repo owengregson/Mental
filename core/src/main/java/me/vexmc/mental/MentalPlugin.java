@@ -22,7 +22,13 @@ import me.vexmc.mental.debug.PlayerDebugSink;
 import me.vexmc.mental.engine.ModuleRegistry;
 import me.vexmc.mental.module.anticheat.AnticheatCompatModule;
 import me.vexmc.mental.module.anticheat.AnticheatGate;
+import me.vexmc.mental.module.block.SwordBlockingModule;
 import me.vexmc.mental.module.compensation.LatencyCompensationModule;
+import me.vexmc.mental.module.damage.ArmourDurabilityModule;
+import me.vexmc.mental.module.damage.ArmourStrengthModule;
+import me.vexmc.mental.module.damage.CritFallbackModule;
+import me.vexmc.mental.module.hitbox.HitboxModule;
+import me.vexmc.mental.module.damage.ToolDurabilityModule;
 import me.vexmc.mental.module.fishing.FishingKnockbackModule;
 import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
@@ -38,6 +44,19 @@ import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.ocm.OcmCompatModule;
 import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
+import me.vexmc.mental.module.rules.cooldown.AttackCooldownModule;
+import me.vexmc.mental.module.rules.cooldown.CooldownSpoofListener;
+import me.vexmc.mental.module.rules.sound.AttackSoundListener;
+import me.vexmc.mental.module.rules.sound.AttackSoundModule;
+import me.vexmc.mental.module.rules.crafting.DisableCraftingModule;
+import me.vexmc.mental.module.consumable.EnderPearlCooldownModule;
+import me.vexmc.mental.module.consumable.GoldenAppleModule;
+import me.vexmc.mental.module.health.RegenModule;
+import me.vexmc.mental.module.potion.PotionDurationModule;
+import me.vexmc.mental.module.potion.PotionValueModule;
+import me.vexmc.mental.module.rules.offhand.OffhandModule;
+import me.vexmc.mental.module.rules.sweep.SweepModule;
+import me.vexmc.mental.module.rules.sweep.SweepParticleListener;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
@@ -155,6 +174,28 @@ public final class MentalPlugin extends JavaPlugin {
                 .registerListener(new GroundPacketTap(groundWatcher, services.sprintTracker()),
                         PacketListenerPriority.MONITOR);
 
+        // Rewrites attack_speed in UPDATE_ATTRIBUTES for the receiver's own
+        // entity so the client never renders a cooldown overlay.  Registered
+        // for the plugin lifetime; the listener gates on the config flag.
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new CooldownSpoofListener(config),
+                        PacketListenerPriority.NORMAL);
+
+        // Cancels SOUND_EFFECT / ENTITY_SOUND_EFFECT packets whose sound name
+        // falls in the entity.player.attack.* family (added in 1.9; absent
+        // entirely in 1.7/1.8).  Cosmetic only — no game state is touched.
+        // Registered for the plugin lifetime; the listener gates on the flag.
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new AttackSoundListener(config),
+                        PacketListenerPriority.NORMAL);
+
+        // Cancels outbound PARTICLE packets whose particle type is sweep_attack
+        // (minecraft:sweep_attack — added in 1.9 with the sweep mechanic).
+        // Registered for the plugin lifetime; the listener gates on the flag.
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new SweepParticleListener(config),
+                        PacketListenerPriority.NORMAL);
+
         PacketEvents.getAPI().init();
 
         getLogger().info(() -> "Mental enabled — server " + environment.describe()
@@ -261,6 +302,22 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new FishingKnockbackModule(services, knockbackPipeline));
         modules.register(new FishingRodVelocityModule(services));
         modules.register(new ProjectileKnockbackModule(services, knockbackPipeline));
+        modules.register(new AttackCooldownModule(services));
+        modules.register(new AttackSoundModule(services));
+        modules.register(new SweepModule(services));
+        modules.register(new DisableCraftingModule(services));
+        modules.register(new OffhandModule(services));
+        modules.register(new GoldenAppleModule(services));
+        modules.register(new EnderPearlCooldownModule(services));
+        modules.register(new RegenModule(services));
+        modules.register(new ArmourStrengthModule(services));
+        modules.register(new ArmourDurabilityModule(services));
+        modules.register(new PotionDurationModule(services));
+        modules.register(new PotionValueModule(services));
+        modules.register(new CritFallbackModule(services));
+        modules.register(new ToolDurabilityModule(services));
+        modules.register(new SwordBlockingModule(services));
+        modules.register(new HitboxModule(services));
     }
 
     private void registerCommands() {

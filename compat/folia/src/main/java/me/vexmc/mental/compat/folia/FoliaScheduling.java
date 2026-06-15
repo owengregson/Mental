@@ -74,6 +74,20 @@ public final class FoliaScheduling implements Scheduling {
     }
 
     @Override
+    public void runOnLater(
+            @NotNull Entity entity, long delayTicks, @NotNull Runnable task, @NotNull Runnable retired) {
+        // Folia rejects delays below 1 — clamp, matching the convention in repeatOn/repeatGlobal.
+        // runDelayed lands on the entity's owning region thread, so the callback is region-correct
+        // (important for player inventory/potion mutations).
+        ScheduledTask scheduled = entity.getScheduler()
+                .runDelayed(plugin, scheduledTask -> task.run(), retired, clampTicks(delayTicks));
+        if (scheduled == null) {
+            // Entity already removed — fire retired immediately.
+            retired.run();
+        }
+    }
+
+    @Override
     public @NotNull TaskHandle repeatAsync(@NotNull Duration initial, @NotNull Duration period, @NotNull Runnable task) {
         ScheduledTask scheduled = Bukkit.getAsyncScheduler().runAtFixedRate(
                 plugin,

@@ -2,6 +2,7 @@ package me.vexmc.mental.module.hitreg;
 
 import java.util.UUID;
 import me.vexmc.mental.MentalServices;
+import me.vexmc.mental.module.damage.WeaponDurability;
 import me.vexmc.mental.module.ocm.OcmMechanic;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -20,8 +21,10 @@ import org.jetbrains.annotations.Nullable;
  * fresh state, and drives the hit through Bukkit's {@code damage(amount,
  * attacker)} — which fires the full event chain (damage events, armor,
  * invulnerability, vanilla knockback, hurt feedback) exactly as a vanilla hit
- * would. Sweep, durability, statistics and hunger are deliberate omissions
- * for the 1.7.10 target feel.</p>
+ * would. Sweep, statistics and hunger are deliberate omissions for the 1.7.10
+ * target feel; weapon durability is omitted by default but restored when the
+ * {@code old-tool-durability} module is on (vanilla's attack-time durability
+ * never runs because the attack packet was cancelled).</p>
  */
 public final class HitApplier {
 
@@ -58,13 +61,47 @@ public final class HitApplier {
         boolean ocmShapesDamage =
                 services.ocmGate().handles(OcmMechanic.TOOL_DAMAGE, attacker)
                 || services.ocmGate().handles(OcmMechanic.CRITICAL_HITS, attacker);
+        // Era Strength/Weakness damage VALUES (1.8: Strength ×3.5, Weakness −2)
+        // apply to the weapon base before crit. Gated by old-potion-values and
+        // skipped entirely when OCM shapes the damage (vanillaShape path).
+        boolean oldPotionValues = services.config().potionValues().enabled();
         double amount = damageable instanceof LivingEntity living
                 ? DamageCalculator.calculate(
                         attacker, living, settings.simulateCrits(), settings.legacyToolDamage(),
-                        ocmShapesDamage)
+                        ocmShapesDamage, oldPotionValues)
                 : 1.0;
 
         damageable.damage(amount, attacker);
+
+        // The cancelled attack packet means vanilla's attack-time weapon
+        // durability never ran (it lives in Player#attack). When the
+        // old-tool-durability module is on, re-add it: 1 durability per accepted
+        // hit (era 1.7→modern attack case), standard Unbreaking skip. The write
+        // is the attacker's entity state, so it must land on the attacker's
+        // owning region thread — mirror the sprint-clear (KnockbackModule
+        // .clearVanillaSprint uses the same services.scheduling().runOn(attacker)).
+        if (services.config().toolDurability().enabled()) {
+            applyWeaponDurability(attacker);
+        }
+    }
+
+    /**
+     * Damages the attacker's main-hand weapon by 1 (Unbreaking-modified),
+     * breaking it like vanilla when its durability is exhausted. The entire
+     * read-roll-write runs on the attacker's owning region thread via
+     * {@code Scheduling.runOn} — the same Folia-correct attacker-write the fast
+     * path uses for its sprint-flag clear — so no attacker-entity state is
+     * touched off-thread. The main-hand item is re-read inside the task because
+     * it may have changed between the hit and the deferred task on Folia. The
+     * Bukkit shell lives in {@link WeaponDurability} (which imports the meta
+     * {@code Damageable} cleanly, away from the entity {@code Damageable} this
+     * file uses for the target).
+     */
+    private void applyWeaponDurability(@NotNull Player attacker) {
+        services.scheduling().runOn(
+                attacker,
+                () -> WeaponDurability.applyOneHit(attacker, services.debug()),
+                () -> {});
     }
 
     /**

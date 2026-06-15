@@ -17,6 +17,17 @@ public final class Enchantments {
 
     private static final @Nullable Enchantment SHARPNESS = resolve("SHARPNESS", "DAMAGE_ALL");
     private static final @Nullable Enchantment PUNCH = resolve("PUNCH", "ARROW_KNOCKBACK");
+    private static final @Nullable Enchantment PROTECTION =
+            resolve("PROTECTION", "PROTECTION_ENVIRONMENTAL");
+    private static final @Nullable Enchantment FIRE_PROTECTION =
+            resolve("FIRE_PROTECTION", "PROTECTION_FIRE");
+    private static final @Nullable Enchantment FEATHER_FALLING =
+            resolve("FEATHER_FALLING", "PROTECTION_FALL");
+    private static final @Nullable Enchantment BLAST_PROTECTION =
+            resolve("BLAST_PROTECTION", "PROTECTION_EXPLOSIONS");
+    private static final @Nullable Enchantment PROJECTILE_PROTECTION =
+            resolve("PROJECTILE_PROTECTION", "PROTECTION_PROJECTILE");
+    private static final @Nullable Enchantment UNBREAKING = resolve("UNBREAKING", "DURABILITY");
 
     private Enchantments() {}
 
@@ -28,8 +39,38 @@ public final class Enchantments {
         return PUNCH;
     }
 
+    /** Armour Protection (modern) / {@code PROTECTION_ENVIRONMENTAL} (legacy). */
+    public static @Nullable Enchantment protection() {
+        return PROTECTION;
+    }
+
+    /** Fire Protection (modern) / {@code PROTECTION_FIRE} (legacy). */
+    public static @Nullable Enchantment fireProtection() {
+        return FIRE_PROTECTION;
+    }
+
+    /** Feather Falling (modern) / {@code PROTECTION_FALL} (legacy). */
+    public static @Nullable Enchantment featherFalling() {
+        return FEATHER_FALLING;
+    }
+
+    /** Blast Protection (modern) / {@code PROTECTION_EXPLOSIONS} (legacy). */
+    public static @Nullable Enchantment blastProtection() {
+        return BLAST_PROTECTION;
+    }
+
+    /** Projectile Protection (modern) / {@code PROTECTION_PROJECTILE} (legacy). */
+    public static @Nullable Enchantment projectileProtection() {
+        return PROJECTILE_PROTECTION;
+    }
+
     public static @NotNull Enchantment knockback() {
         return Enchantment.KNOCKBACK;
+    }
+
+    /** Unbreaking (modern) / {@code DURABILITY} (legacy, renamed in 1.20.5). */
+    public static @Nullable Enchantment unbreaking() {
+        return UNBREAKING;
     }
 
     private static @Nullable Enchantment resolve(@NotNull String modernName, @NotNull String legacyName) {

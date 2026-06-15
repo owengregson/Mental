@@ -39,5 +39,23 @@ public interface Scheduling {
 
     @NotNull TaskHandle repeatAsync(@NotNull Duration initial, @NotNull Duration period, @NotNull Runnable task);
 
+    /**
+     * Runs {@code task} on the thread that owns {@code entity}, after a delay of
+     * {@code delayTicks} server ticks. If the entity is removed before the task
+     * fires, {@code retired} runs instead (possibly immediately). On Folia the
+     * EntityScheduler is used so the callback lands on the entity's owning region
+     * thread; on Paper it collapses to the main thread after the delay.
+     *
+     * <p>This is identical to {@link #runOn} but deferred by {@code delayTicks}.
+     * A delay of {@code 0} is treated as {@code 1} tick on Folia (which rejects
+     * delays below 1) and runs on the next tick on Paper; callers should prefer
+     * {@link #runOn} for fire-now semantics.</p>
+     */
+    void runOnLater(
+            @NotNull Entity entity,
+            long delayTicks,
+            @NotNull Runnable task,
+            @NotNull Runnable retired);
+
     @NotNull String describe();
 }

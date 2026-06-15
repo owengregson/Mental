@@ -40,6 +40,242 @@ modules:
   rod-velocity: true
   # 1.7.10 projectile knockback: snowballs, eggs, pearls, and arrows.
   projectile-knockback: true
+  # Remove the 1.9 attack cooldown and its client-side charge bar / greyed-swing
+  # animation. 1.7/1.8 had no attack-speed attribute at all; this spoof intercepts
+  # the outbound UPDATE_ATTRIBUTES packet and rewrites the player's own attack_speed
+  # to 1024.0 so the client's cooldown delay rounds to zero. The server attribute
+  # stays at vanilla 4.0 — no plugin conflicts, no teardown on disconnect, Folia-safe.
+  # Default OFF (era-exact no-op when disabled).
+  attack-cooldown: false
+  # Suppress the 1.9 swing-result sounds (entity.player.attack.crit/knockback/
+  # nodamage/strong/sweep/weak). None of these existed in 1.7.10 or 1.8.9 —
+  # combat on those versions was silent on every swing. Cosmetic only; no
+  # gameplay state is touched. Default OFF (era-exact no-op when disabled).
+  disable-attack-sounds: false
+  # Disables the 1.9 sweep attack: cancels ENTITY_SWEEP_ATTACK damage events so
+  # swords deal single-target damage as in 1.7/1.8, and hides the sweep_attack
+  # particle via a netty packet intercept. Both effects are controlled by this
+  # one flag. Default OFF (era-exact no-op when disabled).
+  disable-sword-sweep: false
+  # Makes the listed items uncraftable by clearing the crafting result slot when
+  # the output would be a blocked material. SHIELD is the default blocked item —
+  # complements disable-offhand, since the shield can only enter the off-hand
+  # slot via the crafting table output on modern Paper. Configure the blocked
+  # list in the disable-crafting section below. Default OFF (era-exact no-op).
+  disable-crafting: false
+  # Blocks players from placing or using items in the off-hand slot (slot 40).
+  # The off-hand was added in 1.9; on a 1.7/1.8 era server the slot does not
+  # exist. When enabled, all paths through which an item can enter the off-hand
+  # are intercepted: the F-key swap, inventory clicks, number-key hotbar swaps,
+  # drags, and the strip-on-join/world-change fallback. Configure which items
+  # are affected in the disable-offhand section below. Default OFF (era-exact
+  # no-op when disabled).
+  disable-offhand: false
+  # Restores 1.8.9 golden apple and enchanted golden apple potion effects, and
+  # re-registers the notch-apple (enchanted golden apple) crafting recipe that
+  # was removed in 1.9 (8 gold BLOCKS around 1 apple). The normal golden apple
+  # recipe (8 gold INGOTS) is NEVER touched. Effect tables are pinned to the
+  # decompiled 1.8.9 values: Regen II 100 t + Absorption I 2400 t (gapple);
+  # Regen V 600 t + Resistance I 6000 t + Fire Res I 6000 t + Absorption I
+  # 2400 t (napple). Default OFF (era-exact no-op when disabled).
+  old-golden-apples: false
+  # Removes the 1.9 1-second ender-pearl throw cooldown, restoring 1.8 pearl
+  # spam. Era truth: 1.8.9 had no ender-pearl cooldown; the 20-tick (1 s)
+  # cooldown was added in 1.9. Clears the cooldown via setCooldown(ENDER_PEARL,
+  # 0) after each throw — CraftBukkit resolves the right cooldown group
+  # internally on every version (including the 1.21.2+ use_cooldown component).
+  # Default OFF (era-exact no-op when disabled).
+  disable-enderpearl-cooldown: false
+  # Restores the 1.8 natural health regeneration model: heal 1 HP (half a heart)
+  # every 80 ticks (4 seconds) when foodLevel >= 18, provided health is between
+  # 0 and max and the world gamerule naturalRegeneration is on. Suppresses the
+  # 1.9+ fast saturated regen (SATIATED reason). Era values pinned from decompiled
+  # 1.8.9 FoodStats (xg.java). Each player gets its own per-player EntityScheduler
+  # task — Folia-correct, zero global player loops. Default OFF (era-exact no-op).
+  old-player-regen: false
+  # Restores the 1.8 flat armour damage reduction (4% per armour point, NO
+  # toughness), replacing the modern toughness-based model. Applies the full era
+  # pipeline in order: armour points -> resistance -> armour-enchant EPF ->
+  # absorption. Covers all armour-respecting damage (mob melee, projectiles,
+  # explosions, fire, lava, contact); armour-ignoring causes (fall, drowning,
+  # void, magic, ...) are excluded exactly as 1.8 NMS did. EPF is computed
+  # deterministically (no per-hit randomness) since clients never predict armour,
+  # so the jitter is invisible. Era values pinned from decompiled 1.8.9 (pr.java/
+  # acr.java/ack.java). Implemented by overriding the granular damage modifiers
+  # (ARMOR/RESISTANCE/MAGIC/ABSORPTION) at LOWEST priority — the same proven
+  # cross-version mechanism OCM uses (the deprecated modifier setter only throws
+  # when a modifier is absent, so we only ever write applicable ones).
+  # Default OFF (era-exact no-op when disabled).
+  old-armour-strength: false
+  # Restores the 1.8 armour-durability Unbreaking skip: worn armour takes its
+  # vanilla durability wear only 60 + 40/(level+1) % of hits (so it survives more
+  # hits as Unbreaking rises), in place of modern armour's generic
+  # level/(level+1). The per-hit wear MAGNITUDE is left at vanilla's
+  # max(1, floor(damage/4)) — identical 1.8<->modern, so it is never changed
+  # (OCM's flat-1 override is NOT era-exact). At Unbreaking 0 nothing skips, as in
+  # 1.8 NMS. Only currently-worn armour pieces are affected (elytra excluded).
+  # Era values pinned from decompiled 1.8.9 (acg.java/wm.java); mirrors OCM's
+  # ModuleOldArmourDurability. Implemented on PlayerItemDamageEvent at LOWEST
+  # priority, on the player's region thread (Folia-safe, no scheduler).
+  # Default OFF (era-exact no-op when disabled).
+  old-armour-durability: false
+  # Restores the pre-1.9 (1.8) potion DURATIONS. 1.9 shortened many potion
+  # durations; this rewrites a potion's effect back to its 1.8 length when a
+  # player drinks it (PlayerItemConsumeEvent), throws a splash/lingering potion
+  # (right-click), or a dispenser fires one (BlockDispenseEvent) — the same three
+  # hooks OCM's old-potion-effects uses. The duration table is OCM's
+  # old-potion-effects.potion-durations (drink/splash, in seconds), converted to
+  # ticks: Strength 180/135 s, Swiftness 180/135 s, Fire Resistance 180 s,
+  # Weakness 90 s, Poison 45/33 s, Regeneration 45/33 s, Night Vision 180 s,
+  # Invisibility 180/135 s, Water Breathing 180/135 s, Slowness 90/67 s, Leaping
+  # 180/135 s, with strong/long variants where applicable. Instant potions
+  # (Healing/Harming) and no-effect bases (Water, Awkward, ...) are left
+  # untouched. The potion item's PotionMeta is rewritten in place (base set to a
+  # no-effect Water type + a custom effect at the era duration), cross-version via
+  # setBasePotionType (modern) with a setBasePotionData fallback (pre-1.20.5).
+  # This is the DURATION half only — Strength/Weakness damage VALUES are separate.
+  # Default OFF (era-exact no-op when disabled).
+  old-potion-durations: false
+  # Restores the pre-1.9 (1.8) Strength/Weakness damage VALUES. 1.9 weakened
+  # Strength and strengthened Weakness: era Strength was MULTIPLICATIVE on the
+  # weapon base (factor 1 + 2.5*(amp+1) — Strength I x3.5, Strength II x6.0, far
+  # stronger than 1.9's flat +3*(amp+1)), and era Weakness subtracted only
+  # 2.0*(amp+1) (1.9 doubled it to 4.0*(amp+1)). Era values pinned from
+  # decompiled 1.8.9 (pe.java/rv.java); OCM's own defaults (Strength 1.3,
+  # Weakness -0.5) are NOT era-exact and are deliberately not used. Applied to
+  # the weapon base BEFORE the crit x1.5 and BEFORE the Sharpness additive
+  # (era order, wn.java:761-764), clamped >= 0. Implemented in the fast-path
+  # DamageCalculator. SCOPE: fast-path PvP melee only (the dominant case) — mob
+  # attacks and fast-path-off hits keep vanilla Strength/Weakness, and when OCM
+  # shapes the damage these era values are skipped. This is the VALUES half only;
+  # potion DURATIONS are the separate old-potion-durations module.
+  # Default OFF (era-exact no-op when disabled).
+  old-potion-values: false
+  # Applies the 1.8 era critical-hit multiplier (x1.5 on attack damage) for
+  # player melee hits that vanilla missed because the 1.9 sprint/cooldown
+  # requirement was not satisfied. Era crit (1.8): attacker is falling, airborne,
+  # off ladder, out of water, sighted, unmounted — sprinting was NEVER an exclusion
+  # and there was no attack cooldown [wn.java:760]. Vanilla 1.9+ added two extra
+  # gates: cooldown > 0.9 AND not sprinting. This module fires x1.5 on BASE damage
+  # when the era rule triggers but those 1.9 gates would have blocked it (i.e. the
+  # attacker was sprinting or the cooldown bar was not full). SCOPE: fast-path-OFF
+  # player melee only — when Mental's fast path is ON, DamageCalculator already
+  # applies the era crit with the correct ordering (weapon base before Sharpness);
+  # this module is a no-op when the fast path is ON. Fast-path-off is a minority
+  # case: most PvP hits on a Mental server go through the fast path. When OCM owns
+  # old-critical-hits for the attacker, OCM handles the crit — this module does
+  # not double-apply. Default OFF (era-exact no-op when disabled).
+  old-critical-hits: false
+  # Restores weapon durability loss on Mental's fast-path melee hits, which the
+  # fast path otherwise OMITS by design: the fast path applies damage via a direct
+  # damage(amount) call, which (unlike vanilla's Player#attack) never runs the
+  # attack-time durability step, so a weapon never wears on a Mental-registered
+  # hit. With this on, the attacker's main-hand weapon loses 1 durability per
+  # accepted hit (the era 1.7->modern attack case; block-break is 2, the ATTACK
+  # case is 1), modified by the standard tool/weapon Unbreaking skip — a hit
+  # damages with probability 1/(level+1) (acg.java:40, the non-armour path), so
+  # level 0 always wears, level 1 wears half as often, level 3 a quarter. Only a
+  # damageable weapon held in the main hand is affected; when its durability is
+  # exhausted the item breaks like vanilla. This is durability only — the damage
+  # VALUES are already era-correct in DamageCalculator. Implemented in the
+  # fast-path HitApplier; the attacker-inventory write follows the entity's owning
+  # region thread (Folia-safe), mirroring the fast path's sprint-flag clear.
+  # Default OFF (era-exact no-op when disabled).
+  old-tool-durability: false
+  # Restores 1.7-style right-click sword blocking. Right-clicking with a sword
+  # in the main hand raises it to block, and a blocked melee hit takes
+  # (1 + damage) * 0.5 — a reduction of (damage - 1) * 0.5 (the 1.8 model; e.g.
+  # an 8-damage hit takes 4.5). Two mechanisms cover the whole version range,
+  # chosen automatically by the data-component classes the server has (never by
+  # a version number); exactly one is ever live, so the reduction never doubles.
+  #
+  # Modern component path (1.21+) — an in-place sword block pose:
+  #   Tier A (BLOCKS_ATTACKS present, ~1.21.5+): the held sword gets a
+  #     BLOCKS_ATTACKS component whose DamageReduction reproduces the 1.8
+  #     reduction NATIVELY, so the server itself reports isBlocking() and runs
+  #     the blocked-damage pipeline (no software reduction).
+  #   Tier B (CONSUMABLE present, BLOCKS_ATTACKS absent, 1.21.0-1.21.4): the
+  #     held sword gets a CONSUMABLE component with a BLOCK use animation so the
+  #     server enters the blocking state; the (damage - 1) * 0.5 reduction is
+  #     applied in software (the damage event), since the component does not
+  #     reduce on this tier.
+  #
+  # Off-hand-shield path (1.17.1-1.20.6) — Tier C, no component model: an
+  #   in-place sword pose is impossible, so a real SHIELD is briefly injected
+  #   into the OFF-HAND (native isBlocking() works on every version with a
+  #   shield) and the (damage - 1) * 0.5 reduction is applied in software. The
+  #   injected shield is marked so it is always restored to your real off-hand
+  #   item on release / hotbar / swap / off-hand click / drop / death / world
+  #   change / quit and on disable — it is never left stuck in your inventory.
+  #   Honest client-fidelity limit: because this injects a shield, the client
+  #   shows the SHIELD pose, not the lowered-sword pose (the 1.7 pose is a
+  #   client asset that cannot be reproduced server-side on these versions).
+  #
+  # Era truth (all paths): a blocked hit still knocks the victim FULL — only the
+  # DAMAGE is reduced. Mental owns knockback; a block never cancels or zeroes
+  # velocity. The block ends and the component is stripped / the shield restored
+  # on release / hotbar / swap / drop / death / world change / quit and on
+  # disable, so neither a stray component nor a stuck shield is ever left behind.
+  # Default OFF (era-exact no-op when disabled).
+  sword-blocking: false
+  # Restores the 1.7/1.8-era melee reach (3.0 blocks) and hitbox margin (0.1) as
+  # far as the modern server allows, using whichever per-version lever the server
+  # exposes (chosen automatically by capability, never a version number).
+  #
+  # HARD LIMIT (read this first): the CLIENT picks the melee target and sends a
+  # fixed entity id that the server resolves verbatim — there is NO server-side
+  # raytrace on the attack path. True 1.7 target-SELECTION geometry therefore
+  # lives in the client and cannot be reproduced server-side. This module tunes
+  # the reach GATE and the targeting MARGIN only; target selection stays whatever
+  # the modern client does (already close to 1.7 for melee). Net effect = era
+  # reach distance + a small hitbox margin (1.21.5+).
+  #
+  # Per-version levers:
+  #   1.17.1-1.20.4: NO interaction-range attribute and NO attack-range component
+  #     exist; the gate is a hardcoded 6 blocks, already more lenient than era 3.0,
+  #     with no safe per-player lever. This module is a complete NO-OP here.
+  #   1.20.5+: the ENTITY_INTERACTION_RANGE attribute base is pinned to era 3.0
+  #     (and restored to its original on quit / disable). The vanilla base is
+  #     already 3.0, so the meaningful effect is RESETTING any third-party
+  #     inflation back to era reach; the server's leniency added on top cannot be
+  #     removed from this surface.
+  #   1.21.5+: additionally, the held weapon gets the era ATTACK_RANGE item data
+  #     component (max_reach 3.0, hitbox_margin 0.1, creative 4.0) — the real
+  #     "old hitbox" lever. The component is stripped again on hotbar / swap /
+  #     drop / death / world change / quit and on disable.
+  #
+  # Fully reversible (zero-touch): on disable the original attribute base is
+  # restored for every online player and the ATTACK_RANGE component is stripped
+  # from their hands, so neither a tightened attribute nor a stray component is
+  # ever left behind. Default OFF (era-exact no-op when disabled).
+  old-hitboxes: false
+
+# Off-hand slot filter, active when modules.disable-offhand is true.
+#
+# whitelist: true  → only materials listed in 'items' are permitted in the
+#                    off-hand; anything else is blocked.  An empty list blocks
+#                    ALL items (the maximally restrictive era default).
+# whitelist: false → materials listed in 'items' are blocked; everything else
+#                    is allowed.  An empty list allows everything.
+#
+# Any material name recognised by Bukkit's Material.matchMaterial() is valid.
+# Unknown names warn on reload and are skipped — the rest of the list applies.
+#
+# denied-message: the message shown when an action is denied ('' to suppress).
+#   '&' colour codes are translated.
+#disable-offhand:
+#  whitelist: true
+#  items: []
+#  denied-message: "&cOff-hand is disabled"
+
+# Items that become uncraftable when modules.disable-crafting is true.
+# Any material name recognised by Bukkit's Material.matchMaterial() is valid.
+# Unknown names are skipped with a config warning. SHIELD is the canonical
+# default — it is the only 1.9 item a 1.7/1.8 server needs to block from the
+# crafting table; remove it or add others to taste. Unrecognised names warn on
+# reload and are skipped — the rest of the list still applies.
+#disable-crafting:
+#  items: [SHIELD]
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky
