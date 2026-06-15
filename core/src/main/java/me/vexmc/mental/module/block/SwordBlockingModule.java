@@ -20,6 +20,7 @@ import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.EquipmentSlot;
@@ -122,6 +123,18 @@ public final class SwordBlockingModule extends CombatModule implements Listener 
         listen(this);
         debug.log(() -> "sword-blocking active: "
                 + (offhandTier() ? "offhand-shield (tier C)" : components.describe()));
+        // Eager component application: a sword must ALREADY carry the block component
+        // before the right-click, or the client never sends a RIGHT_CLICK_AIR use at
+        // all (a plain sword has no use action — the first air-click is swallowed, and
+        // blocking only starts after first clicking a block). Apply to every online
+        // player's held sword now; onJoin / onHeldChange / onSwapHands keep it applied
+        // as the held item changes. (Tier C has no component — the off-hand shield is
+        // injected on the interact itself.)
+        if (!offhandTier()) {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                services.scheduling().runOn(player, () -> applyToMainHand(player), () -> {});
+            }
+        }
     }
 
     @Override
@@ -251,6 +264,12 @@ public final class SwordBlockingModule extends CombatModule implements Listener 
         if (components.strip(prev)) {
             player.getInventory().setItem(event.getPreviousSlot(), prev);
         }
+        // Eagerly apply to the newly-held slot if it is a sword, so the first
+        // right-click-air after switching to it raises the block (see onEnable).
+        ItemStack next = player.getInventory().getItem(event.getNewSlot());
+        if (components.apply(next)) {
+            player.getInventory().setItem(event.getNewSlot(), next);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -268,10 +287,11 @@ public final class SwordBlockingModule extends CombatModule implements Listener 
             }
             return;
         }
-        // The swap moves the sword between hands; the component must not survive it.
-        // Re-read after the swap on the player's region thread so we strip whatever
-        // actually landed in each hand (Folia-correct, never the Bukkit scheduler).
-        services.scheduling().runOn(player, () -> stripHands(player), () -> {});
+        // The swap moves items between hands; re-read after the swap on the player's
+        // region thread and reconcile — apply the component to a main-hand sword (so a
+        // swapped-in sword still blocks) and strip it from the off-hand (Folia-correct,
+        // never the Bukkit scheduler).
+        services.scheduling().runOn(player, () -> reconcileHands(player), () -> {});
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -348,9 +368,43 @@ public final class SwordBlockingModule extends CombatModule implements Listener 
         stripHands(event.getPlayer());
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onJoin(@NotNull PlayerJoinEvent event) {
+        if (offhandTier()) {
+            return; // Tier C injects the off-hand shield on the interact — nothing to pre-apply.
+        }
+        // Pre-apply the block component to a held sword so the very first right-click
+        // (even on air) raises the block (see onEnable).
+        Player player = event.getPlayer();
+        services.scheduling().runOn(player, () -> applyToMainHand(player), () -> {});
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Helpers                                                            */
     /* ------------------------------------------------------------------ */
+
+    /** Eagerly applies the block component to the player's main-hand sword (no-op otherwise). */
+    private void applyToMainHand(@NotNull Player player) {
+        PlayerInventory inventory = player.getInventory();
+        ItemStack main = inventory.getItemInMainHand();
+        if (components.apply(main)) {
+            inventory.setItemInMainHand(main);
+        }
+    }
+
+    /**
+     * After a hand swap, re-applies the component to a main-hand sword (so the
+     * swapped-in sword still blocks) and strips it from the off-hand (the component
+     * tiers never block from the off-hand).
+     */
+    private void reconcileHands(@NotNull Player player) {
+        applyToMainHand(player);
+        PlayerInventory inventory = player.getInventory();
+        ItemStack off = inventory.getItemInOffHand();
+        if (off.getType() != Material.AIR && components.strip(off)) {
+            inventory.setItemInOffHand(off);
+        }
+    }
 
     /** Strips the block component from both of a player's hands (write-back guarded). */
     private void stripHands(@NotNull LivingEntity entity) {
