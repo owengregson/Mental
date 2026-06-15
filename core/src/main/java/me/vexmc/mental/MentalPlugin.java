@@ -27,6 +27,7 @@ import me.vexmc.mental.module.compensation.LatencyCompensationModule;
 import me.vexmc.mental.module.damage.ArmourDurabilityModule;
 import me.vexmc.mental.module.damage.ArmourStrengthModule;
 import me.vexmc.mental.module.damage.CritFallbackModule;
+import me.vexmc.mental.module.hitbox.HitboxModule;
 import me.vexmc.mental.module.damage.ToolDurabilityModule;
 import me.vexmc.mental.module.fishing.FishingKnockbackModule;
 import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
@@ -316,6 +317,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new CritFallbackModule(services));
         modules.register(new ToolDurabilityModule(services));
         modules.register(new SwordBlockingModule(services));
+        modules.register(new HitboxModule(services));
     }
 
     private void registerCommands() {

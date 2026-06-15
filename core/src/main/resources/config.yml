@@ -218,6 +218,37 @@ modules:
   # disable, so neither a stray component nor a stuck shield is ever left behind.
   # Default OFF (era-exact no-op when disabled).
   sword-blocking: false
+  # Restores the 1.7/1.8-era melee reach (3.0 blocks) and hitbox margin (0.1) as
+  # far as the modern server allows, using whichever per-version lever the server
+  # exposes (chosen automatically by capability, never a version number).
+  #
+  # HARD LIMIT (read this first): the CLIENT picks the melee target and sends a
+  # fixed entity id that the server resolves verbatim — there is NO server-side
+  # raytrace on the attack path. True 1.7 target-SELECTION geometry therefore
+  # lives in the client and cannot be reproduced server-side. This module tunes
+  # the reach GATE and the targeting MARGIN only; target selection stays whatever
+  # the modern client does (already close to 1.7 for melee). Net effect = era
+  # reach distance + a small hitbox margin (1.21.5+).
+  #
+  # Per-version levers:
+  #   1.17.1-1.20.4: NO interaction-range attribute and NO attack-range component
+  #     exist; the gate is a hardcoded 6 blocks, already more lenient than era 3.0,
+  #     with no safe per-player lever. This module is a complete NO-OP here.
+  #   1.20.5+: the ENTITY_INTERACTION_RANGE attribute base is pinned to era 3.0
+  #     (and restored to its original on quit / disable). The vanilla base is
+  #     already 3.0, so the meaningful effect is RESETTING any third-party
+  #     inflation back to era reach; the server's leniency added on top cannot be
+  #     removed from this surface.
+  #   1.21.5+: additionally, the held weapon gets the era ATTACK_RANGE item data
+  #     component (max_reach 3.0, hitbox_margin 0.1, creative 4.0) — the real
+  #     "old hitbox" lever. The component is stripped again on hotbar / swap /
+  #     drop / death / world change / quit and on disable.
+  #
+  # Fully reversible (zero-touch): on disable the original attribute base is
+  # restored for every online player and the ATTACK_RANGE component is stripped
+  # from their hands, so neither a tightened attribute nor a stray component is
+  # ever left behind. Default OFF (era-exact no-op when disabled).
+  old-hitboxes: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #

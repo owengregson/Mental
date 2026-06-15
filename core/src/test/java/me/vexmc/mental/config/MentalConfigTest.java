@@ -97,6 +97,8 @@ class MentalConfigTest {
         assertFalse(config.toolDurability().enabled(), "old-tool-durability defaults OFF");
         assertEquals(SwordBlockingSettings.DEFAULTS, config.swordBlocking());
         assertFalse(config.swordBlocking().enabled(), "sword-blocking defaults OFF");
+        assertEquals(HitboxSettings.DEFAULTS, config.hitbox());
+        assertFalse(config.hitbox().enabled(), "old-hitboxes defaults OFF");
     }
 
     @Test
@@ -127,6 +129,7 @@ class MentalConfigTest {
         assertEquals(CritSettings.DEFAULTS, config.crit());
         assertEquals(ToolDurabilitySettings.DEFAULTS, config.toolDurability());
         assertEquals(SwordBlockingSettings.DEFAULTS, config.swordBlocking());
+        assertEquals(HitboxSettings.DEFAULTS, config.hitbox());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());
@@ -374,6 +377,20 @@ class MentalConfigTest {
 
         assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
         assertTrue(config.swordBlocking().enabled());
+    }
+
+    @Test
+    void oldHitboxesFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  old-hitboxes: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.hitbox().enabled());
     }
 
     @Test
