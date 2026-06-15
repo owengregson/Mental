@@ -30,6 +30,8 @@ public final class Attributes {
             resolve("GRAVITY", "GENERIC_GRAVITY");
     private static final @Nullable Attribute ENTITY_INTERACTION_RANGE =
             resolve("ENTITY_INTERACTION_RANGE", "PLAYER_ENTITY_INTERACTION_RANGE");
+    private static final @Nullable Attribute MAX_HEALTH =
+            resolve("MAX_HEALTH", "GENERIC_MAX_HEALTH");
 
     private Attributes() {}
 
@@ -53,6 +55,17 @@ public final class Attributes {
     /** Absent below 1.20.5 — callers fall back to the classic 3.0 attack reach. */
     public static @Nullable Attribute entityInteractionRange() {
         return ENTITY_INTERACTION_RANGE;
+    }
+
+    /**
+     * {@code MAX_HEALTH} (modern, 1.21.3+) / {@code GENERIC_MAX_HEALTH} (legacy,
+     * 1.17.1–1.21.2) — present on all supported versions.
+     *
+     * <p>Prefer {@link #valueOr} with a fallback of 20.0 (vanilla default) rather
+     * than the deprecated {@link org.bukkit.entity.LivingEntity#getMaxHealth()}.</p>
+     */
+    public static @Nullable Attribute maxHealth() {
+        return MAX_HEALTH;
     }
 
     /** The attribute's current value, or {@code fallback} when absent on this entity or version. */

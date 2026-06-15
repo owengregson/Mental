@@ -86,6 +86,13 @@ modules:
   # internally on every version (including the 1.21.2+ use_cooldown component).
   # Default OFF (era-exact no-op when disabled).
   disable-enderpearl-cooldown: false
+  # Restores the 1.8 natural health regeneration model: heal 1 HP (half a heart)
+  # every 80 ticks (4 seconds) when foodLevel >= 18, provided health is between
+  # 0 and max and the world gamerule naturalRegeneration is on. Suppresses the
+  # 1.9+ fast saturated regen (SATIATED reason). Era values pinned from decompiled
+  # 1.8.9 FoodStats (xg.java). Each player gets its own per-player EntityScheduler
+  # task — Folia-correct, zero global player loops. Default OFF (era-exact no-op).
+  old-player-regen: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #

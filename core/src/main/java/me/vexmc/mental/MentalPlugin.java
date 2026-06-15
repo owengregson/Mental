@@ -45,6 +45,7 @@ import me.vexmc.mental.module.rules.sound.AttackSoundModule;
 import me.vexmc.mental.module.rules.crafting.DisableCraftingModule;
 import me.vexmc.mental.module.consumable.EnderPearlCooldownModule;
 import me.vexmc.mental.module.consumable.GoldenAppleModule;
+import me.vexmc.mental.module.health.RegenModule;
 import me.vexmc.mental.module.rules.offhand.OffhandModule;
 import me.vexmc.mental.module.rules.sweep.SweepModule;
 import me.vexmc.mental.module.rules.sweep.SweepParticleListener;
@@ -300,6 +301,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new OffhandModule(services));
         modules.register(new GoldenAppleModule(services));
         modules.register(new EnderPearlCooldownModule(services));
+        modules.register(new RegenModule(services));
     }
 
     private void registerCommands() {
