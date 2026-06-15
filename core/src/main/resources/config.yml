@@ -182,14 +182,14 @@ modules:
   # region thread (Folia-safe), mirroring the fast path's sprint-flag clear.
   # Default OFF (era-exact no-op when disabled).
   old-tool-durability: false
-  # Restores 1.7-style right-click sword blocking via modern item data
-  # components, on servers/clients that support them. Right-clicking with a
-  # sword in the main hand raises it to block (a version-appropriate block
-  # pose), and a blocked melee hit takes (1 + damage) * 0.5 — a reduction of
-  # (damage - 1) * 0.5 (the 1.8 model; e.g. an 8-damage hit takes 4.5).
+  # Restores 1.7-style right-click sword blocking. Right-clicking with a sword
+  # in the main hand raises it to block, and a blocked melee hit takes
+  # (1 + damage) * 0.5 — a reduction of (damage - 1) * 0.5 (the 1.8 model; e.g.
+  # an 8-damage hit takes 4.5). Two mechanisms cover the whole version range,
+  # chosen automatically by the data-component classes the server has (never by
+  # a version number); exactly one is ever live, so the reduction never doubles.
   #
-  # Two capability tiers, gated on the presence of the data-component classes
-  # (never on a version number):
+  # Modern component path (1.21+) — an in-place sword block pose:
   #   Tier A (BLOCKS_ATTACKS present, ~1.21.5+): the held sword gets a
   #     BLOCKS_ATTACKS component whose DamageReduction reproduces the 1.8
   #     reduction NATIVELY, so the server itself reports isBlocking() and runs
@@ -199,16 +199,23 @@ modules:
   #     server enters the blocking state; the (damage - 1) * 0.5 reduction is
   #     applied in software (the damage event), since the component does not
   #     reduce on this tier.
-  #   Tier C (neither component, 1.17.1-1.20.6, or an old client): this module
-  #     is a complete NO-OP. (The legacy offhand-shield fallback is separate.)
   #
-  # Era truth: a blocked hit still knocks the victim FULL — only the DAMAGE is
-  # reduced. Mental owns knockback; a block never cancels or zeroes velocity.
-  # Honest limit: this cannot be byte-identical to the 1.7 CLIENT (the
-  # lowered-sword pose is a client asset); it provides server BEHAVIOURAL
-  # parity plus a version-appropriate block pose. The component is stripped on
-  # release / hotbar / swap / drop / death / world change / quit and on
-  # disable, so a sword is never left with a stray block component.
+  # Off-hand-shield path (1.17.1-1.20.6) — Tier C, no component model: an
+  #   in-place sword pose is impossible, so a real SHIELD is briefly injected
+  #   into the OFF-HAND (native isBlocking() works on every version with a
+  #   shield) and the (damage - 1) * 0.5 reduction is applied in software. The
+  #   injected shield is marked so it is always restored to your real off-hand
+  #   item on release / hotbar / swap / off-hand click / drop / death / world
+  #   change / quit and on disable — it is never left stuck in your inventory.
+  #   Honest client-fidelity limit: because this injects a shield, the client
+  #   shows the SHIELD pose, not the lowered-sword pose (the 1.7 pose is a
+  #   client asset that cannot be reproduced server-side on these versions).
+  #
+  # Era truth (all paths): a blocked hit still knocks the victim FULL — only the
+  # DAMAGE is reduced. Mental owns knockback; a block never cancels or zeroes
+  # velocity. The block ends and the component is stripped / the shield restored
+  # on release / hotbar / swap / drop / death / world change / quit and on
+  # disable, so neither a stray component nor a stuck shield is ever left behind.
   # Default OFF (era-exact no-op when disabled).
   sword-blocking: false
 
