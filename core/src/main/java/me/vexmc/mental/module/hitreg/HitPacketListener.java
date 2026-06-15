@@ -1,7 +1,9 @@
 package me.vexmc.mental.module.hitreg;
 
+import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListener;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity.InteractAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity;
@@ -111,16 +113,60 @@ final class HitPacketListener implements PacketListener {
                 return;
             }
 
-            // Read-only world scan; the owning-thread applier re-resolves and
-            // re-validates before anything stateful happens.
-            Entity target = SpigotConversionUtil.getEntityById(attacker.getWorld(), targetId);
-            if (!(target instanceof Damageable damageable) || damageable.isDead()
-                    || !isAttackable(attacker, damageable)) {
-                return;
+            // Resolve the target WITHOUT touching a live entity on this thread.
+            // This runs on PacketEvents' netty loop, where reading entity state
+            // is undefined on Paper and THROWS on Folia: getGameMode(),
+            // getName(), getEntities() and SpigotConversionUtil#getEntityById
+            // all trip Folia's "accessing entity state off owning region's
+            // thread" / "asynchronous getEntities" checks. A thrown read here
+            // was silently caught below and the attack passed through to
+            // vanilla — every player-vs-player melee on Folia got VANILLA
+            // knockback instead of Mental's. Player victims (the regionised
+            // case Mental exists for) resolve through the frozen entity-id
+            // index; the owning-thread applier re-resolves and re-validates.
+            UUID victimId = stateCache.playerIdByEntityId(targetId);
+            Player playerVictim = null;
+            Damageable damageable;
+            if (victimId != null) {
+                playerVictim = Bukkit.getPlayer(victimId);
+                if (playerVictim == null) {
+                    return;
+                }
+                damageable = playerVictim;
+            } else {
+                // Not a tracked player. A non-player entity can't be resolved
+                // off-region on Folia, so the hit falls through to vanilla there
+                // (mob combat, armour stands and item frames keep working); on
+                // Paper the live scan is tolerated and the legacy path runs.
+                if (services.capabilities().folia()) {
+                    return;
+                }
+                Entity target = SpigotConversionUtil.getEntityById(attacker.getWorld(), targetId);
+                if (!(target instanceof Damageable resolved) || resolved.isDead()
+                        || !isAttackable(attacker, resolved)) {
+                    return;
+                }
+                damageable = resolved;
+                if (resolved instanceof Player resolvedPlayer) {
+                    playerVictim = resolvedPlayer;
+                }
             }
 
-            if (damageable instanceof Player victim
-                    && !passesReachValidation(attacker, victim, settings)) {
+            // Player-victim attackability from frozen + region-safe reads only:
+            // the snapshot's creative flag and the world PvP toggle (a world
+            // config read, safe off-region — verified on Folia). Same-world is
+            // implied (a melee packet can only target an entity the attacker
+            // sees) and re-checked authoritatively in the applier; spectators
+            // can't send ATTACK, and the applier guards that case regardless.
+            if (playerVictim != null && victimId != null) {
+                PlayerStateCache.Snapshot frozen = stateCache.get(victimId);
+                if (frozen == null || frozen.creative() || !attacker.getWorld().getPVP()) {
+                    return;
+                }
+            }
+
+            if (playerVictim != null
+                    && !passesReachValidation(attacker, playerVictim, settings)) {
                 event.setCancelled(true);
                 return;
             }
@@ -167,8 +213,8 @@ final class HitPacketListener implements PacketListener {
                         + " — in-order w-tap/s-tap registration");
             }
 
-            if (settings.preSendFeedback() && damageable instanceof Player victim) {
-                preSendCombatFeedback(attacker, attackerSnap, victim, now, settings,
+            if (settings.preSendFeedback() && playerVictim != null) {
+                preSendCombatFeedback(attacker, attackerSnap, playerVictim, now, settings,
                         attackerSprinting, freshSprint);
             }
 
@@ -182,10 +228,22 @@ final class HitPacketListener implements PacketListener {
                 services.sprintTracker().stampAttackVerdict(
                         attackerId, attackerSprinting, wireFresh, System.nanoTime());
             }
-            services.scheduling().runOn(
-                    damageable,
-                    () -> applier.apply(attackerId, targetId),
-                    () -> debug(attacker, () -> "target retired before damage application"));
+            // Damage runs on the region that owns the TARGET. Player victims
+            // resolve by UUID there (Bukkit#getPlayer is region-agnostic), so
+            // the applier never scans world entities off-region; non-player
+            // targets (Paper only here) keep the entity-id re-resolution.
+            if (playerVictim != null) {
+                UUID victimUuid = victimId != null ? victimId : playerVictim.getUniqueId();
+                services.scheduling().runOn(
+                        playerVictim,
+                        () -> applier.applyPlayer(attackerId, victimUuid),
+                        () -> debug(attacker, () -> "target retired before damage application"));
+            } else {
+                services.scheduling().runOn(
+                        damageable,
+                        () -> applier.apply(attackerId, targetId),
+                        () -> debug(attacker, () -> "target retired before damage application"));
+            }
             debug(attacker, () -> "fast-path dispatched on " + describe(damageable));
         } catch (Throwable failure) {
             services.plugin().getLogger().warning(
@@ -222,7 +280,7 @@ final class HitPacketListener implements PacketListener {
         // one the authoritative owning-thread path resolves this tick.
         KnockbackProfile profile = victimSnap.profile();
         if (victimSnap.isDamageImmune()) {
-            debug(attacker, () -> "pre-send skipped: " + victim.getName() + " still invulnerable");
+            debug(attacker, () -> "pre-send skipped: " + safeName(victim) + " still invulnerable");
             return;
         }
         // auto follows the victim's live hurt window MINUS ONE TICK. Vanilla
@@ -242,7 +300,7 @@ final class HitPacketListener implements PacketListener {
             // The gate paces the WIRE burst only; a pinned (connectionless)
             // hit sends nothing here, and the authoritative pass already
             // owns its immunity pacing.
-            debug(attacker, () -> "pre-send gated: " + victim.getName()
+            debug(attacker, () -> "pre-send gated: " + safeName(victim)
                     + " inside " + minIntervalMillis + "ms window");
             return;
         }
@@ -294,7 +352,7 @@ final class HitPacketListener implements PacketListener {
                     // values for the authoritative pass and let the normal
                     // velocity event ship them once, at vanilla cadence.
                     pipeline.submitPinned(victim, vector, shipped, attacker);
-                    debug(attacker, () -> "pre-send pinned: " + victim.getName()
+                    debug(attacker, () -> "pre-send pinned: " + safeName(victim)
                             + " has no connection — registration vector ships authoritatively");
                 }
             }
@@ -345,7 +403,7 @@ final class HitPacketListener implements PacketListener {
         if (!verdict.valid()) {
             debug(attacker, () -> String.format(Locale.ROOT,
                     "hit on %s dropped by reach validation: %.2f blocks at every candidate"
-                            + " (rewind %dms)", victim.getName(), verdict.bestDistance(), rewindMillis));
+                            + " (rewind %dms)", safeName(victim), verdict.bestDistance(), rewindMillis));
         }
         return verdict.valid();
     }
@@ -363,13 +421,25 @@ final class HitPacketListener implements PacketListener {
 
     private static String describe(Damageable target) {
         return target instanceof Player player
-                ? player.getName()
+                ? safeName(player)
                 : target.getType().toString().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * A player's name resolved without touching the live entity: {@code
+     * Player#getName()} reads {@code getHandle()} and throws off the owning
+     * region thread on Folia, so debug call sites on the netty loop read the
+     * cached PacketEvents username instead (and fall back to the UUID).
+     */
+    private static String safeName(@NotNull Player player) {
+        User user = PacketEvents.getAPI().getPlayerManager().getUser(player);
+        String name = user != null ? user.getName() : null;
+        return name != null ? name : player.getUniqueId().toString();
     }
 
     private void debug(Player attacker, Supplier<String> message) {
         services.debug().log(
                 DebugCategory.HITREG,
-                () -> "[" + attacker.getName() + "] " + message.get());
+                () -> "[" + safeName(attacker) + "] " + message.get());
     }
 }

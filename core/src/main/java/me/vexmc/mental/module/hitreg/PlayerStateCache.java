@@ -34,6 +34,15 @@ import org.jetbrains.annotations.Nullable;
 public final class PlayerStateCache {
 
     private final ConcurrentHashMap<UUID, Snapshot> snapshots = new ConcurrentHashMap<>();
+    /**
+     * Frozen entity-id → player-UUID reverse index. The netty fast path cannot
+     * resolve a target entity by id on its own thread — {@code getEntityById}
+     * and any {@code getEntities()} scan THROW on Folia (off-region chunk
+     * access) and are undefined on Paper — so the attack listener maps the
+     * packet's target id to a known player through this index, written here on
+     * each player's own owning thread alongside their snapshot.
+     */
+    private final ConcurrentHashMap<Integer, UUID> playerIdsByEntityId = new ConcurrentHashMap<>();
 
     /**
      * Captures {@code player} now. Must run on the player's owning thread.
@@ -85,18 +94,36 @@ public final class PlayerStateCache {
                 // under the victim's feet — the 1.7.10 delivery decay ships
                 // ×0.8918 on ice, not ×0.546 (measured: ice hit 1 = 0.3567).
                 GroundFriction.under(player)));
+        // Owning-thread write of the reverse index the netty listener reads.
+        playerIdsByEntityId.put(player.getEntityId(), player.getUniqueId());
     }
 
     public @Nullable Snapshot get(@NotNull UUID uuid) {
         return snapshots.get(uuid);
     }
 
+    /**
+     * The online player owning entity id {@code entityId}, or {@code null} if no
+     * tracked player has that id. Resolved from the frozen index, so the netty
+     * attack path never touches a live entity to identify its target.
+     */
+    public @Nullable UUID playerIdByEntityId(int entityId) {
+        return playerIdsByEntityId.get(entityId);
+    }
+
     public void forget(@NotNull UUID uuid) {
-        snapshots.remove(uuid);
+        Snapshot removed = snapshots.remove(uuid);
+        if (removed != null) {
+            // Keyed by entity id; the second argument scopes the remove to this
+            // player so a recycled id already re-registered by someone else is
+            // left intact.
+            playerIdsByEntityId.remove(removed.entityId(), uuid);
+        }
     }
 
     public void clear() {
         snapshots.clear();
+        playerIdsByEntityId.clear();
     }
 
     private static double clampedKnockbackResistance(Player player) {

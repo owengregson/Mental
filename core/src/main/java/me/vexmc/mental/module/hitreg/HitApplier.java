@@ -53,6 +53,37 @@ public final class HitApplier {
             return;
         }
 
+        damage(attacker, damageable);
+    }
+
+    /**
+     * Player-vs-player application for the Folia-safe fast path: both parties
+     * resolve by UUID ({@code Bukkit#getPlayer} is region-agnostic, unlike a
+     * {@code World#getEntities()} scan, which throws off-region on Folia), so no
+     * entity-id scan is needed. Runs on the victim's owning region thread (the
+     * region that owns the damage event); for melee the attacker shares that
+     * region, so reading the attacker's state here is region-correct.
+     */
+    public void applyPlayer(@NotNull UUID attackerUuid, @NotNull UUID victimUuid) {
+        Player attacker = Bukkit.getPlayer(attackerUuid);
+        if (attacker == null || !attacker.isOnline() || attacker.getGameMode() == GameMode.SPECTATOR) {
+            return;
+        }
+        Player victim = Bukkit.getPlayer(victimUuid);
+        if (victim == null
+                || victim.isDead()
+                || !isStillAttackable(attacker, victim)
+                || !isInReach(attacker, victim)) {
+            return;
+        }
+        damage(attacker, victim);
+    }
+
+    /**
+     * Drives the resolved-and-validated hit through Bukkit's damage pipeline —
+     * the shared tail of {@link #apply} and {@link #applyPlayer}.
+     */
+    private void damage(@NotNull Player attacker, @NotNull Damageable damageable) {
         var settings = services.config().hitReg();
         // Where OCM's damage modules govern this attacker, hand the hurt
         // pipeline vanilla-shaped damage: OCM decomposes the event into
