@@ -40,6 +40,13 @@ modules:
   rod-velocity: true
   # 1.7.10 projectile knockback: snowballs, eggs, pearls, and arrows.
   projectile-knockback: true
+  # Remove the 1.9 attack cooldown and its client-side charge bar / greyed-swing
+  # animation. 1.7/1.8 had no attack-speed attribute at all; this spoof intercepts
+  # the outbound UPDATE_ATTRIBUTES packet and rewrites the player's own attack_speed
+  # to 1024.0 so the client's cooldown delay rounds to zero. The server attribute
+  # stays at vanilla 4.0 — no plugin conflicts, no teardown on disconnect, Folia-safe.
+  # Default OFF (era-exact no-op when disabled).
+  attack-cooldown: false
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

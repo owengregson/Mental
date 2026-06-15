@@ -38,6 +38,8 @@ import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.ocm.OcmCompatModule;
 import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
+import me.vexmc.mental.module.rules.cooldown.AttackCooldownModule;
+import me.vexmc.mental.module.rules.cooldown.CooldownSpoofListener;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
@@ -155,6 +157,13 @@ public final class MentalPlugin extends JavaPlugin {
                 .registerListener(new GroundPacketTap(groundWatcher, services.sprintTracker()),
                         PacketListenerPriority.MONITOR);
 
+        // Rewrites attack_speed in UPDATE_ATTRIBUTES for the receiver's own
+        // entity so the client never renders a cooldown overlay.  Registered
+        // for the plugin lifetime; the listener gates on the config flag.
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new CooldownSpoofListener(config),
+                        PacketListenerPriority.NORMAL);
+
         PacketEvents.getAPI().init();
 
         getLogger().info(() -> "Mental enabled — server " + environment.describe()
@@ -261,6 +270,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new FishingKnockbackModule(services, knockbackPipeline));
         modules.register(new FishingRodVelocityModule(services));
         modules.register(new ProjectileKnockbackModule(services, knockbackPipeline));
+        modules.register(new AttackCooldownModule(services));
     }
 
     private void registerCommands() {

@@ -26,7 +26,8 @@ public final class MentalConfig {
             @NotNull ProjectileKnockbackSettings projectileKnockback,
             @NotNull AnticheatSettings anticheat,
             @NotNull CompatibilitySettings compatibility,
-            @NotNull DebugSettings debug) {
+            @NotNull DebugSettings debug,
+            @NotNull CooldownSettings cooldown) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -39,7 +40,8 @@ public final class MentalConfig {
                     ProjectileKnockbackSettings.DEFAULTS,
                     AnticheatSettings.DEFAULTS,
                     CompatibilitySettings.DEFAULTS,
-                    DebugSettings.DEFAULTS);
+                    DebugSettings.DEFAULTS,
+                    CooldownSettings.DEFAULTS);
         }
     }
 
@@ -72,7 +74,8 @@ public final class MentalConfig {
                         reader(sources.knockback(), "projectile-knockback", ConfigStore.KNOCKBACK_FILE, issues)),
                 AnticheatSettings.parse(reader(sources.main(), "anticheat", "config.yml", issues)),
                 CompatibilitySettings.parse(reader(sources.main(), "compatibility", "config.yml", issues)),
-                DebugSettings.parse(reader(sources.main(), "debug", "config.yml", issues)));
+                DebugSettings.parse(reader(sources.main(), "debug", "config.yml", issues)),
+                new CooldownSettings(modules.flag("attack-cooldown", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -119,6 +122,10 @@ public final class MentalConfig {
 
     public @NotNull DebugSettings debug() {
         return snapshot.get().debug();
+    }
+
+    public @NotNull CooldownSettings cooldown() {
+        return snapshot.get().cooldown();
     }
 
     private static @NotNull ConfigReader reader(
