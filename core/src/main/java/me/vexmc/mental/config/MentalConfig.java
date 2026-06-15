@@ -35,7 +35,8 @@ public final class MentalConfig {
             @NotNull GoldenAppleSettings goldenApple,
             @NotNull EnderPearlSettings enderPearl,
             @NotNull RegenSettings regen,
-            @NotNull ArmourStrengthSettings armourStrength) {
+            @NotNull ArmourStrengthSettings armourStrength,
+            @NotNull ArmourDurabilitySettings armourDurability) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -57,7 +58,8 @@ public final class MentalConfig {
                     GoldenAppleSettings.DEFAULTS,
                     EnderPearlSettings.DEFAULTS,
                     RegenSettings.DEFAULTS,
-                    ArmourStrengthSettings.DEFAULTS);
+                    ArmourStrengthSettings.DEFAULTS,
+                    ArmourDurabilitySettings.DEFAULTS);
         }
     }
 
@@ -103,7 +105,8 @@ public final class MentalConfig {
                 new GoldenAppleSettings(modules.flag("old-golden-apples", false)),
                 new EnderPearlSettings(modules.flag("disable-enderpearl-cooldown", false)),
                 new RegenSettings(modules.flag("old-player-regen", false)),
-                new ArmourStrengthSettings(modules.flag("old-armour-strength", false)));
+                new ArmourStrengthSettings(modules.flag("old-armour-strength", false)),
+                new ArmourDurabilitySettings(modules.flag("old-armour-durability", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -186,6 +189,10 @@ public final class MentalConfig {
 
     public @NotNull ArmourStrengthSettings armourStrength() {
         return snapshot.get().armourStrength();
+    }
+
+    public @NotNull ArmourDurabilitySettings armourDurability() {
+        return snapshot.get().armourDurability();
     }
 
     private static @NotNull ConfigReader reader(

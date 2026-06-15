@@ -87,6 +87,7 @@ class MentalConfigTest {
         assertEquals(EnderPearlSettings.DEFAULTS, config.enderPearl());
         assertEquals(RegenSettings.DEFAULTS, config.regen());
         assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
+        assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
     }
 
     @Test
@@ -111,6 +112,7 @@ class MentalConfigTest {
         assertEquals(EnderPearlSettings.DEFAULTS, config.enderPearl());
         assertEquals(RegenSettings.DEFAULTS, config.regen());
         assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
+        assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());

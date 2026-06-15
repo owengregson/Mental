@@ -107,6 +107,18 @@ modules:
   # when a modifier is absent, so we only ever write applicable ones).
   # Default OFF (era-exact no-op when disabled).
   old-armour-strength: false
+  # Restores the 1.8 armour-durability Unbreaking skip: worn armour takes its
+  # vanilla durability wear only 60 + 40/(level+1) % of hits (so it survives more
+  # hits as Unbreaking rises), in place of modern armour's generic
+  # level/(level+1). The per-hit wear MAGNITUDE is left at vanilla's
+  # max(1, floor(damage/4)) — identical 1.8<->modern, so it is never changed
+  # (OCM's flat-1 override is NOT era-exact). At Unbreaking 0 nothing skips, as in
+  # 1.8 NMS. Only currently-worn armour pieces are affected (elytra excluded).
+  # Era values pinned from decompiled 1.8.9 (acg.java/wm.java); mirrors OCM's
+  # ModuleOldArmourDurability. Implemented on PlayerItemDamageEvent at LOWEST
+  # priority, on the player's region thread (Folia-safe, no scheduler).
+  # Default OFF (era-exact no-op when disabled).
+  old-armour-durability: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #

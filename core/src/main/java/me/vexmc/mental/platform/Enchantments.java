@@ -27,6 +27,7 @@ public final class Enchantments {
             resolve("BLAST_PROTECTION", "PROTECTION_EXPLOSIONS");
     private static final @Nullable Enchantment PROJECTILE_PROTECTION =
             resolve("PROJECTILE_PROTECTION", "PROTECTION_PROJECTILE");
+    private static final @Nullable Enchantment UNBREAKING = resolve("UNBREAKING", "DURABILITY");
 
     private Enchantments() {}
 
@@ -65,6 +66,11 @@ public final class Enchantments {
 
     public static @NotNull Enchantment knockback() {
         return Enchantment.KNOCKBACK;
+    }
+
+    /** Unbreaking (modern) / {@code DURABILITY} (legacy, renamed in 1.20.5). */
+    public static @Nullable Enchantment unbreaking() {
+        return UNBREAKING;
     }
 
     private static @Nullable Enchantment resolve(@NotNull String modernName, @NotNull String legacyName) {
