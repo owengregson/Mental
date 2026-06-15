@@ -29,8 +29,18 @@ traps that each cost a debugging round to discover:
   behavior; `parse(empty) == LEGACY_17`.
 - **Never touch the client-side technique contract** (0.6 self-multiplier,
   w-tap, jump-resets) — see `era-accuracy`.
-- Mental owns knockback + hit delivery ONLY; combat rules belong to
-  OldCombatMechanics.
+- Mental owns knockback + hit delivery, AND can OPTIONALLY own combat rules
+  via the default-OFF module families `module/rules` (cooldown, sweep, sounds,
+  offhand, crafting), `module/damage` (armour strength/durability, tool
+  durability, critical hits), `module/potion` (durations, values),
+  `module/consumable` (golden apples, ender-pearl cooldown),
+  `module/health` (player regen), `module/block` (sword blocking),
+  and `module/hitbox` (era melee reach) — 16 `CombatModule`s ported from
+  OldCombatMechanics in 2026-06. All default OFF; zero-touch and
+  era-exact-no-op-default invariants are honoured. Mental still yields to OCM
+  via `OcmGate` for the mechanics OCM owns when present; the new rules modules
+  are OCM-agnostic (enabling the same rule in both double-applies — pick one
+  per rule). Ground truth + roadmap: `docs/superpowers/plans/2026-06-14-ocm-*`.
 
 ## Verification gate
 

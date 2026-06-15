@@ -22,6 +22,7 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 - **Fishing rods restored to legacy mechanics.** Hooks damage and shove players on contact, casts fly like in 1.8, and the reel-in pull is gone.
 - **Projectiles knock back.** Snowballs, eggs and ender pearls push players.
 - **Anticheat compatible.** Mental supports and recognizes common anticheats like GrimAC and Vulcan. Mental is also compatible with most others by design. Servers running none can opt into Mental's own ping-rewound reach validation.
+- **Optional 1.8 combat rules.** 16 `CombatModule`s — all default OFF — let you build a complete 1.8-style server without any companion plugin. See the [combat rules modules](#combat-rules-modules-optional) section below.
 
 ## Compatibility
 
@@ -29,7 +30,7 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 | --- | --- |
 | **Server** | Paper 1.17.1 → 26.1.2 · Folia 1.19.4+ |
 | **Java** | 17 or newer |
-| **Dependencies** | None |
+| **Dependencies** | None — Mental is a self-contained 1.8 combat suite; OldCombatMechanics is optional |
 
 Mental plugin jars are universal and work on all supported versions.
 
@@ -58,7 +59,7 @@ Use **`/mental`** (or `/mtl`). It opens an interactive dashboard in chat where y
 | `/mental version` | Version, server platform and feature report. |
 | `/mental help` | Clickable list of every command you can use. |
 
-Module names for the `module` command: `hit-registration`, `wtap-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`.
+Module names for the `module` command: `hit-registration`, `wtap-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`, `attack-cooldown`, `disable-attack-sounds`, `disable-sword-sweep`, `disable-crafting`, `disable-offhand`, `old-golden-apples`, `disable-enderpearl-cooldown`, `old-player-regen`, `old-armour-strength`, `old-armour-durability`, `old-potion-durations`, `old-potion-values`, `old-critical-hits`, `old-tool-durability`, `sword-blocking`, `old-hitboxes`.
 
 ## Configuration
 
@@ -94,10 +95,17 @@ GrimAC and Vulcan are detected automatically, and Mental adjusts the one behavio
 No. Mental deals damage through the standard Bukkit event chain, so anything that cancels or modifies damage keeps working exactly as before.
 
 **Does it remove the 1.9 attack cooldown?**
-No, and that's deliberate. Mental never scales damage by charge, so the cooldown has no effect on hits Mental registers — but the meter itself, sword blocking, regen and the rest of the combat *rules* are a different plugin's job. Pair Mental with [OldCombatMechanics](https://github.com/kernitus/BukkitOldCombatMechanics) (its `disable-attack-cooldown` module) for those; the two are built to run together.
+Yes — enable the `attack-cooldown` module (default OFF). It removes the cooldown and also spoofs the client-side `attack_speed` attribute so the charge meter and greyed-swing animation disappear; the server-side attribute is left untouched. Mental never scales damage by charge regardless, so on its own hits already feel instant — the module just cleans up the visual.
+
+**Can I run without OldCombatMechanics?**
+Yes. Mental now ships 16 optional combat-rule modules (all default OFF) that cover the full 1.8 ruleset: attack cooldown + sweep + sounds, armour strength + durability, potion durations + values, golden/notch apples, ender-pearl cooldown, player regen, offhand restrictions, sword blocking, and era melee reach. Enable what you want under `modules:` in `config.yml` — Mental is a self-contained 1.8 combat suite without any required companion plugin.
+
+A few honest caveats: `sword-blocking` shows a version-appropriate block animation (a data-component in-place pose on 1.21+, off-hand-shield fallback on 1.17.1–1.20.6) — the literal lowered-sword client animation from 1.7 is unreachable server-side. `old-hitboxes` tunes reach and hitbox margin (attribute on 1.20.5+, `AttackRange` item component on 1.21.5+; no-op on 1.17.1–1.20.4) but cannot change client-side target selection. `old-potion-values`, `old-critical-hits`, and `old-tool-durability` apply only on Mental's fast-path hits.
 
 **Can I run it alongside OldCombatMechanics?**
-Yes — that's the intended setup for a complete 1.8-style server. OCM handles the combat rules, Mental handles knockback and hit delivery, and where OCM's own knockback/fishing/projectile modules are enabled, Mental detects it and steps aside automatically, per player modeset, so nothing is ever applied twice. Disable those OCM modules to get Mental's combos, positional projectiles and ping compensation instead. The full ownership table is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+Yes — that still works. Mental detects OCM and yields automatically (via `OcmGate`) for the mechanics OCM owns: knockback, fishing, and projectile behavior are stepped aside per player modeset so nothing is applied twice. The full ownership table is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+
+One important caveat: Mental's new rules modules are **OCM-agnostic** — they do not coordinate with OCM's equivalent modules. If you enable both a Mental rules module and OCM's matching module for the same mechanic (e.g. both `attack-cooldown` and OCM's `disable-attack-cooldown`), the rule will double-apply. **Pick one plugin per rule** — use Mental's modules or OCM's, not both for the same mechanic.
 
 **Why doesn't the projectile module do anything on my 1.21.2+ server?**
 Because it doesn't need to. Mojang restored projectile knockback against players in vanilla 1.21.2.
@@ -107,6 +115,33 @@ Yes, Mental is natively region-aware and localized.
 
 **Something feels off. How do I see what's happening?**
 `/mental debug on`, then `/mental debug subscribe` to stream diagnostics to your chat in-game. Ten categories can be toggled individually so you only see the system you're chasing. If it looks like a bug, [open an issue](../../issues) with what you find.
+
+## Combat rules modules (optional)
+
+Mental ships 16 optional combat-rule modules ported from OldCombatMechanics, all **default OFF**. An untouched config behaves exactly as before (zero-touch). Enable them individually under `modules:` in `config.yml`:
+
+| Config id | What it does |
+| --- | --- |
+| `attack-cooldown` | Removes the 1.9 attack cooldown and spoofs `attack_speed` so the charge meter and greyed-swing animation disappear client-side (server attribute untouched). |
+| `disable-attack-sounds` | Silences the 1.9 swing-result sounds. |
+| `disable-sword-sweep` | Disables the 1.9 sweep attack and its particle. |
+| `disable-crafting` | Makes configured items uncraftable (default: SHIELD). |
+| `disable-offhand` | Blocks off-hand use; supports a whitelist/blacklist item filter. |
+| `old-golden-apples` | 1.8 golden/notch apple effects and the 8-gold-block notch-apple recipe. |
+| `disable-enderpearl-cooldown` | Removes the 1.9 ender-pearl throw cooldown. |
+| `old-player-regen` | The 1.8 natural regeneration model. |
+| `old-armour-strength` | 1.8 flat armour reduction (4 % per armour point, no toughness). |
+| `old-armour-durability` | The 1.8 armour Unbreaking durability behaviour. |
+| `old-potion-durations` | 1.8 potion durations. |
+| `old-potion-values` | 1.8 Strength/Weakness damage values — applies on Mental's fast-path hits. |
+| `old-critical-hits` | Era crit rule for non-fast-path melee (the fast path already applies it). |
+| `old-tool-durability` | Weapon durability on Mental's fast-path hits (which the fast path otherwise omits). |
+| `sword-blocking` | 1.7-style right-click sword blocking. On 1.21+ a data-component in-place block animation is used; 1.17.1–1.20.6 falls back to an off-hand-shield. The literal lowered-sword client animation from 1.7 is unreachable server-side. |
+| `old-hitboxes` | Era melee reach + hitbox margin. Implemented via entity attribute on 1.20.5+, `AttackRange` item component on 1.21.5+; no-op on 1.17.1–1.20.4. Cannot change client-side target selection. |
+
+All 16 modules are Folia-correct (region-aware via Mental's `Scheduling`).
+
+These modules are **OCM-agnostic**: they do not coordinate with OldCombatMechanics' equivalent features. If you run Mental alongside OCM and enable the same rule in both, it will double-apply — pick one plugin per rule. Mental's `OcmGate` coexistence (auto-yield for knockback/fishing/projectile) is unaffected and continues to work regardless of which rules modules you enable.
 
 ## For developers
 
