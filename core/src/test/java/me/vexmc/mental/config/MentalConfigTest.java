@@ -91,6 +91,8 @@ class MentalConfigTest {
         assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
         assertEquals(PotionValueSettings.DEFAULTS, config.potionValues());
         assertFalse(config.potionValues().enabled(), "old-potion-values defaults OFF");
+        assertEquals(CritSettings.DEFAULTS, config.crit());
+        assertFalse(config.crit().enabled(), "old-critical-hits defaults OFF");
     }
 
     @Test
@@ -118,6 +120,7 @@ class MentalConfigTest {
         assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
         assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
         assertEquals(PotionValueSettings.DEFAULTS, config.potionValues());
+        assertEquals(CritSettings.DEFAULTS, config.crit());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());
@@ -323,6 +326,20 @@ class MentalConfigTest {
 
         assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
         assertTrue(config.potionValues().enabled());
+    }
+
+    @Test
+    void oldCriticalHitsFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  old-critical-hits: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.crit().enabled());
     }
 
     @Test

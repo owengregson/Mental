@@ -25,6 +25,7 @@ import me.vexmc.mental.module.anticheat.AnticheatGate;
 import me.vexmc.mental.module.compensation.LatencyCompensationModule;
 import me.vexmc.mental.module.damage.ArmourDurabilityModule;
 import me.vexmc.mental.module.damage.ArmourStrengthModule;
+import me.vexmc.mental.module.damage.CritFallbackModule;
 import me.vexmc.mental.module.fishing.FishingKnockbackModule;
 import me.vexmc.mental.module.fishing.FishingRodVelocityModule;
 import me.vexmc.mental.module.hitreg.HitRegistrationModule;
@@ -310,6 +311,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new ArmourDurabilityModule(services));
         modules.register(new PotionDurationModule(services));
         modules.register(new PotionValueModule(services));
+        modules.register(new CritFallbackModule(services));
     }
 
     private void registerCommands() {

@@ -38,7 +38,8 @@ public final class MentalConfig {
             @NotNull ArmourStrengthSettings armourStrength,
             @NotNull ArmourDurabilitySettings armourDurability,
             @NotNull PotionDurationSettings potionDuration,
-            @NotNull PotionValueSettings potionValues) {
+            @NotNull PotionValueSettings potionValues,
+            @NotNull CritSettings crit) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -63,7 +64,8 @@ public final class MentalConfig {
                     ArmourStrengthSettings.DEFAULTS,
                     ArmourDurabilitySettings.DEFAULTS,
                     PotionDurationSettings.DEFAULTS,
-                    PotionValueSettings.DEFAULTS);
+                    PotionValueSettings.DEFAULTS,
+                    CritSettings.DEFAULTS);
         }
     }
 
@@ -112,7 +114,8 @@ public final class MentalConfig {
                 new ArmourStrengthSettings(modules.flag("old-armour-strength", false)),
                 new ArmourDurabilitySettings(modules.flag("old-armour-durability", false)),
                 new PotionDurationSettings(modules.flag("old-potion-durations", false)),
-                new PotionValueSettings(modules.flag("old-potion-values", false)));
+                new PotionValueSettings(modules.flag("old-potion-values", false)),
+                new CritSettings(modules.flag("old-critical-hits", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -207,6 +210,10 @@ public final class MentalConfig {
 
     public @NotNull PotionValueSettings potionValues() {
         return snapshot.get().potionValues();
+    }
+
+    public @NotNull CritSettings crit() {
+        return snapshot.get().crit();
     }
 
     private static @NotNull ConfigReader reader(

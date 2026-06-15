@@ -151,6 +151,21 @@ modules:
   # potion DURATIONS are the separate old-potion-durations module.
   # Default OFF (era-exact no-op when disabled).
   old-potion-values: false
+  # Applies the 1.8 era critical-hit multiplier (x1.5 on attack damage) for
+  # player melee hits that vanilla missed because the 1.9 sprint/cooldown
+  # requirement was not satisfied. Era crit (1.8): attacker is falling, airborne,
+  # off ladder, out of water, sighted, unmounted — sprinting was NEVER an exclusion
+  # and there was no attack cooldown [wn.java:760]. Vanilla 1.9+ added two extra
+  # gates: cooldown > 0.9 AND not sprinting. This module fires x1.5 on BASE damage
+  # when the era rule triggers but those 1.9 gates would have blocked it (i.e. the
+  # attacker was sprinting or the cooldown bar was not full). SCOPE: fast-path-OFF
+  # player melee only — when Mental's fast path is ON, DamageCalculator already
+  # applies the era crit with the correct ordering (weapon base before Sharpness);
+  # this module is a no-op when the fast path is ON. Fast-path-off is a minority
+  # case: most PvP hits on a Mental server go through the fast path. When OCM owns
+  # old-critical-hits for the attacker, OCM handles the crit — this module does
+  # not double-apply. Default OFF (era-exact no-op when disabled).
+  old-critical-hits: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #

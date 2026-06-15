@@ -6,6 +6,7 @@ import me.vexmc.mental.platform.Enchantments;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -254,15 +255,32 @@ public final class DamageCalculator {
      * The 1.7.10 critical posture: falling, off the ground and off a
      * ladder, out of water, sighted, on no mount. Sprinting does NOT
      * exclude a crit — that rule arrived with 1.9.
+     *
+     * <p>This is the shared predicate used by both the fast-path
+     * {@link DamageCalculator} and the fast-path-off
+     * {@code CritFallbackModule}; one source of truth for the era
+     * precondition set so the two paths can never drift.</p>
+     *
+     * @param attacker the attacking player
+     * @param target   the attack target (unused today — carried for API
+     *                 symmetry and to leave room for era target checks)
      */
     @SuppressWarnings("deprecation") // Player#isOnGround: client-reported, matching legacy crit rules
-    private static boolean isCritical(Player attacker) {
+    public static boolean isLegacyCritical(Player attacker, @SuppressWarnings("unused") Entity target) {
         return attacker.getFallDistance() > 0.0f
                 && !attacker.isOnGround()
                 && !attacker.isClimbing()
                 && !attacker.isInWater()
                 && !attacker.hasPotionEffect(PotionEffectType.BLINDNESS)
                 && attacker.getVehicle() == null;
+    }
+
+    /**
+     * Internal alias — the fast path calls through the shared predicate so
+     * the precondition set has exactly one definition.
+     */
+    private static boolean isCritical(Player attacker) {
+        return isLegacyCritical(attacker, null);
     }
 
     private static double enchantmentBonus(@Nullable ItemStack weapon) {
