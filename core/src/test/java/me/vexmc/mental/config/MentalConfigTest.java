@@ -83,6 +83,7 @@ class MentalConfigTest {
         assertEquals(DebugSettings.DEFAULTS, config.debug());
         assertEquals(CraftingSettings.DEFAULTS, config.crafting());
         assertEquals(OffhandSettings.DEFAULTS, config.offhand());
+        assertEquals(GoldenAppleSettings.DEFAULTS, config.goldenApple());
     }
 
     @Test
@@ -103,6 +104,7 @@ class MentalConfigTest {
         assertEquals(DebugSettings.DEFAULTS, config.debug());
         assertEquals(CraftingSettings.DEFAULTS, config.crafting());
         assertEquals(OffhandSettings.DEFAULTS, config.offhand());
+        assertEquals(GoldenAppleSettings.DEFAULTS, config.goldenApple());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());

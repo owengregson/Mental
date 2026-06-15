@@ -77,6 +77,20 @@ public final class BukkitScheduling implements Scheduling {
     }
 
     @Override
+    public void runOnLater(
+            @NotNull Entity entity, long delayTicks, @NotNull Runnable task, @NotNull Runnable retired) {
+        // On Paper all threads collapse to main; after delayTicks the entity is
+        // re-checked for validity, mirroring runOn's semantics with a delay.
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (entity.isValid()) {
+                task.run();
+            } else {
+                retired.run();
+            }
+        }, Math.max(1, delayTicks));
+    }
+
+    @Override
     public @NotNull TaskHandle repeatAsync(@NotNull Duration initial, @NotNull Duration period, @NotNull Runnable task) {
         long initialTicks = toTicks(initial);
         long periodTicks = Math.max(1, toTicks(period));

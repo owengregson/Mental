@@ -31,7 +31,8 @@ public final class MentalConfig {
             @NotNull AttackSoundSettings attackSound,
             @NotNull SweepSettings sweep,
             @NotNull CraftingSettings crafting,
-            @NotNull OffhandSettings offhand) {
+            @NotNull OffhandSettings offhand,
+            @NotNull GoldenAppleSettings goldenApple) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -49,7 +50,8 @@ public final class MentalConfig {
                     AttackSoundSettings.DEFAULTS,
                     SweepSettings.DEFAULTS,
                     CraftingSettings.DEFAULTS,
-                    OffhandSettings.DEFAULTS);
+                    OffhandSettings.DEFAULTS,
+                    GoldenAppleSettings.DEFAULTS);
         }
     }
 
@@ -91,7 +93,8 @@ public final class MentalConfig {
                         reader(sources.main(), "disable-crafting", "config.yml", issues)),
                 OffhandSettings.parse(
                         modules.flag("disable-offhand", false),
-                        reader(sources.main(), "disable-offhand", "config.yml", issues)));
+                        reader(sources.main(), "disable-offhand", "config.yml", issues)),
+                new GoldenAppleSettings(modules.flag("old-golden-apples", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -158,6 +161,10 @@ public final class MentalConfig {
 
     public @NotNull OffhandSettings offhand() {
         return snapshot.get().offhand();
+    }
+
+    public @NotNull GoldenAppleSettings goldenApple() {
+        return snapshot.get().goldenApple();
     }
 
     private static @NotNull ConfigReader reader(

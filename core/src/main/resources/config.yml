@@ -71,6 +71,14 @@ modules:
   # are affected in the disable-offhand section below. Default OFF (era-exact
   # no-op when disabled).
   disable-offhand: false
+  # Restores 1.8.9 golden apple and enchanted golden apple potion effects, and
+  # re-registers the notch-apple (enchanted golden apple) crafting recipe that
+  # was removed in 1.9 (8 gold BLOCKS around 1 apple). The normal golden apple
+  # recipe (8 gold INGOTS) is NEVER touched. Effect tables are pinned to the
+  # decompiled 1.8.9 values: Regen II 100 t + Absorption I 2400 t (gapple);
+  # Regen V 600 t + Resistance I 6000 t + Fire Res I 6000 t + Absorption I
+  # 2400 t (napple). Default OFF (era-exact no-op when disabled).
+  old-golden-apples: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
