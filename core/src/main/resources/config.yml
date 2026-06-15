@@ -166,6 +166,22 @@ modules:
   # old-critical-hits for the attacker, OCM handles the crit — this module does
   # not double-apply. Default OFF (era-exact no-op when disabled).
   old-critical-hits: false
+  # Restores weapon durability loss on Mental's fast-path melee hits, which the
+  # fast path otherwise OMITS by design: the fast path applies damage via a direct
+  # damage(amount) call, which (unlike vanilla's Player#attack) never runs the
+  # attack-time durability step, so a weapon never wears on a Mental-registered
+  # hit. With this on, the attacker's main-hand weapon loses 1 durability per
+  # accepted hit (the era 1.7->modern attack case; block-break is 2, the ATTACK
+  # case is 1), modified by the standard tool/weapon Unbreaking skip — a hit
+  # damages with probability 1/(level+1) (acg.java:40, the non-armour path), so
+  # level 0 always wears, level 1 wears half as often, level 3 a quarter. Only a
+  # damageable weapon held in the main hand is affected; when its durability is
+  # exhausted the item breaks like vanilla. This is durability only — the damage
+  # VALUES are already era-correct in DamageCalculator. Implemented in the
+  # fast-path HitApplier; the attacker-inventory write follows the entity's owning
+  # region thread (Folia-safe), mirroring the fast path's sprint-flag clear.
+  # Default OFF (era-exact no-op when disabled).
+  old-tool-durability: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
