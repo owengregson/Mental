@@ -79,6 +79,13 @@ modules:
   # Regen V 600 t + Resistance I 6000 t + Fire Res I 6000 t + Absorption I
   # 2400 t (napple). Default OFF (era-exact no-op when disabled).
   old-golden-apples: false
+  # Removes the 1.9 1-second ender-pearl throw cooldown, restoring 1.8 pearl
+  # spam. Era truth: 1.8.9 had no ender-pearl cooldown; the 20-tick (1 s)
+  # cooldown was added in 1.9. Clears the cooldown via setCooldown(ENDER_PEARL,
+  # 0) after each throw — CraftBukkit resolves the right cooldown group
+  # internally on every version (including the 1.21.2+ use_cooldown component).
+  # Default OFF (era-exact no-op when disabled).
+  disable-enderpearl-cooldown: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
