@@ -119,6 +119,23 @@ modules:
   # priority, on the player's region thread (Folia-safe, no scheduler).
   # Default OFF (era-exact no-op when disabled).
   old-armour-durability: false
+  # Restores the pre-1.9 (1.8) potion DURATIONS. 1.9 shortened many potion
+  # durations; this rewrites a potion's effect back to its 1.8 length when a
+  # player drinks it (PlayerItemConsumeEvent), throws a splash/lingering potion
+  # (right-click), or a dispenser fires one (BlockDispenseEvent) — the same three
+  # hooks OCM's old-potion-effects uses. The duration table is OCM's
+  # old-potion-effects.potion-durations (drink/splash, in seconds), converted to
+  # ticks: Strength 180/135 s, Swiftness 180/135 s, Fire Resistance 180 s,
+  # Weakness 90 s, Poison 45/33 s, Regeneration 45/33 s, Night Vision 180 s,
+  # Invisibility 180/135 s, Water Breathing 180/135 s, Slowness 90/67 s, Leaping
+  # 180/135 s, with strong/long variants where applicable. Instant potions
+  # (Healing/Harming) and no-effect bases (Water, Awkward, ...) are left
+  # untouched. The potion item's PotionMeta is rewritten in place (base set to a
+  # no-effect Water type + a custom effect at the era duration), cross-version via
+  # setBasePotionType (modern) with a setBasePotionData fallback (pre-1.20.5).
+  # This is the DURATION half only — Strength/Weakness damage VALUES are separate.
+  # Default OFF (era-exact no-op when disabled).
+  old-potion-durations: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #

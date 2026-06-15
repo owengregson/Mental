@@ -88,6 +88,7 @@ class MentalConfigTest {
         assertEquals(RegenSettings.DEFAULTS, config.regen());
         assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
         assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
+        assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
     }
 
     @Test
@@ -113,6 +114,7 @@ class MentalConfigTest {
         assertEquals(RegenSettings.DEFAULTS, config.regen());
         assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
         assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
+        assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());
