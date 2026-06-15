@@ -46,6 +46,7 @@ import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
 import me.vexmc.mental.module.rules.cooldown.AttackCooldownModule;
 import me.vexmc.mental.module.rules.cooldown.CooldownSpoofListener;
+import me.vexmc.mental.module.rules.cooldown.WeaponAttributeTooltipHider;
 import me.vexmc.mental.module.rules.sound.AttackSoundListener;
 import me.vexmc.mental.module.rules.sound.AttackSoundModule;
 import me.vexmc.mental.module.rules.crafting.DisableCraftingModule;
@@ -179,6 +180,14 @@ public final class MentalPlugin extends JavaPlugin {
         // for the plugin lifetime; the listener gates on the config flag.
         PacketEvents.getAPI().getEventManager()
                 .registerListener(new CooldownSpoofListener(config),
+                        PacketListenerPriority.NORMAL);
+
+        // While the cooldown module is on, the high attack_speed base leaks into
+        // weapon/tool tooltips as a huge "Attack Speed" line.  This strips only
+        // that line from outgoing weapon/tool items (keeping Attack Damage, which
+        // 1.8 weapons showed) — display-only, gated on the same flag.
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new WeaponAttributeTooltipHider(config),
                         PacketListenerPriority.NORMAL);
 
         // Cancels SOUND_EFFECT / ENTITY_SOUND_EFFECT packets whose sound name
