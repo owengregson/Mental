@@ -147,9 +147,17 @@ armor*0.2, 20)`. `[decomp-1.21.11 CombatRules.java:15-26]`
 
 **Durability:** per-hit `max(1, floor(eventDamage/4))` per worn piece — IDENTICAL 1.8↔modern
 `[wm.java:370-380]`, so don't touch magnitude (OCM's flat-1 is NOT era-exact). Only era
-difference = Unbreaking armour skip prob: 1.8 `0.6 + 0.4/(level+1)` `[acg.java:37+40]` vs
-modern `level/(level+1)`. Restore via `PlayerItemDamageEvent` (LOWEST): on a `60+40/(L+1)`%
-roll `setDamage(0)`, else leave vanilla `getDamage()`.
+difference = how Unbreaking protects ARMOUR. CORRECTED (verified against `acg.java` =
+`EnchantmentDurability.a(stack,level,rng)`: `if (item instanceof ItemArmor && nextFloat()<0.6)
+return false; return nextInt(level+1)>0;`, and the caller's negation loop runs ONLY when
+`unbreakingLevel>0`). So: `60 + 40/(level+1)` is the chance the armour **WEARS** per durability
+point (the 0.6 branch returns `false` = NOT negated). At level 0 there is NO negation → armour
+**always wears** (no era difference). 1.8 Unbreaking is therefore *weaker* on armour than the
+modern buffed model — armour with Unbreaking wears MORE in 1.8. Restore via
+`PlayerItemDamageEvent` (LOWEST): `damageChance = 60 + 40/(level+1)`; **wear iff `roll(0..99) <
+damageChance`, skip (`setDamage(0)`) iff `roll >= damageChance`**, else leave vanilla
+`getDamage()`. (My earlier "60% skip" framing was inverted; this matches OCM's working module
+and the decompile — see T10 commit.)
 
 **Hook:** `EntityDamageEvent` (NOT ...ByEntity — must cover mobs/projectiles/explosions/
 environmental), priority LOWEST. Modern `DamageModifier.ARMOR` throws on 1.20.5+ — recompute
