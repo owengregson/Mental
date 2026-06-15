@@ -58,10 +58,14 @@ public final class HitApplier {
         boolean ocmShapesDamage =
                 services.ocmGate().handles(OcmMechanic.TOOL_DAMAGE, attacker)
                 || services.ocmGate().handles(OcmMechanic.CRITICAL_HITS, attacker);
+        // Era Strength/Weakness damage VALUES (1.8: Strength ×3.5, Weakness −2)
+        // apply to the weapon base before crit. Gated by old-potion-values and
+        // skipped entirely when OCM shapes the damage (vanillaShape path).
+        boolean oldPotionValues = services.config().potionValues().enabled();
         double amount = damageable instanceof LivingEntity living
                 ? DamageCalculator.calculate(
                         attacker, living, settings.simulateCrits(), settings.legacyToolDamage(),
-                        ocmShapesDamage)
+                        ocmShapesDamage, oldPotionValues)
                 : 1.0;
 
         damageable.damage(amount, attacker);

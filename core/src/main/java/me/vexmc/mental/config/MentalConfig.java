@@ -37,7 +37,8 @@ public final class MentalConfig {
             @NotNull RegenSettings regen,
             @NotNull ArmourStrengthSettings armourStrength,
             @NotNull ArmourDurabilitySettings armourDurability,
-            @NotNull PotionDurationSettings potionDuration) {
+            @NotNull PotionDurationSettings potionDuration,
+            @NotNull PotionValueSettings potionValues) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -61,7 +62,8 @@ public final class MentalConfig {
                     RegenSettings.DEFAULTS,
                     ArmourStrengthSettings.DEFAULTS,
                     ArmourDurabilitySettings.DEFAULTS,
-                    PotionDurationSettings.DEFAULTS);
+                    PotionDurationSettings.DEFAULTS,
+                    PotionValueSettings.DEFAULTS);
         }
     }
 
@@ -109,7 +111,8 @@ public final class MentalConfig {
                 new RegenSettings(modules.flag("old-player-regen", false)),
                 new ArmourStrengthSettings(modules.flag("old-armour-strength", false)),
                 new ArmourDurabilitySettings(modules.flag("old-armour-durability", false)),
-                new PotionDurationSettings(modules.flag("old-potion-durations", false)));
+                new PotionDurationSettings(modules.flag("old-potion-durations", false)),
+                new PotionValueSettings(modules.flag("old-potion-values", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -200,6 +203,10 @@ public final class MentalConfig {
 
     public @NotNull PotionDurationSettings potionDuration() {
         return snapshot.get().potionDuration();
+    }
+
+    public @NotNull PotionValueSettings potionValues() {
+        return snapshot.get().potionValues();
     }
 
     private static @NotNull ConfigReader reader(

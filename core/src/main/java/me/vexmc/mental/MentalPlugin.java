@@ -49,6 +49,7 @@ import me.vexmc.mental.module.consumable.EnderPearlCooldownModule;
 import me.vexmc.mental.module.consumable.GoldenAppleModule;
 import me.vexmc.mental.module.health.RegenModule;
 import me.vexmc.mental.module.potion.PotionDurationModule;
+import me.vexmc.mental.module.potion.PotionValueModule;
 import me.vexmc.mental.module.rules.offhand.OffhandModule;
 import me.vexmc.mental.module.rules.sweep.SweepModule;
 import me.vexmc.mental.module.rules.sweep.SweepParticleListener;
@@ -308,6 +309,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new ArmourStrengthModule(services));
         modules.register(new ArmourDurabilityModule(services));
         modules.register(new PotionDurationModule(services));
+        modules.register(new PotionValueModule(services));
     }
 
     private void registerCommands() {

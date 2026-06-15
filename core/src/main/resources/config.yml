@@ -136,6 +136,21 @@ modules:
   # This is the DURATION half only — Strength/Weakness damage VALUES are separate.
   # Default OFF (era-exact no-op when disabled).
   old-potion-durations: false
+  # Restores the pre-1.9 (1.8) Strength/Weakness damage VALUES. 1.9 weakened
+  # Strength and strengthened Weakness: era Strength was MULTIPLICATIVE on the
+  # weapon base (factor 1 + 2.5*(amp+1) — Strength I x3.5, Strength II x6.0, far
+  # stronger than 1.9's flat +3*(amp+1)), and era Weakness subtracted only
+  # 2.0*(amp+1) (1.9 doubled it to 4.0*(amp+1)). Era values pinned from
+  # decompiled 1.8.9 (pe.java/rv.java); OCM's own defaults (Strength 1.3,
+  # Weakness -0.5) are NOT era-exact and are deliberately not used. Applied to
+  # the weapon base BEFORE the crit x1.5 and BEFORE the Sharpness additive
+  # (era order, wn.java:761-764), clamped >= 0. Implemented in the fast-path
+  # DamageCalculator. SCOPE: fast-path PvP melee only (the dominant case) — mob
+  # attacks and fast-path-off hits keep vanilla Strength/Weakness, and when OCM
+  # shapes the damage these era values are skipped. This is the VALUES half only;
+  # potion DURATIONS are the separate old-potion-durations module.
+  # Default OFF (era-exact no-op when disabled).
+  old-potion-values: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #

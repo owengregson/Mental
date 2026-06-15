@@ -89,6 +89,8 @@ class MentalConfigTest {
         assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
         assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
         assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
+        assertEquals(PotionValueSettings.DEFAULTS, config.potionValues());
+        assertFalse(config.potionValues().enabled(), "old-potion-values defaults OFF");
     }
 
     @Test
@@ -115,6 +117,7 @@ class MentalConfigTest {
         assertEquals(ArmourStrengthSettings.DEFAULTS, config.armourStrength());
         assertEquals(ArmourDurabilitySettings.DEFAULTS, config.armourDurability());
         assertEquals(PotionDurationSettings.DEFAULTS, config.potionDuration());
+        assertEquals(PotionValueSettings.DEFAULTS, config.potionValues());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());
@@ -306,6 +309,20 @@ class MentalConfigTest {
         assertFalse(config.wtap().enabled());
         assertTrue(config.hitReg().enabled());
         assertTrue(config.fishingKnockback().enabled());
+    }
+
+    @Test
+    void oldPotionValuesFlagTogglesOn() throws Exception {
+        MentalConfig config = new MentalConfig();
+
+        List<String> warnings = config.reload(sources(
+                """
+                modules:
+                  old-potion-values: true
+                """, "", "", "", Map.of()));
+
+        assertTrue(warnings.isEmpty(), () -> "unexpected warnings: " + warnings);
+        assertTrue(config.potionValues().enabled());
     }
 
     @Test
