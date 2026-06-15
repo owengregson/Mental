@@ -57,6 +57,21 @@ modules:
   # particle via a netty packet intercept. Both effects are controlled by this
   # one flag. Default OFF (era-exact no-op when disabled).
   disable-sword-sweep: false
+  # Makes the listed items uncraftable by clearing the crafting result slot when
+  # the output would be a blocked material. SHIELD is the default blocked item —
+  # complements disable-offhand, since the shield can only enter the off-hand
+  # slot via the crafting table output on modern Paper. Configure the blocked
+  # list in the disable-crafting section below. Default OFF (era-exact no-op).
+  disable-crafting: false
+
+# Items that become uncraftable when modules.disable-crafting is true.
+# Any material name recognised by Bukkit's Material.matchMaterial() is valid.
+# Unknown names are skipped with a config warning. SHIELD is the canonical
+# default — it is the only 1.9 item a 1.7/1.8 server needs to block from the
+# crafting table; remove it or add others to taste. Unrecognised names warn on
+# reload and are skipped — the rest of the list still applies.
+#disable-crafting:
+#  items: [SHIELD]
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

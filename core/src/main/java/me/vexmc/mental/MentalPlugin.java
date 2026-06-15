@@ -42,6 +42,7 @@ import me.vexmc.mental.module.rules.cooldown.AttackCooldownModule;
 import me.vexmc.mental.module.rules.cooldown.CooldownSpoofListener;
 import me.vexmc.mental.module.rules.sound.AttackSoundListener;
 import me.vexmc.mental.module.rules.sound.AttackSoundModule;
+import me.vexmc.mental.module.rules.crafting.DisableCraftingModule;
 import me.vexmc.mental.module.rules.sweep.SweepModule;
 import me.vexmc.mental.module.rules.sweep.SweepParticleListener;
 import me.vexmc.mental.platform.SchedulingFactory;
@@ -292,6 +293,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new AttackCooldownModule(services));
         modules.register(new AttackSoundModule(services));
         modules.register(new SweepModule(services));
+        modules.register(new DisableCraftingModule(services));
     }
 
     private void registerCommands() {

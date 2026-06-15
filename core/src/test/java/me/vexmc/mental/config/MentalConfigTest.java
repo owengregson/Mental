@@ -81,6 +81,7 @@ class MentalConfigTest {
         assertEquals(AnticheatSettings.DEFAULTS, config.anticheat());
         assertEquals(CompatibilitySettings.DEFAULTS, config.compatibility());
         assertEquals(DebugSettings.DEFAULTS, config.debug());
+        assertEquals(CraftingSettings.DEFAULTS, config.crafting());
     }
 
     @Test
@@ -99,6 +100,7 @@ class MentalConfigTest {
         assertEquals(AnticheatSettings.DEFAULTS, config.anticheat());
         assertEquals(CompatibilitySettings.DEFAULTS, config.compatibility());
         assertEquals(DebugSettings.DEFAULTS, config.debug());
+        assertEquals(CraftingSettings.DEFAULTS, config.crafting());
 
         KnockbackSettings knockback = config.knockback();
         assertTrue(knockback.enabled());
