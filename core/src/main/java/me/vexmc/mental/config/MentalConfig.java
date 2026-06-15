@@ -40,7 +40,8 @@ public final class MentalConfig {
             @NotNull PotionDurationSettings potionDuration,
             @NotNull PotionValueSettings potionValues,
             @NotNull CritSettings crit,
-            @NotNull ToolDurabilitySettings toolDurability) {
+            @NotNull ToolDurabilitySettings toolDurability,
+            @NotNull SwordBlockingSettings swordBlocking) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -67,7 +68,8 @@ public final class MentalConfig {
                     PotionDurationSettings.DEFAULTS,
                     PotionValueSettings.DEFAULTS,
                     CritSettings.DEFAULTS,
-                    ToolDurabilitySettings.DEFAULTS);
+                    ToolDurabilitySettings.DEFAULTS,
+                    SwordBlockingSettings.DEFAULTS);
         }
     }
 
@@ -118,7 +120,8 @@ public final class MentalConfig {
                 new PotionDurationSettings(modules.flag("old-potion-durations", false)),
                 new PotionValueSettings(modules.flag("old-potion-values", false)),
                 new CritSettings(modules.flag("old-critical-hits", false)),
-                new ToolDurabilitySettings(modules.flag("old-tool-durability", false)));
+                new ToolDurabilitySettings(modules.flag("old-tool-durability", false)),
+                new SwordBlockingSettings(modules.flag("sword-blocking", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -221,6 +224,10 @@ public final class MentalConfig {
 
     public @NotNull ToolDurabilitySettings toolDurability() {
         return snapshot.get().toolDurability();
+    }
+
+    public @NotNull SwordBlockingSettings swordBlocking() {
+        return snapshot.get().swordBlocking();
     }
 
     private static @NotNull ConfigReader reader(
