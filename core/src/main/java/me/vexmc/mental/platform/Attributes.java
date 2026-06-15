@@ -32,6 +32,8 @@ public final class Attributes {
             resolve("ENTITY_INTERACTION_RANGE", "PLAYER_ENTITY_INTERACTION_RANGE");
     private static final @Nullable Attribute MAX_HEALTH =
             resolve("MAX_HEALTH", "GENERIC_MAX_HEALTH");
+    private static final @Nullable Attribute ARMOR =
+            resolve("ARMOR", "GENERIC_ARMOR");
 
     private Attributes() {}
 
@@ -66,6 +68,18 @@ public final class Attributes {
      */
     public static @Nullable Attribute maxHealth() {
         return MAX_HEALTH;
+    }
+
+    /**
+     * {@code ARMOR} (modern, 1.21.3+) / {@code GENERIC_ARMOR} (legacy,
+     * 1.17.1–1.21.2) — present on all supported versions. The summed worn-armour
+     * defence points; the era model reads this directly and ignores
+     * {@code ARMOR_TOUGHNESS} (era has no toughness).
+     *
+     * <p>Prefer {@link #valueOr} with a fallback of 0.0 (no armour).</p>
+     */
+    public static @Nullable Attribute armor() {
+        return ARMOR;
     }
 
     /** The attribute's current value, or {@code fallback} when absent on this entity or version. */

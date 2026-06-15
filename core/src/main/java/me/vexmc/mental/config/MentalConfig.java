@@ -34,7 +34,8 @@ public final class MentalConfig {
             @NotNull OffhandSettings offhand,
             @NotNull GoldenAppleSettings goldenApple,
             @NotNull EnderPearlSettings enderPearl,
-            @NotNull RegenSettings regen) {
+            @NotNull RegenSettings regen,
+            @NotNull ArmourStrengthSettings armourStrength) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -55,7 +56,8 @@ public final class MentalConfig {
                     OffhandSettings.DEFAULTS,
                     GoldenAppleSettings.DEFAULTS,
                     EnderPearlSettings.DEFAULTS,
-                    RegenSettings.DEFAULTS);
+                    RegenSettings.DEFAULTS,
+                    ArmourStrengthSettings.DEFAULTS);
         }
     }
 
@@ -100,7 +102,8 @@ public final class MentalConfig {
                         reader(sources.main(), "disable-offhand", "config.yml", issues)),
                 new GoldenAppleSettings(modules.flag("old-golden-apples", false)),
                 new EnderPearlSettings(modules.flag("disable-enderpearl-cooldown", false)),
-                new RegenSettings(modules.flag("old-player-regen", false)));
+                new RegenSettings(modules.flag("old-player-regen", false)),
+                new ArmourStrengthSettings(modules.flag("old-armour-strength", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -179,6 +182,10 @@ public final class MentalConfig {
 
     public @NotNull RegenSettings regen() {
         return snapshot.get().regen();
+    }
+
+    public @NotNull ArmourStrengthSettings armourStrength() {
+        return snapshot.get().armourStrength();
     }
 
     private static @NotNull ConfigReader reader(

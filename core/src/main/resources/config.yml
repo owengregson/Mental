@@ -93,6 +93,20 @@ modules:
   # 1.8.9 FoodStats (xg.java). Each player gets its own per-player EntityScheduler
   # task — Folia-correct, zero global player loops. Default OFF (era-exact no-op).
   old-player-regen: false
+  # Restores the 1.8 flat armour damage reduction (4% per armour point, NO
+  # toughness), replacing the modern toughness-based model. Applies the full era
+  # pipeline in order: armour points -> resistance -> armour-enchant EPF ->
+  # absorption. Covers all armour-respecting damage (mob melee, projectiles,
+  # explosions, fire, lava, contact); armour-ignoring causes (fall, drowning,
+  # void, magic, ...) are excluded exactly as 1.8 NMS did. EPF is computed
+  # deterministically (no per-hit randomness) since clients never predict armour,
+  # so the jitter is invisible. Era values pinned from decompiled 1.8.9 (pr.java/
+  # acr.java/ack.java). Implemented by overriding the granular damage modifiers
+  # (ARMOR/RESISTANCE/MAGIC/ABSORPTION) at LOWEST priority — the same proven
+  # cross-version mechanism OCM uses (the deprecated modifier setter only throws
+  # when a modifier is absent, so we only ever write applicable ones).
+  # Default OFF (era-exact no-op when disabled).
+  old-armour-strength: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
