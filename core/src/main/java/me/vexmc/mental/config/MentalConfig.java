@@ -27,7 +27,8 @@ public final class MentalConfig {
             @NotNull AnticheatSettings anticheat,
             @NotNull CompatibilitySettings compatibility,
             @NotNull DebugSettings debug,
-            @NotNull CooldownSettings cooldown) {
+            @NotNull CooldownSettings cooldown,
+            @NotNull AttackSoundSettings attackSound) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -41,7 +42,8 @@ public final class MentalConfig {
                     AnticheatSettings.DEFAULTS,
                     CompatibilitySettings.DEFAULTS,
                     DebugSettings.DEFAULTS,
-                    CooldownSettings.DEFAULTS);
+                    CooldownSettings.DEFAULTS,
+                    AttackSoundSettings.DEFAULTS);
         }
     }
 
@@ -75,7 +77,8 @@ public final class MentalConfig {
                 AnticheatSettings.parse(reader(sources.main(), "anticheat", "config.yml", issues)),
                 CompatibilitySettings.parse(reader(sources.main(), "compatibility", "config.yml", issues)),
                 DebugSettings.parse(reader(sources.main(), "debug", "config.yml", issues)),
-                new CooldownSettings(modules.flag("attack-cooldown", false)));
+                new CooldownSettings(modules.flag("attack-cooldown", false)),
+                new AttackSoundSettings(modules.flag("disable-attack-sounds", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -126,6 +129,10 @@ public final class MentalConfig {
 
     public @NotNull CooldownSettings cooldown() {
         return snapshot.get().cooldown();
+    }
+
+    public @NotNull AttackSoundSettings attackSound() {
+        return snapshot.get().attackSound();
     }
 
     private static @NotNull ConfigReader reader(

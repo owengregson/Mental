@@ -47,6 +47,11 @@ modules:
   # stays at vanilla 4.0 — no plugin conflicts, no teardown on disconnect, Folia-safe.
   # Default OFF (era-exact no-op when disabled).
   attack-cooldown: false
+  # Suppress the 1.9 swing-result sounds (entity.player.attack.crit/knockback/
+  # nodamage/strong/sweep/weak). None of these existed in 1.7.10 or 1.8.9 —
+  # combat on those versions was silent on every swing. Cosmetic only; no
+  # gameplay state is touched. Default OFF (era-exact no-op when disabled).
+  disable-attack-sounds: false
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

@@ -40,6 +40,8 @@ import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.projectile.ProjectileKnockbackModule;
 import me.vexmc.mental.module.rules.cooldown.AttackCooldownModule;
 import me.vexmc.mental.module.rules.cooldown.CooldownSpoofListener;
+import me.vexmc.mental.module.rules.sound.AttackSoundListener;
+import me.vexmc.mental.module.rules.sound.AttackSoundModule;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
@@ -164,6 +166,14 @@ public final class MentalPlugin extends JavaPlugin {
                 .registerListener(new CooldownSpoofListener(config),
                         PacketListenerPriority.NORMAL);
 
+        // Cancels SOUND_EFFECT / ENTITY_SOUND_EFFECT packets whose sound name
+        // falls in the entity.player.attack.* family (added in 1.9; absent
+        // entirely in 1.7/1.8).  Cosmetic only — no game state is touched.
+        // Registered for the plugin lifetime; the listener gates on the flag.
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new AttackSoundListener(config),
+                        PacketListenerPriority.NORMAL);
+
         PacketEvents.getAPI().init();
 
         getLogger().info(() -> "Mental enabled — server " + environment.describe()
@@ -271,6 +281,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new FishingRodVelocityModule(services));
         modules.register(new ProjectileKnockbackModule(services, knockbackPipeline));
         modules.register(new AttackCooldownModule(services));
+        modules.register(new AttackSoundModule(services));
     }
 
     private void registerCommands() {
