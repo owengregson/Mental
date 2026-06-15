@@ -42,6 +42,8 @@ import me.vexmc.mental.module.rules.cooldown.AttackCooldownModule;
 import me.vexmc.mental.module.rules.cooldown.CooldownSpoofListener;
 import me.vexmc.mental.module.rules.sound.AttackSoundListener;
 import me.vexmc.mental.module.rules.sound.AttackSoundModule;
+import me.vexmc.mental.module.rules.sweep.SweepModule;
+import me.vexmc.mental.module.rules.sweep.SweepParticleListener;
 import me.vexmc.mental.platform.SchedulingFactory;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
@@ -174,6 +176,13 @@ public final class MentalPlugin extends JavaPlugin {
                 .registerListener(new AttackSoundListener(config),
                         PacketListenerPriority.NORMAL);
 
+        // Cancels outbound PARTICLE packets whose particle type is sweep_attack
+        // (minecraft:sweep_attack — added in 1.9 with the sweep mechanic).
+        // Registered for the plugin lifetime; the listener gates on the flag.
+        PacketEvents.getAPI().getEventManager()
+                .registerListener(new SweepParticleListener(config),
+                        PacketListenerPriority.NORMAL);
+
         PacketEvents.getAPI().init();
 
         getLogger().info(() -> "Mental enabled — server " + environment.describe()
@@ -282,6 +291,7 @@ public final class MentalPlugin extends JavaPlugin {
         modules.register(new ProjectileKnockbackModule(services, knockbackPipeline));
         modules.register(new AttackCooldownModule(services));
         modules.register(new AttackSoundModule(services));
+        modules.register(new SweepModule(services));
     }
 
     private void registerCommands() {

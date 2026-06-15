@@ -28,7 +28,8 @@ public final class MentalConfig {
             @NotNull CompatibilitySettings compatibility,
             @NotNull DebugSettings debug,
             @NotNull CooldownSettings cooldown,
-            @NotNull AttackSoundSettings attackSound) {
+            @NotNull AttackSoundSettings attackSound,
+            @NotNull SweepSettings sweep) {
 
         static @NotNull Snapshot defaults() {
             return new Snapshot(
@@ -43,7 +44,8 @@ public final class MentalConfig {
                     CompatibilitySettings.DEFAULTS,
                     DebugSettings.DEFAULTS,
                     CooldownSettings.DEFAULTS,
-                    AttackSoundSettings.DEFAULTS);
+                    AttackSoundSettings.DEFAULTS,
+                    SweepSettings.DEFAULTS);
         }
     }
 
@@ -78,7 +80,8 @@ public final class MentalConfig {
                 CompatibilitySettings.parse(reader(sources.main(), "compatibility", "config.yml", issues)),
                 DebugSettings.parse(reader(sources.main(), "debug", "config.yml", issues)),
                 new CooldownSettings(modules.flag("attack-cooldown", false)),
-                new AttackSoundSettings(modules.flag("disable-attack-sounds", false)));
+                new AttackSoundSettings(modules.flag("disable-attack-sounds", false)),
+                new SweepSettings(modules.flag("disable-sword-sweep", false)));
         snapshot.set(next);
         return issues.all();
     }
@@ -133,6 +136,10 @@ public final class MentalConfig {
 
     public @NotNull AttackSoundSettings attackSound() {
         return snapshot.get().attackSound();
+    }
+
+    public @NotNull SweepSettings sweep() {
+        return snapshot.get().sweep();
     }
 
     private static @NotNull ConfigReader reader(

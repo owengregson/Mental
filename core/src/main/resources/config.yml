@@ -52,6 +52,11 @@ modules:
   # combat on those versions was silent on every swing. Cosmetic only; no
   # gameplay state is touched. Default OFF (era-exact no-op when disabled).
   disable-attack-sounds: false
+  # Disables the 1.9 sweep attack: cancels ENTITY_SWEEP_ATTACK damage events so
+  # swords deal single-target damage as in 1.7/1.8, and hides the sweep_attack
+  # particle via a netty packet intercept. Both effects are controlled by this
+  # one flag. Default OFF (era-exact no-op when disabled).
+  disable-sword-sweep: false
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky
