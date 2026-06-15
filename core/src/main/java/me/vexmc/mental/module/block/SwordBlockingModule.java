@@ -74,6 +74,18 @@ import org.jetbrains.annotations.NotNull;
  * <p>A blocked hit still knocks the victim FULL — only the DAMAGE is reduced.
  * Mental owns knockback; this module never cancels the event or touches velocity.</p>
  *
+ * <h2>Block-hitting sprint reset (era truth)</h2>
+ * <p>In 1.7/1.8 starting a block dropped the attacker's sprint and the re-engage
+ * on release re-earned the sprint knockback bonus on the next hit — the heart of
+ * block-hitting. Modern clients keep the sprint flag through an item-use block
+ * (you are slowed yet still flagged sprinting — visible as sprint particles while
+ * blocking), so that STOP/START never crosses the wire and the reset silently
+ * stopped happening. {@link #resetSprintForBlock} re-supplies it on the
+ * right-click — but only when the attacker's CLIENT is genuinely sprinting (the
+ * raw client flag, which survives Mental's post-hit {@code setSprinting(false)};
+ * see {@link me.vexmc.mental.module.knockback.SprintTracker#isClientSprinting}) —
+ * so a stationary, defensive block never gains a phantom bonus.</p>
+ *
  * <h2>Honest limit</h2>
  * <p>This cannot be byte-identical to the 1.7 CLIENT (the lowered-sword pose is a
  * client asset). The component tiers deliver server BEHAVIOURAL parity plus a
@@ -177,6 +189,14 @@ public final class SwordBlockingModule extends CombatModule implements Listener 
         if (!SwordBlockComponents.isSword(mainHand.getType())) {
             return;
         }
+
+        // 1.7/1.8 block-hitting reset sprint: starting a block dropped the
+        // attacker's sprint and the re-engage on release re-earned the sprint
+        // knockback bonus on the next hit. Modern clients keep the sprint flag
+        // through an item-use block (slowed, yet still flagged sprinting), so
+        // that STOP/START never crosses the wire and the reset silently stopped
+        // happening. Re-supply it for every tier.
+        resetSprintForBlock(player);
 
         if (offhandTier()) {
             // Tier C: inject the off-hand shield (the only path that touches the off-hand).
@@ -382,6 +402,29 @@ public final class SwordBlockingModule extends CombatModule implements Listener 
     /* ------------------------------------------------------------------ */
     /*  Helpers                                                            */
     /* ------------------------------------------------------------------ */
+
+    /**
+     * Re-arms the sprint knockback bonus as a 1.7/1.8 sword block did, but only
+     * when the attacker's CLIENT is genuinely sprinting (the raw client flag,
+     * which survives Mental's post-hit {@code setSprinting(false)} — a stationary
+     * defensive block must never grant a phantom bonus). Touches Mental's sprint
+     * ledgers via {@link SprintTracker#armSprintReset}; the server flag is also
+     * re-synced to the client's true (sprinting) state so the snapshot read sees
+     * it when {@code wtap-registration} is off. No client desync — the client IS
+     * sprinting — and a later real STOP_SPRINTING still overrides it.
+     */
+    private void resetSprintForBlock(@NotNull Player player) {
+        java.util.UUID id = player.getUniqueId();
+        if (!services.sprintTracker().isClientSprinting(id)) {
+            return;
+        }
+        services.sprintTracker().armSprintReset(id, System.nanoTime());
+        if (!player.isSprinting()) {
+            player.setSprinting(true);
+        }
+        debug.log(() -> "sword-blocking re-armed the sprint bonus (block-hit sprint reset) for "
+                + player.getName());
+    }
 
     /** Eagerly applies the block component to the player's main-hand sword (no-op otherwise). */
     private void applyToMainHand(@NotNull Player player) {

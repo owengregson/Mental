@@ -206,4 +206,51 @@ class SprintTrackerTest {
         tracker.stampAttackVerdict(attacker, true, Boolean.TRUE, t(0));
         assertNull(tracker.takeAttackVerdict(attacker, t(0) + 151_000_000L));
     }
+
+    /* ------------------------------------------------------------------ */
+    /*  Block-hitting sprint reset (1.7/1.8)                                */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void clientSprintFlagTracksRawStartStopAndSurvivesClears() {
+        SprintTracker tracker = new SprintTracker();
+        UUID attacker = UUID.randomUUID();
+
+        assertFalse(tracker.isClientSprinting(attacker));
+        tracker.onWireSprint(attacker, true, t(0));
+        assertTrue(tracker.isClientSprinting(attacker));
+
+        // The post-hit clears that wipe the wire view must NOT touch the raw
+        // client flag — it is the only signal that the client is still
+        // sprinting after Mental's own setSprinting(false).
+        tracker.clearWireSprint(attacker, t(5));
+        assertTrue(tracker.isClientSprinting(attacker), "clearWireSprint leaves the raw flag");
+
+        tracker.onWireSprint(attacker, false, t(10)); // a real STOP clears it
+        assertFalse(tracker.isClientSprinting(attacker));
+    }
+
+    @Test
+    void armSprintResetReEngagesAfterAPostHitClear() {
+        SprintTracker tracker = new SprintTracker();
+        UUID attacker = UUID.randomUUID();
+        tracker.consultWire(true);
+
+        // Sprint, then a sprint hit clears the wire (Mental mirrors vanilla's
+        // post-hit setSprinting(false)); a held-sprint follow-up reads plain.
+        tracker.onWireSprint(attacker, true, t(0));
+        tracker.clearWireSprint(attacker, t(5));
+        SprintTracker.WireVerdict afterHit = tracker.peekWire(attacker);
+        assertNotNull(afterHit);
+        assertFalse(afterHit.sprinting(), "cleared after the sprint hit");
+
+        // Block-hitting re-engages: the next hit sees sprinting + fresh again,
+        // exactly as the era's block→re-sprint did.
+        tracker.armSprintReset(attacker, t(10));
+        SprintTracker.WireVerdict afterBlock = tracker.peekWire(attacker);
+        assertNotNull(afterBlock);
+        assertTrue(afterBlock.sprinting(), "block re-armed the sprint flag");
+        assertTrue(afterBlock.fresh(), "block re-armed freshness too");
+        assertTrue(tracker.consumeFresh(attacker), "the Bukkit freshness ledger is armed as well");
+    }
 }

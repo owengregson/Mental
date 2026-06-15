@@ -67,6 +67,22 @@ construction and must keep doing so:
 - A real victim's walk/jump never entered the legacy server's motion fields
   — held input is integrated by the client ON TOP of the knock packet
 
+**The one exception that needs server-side reconstruction — block-hitting's
+sprint reset.** In 1.7/1.8 starting a block dropped the sprint flag (the client
+sent STOP_SPRINTING), and the re-engage on release re-armed the sprint KB bonus
+— that's why block-hitting maintained the bonus like an easy w-tap. Modern
+clients (1.17+) KEEP the sprint flag through an item-use block (you're slowed
+but still flagged sprinting — visible as sprint particles while blocking), so
+that STOP/START never crosses the wire and block-hitting silently stops
+resetting sprint. Mental reconstructs it: `SwordBlockingModule.resetSprintForBlock`
+re-arms the sprint ledgers on the block right-click via
+`SprintTracker.armSprintReset`, gated on the RAW client sprint flag
+(`SprintTracker.isClientSprinting` — the only signal that survives Mental's own
+post-hit `setSprinting(false)`) so a stationary defensive block never gains a
+phantom bonus. NOTE the local-player sprint-particle visual during a block is
+client-authoritative rendering and cannot be removed server-side (same family as
+the right-click "item rises" cosmetic) — only the FUNCTIONAL reset is restored.
+
 ## Myths (do not implement, do not "fix")
 
 - Victim sprint-key spamming reducing knockback: placebo (the flag changes no
