@@ -5,10 +5,16 @@ import java.util.List;
 import me.vexmc.mental.MentalPlugin;
 import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.common.scheduling.TaskHandle;
+import me.vexmc.mental.tester.suite.BlockingSuite;
 import me.vexmc.mental.tester.suite.BootSuite;
 import me.vexmc.mental.tester.suite.CommandSuite;
+import me.vexmc.mental.tester.suite.ConsumableRulesSuite;
+import me.vexmc.mental.tester.suite.CosmeticSmokeSuite;
+import me.vexmc.mental.tester.suite.DamageRulesSuite;
 import me.vexmc.mental.tester.suite.EraParitySuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
+import me.vexmc.mental.tester.suite.HitboxSuite;
+import me.vexmc.mental.tester.suite.InventoryRulesSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
 import me.vexmc.mental.tester.suite.OcmCoexistenceSuite;
 import me.vexmc.mental.tester.suite.ProfileSuite;
@@ -60,6 +66,15 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
                 suite.addAll(EraParitySuite.tests(mental, this));
+                // The ported OCM "combat rules" modules (default OFF) — each
+                // suite enables its module, asserts era behaviour, and toggles
+                // it back off, so they run cleanly alongside the era suites.
+                suite.addAll(DamageRulesSuite.tests(mental, this));
+                suite.addAll(ConsumableRulesSuite.tests(mental, this));
+                suite.addAll(InventoryRulesSuite.tests(mental, this));
+                suite.addAll(BlockingSuite.tests(mental, this));
+                suite.addAll(HitboxSuite.tests(mental, this));
+                suite.addAll(CosmeticSmokeSuite.tests(mental, this));
             }
             new TestHarness(this, scheduling).run(suite);
         });

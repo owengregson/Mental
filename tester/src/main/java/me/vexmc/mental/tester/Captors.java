@@ -21,6 +21,7 @@ public final class Captors implements Listener {
 
     private final Map<UUID, Vector> velocities = new ConcurrentHashMap<>();
     private final Map<UUID, Double> damages = new ConcurrentHashMap<>();
+    private final Map<UUID, Double> finalDamages = new ConcurrentHashMap<>();
     private final Map<UUID, String> projectileHits = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> knockbackApplies = new ConcurrentHashMap<>();
 
@@ -42,6 +43,10 @@ public final class Captors implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(@NotNull EntityDamageByEntityEvent event) {
         damages.put(event.getEntity().getUniqueId(), event.getDamage());
+        // getDamage() is the BASE; getFinalDamage() is after every modifier
+        // (armour, resistance, enchant, absorption) — the value a defensive
+        // module like old-armour-strength actually shapes.
+        finalDamages.put(event.getEntity().getUniqueId(), event.getFinalDamage());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -70,6 +75,10 @@ public final class Captors implements Listener {
         return damages.get(entity);
     }
 
+    public @Nullable Double finalDamageOf(@NotNull UUID entity) {
+        return finalDamages.get(entity);
+    }
+
     public @Nullable String projectileHitOn(@NotNull UUID entity) {
         return projectileHits.get(entity);
     }
@@ -81,6 +90,7 @@ public final class Captors implements Listener {
     public void reset() {
         velocities.clear();
         damages.clear();
+        finalDamages.clear();
         knockbackApplies.clear();
     }
 }
