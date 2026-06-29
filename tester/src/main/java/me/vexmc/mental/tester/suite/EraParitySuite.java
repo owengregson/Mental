@@ -280,8 +280,7 @@ public final class EraParitySuite {
             }
 
             Location start = context.sync(() -> {
-                context.expect(mental.services().knockbackProfiles()
-                                .setOverride(victim.player(), profile),
+                context.expect(mental.management().setGlobalProfile(profile),
                         "preset '" + profile + "' missing");
                 attacker.player().setSprinting(shape.sprintAttacker);
                 victim.player().setSprinting(shape.sprintVictim);

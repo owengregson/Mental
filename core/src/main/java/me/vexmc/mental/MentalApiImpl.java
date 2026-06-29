@@ -8,7 +8,6 @@ import me.vexmc.mental.engine.ModuleRegistry;
 import me.vexmc.mental.module.compensation.LatencyCompensationModule;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 record MentalApiImpl(@NotNull MentalPlugin plugin, @NotNull ModuleRegistry modules)
         implements Mental.MentalApi {
@@ -36,13 +35,13 @@ record MentalApiImpl(@NotNull MentalPlugin plugin, @NotNull ModuleRegistry modul
     }
 
     @Override
-    public @Nullable String knockbackProfileOverride(@NotNull Player player) {
-        return plugin.services().knockbackProfiles().override(player.getUniqueId());
+    public @NotNull String knockbackProfile() {
+        return plugin.services().knockbackProfiles().defaultProfileName();
     }
 
     @Override
-    public boolean setKnockbackProfile(@NotNull Player player, @Nullable String profile) {
-        return plugin.services().knockbackProfiles().setOverride(player, profile);
+    public boolean setKnockbackProfile(@NotNull String profile) {
+        return plugin.management().setGlobalProfile(profile);
     }
 
     @Override

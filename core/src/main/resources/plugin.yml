@@ -12,7 +12,7 @@ softdepend: [OldCombatMechanics]
 
 commands:
   mental:
-    description: Mental root command — dashboard, modules, knockback profiles, ping, debug, reload.
+    description: Open the Mental management menu in-game; reload the config from the console.
     aliases: [mtl]
     permission: mental.command.use
 
@@ -22,26 +22,12 @@ permissions:
     default: op
     children:
       mental.command.use: true
-      mental.command.module: true
-      mental.command.knockback: true
       mental.command.reload: true
-      mental.command.debug: true
-      mental.command.ping: true
   mental.command.use:
-    description: Use /mental, the dashboard, help, and version.
-    default: op
-  mental.command.module:
-    description: Toggle and inspect modules.
-    default: op
-  mental.command.knockback:
-    description: List, inspect, and assign knockback profiles.
+    # Opens the in-game management menu — every setting (modules, the global
+    # knockback profile, compatibility, debug) is administered there.
+    description: Open the Mental management menu.
     default: op
   mental.command.reload:
-    description: Reload the configuration.
-    default: op
-  mental.command.debug:
-    description: Control debug logging and subscribe to debug output.
-    default: op
-  mental.command.ping:
-    description: View measured ping statistics.
+    description: Reload the configuration (console fallback — the menu has a reload button).
     default: op

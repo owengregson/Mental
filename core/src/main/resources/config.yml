@@ -10,9 +10,11 @@
 #    profiles/                one file per knockback profile; presets are
 #                             regenerated when missing, edits are yours
 #
-#  Every module can also be toggled live: /mental module <name> <on|off>
-#  Reloads (/mental reload) swap the whole configuration atomically — no
-#  hit is ever processed against a half-applied config.
+#  Everything here is managed in-game through the Mental menu — run /mental
+#  (op only): module switches, the server-wide knockback profile, anticheat
+#  and OCM coordination, and debug. Changes apply atomically — no hit is ever
+#  processed against a half-applied config. The console can still reload with
+#  /mental reload. Editing files by hand still works; reload to apply.
 # ──────────────────────────────────────────────────────────────────────────
 config-version: 2
 
@@ -312,8 +314,8 @@ compatibility:
   #   ignore — pretend OCM is absent; both plugins will fight. Not advised.
   old-combat-mechanics: auto
 
-# Verbose logging. Enable globally, then pick categories. Subscribed admins
-# (/mental debug subscribe) receive lines in-game as well.
+# Verbose logging. Enable globally, then pick categories. Admins can also
+# subscribe to live in-game output from the Debug screen of the /mental menu.
 debug:
   enabled: false
   categories:

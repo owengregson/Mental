@@ -15,10 +15,13 @@ description: Use when changing the knockback engine, profile schema, presets, or
   matching a superseded bundled revision verbatim (`SupersededPresets`,
   value-equality not bytes) is upgraded in place when research corrects a
   preset. Any tuned value freezes the file forever.
-- Resolution is by the **VICTIM**: player override → per-world map
-  (knockback.yml) → default. Overrides survive world changes, clear on quit,
-  validate against the live set; `PlayerKnockbackProfileChangeEvent` fires on
-  change (owning thread). The netty pre-send reads the profile FROZEN into
+- Knockback is **GLOBAL** (since 2.1.0): resolution is by the VICTIM's
+  per-world map (knockback.yml) → server default. There is NO per-player
+  override — the override map, `/mental kb set <player>`, and the per-player
+  API/`PlayerKnockbackProfileChangeEvent` were removed when management moved
+  into the in-game GUI. The default is set through the menu, which writes
+  `knockback.profile` and reloads; `KnockbackProfileChangeEvent` (no player)
+  fires on a global change. The netty pre-send reads the profile FROZEN into
   the victim's per-tick snapshot, so prediction and truth share one profile.
 - Config is split by concern: config.yml (module switches + policy),
   knockback.yml (selection + rod/fishing/projectile), hit-registration.yml,
