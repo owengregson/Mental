@@ -16,8 +16,17 @@ import java.util.List;
  * {@code delay = (1 / attack_speed) * 20}; at 1024.0 the delay is
  * {@code ~0.02} ticks — effectively zero — so {@code getAttackStrengthScale}
  * always returns 1.0: no greyed-out swing, no charge bar.
- * The server attribute is untouched (stays at vanilla 4.0) so no plugin
- * conflict arises and no teardown is required on disconnect.
+ *
+ * <p>This is only the CLIENT overlay half of cooldown removal. The DAMAGE ramp
+ * lives server-side ({@code Player#attack} scales by the attack-strength), so
+ * {@link ServerAttackSpeed} raises the player's SERVER {@code attack_speed} base
+ * to this same {@link #FULL_CHARGE_ATTACK_SPEED} (with quit/disable teardown).
+ * Once it has, the server's own {@code UPDATE_ATTRIBUTES} already carries the
+ * high value to the client, so this spoof is mostly a join-window backstop —
+ * but it stays registered so the overlay is suppressed even on that first sync.
+ * See {@link AttackCooldownModule} for the two-halves design and
+ * {@link ServerAttackSpeed} for why a client-only spoof left mob / fast-path-off
+ * hits scaled to ~20%.
  *
  * <p>Era truth: 1.7.10 and 1.8.9 had no attack-speed attribute at all
  * ({@code generic.attackSpeed} does not exist in 1.8.9 GenericAttributes);
