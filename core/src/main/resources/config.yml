@@ -40,11 +40,17 @@ modules:
   rod-velocity: true
   # 1.7.10 projectile knockback: snowballs, eggs, pearls, and arrows.
   projectile-knockback: true
-  # Remove the 1.9 attack cooldown and its client-side charge bar / greyed-swing
-  # animation. 1.7/1.8 had no attack-speed attribute at all; this spoof intercepts
-  # the outbound UPDATE_ATTRIBUTES packet and rewrites the player's own attack_speed
-  # to 1024.0 so the client's cooldown delay rounds to zero. The server attribute
-  # stays at vanilla 4.0 — no plugin conflicts, no teardown on disconnect, Folia-safe.
+  # Remove the 1.9 attack cooldown. 1.7/1.8 had no attack-speed attribute at all.
+  # Two halves: (1) the client charge bar / greyed-swing is suppressed by rewriting
+  # the outbound UPDATE_ATTRIBUTES attack_speed to 1024.0 (client delay rounds to
+  # zero); (2) the SERVER attack_speed base is raised to 1024.0 too, so vanilla
+  # Player#attack deals full-charge damage on every swing. Half (2) is what makes
+  # spam-clicking deal full damage on hits Mental's fast path does NOT own — a mob
+  # on Folia, or any hit while fast-path is off — which were otherwise scaled to
+  # ~20% per the 1.9 cooldown ramp. The server base is captured and restored on
+  # quit/disable (zero-touch). Folia-safe (per-player writes run on the owning
+  # region). NOTE: a full server charge also re-enables 1.9 sweep attacks on the
+  # vanilla path (1.7/1.8 had none) — enable the no-sweep module to suppress them.
   # Default OFF (era-exact no-op when disabled).
   attack-cooldown: false
   # Suppress the 1.9 swing-result sounds (entity.player.attack.crit/knockback/

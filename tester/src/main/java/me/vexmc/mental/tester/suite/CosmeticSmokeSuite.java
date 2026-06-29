@@ -2,6 +2,7 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.List;
 import me.vexmc.mental.MentalPlugin;
+import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -11,6 +12,8 @@ import me.vexmc.mental.tester.fake.FakePlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.jetbrains.annotations.NotNull;
@@ -25,11 +28,13 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p>Why each is smoke-only, and where the real pin lives:</p>
  * <ul>
- *   <li><b>attack-cooldown</b> — the client-side {@code attack_speed} attribute
- *       spoof (value 1024.0, packet-only) only changes the charge-bar overlay
- *       the CLIENT draws for its own entity. A FakePlayer has no client, so the
- *       spoof is unobservable here. Behaviour is unit-pinned in
- *       {@code CooldownSpoofTest} and wire-pinned by the legacy-lab harness.</li>
+ *   <li><b>attack-cooldown</b> — has a SERVER half that IS observable: it raises
+ *       the player's {@code attack_speed} base to full charge so vanilla
+ *       {@code Player#attack} stops scaling spam-clicked hits (the bug a
+ *       client-only spoof left on mob / fast-path-off hits). This suite asserts
+ *       the base is raised on enable and restored on disable, plus a best-effort
+ *       full-damage spam hit. The client charge-overlay half is unit-pinned in
+ *       {@code CooldownSpoofTest}; the damage math in {@code CooldownDamageScalingTest}.</li>
  *   <li><b>disable-attack-sounds</b> — cancels the attack sound packet on send;
  *       a clientless player receives nothing, so the cancel is unobservable
  *       here. Unit-pinned in {@code AttackSoundsTest}.</li>
@@ -66,49 +71,116 @@ public final class CosmeticSmokeSuite {
                         runOldCriticalHits(mental, tester, context)));
     }
 
+    /**
+     * The full-charge value the module writes to the SERVER attack_speed base
+     * (mirrors {@code CooldownSpoof.FULL_CHARGE_ATTACK_SPEED}; that constant lives
+     * in a PacketEvents-importing class the clientless tester must not load, so it
+     * is duplicated here and guarded against drift in {@code CooldownDamageScalingTest}).
+     */
+    private static final double FULL_CHARGE_BASE = 1024.0;
+
+    /**
+     * Behaviour test for the SERVER half of attack-cooldown: enabling the module
+     * raises the attacker's {@code attack_speed} base to full charge (so vanilla
+     * {@code Player#attack} stops scaling spam-clicked hits — the iron-golem bug),
+     * and disabling restores it (zero-touch). A clientless {@link FakePlayer}
+     * attacks server-side through the real {@code Player#attack}, which is exactly
+     * the vanilla path the fix targets, so the full-damage spam hit is observable
+     * here (best-effort, since hit-landing varies for synthetic players).
+     */
     private static void runAttackCooldown(
             MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
         FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
         FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        Attribute attackSpeed = Attributes.attackSpeed();
 
         try {
-            toggleModule(context, "attack-cooldown", true);
-            context.expect(moduleActive(mental, "attack-cooldown"),
-                    "attack-cooldown module failed to enable");
-            // The attack_speed spoof is a client-only overlay change; a
-            // clientless fake player cannot observe it (CooldownSpoofTest +
-            // legacy-lab pin the real behaviour). We only confirm a hit lands.
-            context.note("attack-cooldown spoof is client-only — unobservable clientless; "
-                    + "behaviour unit-pinned in CooldownSpoofTest + legacy-lab");
-
+            // Spawn BEFORE enabling so the module's apply-to-online-players reaches
+            // the fake players (a clientless spawn may not fire PlayerJoinEvent).
             context.syncRun(() -> {
                 Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 2));
+                attacker.player().getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
             });
             context.awaitTicks(5);
 
-            captors.reset();
-            context.syncRun(() -> {
-                victim.player().setNoDamageTicks(0);
-                attacker.attack(victim.player());
-            });
-            context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40,
-                    "a melee hit to land with attack-cooldown enabled");
+            toggleModule(context, "attack-cooldown", true);
+            context.expect(moduleActive(mental, "attack-cooldown"),
+                    "attack-cooldown module failed to enable");
 
-            context.expect(captors.damageOf(victim.uuid()) != null,
-                    "a normal hit must still land with attack-cooldown enabled");
+            if (attackSpeed == null) {
+                context.note("attack_speed attribute absent on this version — server-base half N/A");
+            } else {
+                // The fix: the SERVER attack_speed base must be raised to full
+                // charge. The apply runs on the player's region thread (deferred a
+                // tick on Paper), so give it a few ticks then read on the main thread.
+                context.awaitTicks(5);
+                double enabledBase = context.sync(() -> baseValue(attacker, attackSpeed));
+                context.expect(enabledBase >= FULL_CHARGE_BASE,
+                        "server attack_speed base must be raised to full charge on enable (was "
+                                + enabledBase + ") — a client-only spoof leaves vanilla Player#attack "
+                                + "scaling spam-clicked hits toward 20%");
+
+                // Behaviour: a spam-clicked hit (its attack-strength ticker reset by
+                // the prior swing) must deal full weapon damage, not the 1.9 ramp.
+                double weaponDamage = context.sync(() -> attackDamageValue(attacker));
+                captors.reset();
+                context.syncRun(() -> {
+                    victim.player().setNoDamageTicks(0);
+                    attacker.attack(victim.player());        // charge the strike
+                    victim.player().setNoDamageTicks(0);
+                    attacker.attack(victim.player());        // spam: ticker just reset (last-write-wins)
+                });
+                context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40,
+                        "a spam-clicked hit to land with attack-cooldown enabled");
+                Double spamDamage = captors.damageOf(victim.uuid());
+                if (spamDamage == null || weaponDamage <= 0.0) {
+                    context.note("spam hit did not land / weapon damage unreadable (synthetic-player "
+                            + "variance) — the full-charge math is unit-pinned in CooldownDamageScalingTest");
+                } else {
+                    // Full charge: damage == the weapon's attack-damage; the 1.9 ramp
+                    // would have scaled this spam hit toward 0.2x (the 11/12-hits bug).
+                    context.expectNear(weaponDamage, spamDamage, Math.max(0.75, weaponDamage * 0.1),
+                            "spam-clicked hit must deal full weapon damage with no cooldown ramp");
+                }
+            }
         } finally {
             toggleModule(context, "attack-cooldown", false);
             context.expect(!moduleActive(mental, "attack-cooldown"),
                     "attack-cooldown module failed to disable");
+            if (attackSpeed != null) {
+                // Zero-touch: disable restores the captured (sanitized) original base
+                // — vanilla 4.0 here — on the disabling thread.
+                context.awaitTicks(3);
+                double restoredBase = context.sync(() -> baseValue(attacker, attackSpeed));
+                context.expect(restoredBase < FULL_CHARGE_BASE,
+                        "server attack_speed base must be restored on disable (zero-touch); was "
+                                + restoredBase);
+            }
             context.syncRun(() -> {
                 attacker.remove();
                 victim.remove();
             });
             captors.unregister();
         }
+    }
+
+    /** The player's {@code attack_speed} base, or {@code -1} when the attribute is absent. */
+    private static double baseValue(FakePlayer player, Attribute attribute) {
+        AttributeInstance instance = player.player().getAttribute(attribute);
+        return instance == null ? -1.0 : instance.getBaseValue();
+    }
+
+    /** The player's resolved {@code attack_damage} (with the held weapon), or {@code -1} when absent. */
+    private static double attackDamageValue(FakePlayer player) {
+        Attribute attackDamage = Attributes.attackDamage();
+        if (attackDamage == null) {
+            return -1.0;
+        }
+        AttributeInstance instance = player.player().getAttribute(attackDamage);
+        return instance == null ? -1.0 : instance.getValue();
     }
 
     private static void runDisableAttackSounds(
