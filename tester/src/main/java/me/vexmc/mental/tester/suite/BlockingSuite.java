@@ -319,8 +319,8 @@ public final class BlockingSuite {
 
     /** Toggles through the real console command path and waits for convergence. */
     private static void toggleModule(TestContext context, String id, boolean enabled) throws Exception {
-        context.syncRun(() -> Bukkit.dispatchCommand(
-                Bukkit.getConsoleSender(), "mental module " + id + " " + (enabled ? "on" : "off")));
+        context.syncRun(() -> ((MentalPlugin) Bukkit.getPluginManager().getPlugin("Mental"))
+                .management().setModuleEnabled(id, enabled));
         context.awaitTicks(1);
     }
 

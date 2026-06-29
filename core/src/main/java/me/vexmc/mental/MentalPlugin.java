@@ -6,7 +6,6 @@ import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.command.BukkitCommandRenderer;
 import me.vexmc.mental.command.MentalCommands;
@@ -20,6 +19,9 @@ import me.vexmc.mental.config.MentalConfig;
 import me.vexmc.mental.debug.ConsoleSink;
 import me.vexmc.mental.debug.PlayerDebugSink;
 import me.vexmc.mental.engine.ModuleRegistry;
+import me.vexmc.mental.gui.MenuContext;
+import me.vexmc.mental.gui.MenuManager;
+import me.vexmc.mental.manage.ManagementService;
 import me.vexmc.mental.module.anticheat.AnticheatCompatModule;
 import me.vexmc.mental.module.anticheat.AnticheatGate;
 import me.vexmc.mental.module.block.SwordBlockingModule;
@@ -86,6 +88,8 @@ public final class MentalPlugin extends JavaPlugin {
     private MentalConfig config;
     private ConfigStore configStore;
     private MentalServices services;
+    private ManagementService management;
+    private MenuManager menuManager;
     private ModuleRegistry modules;
     private PlayerDebugSink playerDebugSink;
     private KnockbackPipeline knockbackPipeline;
@@ -131,10 +135,18 @@ public final class MentalPlugin extends JavaPlugin {
                 new AnticheatGate(), new OcmGate(),
                 new SprintTracker(),
                 new KnockbackProfiles(config));
+        this.management = new ManagementService(this);
         this.modules = new ModuleRegistry(getLogger());
 
         registerModules();
         modules.enableAll();
+
+        // The management GUI replaces command-based administration: always-on
+        // routing infrastructure (like the command system), registered for the
+        // plugin lifetime and torn down in onDisable. Never touches the game.
+        this.menuManager = new MenuManager(
+                new MenuContext(services, management, playerDebugSink));
+        getServer().getPluginManager().registerEvents(menuManager, this);
 
         registerCommands();
 
@@ -142,7 +154,6 @@ public final class MentalPlugin extends JavaPlugin {
             @EventHandler
             public void onQuit(PlayerQuitEvent event) {
                 playerDebugSink.forget(event.getPlayer().getUniqueId());
-                services.knockbackProfiles().forget(event.getPlayer().getUniqueId());
             }
         }, this);
 
@@ -215,6 +226,10 @@ public final class MentalPlugin extends JavaPlugin {
     @Override
     public void onDisable() {
         Mental.register(null);
+        if (menuManager != null) {
+            menuManager.shutdown();
+            menuManager = null;
+        }
         if (metrics != null) {
             metrics.shutdown();
             metrics = null;
@@ -236,7 +251,6 @@ public final class MentalPlugin extends JavaPlugin {
         }
         if (services != null) {
             services.sprintTracker().clear();
-            services.knockbackProfiles().clear();
         }
         try {
             if (PacketEvents.getAPI() != null) {
@@ -246,6 +260,7 @@ public final class MentalPlugin extends JavaPlugin {
             getLogger().warning("PacketEvents termination threw: " + failure.getMessage());
         }
         modules = null;
+        management = null;
         services = null;
         config = null;
         getLogger().info("Mental disabled.");
@@ -261,10 +276,6 @@ public final class MentalPlugin extends JavaPlugin {
         configStore.ensureDefaultFiles();
         List<String> warnings = new ArrayList<>(
                 config.reload(configStore.loadSources(getConfig())));
-        for (UUID stale : services.knockbackProfiles().clearStaleOverrides()) {
-            warnings.add("knockback profile override cleared for " + stale
-                    + " — its profile no longer exists");
-        }
         reportConfigIssues(warnings);
         applyDebugSettings(services.debug());
         modules.reloadAll();
@@ -273,6 +284,11 @@ public final class MentalPlugin extends JavaPlugin {
 
     public @NotNull MentalServices services() {
         return services;
+    }
+
+    /** The config write-back service behind the management GUI and the API. */
+    public @NotNull ManagementService management() {
+        return management;
     }
 
     public @NotNull ModuleRegistry modules() {
@@ -330,7 +346,7 @@ public final class MentalPlugin extends JavaPlugin {
     }
 
     private void registerCommands() {
-        CommandTree tree = new MentalCommands(this, services, modules, playerDebugSink).build();
+        CommandTree tree = new MentalCommands(this, menuManager).build();
 
         var command = getCommand("mental");
         if (command != null) {
@@ -346,7 +362,7 @@ public final class MentalPlugin extends JavaPlugin {
                 Class.forName(BRIGADIER_BRIDGE)
                         .getMethod("register", org.bukkit.plugin.java.JavaPlugin.class,
                                 CommandTree.class, String.class, List.class)
-                        .invoke(null, this, tree, "Mental root command — dashboard, modules, knockback profiles, ping, debug.",
+                        .invoke(null, this, tree, "Open the Mental management menu; reload from the console.",
                                 List.of("mtl"));
                 getLogger().info("Commands rendered natively via Brigadier.");
             } catch (ReflectiveOperationException failure) {

@@ -3,7 +3,7 @@ package me.vexmc.mental.tester.suite;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import me.vexmc.mental.MentalPlugin;
-import me.vexmc.mental.api.event.PlayerKnockbackProfileChangeEvent;
+import me.vexmc.mental.api.event.KnockbackProfileChangeEvent;
 import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
@@ -23,37 +23,39 @@ import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Knockback profiles end to end on a live server: a per-player override
- * (the practice-core path) must reroute the very next hit through the
- * preset's parsed values — file → parse → resolve → engine → velocity
- * event — and the archived-server presets must demonstrate their structural
- * levers on the wire: mmc's heavier friction survival on the soft dev123
- * base, and lunar's vertical cap that sits BELOW its base (every grounded
- * hit pins at the cap, a shape no base/extra pair can fake).
+ * Knockback profiles end to end on a live server. Mental's knockback is
+ * <em>global</em>: selecting a profile (through the management GUI, which calls
+ * {@code ManagementService.setGlobalProfile}) must reroute every subsequent hit
+ * through the preset's parsed values — file → parse → resolve → engine →
+ * velocity event — server-wide. The archived-server presets must demonstrate
+ * their structural levers on the wire: mmc's heavier friction survival on the
+ * soft dev123 base, and lunar's vertical cap that sits BELOW its base (every
+ * grounded hit pins at the cap, a shape no base/extra pair can fake). Each
+ * scenario restores the legacy-1.7 default in its finally so suites stay
+ * isolated.
  */
 public final class ProfileSuite {
 
     private static final double EPSILON = 1.0e-3;
+    private static final String DEFAULT_PROFILE = "legacy-1.7";
 
     private ProfileSuite() {}
 
     public static @NotNull List<TestCase> tests(
             @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
-                new TestCase("profile: kohi override reroutes the next hit", context ->
-                        runOverrideScenario(mental, tester, context)),
+                new TestCase("profile: selecting kohi globally reroutes the next hit", context ->
+                        runKohiScenario(mental, tester, context)),
                 new TestCase("profile: mmc carries the archived dev123 values", context ->
                         runMmcScenario(mental, tester, context)),
                 new TestCase("profile: lunar's cap pins every grounded vertical", context ->
                         runLunarScenario(mental, tester, context)),
-                new TestCase("profile: the command path assigns and clears overrides", context ->
-                        runCommandScenario(mental, tester, context)),
-                new TestCase("profile: unknown names are rejected and events fire on change", context ->
-                        runApiContractScenario(mental, tester, context)));
+                new TestCase("profile: global selection persists, rejects unknowns, fires events", context ->
+                        runGlobalApiScenario(mental, tester, context)));
     }
 
-    /** Hit under a kohi override must equal kohi math, not the legacy default. */
-    private static void runOverrideScenario(
+    /** A hit under a global kohi selection must equal kohi math, not the legacy default. */
+    private static void runKohiScenario(
             MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
         FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
@@ -68,13 +70,12 @@ public final class ProfileSuite {
             context.awaitTicks(5);
 
             KnockbackVector expected = context.sync(() -> {
-                context.expect(mental.services().knockbackProfiles()
-                                .setOverride(victim.player(), "kohi"),
-                        "kohi preset missing — overrides must accept every bundled profile");
+                context.expect(mental.management().setGlobalProfile("kohi"),
+                        "kohi preset missing — every bundled profile must be selectable");
                 KnockbackProfile resolved = mental.services().knockbackProfiles()
                         .resolve(victim.player());
                 context.expect("kohi".equals(resolved.name()),
-                        "override did not win resolution (got " + resolved.name() + ")");
+                        "global selection did not win resolution (got " + resolved.name() + ")");
                 victim.player().setNoDamageTicks(0);
                 var victimState = KnockbackSuite.restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
@@ -86,10 +87,7 @@ public final class ProfileSuite {
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
             // The kohi base differs from legacy-1.7 — matching it proves the
-            // profile actually switched, not just that a knock arrived. The
-            // expectation is the WIRE value: equilibrium baseline + kohi
-            // base, shipped as the full tracker stamp (the decayed wire is
-            // the opt-in tracker-decayed delivery, not kohi's default).
+            // profile actually switched, not just that a knock arrived.
             context.expectNear(-0.0784 * 0.5 + 0.35, expected.y(), EPSILON,
                     "kohi expectation sanity (wire vertical)");
 
@@ -102,7 +100,7 @@ public final class ProfileSuite {
             context.expectNear(expected.z(), applied.getZ(), EPSILON, "kohi knockback z");
         } finally {
             context.syncRun(() -> {
-                mental.services().knockbackProfiles().setOverride(victim.player(), null);
+                mental.management().setGlobalProfile(DEFAULT_PROFILE);
                 attacker.remove();
                 victim.remove();
             });
@@ -131,9 +129,7 @@ public final class ProfileSuite {
             context.awaitTicks(5);
 
             KnockbackVector expected = context.sync(() -> {
-                context.expect(mental.services().knockbackProfiles()
-                                .setOverride(victim.player(), "mmc"),
-                        "mmc preset missing");
+                context.expect(mental.management().setGlobalProfile("mmc"), "mmc preset missing");
                 victim.player().setNoDamageTicks(0);
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()),
@@ -162,7 +158,7 @@ public final class ProfileSuite {
                     "a four-block mmc hit ships the FULL dev123 push — no taper");
         } finally {
             context.syncRun(() -> {
-                mental.services().knockbackProfiles().setOverride(victim.player(), null);
+                mental.management().setGlobalProfile(DEFAULT_PROFILE);
                 attacker.remove();
                 victim.remove();
             });
@@ -191,9 +187,7 @@ public final class ProfileSuite {
             context.awaitTicks(5);
 
             KnockbackVector expected = context.sync(() -> {
-                context.expect(mental.services().knockbackProfiles()
-                                .setOverride(victim.player(), "lunar"),
-                        "lunar preset missing");
+                context.expect(mental.management().setGlobalProfile("lunar"), "lunar preset missing");
                 victim.player().setNoDamageTicks(0);
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()),
@@ -216,7 +210,7 @@ public final class ProfileSuite {
                     "lunar ships the full 0.54 base horizontal");
         } finally {
             context.syncRun(() -> {
-                mental.services().knockbackProfiles().setOverride(victim.player(), null);
+                mental.management().setGlobalProfile(DEFAULT_PROFILE);
                 attacker.remove();
                 victim.remove();
             });
@@ -224,75 +218,47 @@ public final class ProfileSuite {
         }
     }
 
-    /** /mental kb set and reset drive the same override store. */
-    private static void runCommandScenario(
+    /**
+     * The global selection contract: {@code setGlobalProfile} rejects unknown
+     * names, persists the chosen default (so {@code defaultProfileName} reflects
+     * it), and fires {@link KnockbackProfileChangeEvent} once per actual
+     * transition (a re-select of the active profile is a no-op success).
+     */
+    private static void runGlobalApiScenario(
             MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer target = new FakePlayer(tester, mental.services().scheduling());
-
-        try {
-            context.syncRun(() ->
-                    target.spawn(Arena.prepare(Bukkit.getWorlds().get(0))));
-            context.awaitTicks(3);
-
-            String name = context.sync(() -> target.player().getName());
-            boolean setHandled = context.sync(() -> Bukkit.dispatchCommand(
-                    Bukkit.getConsoleSender(), "mental kb set lunar " + name));
-            context.expect(setHandled, "'mental kb set' was not handled");
-            context.expect("lunar".equals(context.sync(() ->
-                            mental.services().knockbackProfiles().resolve(target.player()).name())),
-                    "command override did not apply");
-
-            boolean resetHandled = context.sync(() -> Bukkit.dispatchCommand(
-                    Bukkit.getConsoleSender(), "mental kb reset " + name));
-            context.expect(resetHandled, "'mental kb reset' was not handled");
-            context.expect(context.sync(() -> mental.services().knockbackProfiles()
-                            .override(target.uuid())) == null,
-                    "command reset did not clear the override");
-
-            boolean overviewHandled = context.sync(() -> Bukkit.dispatchCommand(
-                    Bukkit.getConsoleSender(), "mental kb"));
-            context.expect(overviewHandled, "'mental kb' overview was not handled");
-        } finally {
-            context.syncRun(target::remove);
-        }
-    }
-
-    /** API contract: validation rejects unknowns; the change event fires per transition. */
-    private static void runApiContractScenario(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer player = new FakePlayer(tester, mental.services().scheduling());
         List<String> transitions = new CopyOnWriteArrayList<>();
         Listener probe = new Listener() {
             @EventHandler
-            public void onChange(PlayerKnockbackProfileChangeEvent event) {
+            public void onChange(KnockbackProfileChangeEvent event) {
                 transitions.add(event.getPreviousProfile() + "->" + event.getNewProfile());
             }
         };
 
         try {
-            context.syncRun(() -> {
-                player.spawn(Arena.prepare(Bukkit.getWorlds().get(0)));
-                Bukkit.getPluginManager().registerEvents(probe, tester);
-            });
-            context.awaitTicks(3);
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(probe, tester));
 
             context.syncRun(() -> {
-                var profiles = mental.services().knockbackProfiles();
-                context.expect(!profiles.setOverride(player.player(), "minemen-exact"),
+                var management = mental.management();
+                management.setGlobalProfile(DEFAULT_PROFILE); // normalise the starting point
+                transitions.clear();
+
+                context.expect(!management.setGlobalProfile("minemen-exact"),
                         "an unknown profile name must be rejected");
-                context.expect(profiles.setOverride(player.player(), "kohi"), "set kohi");
-                context.expect(profiles.setOverride(player.player(), "kohi"),
-                        "re-setting the same profile is a no-op success");
-                context.expect(profiles.setOverride(player.player(), "mmc"), "switch to mmc");
-                context.expect(profiles.setOverride(player.player(), null), "clear");
+                context.expect(management.setGlobalProfile("kohi"), "set kohi");
+                context.expect(management.setGlobalProfile("kohi"),
+                        "re-selecting the active profile is a no-op success");
+                context.expect(management.setGlobalProfile("mmc"), "switch to mmc");
+                context.expect("mmc".equals(
+                                mental.services().knockbackProfiles().defaultProfileName()),
+                        "the global default must reflect the last selection");
             });
 
-            context.expect(List.of("null->kohi", "kohi->mmc", "mmc->null").equals(transitions),
-                    "change events must fire once per actual transition, got " + transitions);
+            context.expect(List.of(DEFAULT_PROFILE + "->kohi", "kohi->mmc").equals(transitions),
+                    "global change events must fire once per actual transition, got " + transitions);
         } finally {
             context.syncRun(() -> {
                 HandlerList.unregisterAll(probe);
-                player.remove();
+                mental.management().setGlobalProfile(DEFAULT_PROFILE);
             });
         }
     }

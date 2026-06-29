@@ -2,14 +2,20 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.List;
 import me.vexmc.mental.MentalPlugin;
+import me.vexmc.mental.gui.Menu;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.fake.FakePlayer;
 import org.bukkit.Bukkit;
+import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
 
-/** The command tree executes on whichever backend this version selected. */
+/**
+ * The command is now a thin launcher: a permitted player opens the management
+ * GUI, the console gets the reload fallback and a hint. Rendered on whichever
+ * backend this version selected (classic / Brigadier).
+ */
 public final class CommandSuite {
 
     private CommandSuite() {}
@@ -17,16 +23,16 @@ public final class CommandSuite {
     public static @NotNull List<TestCase> tests(
             @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
-                new TestCase("command: console runs version and module status", context -> {
-                    boolean version = context.sync(() ->
-                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mental version"));
-                    context.expect(version, "'mental version' was not handled");
+                new TestCase("command: console reload and bare hint are handled", context -> {
+                    boolean reload = context.sync(() ->
+                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mental reload"));
+                    context.expect(reload, "'mental reload' was not handled");
 
-                    boolean status = context.sync(() ->
-                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mental module knockback status"));
-                    context.expect(status, "'mental module knockback status' was not handled");
+                    boolean bare = context.sync(() ->
+                            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mental"));
+                    context.expect(bare, "bare 'mental' from the console was not handled");
                 }),
-                new TestCase("command: permitted player opens the dashboard", context -> {
+                new TestCase("command: a permitted player opens the dashboard GUI", context -> {
                     FakePlayer player = new FakePlayer(tester, mental.services().scheduling());
                     try {
                         context.syncRun(() ->
@@ -37,9 +43,21 @@ public final class CommandSuite {
                             return Bukkit.dispatchCommand(player.player(), "mental");
                         });
                         context.expect(handled, "bare /mental was not handled for a permitted player");
+                        // open() defers onto the player's region thread; give it a few ticks.
+                        context.awaitTicks(3);
+                        boolean menuOpen = context.sync(() -> menuOpen(player));
+                        context.expect(menuOpen, "/mental did not open a Mental management menu");
                     } finally {
-                        context.syncRun(player::remove);
+                        context.syncRun(() -> {
+                            player.player().closeInventory();
+                            player.remove();
+                        });
                     }
                 }));
+    }
+
+    private static boolean menuOpen(@NotNull FakePlayer player) {
+        InventoryHolder holder = player.player().getOpenInventory().getTopInventory().getHolder();
+        return holder instanceof Menu;
     }
 }

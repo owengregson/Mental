@@ -12,8 +12,8 @@ import org.jetbrains.annotations.Nullable;
  * <pre>{@code
  * MentalApi mental = Mental.get();
  * if (mental != null && mental.moduleEnabled("knockback")) {
- *     // a practice core pinning a duel to the kohi feel:
- *     mental.setKnockbackProfile(victim, "kohi");
+ *     // pin the whole server to the kohi feel:
+ *     mental.setKnockbackProfile("kohi");
  * }
  * }</pre>
  */
@@ -29,22 +29,24 @@ public final class Mental {
 
         /**
          * The knockback profile currently governing knocks against
-         * {@code player}: their override if set, else their world's mapping,
-         * else the server default. Call from the player's owning thread.
+         * {@code player}: their world's mapping if one is set, else the
+         * server-wide default. Knockback is global — there is no per-player
+         * assignment. Call from the player's owning thread.
          */
         @NotNull String knockbackProfile(@NotNull Player player);
 
-        /** The player's explicit profile override, or null when none is set. */
-        @Nullable String knockbackProfileOverride(@NotNull Player player);
+        /** The server-wide default knockback profile name. */
+        @NotNull String knockbackProfile();
 
         /**
-         * Sets (or clears, with null) a player's knockback-profile override
-         * and fires {@code PlayerKnockbackProfileChangeEvent} on change.
-         * Returns false — changing nothing — when no such profile exists.
-         * Overrides survive world changes and clear on quit; call from the
-         * player's owning thread.
+         * Sets the server-wide knockback profile, persisting it to
+         * knockback.yml and reloading the configuration; fires
+         * {@code KnockbackProfileChangeEvent} on change. Returns false —
+         * changing nothing — when no profile by that name is loaded. Reloads
+         * the configuration, so call from the main thread (the global region
+         * thread on Folia).
          */
-        boolean setKnockbackProfile(@NotNull Player player, @Nullable String profile);
+        boolean setKnockbackProfile(@NotNull String profile);
 
         /** Every loaded knockback profile name. */
         @NotNull Set<String> knockbackProfiles();

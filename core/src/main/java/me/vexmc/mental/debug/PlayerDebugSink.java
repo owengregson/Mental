@@ -11,7 +11,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
-/** Streams debug lines to admins who opted in via {@code /mental debug subscribe}. */
+/** Streams debug lines to admins who opted in via the Debug screen of the management menu. */
 public final class PlayerDebugSink implements DebugLog.Sink {
 
     private final Set<UUID> subscribers = ConcurrentHashMap.newKeySet();
@@ -23,6 +23,10 @@ public final class PlayerDebugSink implements DebugLog.Sink {
         }
         subscribers.add(player);
         return true;
+    }
+
+    public boolean isSubscribed(@NotNull UUID player) {
+        return subscribers.contains(player);
     }
 
     public void forget(@NotNull UUID player) {

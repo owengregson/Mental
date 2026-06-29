@@ -17,7 +17,7 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 - **W-taps register at any speed.** Sprint toggles are read in packet-arrival order, sub-tick — a w-tap or s-tap counts even when it lands in the same tick as the follow-up hit, where vanilla quantizes both to tick boundaries. The fastest sprint-reset detection physically possible from the server side.
 - **Knockback uses 1:1 replicated 1.7/1.8 formula**, line for line. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, critical hits and Sharpness damage.
 - **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so quick successive hits stack and launch — the mechanical core of legacy combo PvP. Fishing rods and projectiles knock away from where the shooter stands, like they used to.
-- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, the archived configs of the era's best servers (`kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar` — real archived values, not remakes), or your own — assignable per server, per world, and per player at runtime (`/mental kb`, or the API for practice cores).
+- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, the archived configs of the era's best servers (`kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar` — real archived values, not remakes), or your own — selected server-wide from the in-game menu (with an optional per-world map in `knockback.yml`).
 - **The "Ping Problem" is fixed.** Mental measures each player's connection during combat and corrects the knockback they receive, so getting hit feels the same on 20 ms as it does on 150 ms.
 - **Fishing rods restored to legacy mechanics.** Hooks damage and shove players on contact, casts fly like in 1.8, and the reel-in pull is gone.
 - **Projectiles knock back.** Snowballs, eggs and ender pearls push players.
@@ -42,24 +42,22 @@ Mental plugin jars are universal and work on all supported versions.
 
 The defaults already give you the classic combat. The configuration is split by concern under `plugins/Mental/` — every option is explained in its file.
 
-## Commands
+## Management
 
-Use **`/mental`** (or `/mtl`). It opens an interactive dashboard in chat where you can click to toggle and hover for what each module does.
+Everything is managed in-game through one unified menu — run **`/mental`** (or `/mtl`) to open it. It is hand-designed and works across every supported version (1.17.1 → 26.x) and on Folia.
 
-| Command | What it does |
-| --- | --- |
-| `/mental` | The dashboard. View and toggle every module by clicking. |
-| `/mental module <name> <on\|off\|status>` | Toggle a module from console or scripts (saved to config). |
-| `/mental kb` | Knockback profiles: list, `info <profile>`, `set <profile> [player]`, `reset [player]`. |
-| `/mental ping [player]` | A player's measured ping, jitter and connection quality. |
-| `/mental reload` | Apply config changes without a restart. Safe mid-combat. |
-| `/mental debug <on\|off>` | Verbose logging for troubleshooting (see the FAQ). |
-| `/mental debug category <name> <on\|off>` | Toggle one of the ten debug categories individually. |
-| `/mental debug subscribe` | Stream debug lines to your in-game chat. |
-| `/mental version` | Version, server platform and feature report. |
-| `/mental help` | Clickable list of every command you can use. |
+The dashboard opens with a live status plate (version, platform, scheduling backend, active knockback profile, modules active, anticheat and OCM posture) and one screen per area:
 
-Module names for the `module` command: `hit-registration`, `wtap-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`, `attack-cooldown`, `disable-attack-sounds`, `disable-sword-sweep`, `disable-crafting`, `disable-offhand`, `old-golden-apples`, `disable-enderpearl-cooldown`, `old-player-regen`, `old-armour-strength`, `old-armour-durability`, `old-potion-durations`, `old-potion-values`, `old-critical-hits`, `old-tool-durability`, `sword-blocking`, `old-hitboxes`.
+- **Knockback** — pick the server-wide knockback profile (the active one glows; each tile previews its base / vertical / delivery / combos values), and toggle the sources (fishing, projectile, rod).
+- **Hit Registration**, **Combat Rules**, **Damage**, **Potions & Food**, **Player** — click any module to enable or disable it live (a green glow means on).
+- **Compatibility** — cycle the anticheat posture and OldCombatMechanics coordination.
+- **Debug** — toggle any of the ten verbose-logging channels and stream them to your chat.
+
+Changes apply atomically the instant you click — no restart, safe mid-combat. Editing the YAML files by hand still works; reload to apply. The console cannot open an inventory, so the one surviving command is **`/mental reload`** (mirrored by the dashboard's reload button) for ops and automation.
+
+> **Knockback is global.** Selecting a profile sets it for the whole server at once (the optional per-world map in `knockback.yml` is still honoured). There is no per-player profile: earlier versions had a per-player override with a `/mental kb set <player>` command, and both were removed in 2.1.0 — along with the per-player `MentalApi` surface (`setKnockbackProfile(Player, …)` is now `setKnockbackProfile(String)`, and `PlayerKnockbackProfileChangeEvent` is now `KnockbackProfileChangeEvent`).
+
+Module ids (shown in the menu, and the keys under `modules:` in `config.yml` if you prefer editing by hand): `hit-registration`, `wtap-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`, `attack-cooldown`, `disable-attack-sounds`, `disable-sword-sweep`, `disable-crafting`, `disable-offhand`, `old-golden-apples`, `disable-enderpearl-cooldown`, `old-player-regen`, `old-armour-strength`, `old-armour-durability`, `old-potion-durations`, `old-potion-values`, `old-critical-hits`, `old-tool-durability`, `sword-blocking`, `old-hitboxes`.
 
 ## Configuration
 
@@ -114,7 +112,7 @@ Because it doesn't need to. Mojang restored projectile knockback against players
 Yes, Mental is natively region-aware and localized.
 
 **Something feels off. How do I see what's happening?**
-`/mental debug on`, then `/mental debug subscribe` to stream diagnostics to your chat in-game. Ten categories can be toggled individually so you only see the system you're chasing. If it looks like a bug, [open an issue](../../issues) with what you find.
+Open `/mental` → **Debug**, enable logging and click **Receive in chat** to stream diagnostics to your chat in-game. Ten categories can be toggled individually so you only see the system you're chasing. If it looks like a bug, [open an issue](../../issues) with what you find.
 
 ## Combat rules modules (optional)
 

@@ -55,8 +55,10 @@ Mental profile is wrong" — check them FIRST on any live feel report:
   (native 1.8 = 20): 9-tick combo cadence, one less free-fall tick, every
   combo vertical runs high even when Mental owns the knock.
 
-Mental warns at startup on both (`OcmCompatModule.warnFeelOverlaps`) and
-`/mental kb` flags melee ownership.
+Mental warns at startup on both (`OcmCompatModule.warnFeelOverlaps`); the
+management GUI's dashboard shows the OCM coordination mode and whether OCM is
+installed (the `/mental kb` overview that used to flag melee ownership is gone
+— management moved into the in-game menu in 2.1.0).
 
 ## Testing it
 
