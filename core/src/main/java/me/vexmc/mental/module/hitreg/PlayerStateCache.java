@@ -6,12 +6,12 @@ import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.GroundFriction;
 import me.vexmc.mental.module.knockback.KnockbackProfiles;
+import me.vexmc.mental.module.knockback.ServerTickClock;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
-import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -44,6 +44,12 @@ public final class PlayerStateCache {
      */
     private final ConcurrentHashMap<Integer, UUID> playerIdsByEntityId = new ConcurrentHashMap<>();
 
+    private final ServerTickClock clock;
+
+    public PlayerStateCache(@NotNull ServerTickClock clock) {
+        this.clock = clock;
+    }
+
     /**
      * Captures {@code player} now. Must run on the player's owning thread.
      * Motion comes from the {@link VictimMotion} ledger — the same legacy
@@ -64,7 +70,7 @@ public final class PlayerStateCache {
         // grounded 0.3608 vertical where the era ships the pre-landing ~0.25.
         VictimMotion.Motion motion = ledger.currentExcludingTick(
                 player.getUniqueId(),
-                Bukkit.getCurrentTick(),
+                clock.currentTick(),
                 System.nanoTime(),
                 onGround,
                 Attributes.valueOr(player, Attributes.gravity(), VictimMotion.DEFAULT_GRAVITY));

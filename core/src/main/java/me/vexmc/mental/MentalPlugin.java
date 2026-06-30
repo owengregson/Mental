@@ -39,6 +39,7 @@ import me.vexmc.mental.module.knockback.GroundPacketTap;
 import me.vexmc.mental.module.knockback.GroundTransitionWatcher;
 import me.vexmc.mental.module.knockback.KnockbackModule;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
+import me.vexmc.mental.module.knockback.ServerTickClock;
 import me.vexmc.mental.module.knockback.KnockbackProfiles;
 import me.vexmc.mental.module.knockback.SprintTracker;
 import me.vexmc.mental.module.knockback.VelocityDuplicateSuppressor;
@@ -94,6 +95,7 @@ public final class MentalPlugin extends JavaPlugin {
     private PlayerDebugSink playerDebugSink;
     private KnockbackPipeline knockbackPipeline;
     private GroundTransitionWatcher groundWatcher;
+    private ServerTickClock serverTickClock;
     private VelocityDuplicateSuppressor velocitySuppressor;
     private Metrics metrics;
 
@@ -241,6 +243,10 @@ public final class MentalPlugin extends JavaPlugin {
             groundWatcher.shutdown();
             groundWatcher = null;
         }
+        if (serverTickClock != null) {
+            serverTickClock.stop();
+            serverTickClock = null;
+        }
         if (velocitySuppressor != null) {
             velocitySuppressor.clear();
             velocitySuppressor = null;
@@ -304,13 +310,19 @@ public final class MentalPlugin extends JavaPlugin {
         VictimMotion victimMotion = new VictimMotion();
         knockbackPipeline = new KnockbackPipeline(services, victimMotion);
         getServer().getPluginManager().registerEvents(knockbackPipeline, this);
+        // The netty-readable server tick behind the era attack-ordering
+        // exclusion. Started here (before the GroundPacketTap registers) so the
+        // Folia global counter is already advancing when the first movement
+        // packet arrives; a no-op on Paper, which reads getCurrentTick directly.
+        serverTickClock = new ServerTickClock(services.capabilities().folia(), Bukkit::getCurrentTick);
+        serverTickClock.start(services.scheduling());
         // Observation only — feeds the wtap-extra freshness branch; with the
         // knob disabled (every default) it changes nothing.
         getServer().getPluginManager().registerEvents(services.sprintTracker(), this);
         // Pure observation as well: replicates the era movement-packet
         // bookkeeping (jump stamps, landings) into the ledger so knockback
         // verticals see the same baselines a legacy server's fields held.
-        groundWatcher = new GroundTransitionWatcher(services, victimMotion);
+        groundWatcher = new GroundTransitionWatcher(services, victimMotion, serverTickClock);
         getServer().getPluginManager().registerEvents(groundWatcher, this);
         groundWatcher.watchOnlinePlayers();
 
@@ -320,7 +332,8 @@ public final class MentalPlugin extends JavaPlugin {
 
         modules.register(new AnticheatCompatModule(services));
         modules.register(new OcmCompatModule(services, services.ocmGate()));
-        modules.register(new HitRegistrationModule(services, victimMotion, knockbackPipeline, compensation));
+        modules.register(new HitRegistrationModule(
+                services, victimMotion, knockbackPipeline, compensation, serverTickClock));
         modules.register(new WtapRegistrationModule(services));
         modules.register(knockback);
         modules.register(compensation);

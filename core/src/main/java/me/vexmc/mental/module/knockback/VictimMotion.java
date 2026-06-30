@@ -65,6 +65,16 @@ public final class VictimMotion {
     private static final long NANOS_PER_TICK = 50_000_000L;
 
     /**
+     * How recent a boundary sample must be for the attack-ordering exclusion to
+     * fire. The era contract is inherently sub-tick (an attack and a movement
+     * packet in the SAME tick); four ticks leaves margin for scheduler jitter
+     * while rejecting a stale match — the guard that keeps a frozen Folia
+     * global-tick counter from excluding universally (it stamps fresh stamps with
+     * the stuck value, but a genuinely stale sample is rejected here).
+     */
+    private static final long EXCLUDE_RECENCY_NANOS = 4 * NANOS_PER_TICK;
+
+    /**
      * Tick stamp for writers with no era ordering contract (the per-tick
      * sampler, the velocity-event recorder): their records are never
      * excluded by {@link #currentExcludingTick}, preserving the pre-1.5.1
@@ -248,11 +258,18 @@ public final class VictimMotion {
      * ~0.25 vertical, never a grounded re-stamp). Only packet-fed records
      * carry real ticks; sampler records ({@link #NO_TICK}) are never
      * excluded, so packetless players keep the inclusive view.
+     *
+     * <p>The matching sample must also be RECENT ({@link #EXCLUDE_RECENCY_NANOS}):
+     * the era contract is sub-tick, and on Folia the tick value comes from a
+     * plugin global counter, so a stale sample whose tick happens to equal a
+     * frozen counter's value must not fire a (too-sinky) exclusion. A stale match
+     * reads the sample inclusively instead.</p>
      */
     public @NotNull Motion currentExcludingTick(
             @NotNull UUID victim, int excludeTick, long nowNanos, boolean groundedNow, double gravity) {
         Sample sample = samples.get(victim);
-        if (sample != null && sample.tick() != NO_TICK && sample.tick() == excludeTick) {
+        if (sample != null && sample.tick() != NO_TICK && sample.tick() == excludeTick
+                && nowNanos - sample.nanos() < EXCLUDE_RECENCY_NANOS) {
             Sample previous = sample.previous();
             // The boundary sample's own grounded state is the as-of truth;
             // the caller's live view would smuggle the excluded transition
