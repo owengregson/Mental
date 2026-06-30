@@ -1,38 +1,53 @@
 # Mental
 
-## WARNING: This plugin is still in beta. The `mmc` preset ships Minemen's archived 2017 values; their post-2019 engine is a different knob family and remains unreplicated.
+**Latency-compensated 1.7 / 1.8 combat for modern Paper & Folia.**
 
-**Async Hit-reg, Ping compensation, & Legacy Knockback for modern Paper servers.**
+Mental brings back the way PvP used to feel — 1.7/1.8 knockback, real combos, fishing-rod hits and snowball trades — while registering hits *faster* than vanilla and levelling the field for players on higher ping.
 
-Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits, and snowball trades. It also registers hits faster than vanilla and evens out the playing field for players on higher ping.
-
-[![Paper](https://img.shields.io/badge/Paper-1.17.1%20→%2026.1.2-blue?style=flat-square)](https://papermc.io/)
+[![Release](https://img.shields.io/github/v/release/owengregson/Mental?style=flat-square&label=release&color=brightgreen)](../../releases)
+[![Paper](https://img.shields.io/badge/Paper-1.17.1%20→%2026.x-blue?style=flat-square)](https://papermc.io/)
 [![Folia](https://img.shields.io/badge/Folia-supported-purple?style=flat-square)](https://github.com/PaperMC/Folia)
 [![Java](https://img.shields.io/badge/Java-17+-orange?style=flat-square)](https://adoptium.net/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-## Why Mental?
+> **Stable release.** Mental is out of beta — verified across the full Paper 1.17.1 → 26.x range and on Folia, with a live integration matrix on every commit. Drop it in and play.
 
-- **Attacks register faster.** Mental processes attacks asynchronously via the netty thread, meaning there is zero server latency for hit animations. On 1.19.4+ the velocity and hurt animation arrive bundled, in the same client frame.
-- **W-taps register at any speed.** Sprint toggles are read in packet-arrival order, sub-tick — a w-tap or s-tap counts even when it lands in the same tick as the follow-up hit, where vanilla quantizes both to tick boundaries. The fastest sprint-reset detection physically possible from the server side.
-- **Knockback uses 1:1 replicated 1.7/1.8 formula**, line for line. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, critical hits and Sharpness damage.
-- **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so quick successive hits stack and launch — the mechanical core of legacy combo PvP. Fishing rods and projectiles knock away from where the shooter stands, like they used to.
-- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, the archived configs of the era's best servers (`kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar` — real archived values, not remakes), `signature` (Mental's own velt derivative, tuned to hold the combo reach pocket), or your own — selected server-wide from the in-game menu (with an optional per-world map in `knockback.yml`).
-- **The "Ping Problem" is fixed.** Mental measures each player's connection during combat and corrects the knockback they receive, so getting hit feels the same on 20 ms as it does on 150 ms.
-- **Fishing rods restored to legacy mechanics.** Hooks damage and shove players on contact, casts fly like in 1.8, and the reel-in pull is gone.
-- **Projectiles knock back.** Snowballs, eggs and ender pearls push players.
-- **Anticheat compatible.** Mental supports and recognizes common anticheats like GrimAC and Vulcan. Mental is also compatible with most others by design. Servers running none can opt into Mental's own ping-rewound reach validation.
-- **Optional 1.8 combat rules.** 16 `CombatModule`s — all default OFF — let you build a complete 1.8-style server without any companion plugin. See the [combat rules modules](#combat-rules-modules-optional) section below.
+---
+
+## Highlights
+
+- **Hits register faster than vanilla.** Attacks are processed on the netty thread, so there's zero server-tick latency on hit feedback. On 1.19.4+ the velocity and hurt animation arrive bundled in the same client frame.
+- **Real 1.7/1.8 knockback**, replicated line-for-line: sprint hits, Knockback-enchant bonuses, the exact vertical behaviour, crits and Sharpness damage.
+- **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so fast successive hits stack and launch — the mechanical core of legacy combo PvP.
+- **W-taps register at any speed.** Sprint toggles are read in packet-arrival order, sub-tick — a w-tap counts even in the same tick as the follow-up hit. The fastest sprint-reset detection physically possible server-side.
+- **The "ping problem" is fixed.** Mental measures each player's connection mid-fight and corrects the knockback they receive, so getting hit feels the same at 150 ms as at 20 ms.
+- **Legacy rods & projectiles.** Fishing hooks shove players on contact and cast like 1.8; snowballs, eggs and pearls knock back — all away from where the shooter stands, like they used to.
+- **Knockback profiles.** One file per feel — the archived configs of the era's best servers, plus Mental's own. Swap the whole game's feel from an in-game menu. (See [recommended presets](#recommended-presets).)
+- **Anticheat-friendly.** GrimAC and Vulcan are detected and accommodated automatically; most others work by design. Running none? Opt into Mental's own ping-rewound reach check.
+- **Optional full 1.8 ruleset.** 16 combat-rule modules (all default OFF) let you build a complete 1.8 server with no companion plugin. See [combat rules modules](#combat-rules-modules-optional).
+
+## Recommended presets
+
+Mental ships the **real archived knockback configs** of the era's best servers (measured from server archives, not remakes) — plus `signature`, Mental's own. These are the ones we think feel best:
+
+| Preset | The feel |
+| --- | --- |
+| **`signature`** | **Mental's own.** velt's dead-consistent wipe, tuned so combo'd players hold the perfect reach pocket instead of drifting out of range. The pick for modern combo PvP. |
+| **`lunar`** | Lunar Network's archived Season 5 — heavy base and a controlled, grounded "hold-W" feel, exactly as the era played it. |
+| **`badlion`** | Badlion's archived NoDebuff values — soft base, strong sprint differential, true 1.7 ledger combos. W-tapping decides trades. |
+| **`velt`** | VeltPvP's archived HCF values — a near-total residual wipe, so every hit lands identically. The "dead consistent" practice feel. |
+
+Pick one in-game under **`/mental` → Knockback**, or set `knockback.profile` in `knockback.yml`. The full list (`legacy-1.7`, `legacy-1.8`, `kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar`, `signature`, `custom`) with provenance is in the [profile guide](docs/knockback-profiles.md).
 
 ## Compatibility
 
 | | |
 | --- | --- |
-| **Server** | Paper 1.17.1 → 26.1.2 · Folia 1.19.4+ |
+| **Server** | Paper 1.17.1 → 26.x · Folia 1.19.4+ |
 | **Java** | 17 or newer |
-| **Dependencies** | None — Mental is a self-contained 1.8 combat suite; OldCombatMechanics is optional |
+| **Dependencies** | None — Mental is a self-contained 1.8 combat suite. OldCombatMechanics is optional. |
 
-Mental plugin jars are universal and work on all supported versions.
+One universal jar runs the whole version range.
 
 ## Installation
 
@@ -40,24 +55,22 @@ Mental plugin jars are universal and work on all supported versions.
 2. Drop it into your server's `plugins/` folder.
 3. Restart.
 
-The defaults already give you the classic combat. The configuration is split by concern under `plugins/Mental/` — every option is explained in its file.
+That's it — the defaults already give you the classic combat. Everything else is tunable in-game or in the config files.
 
 ## Management
 
-Everything is managed in-game through one unified menu — run **`/mental`** (or `/mtl`) to open it. It is hand-designed and works across every supported version (1.17.1 → 26.x) and on Folia.
+Run **`/mental`** (or `/mtl`) to open one unified, hand-designed menu — it works on every supported version and on Folia. Changes apply atomically the instant you click: no restart, safe mid-combat.
 
-The dashboard opens with a live status plate (version, platform, scheduling backend, active knockback profile, modules active, anticheat and OCM posture) and one screen per area:
+The dashboard shows a live status plate (version, platform, scheduling backend, active profile, modules, anticheat & OCM posture) and one screen per area:
 
-- **Knockback** — pick the server-wide knockback profile (the active one glows; each tile previews its base / vertical / delivery / combos values), and toggle the sources (fishing, projectile, rod).
-- **Hit Registration**, **Combat Rules**, **Damage**, **Potions & Food**, **Player** — click any module to enable or disable it live (a green glow means on).
+- **Knockback** — pick the server-wide profile (the active one glows, each tile previews its values) and toggle the sources (fishing, projectile, rod).
+- **Hit Registration · Combat Rules · Damage · Potions & Food · Player** — flip any module on or off live.
 - **Compatibility** — cycle the anticheat posture and OldCombatMechanics coordination.
-- **Debug** — toggle any of the ten verbose-logging channels and stream them to your chat.
+- **Debug** — toggle any of ten verbose-logging channels and stream them to your chat.
 
-Changes apply atomically the instant you click — no restart, safe mid-combat. Editing the YAML files by hand still works; reload to apply. The console cannot open an inventory, so the one surviving command is **`/mental reload`** (mirrored by the dashboard's reload button) for ops and automation.
+Prefer YAML? Editing the files by hand still works — the one surviving command is **`/mental reload`** (the console can't open a menu), mirrored by the dashboard's reload button.
 
-> **Knockback is global.** Selecting a profile sets it for the whole server at once (the optional per-world map in `knockback.yml` is still honoured). There is no per-player profile: earlier versions had a per-player override with a `/mental kb set <player>` command, and both were removed in 2.1.0 — along with the per-player `MentalApi` surface (`setKnockbackProfile(Player, …)` is now `setKnockbackProfile(String)`, and `PlayerKnockbackProfileChangeEvent` is now `KnockbackProfileChangeEvent`).
-
-Module ids (shown in the menu, and the keys under `modules:` in `config.yml` if you prefer editing by hand): `hit-registration`, `wtap-registration`, `knockback`, `latency-compensation`, `fishing-knockback`, `rod-velocity`, `projectile-knockback`, `attack-cooldown`, `disable-attack-sounds`, `disable-sword-sweep`, `disable-crafting`, `disable-offhand`, `old-golden-apples`, `disable-enderpearl-cooldown`, `old-player-regen`, `old-armour-strength`, `old-armour-durability`, `old-potion-durations`, `old-potion-values`, `old-critical-hits`, `old-tool-durability`, `sword-blocking`, `old-hitboxes`.
+> **Knockback is global.** A profile applies to the whole server at once (an optional per-world map in `knockback.yml` is still honoured). There's no per-player profile — the old `/mental kb set <player>` override was removed in 2.1.0.
 
 ## Configuration
 
@@ -74,95 +87,85 @@ Split by concern under `plugins/Mental/`, every option explained in its file:
 ```yaml
 # knockback.yml — pick the feel
 knockback:
-  profile: legacy-1.7        # legacy-1.7 · legacy-1.8 · kohi · minehq · badlion
+  profile: signature         # legacy-1.7 · legacy-1.8 · kohi · minehq · badlion
                              # · velt · mmc · lunar · signature · custom
   per-world:
     duels: kohi              # optional per-world overrides
 ```
 
-Profiles are the whole engine knob set — base/extra pushes, friction, vertical assign-vs-add, distance taper, air multipliers, w-tap bonuses and more. The guide (with the preset provenance and the fork-porting hazard table) is [docs/knockback-profiles.md](docs/knockback-profiles.md).
-
-`/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config. A v1 single-file `config.yml` migrates automatically on first start: tuned knockback values become `profiles/custom.yml` and stay selected, and the original file is kept as `config-v1-backup.yml`.
-
-## FAQ
-
-**Will it clash with my anticheat?**
-GrimAC and Vulcan are detected automatically, and Mental adjusts the one behavior their movement prediction would object to. Hits still register at full speed. Running something else? Set `anticheat.mode: force-safe` and Mental behaves the same way unconditionally.
-
-**Will it clash with WorldGuard, GriefPrevention or my combat logger?**
-No. Mental deals damage through the standard Bukkit event chain, so anything that cancels or modifies damage keeps working exactly as before.
-
-**Does it remove the 1.9 attack cooldown?**
-Yes — enable the `attack-cooldown` module (default OFF). It removes the cooldown and also spoofs the client-side `attack_speed` attribute so the charge meter and greyed-swing animation disappear; the server-side attribute is left untouched. Mental never scales damage by charge regardless, so on its own hits already feel instant — the module just cleans up the visual.
-
-**Can I run without OldCombatMechanics?**
-Yes. Mental now ships 16 optional combat-rule modules (all default OFF) that cover the full 1.8 ruleset: attack cooldown + sweep + sounds, armour strength + durability, potion durations + values, golden/notch apples, ender-pearl cooldown, player regen, offhand restrictions, sword blocking, and era melee reach. Enable what you want under `modules:` in `config.yml` — Mental is a self-contained 1.8 combat suite without any required companion plugin.
-
-A few honest caveats: `sword-blocking` shows a version-appropriate block animation (a data-component in-place pose on 1.21+, off-hand-shield fallback on 1.17.1–1.20.6) — the literal lowered-sword client animation from 1.7 is unreachable server-side. `old-hitboxes` tunes reach and hitbox margin (attribute on 1.20.5+, `AttackRange` item component on 1.21.5+; no-op on 1.17.1–1.20.4) but cannot change client-side target selection. `old-potion-values`, `old-critical-hits`, and `old-tool-durability` apply only on Mental's fast-path hits.
-
-**Can I run it alongside OldCombatMechanics?**
-Yes — that still works. Mental detects OCM and yields automatically (via `OcmGate`) for the mechanics OCM owns: knockback, fishing, and projectile behavior are stepped aside per player modeset so nothing is applied twice. The full ownership table is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
-
-One important caveat: Mental's new rules modules are **OCM-agnostic** — they do not coordinate with OCM's equivalent modules. If you enable both a Mental rules module and OCM's matching module for the same mechanic (e.g. both `attack-cooldown` and OCM's `disable-attack-cooldown`), the rule will double-apply. **Pick one plugin per rule** — use Mental's modules or OCM's, not both for the same mechanic.
-
-**Why doesn't the projectile module do anything on my 1.21.2+ server?**
-Because it doesn't need to. Mojang restored projectile knockback against players in vanilla 1.21.2.
-
-**Is Folia supported?**
-Yes, Mental is natively region-aware and localized.
-
-**Something feels off. How do I see what's happening?**
-Open `/mental` → **Debug**, enable logging and click **Receive in chat** to stream diagnostics to your chat in-game. Ten categories can be toggled individually so you only see the system you're chasing. If it looks like a bug, [open an issue](../../issues) with what you find.
+A profile is the whole engine knob set — base/extra pushes, friction, vertical assign-vs-add, distance taper, air multipliers, w-tap bonuses and more. `/mental reload` applies changes instantly, and a fight in progress never sees a half-applied config. A pre-2.0 single-file `config.yml` migrates automatically on first start (your tuned values become `profiles/custom.yml`; the original is kept as `config-v1-backup.yml`).
 
 ## Combat rules modules (optional)
 
-Mental ships 16 optional combat-rule modules ported from OldCombatMechanics, all **default OFF**. An untouched config behaves exactly as before (zero-touch). Enable them individually under `modules:` in `config.yml`:
+Mental ships 16 combat-rule modules ported from OldCombatMechanics, **all default OFF** — an untouched config behaves exactly as vanilla-plus-Mental-knockback (zero-touch). Enable what you want under `modules:` in `config.yml` to build a full 1.8 server with no companion plugin.
 
 | Config id | What it does |
 | --- | --- |
-| `attack-cooldown` | Removes the 1.9 attack cooldown and spoofs `attack_speed` so the charge meter and greyed-swing animation disappear client-side (server attribute untouched). |
+| `attack-cooldown` | Removes the 1.9 attack cooldown and spoofs `attack_speed` so the charge meter and greyed-swing vanish client-side (server attribute untouched). |
 | `disable-attack-sounds` | Silences the 1.9 swing-result sounds. |
 | `disable-sword-sweep` | Disables the 1.9 sweep attack and its particle. |
 | `disable-crafting` | Makes configured items uncraftable (default: SHIELD). |
 | `disable-offhand` | Blocks off-hand use; supports a whitelist/blacklist item filter. |
-| `old-golden-apples` | 1.8 golden/notch apple effects and the 8-gold-block notch-apple recipe. |
+| `old-golden-apples` | 1.8 golden/notch apple effects and the 8-gold-block notch recipe. |
 | `disable-enderpearl-cooldown` | Removes the 1.9 ender-pearl throw cooldown. |
 | `old-player-regen` | The 1.8 natural regeneration model. |
-| `old-armour-strength` | 1.8 flat armour reduction (4 % per armour point, no toughness). |
+| `old-armour-strength` | 1.8 flat armour reduction (4 % per point, no toughness). |
 | `old-armour-durability` | The 1.8 armour Unbreaking durability behaviour. |
 | `old-potion-durations` | 1.8 potion durations. |
-| `old-potion-values` | 1.8 Strength/Weakness damage values — applies on Mental's fast-path hits. |
-| `old-critical-hits` | Era crit rule for non-fast-path melee (the fast path already applies it). |
-| `old-tool-durability` | Weapon durability on Mental's fast-path hits (which the fast path otherwise omits). |
-| `sword-blocking` | 1.7-style right-click sword blocking. On 1.21+ a data-component in-place block animation is used; 1.17.1–1.20.6 falls back to an off-hand-shield. The literal lowered-sword client animation from 1.7 is unreachable server-side. |
-| `old-hitboxes` | Era melee reach + hitbox margin. Implemented via entity attribute on 1.20.5+, `AttackRange` item component on 1.21.5+; no-op on 1.17.1–1.20.4. Cannot change client-side target selection. |
+| `old-potion-values` | 1.8 Strength/Weakness damage values (applies on Mental's fast-path hits). |
+| `old-critical-hits` | Era crit rule for non-fast-path melee. |
+| `old-tool-durability` | Weapon durability on Mental's fast-path hits. |
+| `sword-blocking` | 1.7-style right-click sword blocking (a data-component pose on 1.21+, off-hand-shield fallback on 1.17.1–1.20.6). |
+| `old-hitboxes` | Era melee reach + hitbox margin (entity attribute on 1.20.5+, `AttackRange` component on 1.21.5+; no-op below). |
 
-All 16 modules are Folia-correct (region-aware via Mental's `Scheduling`).
+All 16 are Folia-correct. They're **OCM-agnostic** — if you run OldCombatMechanics too, enable each rule in *one* plugin only, or it double-applies.
 
-These modules are **OCM-agnostic**: they do not coordinate with OldCombatMechanics' equivalent features. If you run Mental alongside OCM and enable the same rule in both, it will double-apply — pick one plugin per rule. Mental's `OcmGate` coexistence (auto-yield for knockback/fishing/projectile) is unaffected and continues to work regardless of which rules modules you enable.
+## FAQ
+
+**Will it clash with my anticheat?**
+GrimAC and Vulcan are detected automatically and Mental adjusts the one behaviour their movement prediction would object to — hits still register at full speed. Running something else? Set `anticheat.mode: force-safe`.
+
+**Will it clash with WorldGuard, GriefPrevention or my combat logger?**
+No. Mental deals damage through the standard Bukkit event chain, so anything that cancels or modifies damage keeps working.
+
+**Does it remove the 1.9 attack cooldown?**
+Enable the `attack-cooldown` module (default OFF). It removes the cooldown *and* hides the charge meter and greyed swing client-side. Mental never scales damage by charge anyway, so hits already feel instant — the module just cleans up the visual.
+
+**Can I run without OldCombatMechanics?**
+Yes — Mental's 16 optional modules cover the full 1.8 ruleset, so it's a self-contained 1.8 combat suite.
+
+**Can I run it *alongside* OldCombatMechanics?**
+Yes. Mental detects OCM and auto-yields (via `OcmGate`) for the mechanics OCM owns — knockback, fishing and projectiles step aside per player modeset so nothing applies twice. The new rules modules are OCM-agnostic, though, so pick one plugin per rule. Full ownership table in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+
+**Why doesn't the projectile module do anything on my 1.21.2+ server?**
+Because it doesn't need to — Mojang restored projectile knockback against players in vanilla 1.21.2.
+
+**Is Folia supported?**
+Yes — Mental is natively region-aware.
+
+**Something feels off. How do I see what's happening?**
+Open `/mental` → **Debug**, enable logging and click **Receive in chat** to stream diagnostics in-game. If it looks like a bug, [open an issue](../../issues) with what you find.
 
 ## For developers
-
-### How it's put together
 
 Mental is a multi-module Gradle build:
 
 | Module | Purpose |
 | --- | --- |
 | `api` | The small public API other plugins compile against |
-| `common` | Pure logic with no Bukkit dependency: combat math, config model, command tree |
+| `common` | Pure logic, no Bukkit dependency: combat math, config model, command tree |
 | `core` | The plugin itself: combat modules, packet layer, Bukkit wiring |
 | `compat-folia` | Folia schedulers, loaded only when Folia is detected |
 | `compat-brigadier` | Native command registration, loaded only on 1.20.6+ |
 | `tester` | The in-server integration test harness |
 
-The wide version range works without reflection on hot paths: `core` compiles against the oldest supported API (1.17), which makes the common path binary-safe everywhere, and anything newer lives in the `compat-*` modules behind runtime feature detection. The two binary breaks in the range (the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames) are absorbed by small boot-time resolvers.
+`core` compiles against the oldest supported API (1.17), so the common path is binary-safe everywhere; anything newer lives in a `compat-*` module behind runtime feature detection. The two binary breaks in the range (the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames) are absorbed by small boot-time resolvers.
 
-If you're curious how a hit travels from packet to knockback, [docs/fast-path.md](docs/fast-path.md) walks the whole pipeline. For what "1.7.10 combat" means precisely — the residual ledger behind combos, the legacy damage tables, and the few client-side mechanics no server can mirror — see [docs/legacy-combat.md](docs/legacy-combat.md). The knockback-profile system (presets, provenance, the divisor↔multiplier porting hazard) is in [docs/knockback-profiles.md](docs/knockback-profiles.md), with the research behind it in [docs/research/](docs/research/). How Mental divides combat with OldCombatMechanics (and proves it on live servers) is in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+Deeper reading: [docs/fast-path.md](docs/fast-path.md) (packet → knockback pipeline), [docs/legacy-combat.md](docs/legacy-combat.md) (what "1.7.10 combat" means precisely), [docs/knockback-profiles.md](docs/knockback-profiles.md) (presets, provenance, the divisor↔multiplier porting hazard), [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
 
 ### API
 
-Two events and a small facade, under `me.vexmc.mental.api`. Add the Mental jar to your compile classpath and `softdepend: [Mental]` to your plugin.yml.
+Two events and a small facade, under `me.vexmc.mental.api`. Add the Mental jar to your compile classpath and `softdepend: [Mental]` to your `plugin.yml`.
 
 ```java
 // Veto hits before they happen (fires on a packet thread — keep it fast):
@@ -179,11 +182,9 @@ public void onKnockback(KnockbackApplyEvent event) {
     event.velocity(event.velocity().multiply(0.8));
 }
 
-// Query Mental's state:
+// Query and control Mental's state (knockback is server-wide):
 OptionalDouble ping = Mental.get().pingMillis(player);
-
-// Pin a duel to a knockback profile (practice cores):
-Mental.get().setKnockbackProfile(victim, "kohi");   // fires PlayerKnockbackProfileChangeEvent
+Mental.get().setKnockbackProfile("kohi");   // fires KnockbackProfileChangeEvent
 ```
 
 ### Building and testing
@@ -191,22 +192,9 @@ Mental.get().setKnockbackProfile(victim, "kohi");   // fires PlayerKnockbackProf
 ```bash
 ./gradlew build                    # compile + unit tests → core/build/libs/Mental-<version>.jar
 ./gradlew integrationTest          # boots real Paper servers (oldest + newest supported)
-./gradlew integrationTestMatrix    # the full seven-version matrix
+./gradlew integrationTestMatrix    # the full version matrix
 ```
 
-The integration tests are the interesting part. They start actual Paper servers, spawn synthetic players, throw real punches, and assert that the resulting velocity matches the 1.8 math to three decimal places. Gradle provisions the right JDK for each server version automatically, so a plain clone and `./gradlew build` is all you need.
+The integration tests start actual Paper servers, spawn synthetic players, throw real punches and assert the resulting velocity matches the 1.8 math to three decimals. Gradle provisions the right JDK per server version automatically, so a plain clone and `./gradlew build` is all you need.
 
 Contributions are welcome. For anything bigger than a bugfix, open an issue first so we can talk it through.
-
-## Credits
-
-Mental is built on the following:
-
-- [knockback-sync](https://github.com/CASELOAD7000/knockback-sync) — the latency-compensation approach
-- [BukkitOldCombatMechanics](https://github.com/kernitus/BukkitOldCombatMechanics) — 1.8 rod and projectile mechanics, and the real-server testing approach
-- [SmashHit](https://github.com/frash23/SmashHit) — the async hit-registration concept
-- [PacketEvents](https://github.com/retrooper/packetevents) — the packet layer (bundled inside the jar)
-
-## License
-
-MIT. See [LICENSE](LICENSE).
