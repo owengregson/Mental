@@ -29,7 +29,7 @@ class HitApplierTest {
 
     @Test
     void foliaSwallowsACrossRegionApplyFailure() {
-        AtomicReference<RuntimeException> swallowed = new AtomicReference<>();
+        AtomicReference<IllegalStateException> swallowed = new AtomicReference<>();
         IllegalStateException offRegion = new IllegalStateException(
                 "Accessing entity state off owning region's thread");
         HitApplier.applyGuarded(true, () -> {
@@ -48,6 +48,19 @@ class HitApplierTest {
                     throw bug;
                 },
                 e -> fail("Paper has no regions; an apply throw must propagate, never be swallowed")));
+    }
+
+    @Test
+    void foliaStillSurfacesAGenuineBug() {
+        // The catch is scoped to the off-region IllegalStateException; a real
+        // logic bug (here an NPE) must NOT be swallowed even on Folia — the one
+        // platform with no combat test coverage.
+        assertThrows(NullPointerException.class, () -> HitApplier.applyGuarded(
+                true,
+                () -> {
+                    throw new NullPointerException("a genuine bug, not an off-region read");
+                },
+                e -> fail("a non-off-region throw must surface, not be masked as a region skip")));
     }
 
     @Test

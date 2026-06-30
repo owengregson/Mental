@@ -41,6 +41,13 @@ public final class FoliaScheduling implements Scheduling {
     }
 
     @Override
+    public boolean isOwnedByCurrentRegion(@NotNull Entity entity) {
+        // The real region-ownership check: true iff the region executing on this
+        // thread owns the entity, so the caller may read its live state safely.
+        return Bukkit.getServer().isOwnedByCurrentRegion(entity);
+    }
+
+    @Override
     public void runOn(@NotNull Entity entity, @NotNull Runnable task, @NotNull Runnable retired) {
         ScheduledTask scheduled = entity.getScheduler().run(plugin, ignored -> task.run(), retired);
         if (scheduled == null) {

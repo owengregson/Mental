@@ -69,22 +69,31 @@ public final class HitApplier {
      *
      * <p>The exception is a region-boundary straddle, or an attacker that
      * pearled/teleported across a region between the netty snapshot and this
-     * deferred task: the attacker reads here — {@code getGameMode}, the
-     * attribute/enchant reads in {@code DamageCalculator}, and the
-     * knockback-direction read inside {@code damage(amount, attacker)} — then
-     * throw {@code ensureTickThread} off the victim's region. A cross-region
-     * attacker is no longer within reach, so {@link #applyGuarded} drops the hit
-     * with a logged skip rather than letting the scheduler surface an uncaught
-     * throw; on Paper there are no regions, so any throw propagates unmasked.</p>
+     * deferred task. An up-front {@code isOwnedByCurrentRegion} gate drops the
+     * hit before any attacker-state read — {@code getGameMode}, the
+     * attribute/enchant reads in {@code DamageCalculator}, the knockback-direction
+     * read inside {@code damage(amount, attacker)} — since a cross-region attacker
+     * is not within reach and cannot be read region-safely. {@link #applyGuarded}
+     * is the backstop: should any read still throw {@code ensureTickThread}, it
+     * degrades to a logged skip on Folia rather than letting the scheduler surface
+     * an uncaught throw. On Paper there is one region, so the gate is always true
+     * and any throw propagates unmasked.</p>
      */
     public void applyPlayer(@NotNull UUID attackerUuid, @NotNull UUID victimUuid) {
         applyGuarded(
                 services.capabilities().folia(),
                 () -> {
                     Player attacker = Bukkit.getPlayer(attackerUuid);
-                    if (attacker == null
-                            || !attacker.isOnline()
-                            || attacker.getGameMode() == GameMode.SPECTATOR) {
+                    if (attacker == null) {
+                        return;
+                    }
+                    if (!services.scheduling().isOwnedByCurrentRegion(attacker)) {
+                        services.debug().log(DebugCategory.KNOCKBACK,
+                                () -> "skipped melee apply: attacker " + attackerUuid
+                                        + " not owned by the victim's region");
+                        return;
+                    }
+                    if (!attacker.isOnline() || attacker.getGameMode() == GameMode.SPECTATOR) {
                         return;
                     }
                     Player victim = Bukkit.getPlayer(victimUuid);
@@ -102,22 +111,26 @@ public final class HitApplier {
     }
 
     /**
-     * Runs the resolve-validate-damage body, degrading a cross-region failure to
-     * a logged skip on Folia. See {@link #applyPlayer} for why the attacker reads
+     * Runs the resolve-validate-damage body, degrading an off-region failure to a
+     * logged skip on Folia. See {@link #applyPlayer} for why the attacker reads
      * can throw off the victim's region thread; a cross-region attacker is no
-     * longer within reach, so the era-correct outcome is to drop the hit. On
-     * Paper there are no regions, so a throw is a genuine bug and propagates
-     * unmasked — byte-identical to the pre-guard code.
+     * longer within reach, so the era-correct outcome is to drop the hit. The
+     * catch is scoped to {@link IllegalStateException} — Folia's off-region read
+     * throws exactly that ({@code Accessing entity state off owning region's
+     * thread}) — so a genuine logic bug (an NPE, say) still surfaces even on Folia,
+     * the one platform with no combat test coverage. On Paper there are no
+     * regions, so a throw is a genuine bug and propagates unmasked — byte-identical
+     * to the pre-guard code.
      */
     static void applyGuarded(
-            boolean folia, @NotNull Runnable body, @NotNull Consumer<RuntimeException> onSkip) {
+            boolean folia, @NotNull Runnable body, @NotNull Consumer<IllegalStateException> onSkip) {
         try {
             body.run();
-        } catch (RuntimeException crossRegionOrBug) {
+        } catch (IllegalStateException crossRegion) {
             if (!folia) {
-                throw crossRegionOrBug;
+                throw crossRegion;
             }
-            onSkip.accept(crossRegionOrBug);
+            onSkip.accept(crossRegion);
         }
     }
 

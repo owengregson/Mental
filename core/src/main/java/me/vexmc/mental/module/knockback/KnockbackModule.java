@@ -85,6 +85,22 @@ public final class KnockbackModule extends CombatModule implements Listener {
             // pending the source's own submit clobbers.
             return;
         }
+        // Every authoritative read below touches the live ATTACKER on the VICTIM's
+        // region thread — the sprint flag, the position via EntityState.capture,
+        // the attacker self-slow. On Folia a cross-region attacker (a
+        // region-boundary straddle, or a pearl/teleport across regions in the
+        // dispatch tick) makes each throw ensureTickThread; because this runs
+        // inside the synchronous EntityDamageByEntityEvent dispatch the event bus
+        // swallows the throw, leaving vanilla to apply a raw knock with a
+        // half-mutated sprint/freshness ledger. Skip the bookkeeping up front — a
+        // cross-region attacker is not within melee reach anyway — and drop any
+        // pre-delivered pending so it cannot leak onto a later hit. On Paper there
+        // is one region, so this is always owned (byte-identical).
+        if (!services.scheduling().isOwnedByCurrentRegion(attacker)) {
+            pipeline.withdraw(victim, KnockbackPipeline.Cause.MELEE);
+            debug.log(() -> "skipped cross-region melee knockback for " + victim.getName());
+            return;
+        }
         KnockbackProfile profile = services.knockbackProfiles().resolve(victim);
         // The hit's registration instant — the wire stamp's nanos when the fast
         // path registered it, else now. The post-hit sprint clear is stamped
