@@ -92,3 +92,28 @@ no archived "signature" server).
 - **Zero-touch / era-exact default:** signature is opt-in; `legacy-1.7` stays
   the default and `parse(empty) == LEGACY_17` is unchanged.
 - **velt preserved:** velt's own file and pins are untouched.
+
+## Addendum (2.2.1, 2026-06-30): the vertical tuning
+
+After playtesting 2.2.0, the owner found two more values held combos best, so
+the preset gained a vertical tune alongside the horizontal trim:
+
+- `base.vertical 0.36 → 0.365`. The cap stays `0.36`, and `0.365` sits just
+  above it, so a resting/rising victim still pins at `0.36` (the cap bites)
+  while a **descending** victim — the combo case — keeps up to `+0.005` more
+  lift. The bump is invisible on the grounded opener at rest and shows only
+  below the cap.
+- `air.vertical 1.0 → 0.98`. A 2% vertical trim on the airborne follow-ups,
+  the vertical sibling of the `0.92` horizontal trim.
+
+Net arc: the opener gets a hair more height on a falling victim, the airborne
+follow-ups a hair less. The horizontal behavior (`base.horizontal 0.325`,
+`air.horizontal 0.92`) is unchanged from 2.2.0.
+
+Unedited 2.2.0 `signature.yml` files upgrade in place: `SupersededPresets`
+gains the 2.2.0 revision (`air (0.92, 1.0)`, `base.vertical 0.36`), so a server
+that never tuned the file is corrected to the 2.2.1 values with a console
+notice; any owner edit freezes it. Pins updated accordingly
+(`MentalConfigTest` canonical values, `KnockbackEngineTest` the `×0.98`
+vertical trim + the `+0.005` descending lift, `ConfigStoreTest` the signature
+upgrade-in-place / tuned-is-frozen pair). Released as **2.2.1**.

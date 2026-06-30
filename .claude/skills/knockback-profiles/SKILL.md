@@ -11,10 +11,14 @@ description: Use when changing the knockback engine, profile schema, presets, or
   `profiles/<name>.yml`. Ten shipped presets: `legacy-1.7` (default),
   `legacy-1.8`, `kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar`,
   `signature`, `custom`. `signature` is Mental's OWN tuning (not a ported
-  fork config) — velt verbatim except `air.horizontal 0.92`, an airborne-only
-  ~8% horizontal trim that holds the combo reach pocket without touching the
-  grounded opener (the `air` multipliers apply only to airborne victims, so it
-  is the one knob distinguishing combo hits 2+ from hit 1). Presets are
+  fork config) — velt's wipe shape tuned to hold the combo reach pocket:
+  `air.horizontal 0.92` + `air.vertical 0.98` trim the airborne follow-ups
+  (the `air` multipliers apply only to airborne victims, so they retune combo
+  hits 2+ without touching the grounded opener), and `base.vertical 0.365`
+  keeps a touch more lift on descending hits (the 0.36 cap still bites on the
+  opener). Its 2.2.0 revision (`air (0.92, 1.0)`, `base.vertical 0.36`) is in
+  `SupersededPresets`, so an unedited 2.2.0 file upgrades to the 2.2.1 tune.
+  Presets are
   extracted only when missing — owner edits are
   sacred, deleting regenerates pristine — with ONE exception: a file still
   matching a superseded bundled revision verbatim (`SupersededPresets`,

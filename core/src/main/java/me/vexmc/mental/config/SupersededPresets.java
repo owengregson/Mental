@@ -91,10 +91,39 @@ final class SupersededPresets {
             ResistancePolicy.LEGACY,
             true);
 
+    /**
+     * signature as shipped in 2.2.0: velt verbatim plus only the horizontal
+     * pocket trim ({@code air.horizontal 0.92}). 2.2.1 added the vertical
+     * tuning ({@code base.vertical 0.365}, {@code air.vertical 0.98}) the owner
+     * found held combos best, so an unedited 2.2.0 file upgrades in place.
+     */
+    private static final KnockbackProfile SIGNATURE_2_2_0 = new KnockbackProfile(
+            "signature",
+            "Signature",
+            "Mental's signature feel — velt's residual wipe and pinned 0.36"
+                    + " vertical, with airborne combo hits trimmed 8% to hold"
+                    + " the reach pocket.",
+            new Push(0.325, 0.36),
+            VerticalMode.ADD,
+            new Push(0.5, 0.0),
+            new WtapExtra(false, 0.5, 0.0),
+            new Friction(0.1, 0.1, 0.1),
+            new Limits(0.36, -3.9, -1.0),
+            new Push(0.92, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true);
+
     private static final Map<String, List<KnockbackProfile>> BY_PRESET = Map.of(
             "kohi", List.of(KOHI_1_3),
             "mmc", List.of(MMC_1_3),
-            "lunar", List.of(LUNAR_1_3));
+            "lunar", List.of(LUNAR_1_3),
+            "signature", List.of(SIGNATURE_2_2_0));
 
     private SupersededPresets() {}
 

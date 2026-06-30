@@ -252,21 +252,22 @@ class MentalConfigTest {
         // is identity. signature is the derivative that does.
         assertEquals(new KnockbackProfile.Push(1.0, 1.0), velt.air());
 
-        // signature == Mental's own velt derivative: every velt value verbatim
-        // EXCEPT air.horizontal 1.0 -> 0.92, which trims the airborne combo
-        // hits (the second and later) 8% to hold the reach pocket. The
-        // grounded opener and the pinned 0.36 vertical are untouched.
+        // signature == Mental's own velt derivative, tuned by playtesting:
+        // velt's residual wipe, sprint horizontal, and 0.36 vertical cap, with
+        // three changes — air.horizontal 0.92 (the airborne pocket trim),
+        // base.vertical 0.365 (a touch above the cap, so descending hits keep
+        // more lift), and air.vertical 0.98 (the airborne vertical trim).
         KnockbackProfile signature = profiles.get("signature");
         assertNotNull(signature);
-        assertEquals(velt.base(), signature.base());
+        assertEquals(new KnockbackProfile.Push(0.325, 0.365), signature.base());
+        assertEquals(new KnockbackProfile.Push(0.92, 0.98), signature.air());
         assertEquals(velt.extra(), signature.extra());
         assertEquals(velt.friction(), signature.friction());
-        assertEquals(velt.limits(), signature.limits());
+        assertEquals(velt.limits(), signature.limits());   // cap stays 0.36
         assertEquals(velt.verticalMode(), signature.verticalMode());
         assertEquals(velt.combos(), signature.combos());
         assertEquals(velt.meleeDelivery(), signature.meleeDelivery());
         assertEquals(velt.resistance(), signature.resistance());
-        assertEquals(new KnockbackProfile.Push(0.92, 1.0), signature.air());
 
         // custom ships as legacy-1.7 values — selecting it changes nothing
         // until the owner edits the file.
