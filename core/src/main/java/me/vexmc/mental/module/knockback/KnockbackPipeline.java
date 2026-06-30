@@ -1,7 +1,6 @@
 package me.vexmc.mental.module.knockback;
 
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.api.event.KnockbackApplyEvent;
@@ -72,35 +71,17 @@ public final class KnockbackPipeline implements Listener {
      */
     private static final long PAPER_PENDING_EXPIRY_NANOS = 100_000_000L; // 2 ticks
     private static final long FOLIA_PENDING_EXPIRY_NANOS = 300_000_000L; // ~6 ticks of headroom
-    private static final long APPLIED_TAG_TTL_NANOS = 25_000_000L; // half a tick
 
     /** The pending lifetime for this platform; see the constants above. */
     static long pendingExpiryNanos(boolean folia) {
         return folia ? FOLIA_PENDING_EXPIRY_NANOS : PAPER_PENDING_EXPIRY_NANOS;
     }
 
-    private record Pending(
-            @Nullable KnockbackVector vector,
-            @Nullable KnockbackVector preDelivered,
-            boolean wireDelivered,
-            @Nullable LivingEntity attacker,
-            @NotNull Cause cause,
-            boolean groundedAtSubmit,
-            long stampNanos) {
-
-        boolean expired(long nowNanos, long expiryNanos) {
-            return nowNanos - stampNanos > expiryNanos;
-        }
-    }
-
-    /** {@code grounded} is the launch state captured at SUBMIT — the era's pre-move friction state. */
-    private record AppliedTag(@NotNull Cause cause, boolean grounded, long stampNanos) {}
-
     private final MentalServices services;
     private final VictimMotion ledger;
     private final long pendingExpiryNanos;
-    private final ConcurrentHashMap<UUID, Pending> pending = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, AppliedTag> applied = new ConcurrentHashMap<>();
+    private final PendingStore pending = new PendingStore();
+    private final AppliedTagStore applied = new AppliedTagStore();
     private volatile @Nullable VelocityDuplicateSuppressor suppressor;
 
     public KnockbackPipeline(@NotNull MentalServices services, @NotNull VictimMotion ledger) {
@@ -134,10 +115,23 @@ public final class KnockbackPipeline implements Listener {
         // lifted them (always, for the tester's fake players) and modern
         // servers flip the flag on the hit tick itself, but the era tracker
         // decayed with the victim's state AT the knock.
-        pending.put(victim.getUniqueId(), new Pending(
+        enqueue(victim.getUniqueId(), new Pending(
                 vector, null, false, attacker, cause,
                 ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
                 System.nanoTime()));
+    }
+
+    /**
+     * Appends a pending to the victim's FIFO and logs an over-cap eviction (the
+     * cap only bites a stuck victim that never fires a velocity event).
+     */
+    private void enqueue(@NotNull UUID victimId, @NotNull Pending p) {
+        Pending evicted = pending.enqueue(victimId, p);
+        if (evicted != null) {
+            Cause droppedCause = evicted.cause();
+            debug(() -> "evicted oldest " + droppedCause + " pending for " + victimId
+                    + " (cap " + PendingStore.CAP + " unconsumed knocks queued)");
+        }
     }
 
     /**
@@ -154,7 +148,7 @@ public final class KnockbackPipeline implements Listener {
             @NotNull KnockbackVector vector,
             @NotNull KnockbackVector preDelivered,
             @Nullable LivingEntity attacker) {
-        pending.put(victim.getUniqueId(), new Pending(
+        enqueue(victim.getUniqueId(), new Pending(
                 vector, preDelivered, true, attacker, Cause.MELEE,
                 ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
                 System.nanoTime()));
@@ -175,46 +169,39 @@ public final class KnockbackPipeline implements Listener {
             @NotNull KnockbackVector vector,
             @NotNull KnockbackVector shipped,
             @Nullable LivingEntity attacker) {
-        pending.put(victim.getUniqueId(), new Pending(
+        enqueue(victim.getUniqueId(), new Pending(
                 vector, shipped, false, attacker, Cause.MELEE,
                 ledger.groundedView(victim.getUniqueId(), victim.isOnGround()),
                 System.nanoTime()));
     }
 
-    /** Drops a pending vector — a protection plugin cancelled the hit it belonged to. */
+    /** Drops every pending vector — a protection plugin cancelled the hit it belonged to. */
     public void withdraw(@NotNull Player victim) {
-        pending.remove(victim.getUniqueId());
+        pending.withdrawAll(victim.getUniqueId());
     }
 
     /**
-     * Drops a pending only when it was queued by {@code onlyIfCause} — so a melee
-     * cancel does not evict a concurrent projectile/arrow knock sharing the
-     * victim's single pending slot.
+     * Drops only the pendings queued by {@code onlyIfCause} — so a melee cancel
+     * does not evict a concurrent projectile/arrow knock sharing the victim's
+     * FIFO.
      */
     public void withdraw(@NotNull Player victim, @NotNull Cause onlyIfCause) {
-        pending.computeIfPresent(victim.getUniqueId(),
-                (id, p) -> p.cause() == onlyIfCause ? null : p);
+        pending.withdrawCause(victim.getUniqueId(), onlyIfCause);
     }
 
     /**
-     * Whether a live pre-delivered vector is queued for the victim — the
-     * authoritative damage pass adopts it instead of recomputing, so both
-     * stamps of one hit can never disagree.
+     * Whether a live pre-delivered vector registered by {@code attacker} is
+     * queued for the victim — the authoritative damage pass adopts it instead of
+     * recomputing, so both stamps of one hit can never disagree. Scoped to the
+     * registering attacker: the wider Folia window keeps a consumed-late pending
+     * live longer, so a lingering pending must never be adopted by a DIFFERENT
+     * attacker's hit (which would ship hit-1's owner/direction for hit-2). The
+     * connectionless pinned case carries no attacker to scope on.
      */
     public boolean hasFreshPreDelivered(@NotNull Player victim, @Nullable LivingEntity attacker) {
-        Pending stored = pending.get(victim.getUniqueId());
-        if (stored == null || stored.preDelivered() == null
-                || stored.expired(System.nanoTime(), pendingExpiryNanos)) {
-            return false;
-        }
-        // Scope adoption to the attacker that registered the pre-send. The wider
-        // Folia window keeps a consumed-late pending live longer, so a lingering
-        // pending must never be adopted by a DIFFERENT attacker's hit (which
-        // would ship hit-1's owner/direction for hit-2). The connectionless
-        // pinned case carries no attacker to scope on.
-        UUID storedAttacker = stored.attacker() != null ? stored.attacker().getUniqueId() : null;
         UUID hitAttacker = attacker != null ? attacker.getUniqueId() : null;
-        return sameAttacker(storedAttacker, hitAttacker);
+        return pending.hasFreshPreDelivered(
+                victim.getUniqueId(), System.nanoTime(), pendingExpiryNanos, hitAttacker);
     }
 
     /** Whether a pre-delivered pending registered by {@code stored} is adoptable by {@code hit}. */
@@ -227,40 +214,49 @@ public final class KnockbackPipeline implements Listener {
 
     /**
      * Safety net for sources vanilla never arms a velocity event for (modern
-     * ender pearls): one tick later, if the submission is still pending, set
-     * the velocity directly — which arms the event this pipeline then serves.
+     * ender pearls, thrown projectiles): one tick later, if the submission for
+     * {@code cause} is still pending, set the velocity directly — which arms the
+     * event this pipeline then serves.
+     *
+     * <p>It targets the newest pending of {@code cause} rather than the FIFO
+     * head, promoting it so the velocity event below consumes exactly it: an
+     * unrelated lingering knock (e.g. a pre-sent melee invuln then absorbed)
+     * could otherwise sit at the head and the projectile knock would be orphaned
+     * unserved. It is not gated on the adoption-window expiry — on Folia the
+     * next-region-tick defer can exceed that window and the knock would silently
+     * vanish; leak protection is the bounded FIFO, the withdraw() on cancel, and
+     * the retired callback, not a clock.</p>
      */
-    public void ensureDelivery(@NotNull Player victim) {
+    public void ensureDelivery(@NotNull Player victim, @NotNull Cause cause) {
         UUID victimId = victim.getUniqueId();
         services.scheduling().runOn(
                 victim,
                 () -> {
-                    // This is the SOLE delivery path for modern thrown projectiles
-                    // (no vanilla velocity event fires for them), so it must not be
-                    // gated on the adoption-window expiry: on Folia the next-region-
-                    // tick defer can exceed that window and the knock would silently
-                    // vanish. Leak protection here is the per-UUID overwrite, the
-                    // withdraw() on cancel, and the retired callback — not a clock.
-                    Pending stored = pending.get(victimId);
-                    if (stored != null && stored.vector() != null) {
-                        victim.setVelocity(stored.vector().toBukkit());
+                    Pending target = pending.promoteNewestOfCause(victimId, cause);
+                    if (target != null && target.vector() != null) {
+                        victim.setVelocity(target.vector().toBukkit());
                     }
                 },
-                () -> pending.remove(victimId));
+                () -> pending.withdrawAll(victimId));
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value selects the delivery decay
     public void onPlayerVelocity(@NotNull PlayerVelocityEvent event) {
         Player victim = event.getPlayer();
         UUID victimId = victim.getUniqueId();
-        Pending stored = pending.remove(victimId);
-        if (stored == null) {
-            return;
-        }
+        // First action: drop any tag a prior event left (one cancelled between
+        // HIGH and MONITOR). This victim's MONITOR below then reads only what
+        // THIS event sets, which retires the wall-clock TTL a GC pause could
+        // outlast.
+        applied.clearFor(victimId);
         long now = System.nanoTime();
-        if (stored.expired(now, pendingExpiryNanos)) {
-            debug(() -> "dropped expired " + stored.cause() + " vector for " + victim.getName());
+        // Take the OLDEST live pending, dropping any expired heads ahead of it:
+        // overlapping combo hits each pair with their own velocity event in
+        // arrival order. A lone pending (the universal era-config case) makes
+        // this exactly the old single-slot take.
+        Pending stored = pending.pollLive(victimId, now, pendingExpiryNanos,
+                n -> debug(() -> "dropped " + n + " expired pending(s) for " + victim.getName()));
+        if (stored == null) {
             return;
         }
         if (stored.vector() == null) {
@@ -294,7 +290,7 @@ public final class KnockbackPipeline implements Listener {
                     victim, apply.velocity(), stored.cause(), stored.groundedAtSubmit());
         }
         event.setVelocity(shipped);
-        applied.put(victimId, new AppliedTag(stored.cause(), stored.groundedAtSubmit(), now));
+        applied.setFor(victimId, new AppliedTag(stored.cause(), stored.groundedAtSubmit()));
         debug(() -> "applied " + stored.cause() + " knockback to " + victim.getName()
                 + " -> (" + shipped.getX() + ", " + shipped.getY() + ", " + shipped.getZ() + ")");
     }
@@ -329,8 +325,11 @@ public final class KnockbackPipeline implements Listener {
         UUID victimId = event.getPlayer().getUniqueId();
         long now = System.nanoTime();
 
-        AppliedTag tag = applied.remove(victimId);
-        boolean tagged = tag != null && now - tag.stampNanos() < APPLIED_TAG_TTL_NANOS;
+        // The HIGH handler cleared this slot on entry and set it only if it
+        // applied a vector for THIS event, so a present tag is unambiguously
+        // ours — no staleness window, no clock.
+        AppliedTag tag = applied.takeFor(victimId);
+        boolean tagged = tag != null;
         Cause cause = tagged ? tag.cause() : null;
         if (cause == Cause.MELEE
                 && !services.knockbackProfiles().resolve(event.getPlayer()).combos()) {
@@ -383,8 +382,8 @@ public final class KnockbackPipeline implements Listener {
     }
 
     private void forget(UUID victimId) {
-        pending.remove(victimId);
-        applied.remove(victimId);
+        pending.forget(victimId);
+        applied.forget(victimId);
         ledger.forget(victimId);
     }
 

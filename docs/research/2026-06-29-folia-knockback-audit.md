@@ -49,38 +49,58 @@ byte-identical (the changes are no-ops unless an exception, a cross-region cast,
 mismatched attacker, or region-tick lag occurs); the full unit suite + the 9-server
 integration matrix (7 Paper + 2 OCM) stay green.
 
-## Deferred — known narrow limitations (NOT engine bugs)
+## The four deferred items — now SHIPPED (2.1.2)
 
-1. **Token-keyed pending (per-hit identity).** The pending is still a single per-victim
-   slot. After the attacker-scoping + withdraw discipline + payload-matched suppressor,
-   the residual exposure is: two *overlapping* hits from the **same** attacker on the
-   same victim within the pending window, which only happens with a **non-era lowered
-   invulnerability** config, or knock-drop under **sub-~6.6 TPS** lag where even the
-   300 ms window expires before the entity tracker fires. The complete fix is a small
-   bounded per-victim token map consumed by the matching velocity event instead of a
-   wall-clock window; deferred as a higher-risk refactor of the era-tuned delivery.
+All four limitations the first round deferred were completed in 2.1.2, each rebuilt
+to an adversarial design panel's validated respec (the first cut of three of the four
+had a blocker the panel caught: a bare-deque race, a cross-victim ThreadLocal clobber,
+and an inverted "degrades safely" claim for the tick surrogate). A fifth issue in the
+same root-cause family surfaced during that panel and shipped with them.
 
-2. **`HitApplier.applyPlayer` reads the live attacker on the victim's region.** For
-   melee, Folia keeps the attacker and victim in the same region (they are within a few
-   blocks), so the reads are region-correct in practice. A region-boundary straddle or
-   an attacker that pearls across a region in the dispatch tick could throw; deferred
-   because the co-location guarantee holds for essentially all real melee.
+1. **Token-keyed pending → per-victim FIFO (`PendingStore`).** The single slot became a
+   bounded per-victim FIFO so two overlapping same-attacker hits each pair with their own
+   velocity event in arrival order. Every mutation runs inside
+   `ConcurrentHashMap.compute`/`computeIfPresent` (the inner `ArrayDeque` is only touched
+   under the per-victim bin lock — one linearization point, like the old put/remove); a
+   20k-pending concurrency pin proves conservation. Degenerates to the old single-slot
+   take at depth ≤ 1 (the universal era path), so the measured wire values are untouched.
+   `ensureDelivery(victim, cause)` promotes the newest pending of its cause so a
+   projectile/rod knock is never orphaned behind a lingering melee.
 
-3. **Folia `NO_TICK` disables the within-tick attack-ordering exclusion.** The packet
-   feed cannot read a region tick off the netty thread (`getCurrentTick` throws), so it
-   stamps `VictimMotion.NO_TICK`; `currentExcludingTick` then never excludes a same-tick
-   transition. An exact-touchdown second combo hit on Folia can therefore ship the
-   grounded ~0.3608 vertical where the era ships the pre-landing ~0.25 — slightly
-   **floatier exact-boundary combos on Folia only**. This is an accepted trade: the
-   alternative (reading the region tick off-thread) **threw and froze the whole ground
-   ledger**, which was strictly worse. A netty-readable monotonic per-region tick
-   surrogate could restore it; deferred as high-risk. **If you see floatier combos on
-   Folia, this is the cause — not the engine.**
+2. **`HitApplier.applyPlayer` region-safety + the 5th issue.** `Scheduling.isOwnedBy
+   CurrentRegion` (true on Paper, the real check on Folia) gates the authoritative
+   attacker reads up front in BOTH `HitApplier.applyPlayer` AND
+   `KnockbackModule.onEntityDamageByEntity`. The fifth issue: the EDBEE-handler attacker
+   reads run inside the synchronous event dispatch, so Bukkit's per-listener
+   `catch(Throwable)` would swallow an off-region throw — leaving vanilla to apply a raw
+   knock with a half-mutated sprint/freshness ledger — which a try/catch around the
+   applier could never intercept. The up-front gate skips the cross-region hit (not
+   within reach anyway) before any attacker read; the applier's backstop catch is scoped
+   to `IllegalStateException` so a genuine bug still surfaces on Folia.
 
-4. **`AppliedTag` 25 ms wall-clock TTL** between the HIGH and MONITOR velocity handlers
-   could lapse across a >25 ms GC pause, missing the combos-off send-then-revert skip
-   once. Rare and self-healing; a per-event carrier would remove the clock dependence.
-   Deferred as low severity.
+3. **Folia boundary exclusion restored (`ServerTickClock`).** A netty-readable tick both
+   the packet stamp and the snapshot read share: `Bukkit.getCurrentTick()` on Paper
+   (byte-identical), a global-region-task `AtomicInteger` on Folia, **initialised to
+   `NO_TICK`** so a never-started/stalled counter degrades to no-exclusion (inclusive)
+   rather than — as a stuck shared `0` would — excluding universally and permanently (a
+   server-wide too-sinky regression, the inverted claim the panel caught).
+   `currentExcludingTick` additionally requires the boundary sample to be recent (4
+   ticks), so a stale match cannot false-exclude. The exact-touchdown Folia combo now
+   ships the era ~0.25 instead of the grounded ~0.3608.
+
+4. **`AppliedTag` clock-free carrier (`AppliedTagStore`).** The 25 ms TTL is gone: the
+   HIGH handler clears the victim's slot on entry and sets it only on apply, and since
+   any event reaching MONITOR uncancelled also passed HIGH, MONITOR reads exactly this
+   event's tag with no clock — GC-pause-immune. Kept keyed by victim (not a
+   `ThreadLocal`, which the panel showed would let a nested different-victim event
+   clobber it).
+
+## Deferred — none
+
+There are no remaining deferred items from this audit. The narrow Folia-straddle outcome
+that survives (a cross-region melee is dropped rather than applied) is a Folia limitation,
+not a Mental bug: a victim cannot be damaged from another region's thread, so dropping the
+hit is the only region-safe outcome.
 
 The matrix has **no live Folia combat coverage** (the tester runs only the boot suite
 on Folia — gameplay suites drive cross-region state from one context, which Folia

@@ -1,7 +1,9 @@
 package me.vexmc.mental.module.hitreg;
 
 import java.util.UUID;
+import java.util.function.Consumer;
 import me.vexmc.mental.MentalServices;
+import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.module.damage.WeaponDurability;
 import me.vexmc.mental.module.ocm.OcmMechanic;
 import org.bukkit.Bukkit;
@@ -62,21 +64,74 @@ public final class HitApplier {
      * {@code World#getEntities()} scan, which throws off-region on Folia), so no
      * entity-id scan is needed. Runs on the victim's owning region thread (the
      * region that owns the damage event); for melee the attacker shares that
-     * region, so reading the attacker's state here is region-correct.
+     * region in essentially all real play, so reading the attacker's state here
+     * is region-correct.</p>
+     *
+     * <p>The exception is a region-boundary straddle, or an attacker that
+     * pearled/teleported across a region between the netty snapshot and this
+     * deferred task. An up-front {@code isOwnedByCurrentRegion} gate drops the
+     * hit before any attacker-state read — {@code getGameMode}, the
+     * attribute/enchant reads in {@code DamageCalculator}, the knockback-direction
+     * read inside {@code damage(amount, attacker)} — since a cross-region attacker
+     * is not within reach and cannot be read region-safely. {@link #applyGuarded}
+     * is the backstop: should any read still throw {@code ensureTickThread}, it
+     * degrades to a logged skip on Folia rather than letting the scheduler surface
+     * an uncaught throw. On Paper there is one region, so the gate is always true
+     * and any throw propagates unmasked.</p>
      */
     public void applyPlayer(@NotNull UUID attackerUuid, @NotNull UUID victimUuid) {
-        Player attacker = Bukkit.getPlayer(attackerUuid);
-        if (attacker == null || !attacker.isOnline() || attacker.getGameMode() == GameMode.SPECTATOR) {
-            return;
+        applyGuarded(
+                services.capabilities().folia(),
+                () -> {
+                    Player attacker = Bukkit.getPlayer(attackerUuid);
+                    if (attacker == null) {
+                        return;
+                    }
+                    if (!services.scheduling().isOwnedByCurrentRegion(attacker)) {
+                        services.debug().log(DebugCategory.KNOCKBACK,
+                                () -> "skipped melee apply: attacker " + attackerUuid
+                                        + " not owned by the victim's region");
+                        return;
+                    }
+                    if (!attacker.isOnline() || attacker.getGameMode() == GameMode.SPECTATOR) {
+                        return;
+                    }
+                    Player victim = Bukkit.getPlayer(victimUuid);
+                    if (victim == null
+                            || victim.isDead()
+                            || !isStillAttackable(attacker, victim)
+                            || !isInReach(attacker, victim)) {
+                        return;
+                    }
+                    damage(attacker, victim);
+                },
+                crossRegion -> services.debug().log(DebugCategory.KNOCKBACK,
+                        () -> "skipped cross-region melee apply for attacker " + attackerUuid
+                                + ": " + crossRegion));
+    }
+
+    /**
+     * Runs the resolve-validate-damage body, degrading an off-region failure to a
+     * logged skip on Folia. See {@link #applyPlayer} for why the attacker reads
+     * can throw off the victim's region thread; a cross-region attacker is no
+     * longer within reach, so the era-correct outcome is to drop the hit. The
+     * catch is scoped to {@link IllegalStateException} — Folia's off-region read
+     * throws exactly that ({@code Accessing entity state off owning region's
+     * thread}) — so a genuine logic bug (an NPE, say) still surfaces even on Folia,
+     * the one platform with no combat test coverage. On Paper there are no
+     * regions, so a throw is a genuine bug and propagates unmasked — byte-identical
+     * to the pre-guard code.
+     */
+    static void applyGuarded(
+            boolean folia, @NotNull Runnable body, @NotNull Consumer<IllegalStateException> onSkip) {
+        try {
+            body.run();
+        } catch (IllegalStateException crossRegion) {
+            if (!folia) {
+                throw crossRegion;
+            }
+            onSkip.accept(crossRegion);
         }
-        Player victim = Bukkit.getPlayer(victimUuid);
-        if (victim == null
-                || victim.isDead()
-                || !isStillAttackable(attacker, victim)
-                || !isInReach(attacker, victim)) {
-            return;
-        }
-        damage(attacker, victim);
     }
 
     /**

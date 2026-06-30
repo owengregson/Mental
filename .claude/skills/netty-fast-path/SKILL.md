@@ -31,8 +31,19 @@ thread:
   `Bukkit.getCurrentTick()` (→ `RegionizedServer.getCurrentTick()`, throws
   `IllegalStateException("No currently ticking region")` off a region thread —
   it cost a debugging round when a swallowed throw silently killed the
-  packet-fed ground ledger; the packet feed uses `VictimMotion.NO_TICK` on
-  Folia) — any `getHandle()`-routed accessor.
+  packet-fed ground ledger) — any `getHandle()`-routed accessor.
+
+The boundary attack-ordering exclusion needs a tick at two sites — the netty
+packet stamp (`GroundTransitionWatcher`) and the owning-thread snapshot read
+(`PlayerStateCache`). Both now go through `ServerTickClock` (since 2.1.2):
+`Bukkit.getCurrentTick()` on Paper (byte-identical), a global-region-task
+`AtomicInteger` on Folia that any thread may read. It is **initialised to
+`NO_TICK`, not 0** — load-bearing: both sites read the same clock, so a
+never-started/stalled counter that read a stuck `0` would make every stamp
+equal every excludeTick and fire the exclusion **universally and permanently**
+(server-wide too-sinky). NO_TICK init degrades a dead counter to no-exclusion
+(inclusive) instead, and `currentExcludingTick` also requires the boundary
+sample to be RECENT (4 ticks) so a stale match cannot false-exclude.
 - SAFE (cached / config): `getLocation()`, `getWorld()`, `getUniqueId()`,
   `getType()`, `isValid()`, `isDead()`, `isOnGround()` (javap-proven: reads
   the raw NMS `Entity.onGround()` field directly, NOT through `getHandle()`,
@@ -53,8 +64,24 @@ and let the owning-thread applier (`HitApplier.applyPlayer`, resolves both
 parties by UUID — never `getEntities()`) be the authoritative validator.
 Non-player targets can't be resolved off-region, so on Folia they pass through
 to vanilla (mob combat / armour stands keep working); Paper keeps the live
-scan. Melee guarantees attacker and victim share a region, so the applier's
-attacker reads are region-correct.
+scan. Melee guarantees attacker and victim share a region in essentially all
+real play, so the applier's attacker reads are region-correct — EXCEPT a
+region-boundary straddle or an attacker that pearls/teleports across a region
+in the dispatch tick. The authoritative knockback path reads the live ATTACKER
+on the VICTIM's region thread (`HitApplier.applyPlayer` AND
+`KnockbackModule.onEntityDamageByEntity` — sprint flag, position, the attacker
+self-slow); a cross-region attacker makes each throw `ensureTickThread`. The
+trap (cost a design-panel round): the EDBEE-handler reads run **inside the
+synchronous `EntityDamageByEntityEvent` dispatch**, so Bukkit's per-listener
+`catch(Throwable)` in the event bus SWALLOWS the throw — a try/catch around the
+applier can never intercept it, the event isn't cancelled, and vanilla applies
+a raw knock with a half-mutated sprint/freshness ledger. Fix (2.1.2): an
+up-front `Scheduling.isOwnedByCurrentRegion(attacker)` gate in BOTH handlers
+(always true on Paper — one region; the real check on Folia) skips the
+cross-region hit before any attacker read. Only call `isOwnedByCurrentRegion`
+from a region/owning thread, never netty. The applier keeps a backstop catch
+scoped to `IllegalStateException` (the off-region throw) so a genuine bug still
+surfaces on Folia.
 
 Two corollaries:
 - **Debug suppliers run on the netty thread too.** A `() -> "..." +

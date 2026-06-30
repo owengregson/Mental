@@ -36,6 +36,13 @@ public final class BukkitScheduling implements Scheduling {
     }
 
     @Override
+    public boolean isOwnedByCurrentRegion(@NotNull Entity entity) {
+        // One region: the main thread owns every entity. Callers reach this only
+        // from the owning thread, so the reads they are gating are region-correct.
+        return true;
+    }
+
+    @Override
     public void runOn(@NotNull Entity entity, @NotNull Runnable task, @NotNull Runnable retired) {
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (entity.isValid()) {

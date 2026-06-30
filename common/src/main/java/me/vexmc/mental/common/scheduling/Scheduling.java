@@ -26,6 +26,18 @@ public interface Scheduling {
      */
     void runOn(@NotNull Entity entity, @NotNull Runnable task, @NotNull Runnable retired);
 
+    /**
+     * Whether {@code entity} is owned by the region executing on the CURRENT
+     * thread. On Paper there is a single region — the main thread owns
+     * everything — so this is always {@code true}; on Folia it is the real
+     * region-ownership check. It gates live-entity reads that would otherwise
+     * throw {@code ensureTickThread} when the entity belongs to another region
+     * (a region-boundary straddle, or an entity that moved regions in the
+     * dispatch tick). Call it from a region/owning thread (a damage handler),
+     * never the netty loop.
+     */
+    boolean isOwnedByCurrentRegion(@NotNull Entity entity);
+
     void runAsync(@NotNull Runnable task);
 
     @NotNull TaskHandle repeatGlobal(long initialTicks, long periodTicks, @NotNull Runnable task);

@@ -248,6 +248,25 @@ class VictimMotionTest {
         assertEquals(VictimMotion.groundedEquilibrium(GRAVITY), asOf.vy(), EPSILON);
     }
 
+    @Test
+    void staleBoundarySamplesAreNotExcluded() {
+        // The era same-tick contract is inherently sub-tick. A frozen Folia
+        // global-tick counter could stamp an OLD transition with the same value
+        // the snapshot later reads, so the exclusion must also require the
+        // boundary sample to be RECENT — otherwise a stale match would fire a
+        // false too-sinky exclusion server-wide. A stale match reads the sample
+        // inclusively instead.
+        ledger.recordLiftoff(victim, true, false, 0.0f, TICK_NANOS, GRAVITY, VictimMotion.JUMP_IMPULSE, 1);
+        ledger.recordLanding(victim, 10 * TICK_NANOS, GRAVITY, VictimMotion.DEFAULT_SLIPPERINESS, 10);
+        // Same excludeTick=10, but read 90 ticks later (groundedNow=false so an
+        // exclusion would surface the airborne liftoff, distinguishing it).
+        VictimMotion.Motion asOf = ledger.currentExcludingTick(
+                victim, 10, 100 * TICK_NANOS, false, GRAVITY);
+        // Not excluded: reads the landing inclusively (grounded equilibrium),
+        // never the long-decayed pre-landing flight.
+        assertEquals(VictimMotion.groundedEquilibrium(GRAVITY), asOf.vy(), EPSILON);
+    }
+
     // ── slipperiness, the jump-boost stamp, and the attacker self-slow ──
     // (compendium §5b — all wire-measured on the real era jars 2026-06-06)
 

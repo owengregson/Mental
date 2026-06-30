@@ -11,6 +11,7 @@ import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.engine.CombatModule;
 import me.vexmc.mental.module.knockback.KnockbackHints;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
+import me.vexmc.mental.module.knockback.ServerTickClock;
 import me.vexmc.mental.module.knockback.VictimMotion;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -32,7 +33,7 @@ import org.jetbrains.annotations.NotNull;
 public final class HitRegistrationModule extends CombatModule implements Listener {
 
     private final CpsLimiter limiter = new CpsLimiter();
-    private final PlayerStateCache stateCache = new PlayerStateCache();
+    private final PlayerStateCache stateCache;
     private final HitFeedbackGate feedbackGate = new HitFeedbackGate();
     private final PositionHistory positionHistory = new PositionHistory();
     private final ConcurrentHashMap<UUID, TaskHandle> snapshotTasks = new ConcurrentHashMap<>();
@@ -46,13 +47,15 @@ public final class HitRegistrationModule extends CombatModule implements Listene
             @NotNull MentalServices services,
             @NotNull VictimMotion ledger,
             @NotNull KnockbackPipeline pipeline,
-            @NotNull KnockbackHints hints) {
+            @NotNull KnockbackHints hints,
+            @NotNull ServerTickClock clock) {
         super(services, "hit-registration", "Hit Registration",
                 "Netty-thread attack interception with owning-thread damage and pre-sent feedback.",
                 DebugCategory.HITREG);
         this.ledger = ledger;
         this.pipeline = pipeline;
         this.hints = hints;
+        this.stateCache = new PlayerStateCache(clock);
     }
 
     @Override
