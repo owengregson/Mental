@@ -17,7 +17,7 @@ Mental brings back the way PvP used to feel: 1.7/1.8 knockback, fishing rod hits
 - **W-taps register at any speed.** Sprint toggles are read in packet-arrival order, sub-tick — a w-tap or s-tap counts even when it lands in the same tick as the follow-up hit, where vanilla quantizes both to tick boundaries. The fastest sprint-reset detection physically possible from the server side.
 - **Knockback uses 1:1 replicated 1.7/1.8 formula**, line for line. Sprint hits, Knockback enchantment bonuses, the exact vertical behavior, critical hits and Sharpness damage.
 - **Combos work like 1.7.10.** The server never wipes a victim's knockback residual between hits, so quick successive hits stack and launch — the mechanical core of legacy combo PvP. Fishing rods and projectiles knock away from where the shooter stands, like they used to.
-- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, the archived configs of the era's best servers (`kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar` — real archived values, not remakes), or your own — selected server-wide from the in-game menu (with an optional per-world map in `knockback.yml`).
+- **Knockback profiles.** One file per feel under `plugins/Mental/profiles/` — `legacy-1.7` (the default), `legacy-1.8`, the archived configs of the era's best servers (`kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar` — real archived values, not remakes), `signature` (Mental's own velt derivative, tuned to hold the combo reach pocket), or your own — selected server-wide from the in-game menu (with an optional per-world map in `knockback.yml`).
 - **The "Ping Problem" is fixed.** Mental measures each player's connection during combat and corrects the knockback they receive, so getting hit feels the same on 20 ms as it does on 150 ms.
 - **Fishing rods restored to legacy mechanics.** Hooks damage and shove players on contact, casts fly like in 1.8, and the reel-in pull is gone.
 - **Projectiles knock back.** Snowballs, eggs and ender pearls push players.
@@ -74,8 +74,8 @@ Split by concern under `plugins/Mental/`, every option explained in its file:
 ```yaml
 # knockback.yml — pick the feel
 knockback:
-  profile: legacy-1.7        # legacy-1.7 · legacy-1.8 · kohi · minehq ·
-                             # badlion · velt · mmc · lunar · custom
+  profile: legacy-1.7        # legacy-1.7 · legacy-1.8 · kohi · minehq · badlion
+                             # · velt · mmc · lunar · signature · custom
   per-world:
     duels: kohi              # optional per-world overrides
 ```

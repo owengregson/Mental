@@ -37,6 +37,7 @@ public final class KnockbackMenu extends Menu {
             "velt", "DIAMOND_AXE",
             "mmc", "BOW",
             "lunar", "ENDER_EYE",
+            "signature", "NETHER_STAR",
             "custom", "WRITABLE_BOOK");
 
     private static final int[] PROFILE_SLOTS = {

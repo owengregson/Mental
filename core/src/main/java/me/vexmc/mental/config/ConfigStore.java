@@ -50,7 +50,7 @@ public final class ConfigStore {
     /** Presets shipped in the jar; regenerated individually when missing. */
     public static final List<String> BUNDLED_PROFILES = List.of(
             "legacy-1.7", "legacy-1.8", "kohi", "minehq", "badlion", "velt",
-            "mmc", "lunar", "custom");
+            "mmc", "lunar", "signature", "custom");
 
     private final File dataFolder;
     private final Function<String, InputStream> resources;

@@ -248,6 +248,25 @@ class MentalConfigTest {
         assertEquals(new KnockbackProfile.Friction(0.1, 0.1, 0.1), velt.friction());
         assertEquals(0.36, velt.limits().vertical());
         assertFalse(velt.combos());
+        // velt does not correct the airborne over-travel — its air multiplier
+        // is identity. signature is the derivative that does.
+        assertEquals(new KnockbackProfile.Push(1.0, 1.0), velt.air());
+
+        // signature == Mental's own velt derivative: every velt value verbatim
+        // EXCEPT air.horizontal 1.0 -> 0.92, which trims the airborne combo
+        // hits (the second and later) 8% to hold the reach pocket. The
+        // grounded opener and the pinned 0.36 vertical are untouched.
+        KnockbackProfile signature = profiles.get("signature");
+        assertNotNull(signature);
+        assertEquals(velt.base(), signature.base());
+        assertEquals(velt.extra(), signature.extra());
+        assertEquals(velt.friction(), signature.friction());
+        assertEquals(velt.limits(), signature.limits());
+        assertEquals(velt.verticalMode(), signature.verticalMode());
+        assertEquals(velt.combos(), signature.combos());
+        assertEquals(velt.meleeDelivery(), signature.meleeDelivery());
+        assertEquals(velt.resistance(), signature.resistance());
+        assertEquals(new KnockbackProfile.Push(0.92, 1.0), signature.air());
 
         // custom ships as legacy-1.7 values — selecting it changes nothing
         // until the owner edits the file.
