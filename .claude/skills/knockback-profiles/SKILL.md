@@ -8,9 +8,14 @@ description: Use when changing the knockback engine, profile schema, presets, or
 ## Model
 
 - A profile = one complete feel (`KnockbackProfile` record), one file under
-  `profiles/<name>.yml`. Nine shipped presets: `legacy-1.7` (default),
+  `profiles/<name>.yml`. Ten shipped presets: `legacy-1.7` (default),
   `legacy-1.8`, `kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar`,
-  `custom`. Presets are extracted only when missing — owner edits are
+  `signature`, `custom`. `signature` is Mental's OWN tuning (not a ported
+  fork config) — velt verbatim except `air.horizontal 0.92`, an airborne-only
+  ~8% horizontal trim that holds the combo reach pocket without touching the
+  grounded opener (the `air` multipliers apply only to airborne victims, so it
+  is the one knob distinguishing combo hits 2+ from hit 1). Presets are
+  extracted only when missing — owner edits are
   sacred, deleting regenerates pristine — with ONE exception: a file still
   matching a superseded bundled revision verbatim (`SupersededPresets`,
   value-equality not bytes) is upgraded in place when research corrects a

@@ -18,6 +18,8 @@ knockback:
   #   velt         VeltPvP's archived values — the residual-wipe shape
   #   mmc          Minemen Club's archived dev123 (2017) values
   #   lunar        Lunar Network's archived Season 5 values
+  #   signature    Mental's own — velt's wipe feel, airborne combo hits
+  #                trimmed 8% to hold the reach pocket
   #   custom       yours — a fully commented schema to edit freely
   profile: legacy-1.7
 

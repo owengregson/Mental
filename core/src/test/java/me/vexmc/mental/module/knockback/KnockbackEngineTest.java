@@ -354,6 +354,62 @@ class KnockbackEngineTest {
         assertEquals(0.32 * 0.6, airborne.z(), EPSILON);
     }
 
+    /**
+     * The {@code signature} preset's one tweak. A combo opener lands on a
+     * grounded victim; the follow-ups land airborne. signature is velt verbatim
+     * except {@code air.horizontal 0.92}, so a sprinting combo hit on an
+     * AIRBORNE victim is exactly 0.92× the same hit on the GROUNDED opener
+     * (horizontal only) — the pocket trim — while the opener and the pinned
+     * 0.36 vertical match velt. This is the behavioral guarantee behind the
+     * "second hit drifts too far" fix.
+     */
+    @Test
+    void signatureTrimsTheAirborneComboHitButNotTheGroundedOpener() {
+        KnockbackProfile velt = veltShape(1.0);
+        KnockbackProfile signature = veltShape(0.92);
+
+        // The grounded opener: signature is byte-identical to velt (the air
+        // multiplier is never applied to a grounded victim).
+        KnockbackVector opener = computed(
+                attacker(0, 0, 0.0f, true, 0), victim(3, 4, 0, 0, 0, 0), signature, null);
+        KnockbackVector veltOpener = computed(
+                attacker(0, 0, 0.0f, true, 0), victim(3, 4, 0, 0, 0, 0), velt, null);
+        assertEquals(0.195, opener.x(), EPSILON);   // 0.6 × 0.325 base, no sprint on x at yaw 0
+        assertEquals(0.36, opener.y(), EPSILON);    // pinned: 0 friction-residual + 0.36, capped 0.36
+        assertEquals(0.76, opener.z(), EPSILON);    // 0.8 × 0.325 + 0.5 sprint
+        assertEquals(veltOpener.x(), opener.x(), EPSILON);
+        assertEquals(veltOpener.y(), opener.y(), EPSILON);
+        assertEquals(veltOpener.z(), opener.z(), EPSILON);
+
+        // The airborne follow-up: horizontal trimmed 8%, vertical untouched.
+        KnockbackVector followUp = computed(
+                attacker(0, 0, 0.0f, true, 0), airborneVictim(3, 4, 0, 0, 0), signature, null);
+        assertEquals(0.195 * 0.92, followUp.x(), EPSILON);
+        assertEquals(0.36, followUp.y(), EPSILON);  // air.vertical 1.0 — height is the signature
+        assertEquals(0.76 * 0.92, followUp.z(), EPSILON);
+
+        // And velt would NOT trim it — the over-travel signature corrects.
+        KnockbackVector veltFollowUp = computed(
+                attacker(0, 0, 0.0f, true, 0), airborneVictim(3, 4, 0, 0, 0), velt, null);
+        assertEquals(opener.x(), veltFollowUp.x(), EPSILON);
+        assertEquals(opener.z(), veltFollowUp.z(), EPSILON);
+    }
+
+    /** velt's body with a parameterized air-horizontal multiplier (1.0 = velt, 0.92 = signature). */
+    private static KnockbackProfile veltShape(double airHorizontal) {
+        return new KnockbackProfile(
+                "velt-shape", "Velt shape", "",
+                new KnockbackProfile.Push(0.325, 0.36), VerticalMode.ADD,
+                new KnockbackProfile.Push(0.5, 0.0),
+                new KnockbackProfile.WtapExtra(false, 0.5, 0.0),
+                new KnockbackProfile.Friction(0.1, 0.1, 0.1),
+                new KnockbackProfile.Limits(0.36, -3.9, -1.0),
+                new KnockbackProfile.Push(airHorizontal, 1.0),
+                DEFAULTS.add(), DEFAULTS.rangeReduction(),
+                1.0, false, KnockbackDelivery.TRACKER, KnockbackDelivery.TRACKER,
+                ResistancePolicy.NONE, true);
+    }
+
     @Test
     void addOffsetsDistributeByAxisShareAndMatchSigns() {
         KnockbackProfile added = new KnockbackProfile(
