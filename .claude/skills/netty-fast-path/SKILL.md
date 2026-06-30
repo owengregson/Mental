@@ -27,11 +27,18 @@ thread:
 
 - THROW: `world.getEntities()`, `world.getNearbyEntities()`,
   `SpigotConversionUtil.getEntityById` (on a cache miss → NMS lookup),
-  `entity.getEntityId()`, `entity.getName()`, `player.getGameMode()` — any
-  `getHandle()`-routed accessor.
+  `entity.getEntityId()`, `entity.getName()`, `player.getGameMode()`,
+  `Bukkit.getCurrentTick()` (→ `RegionizedServer.getCurrentTick()`, throws
+  `IllegalStateException("No currently ticking region")` off a region thread —
+  it cost a debugging round when a swallowed throw silently killed the
+  packet-fed ground ledger; the packet feed uses `VictimMotion.NO_TICK` on
+  Folia) — any `getHandle()`-routed accessor.
 - SAFE (cached / config): `getLocation()`, `getWorld()`, `getUniqueId()`,
-  `getType()`, `isValid()`, `isDead()`, `world.getPVP()`,
-  `Bukkit.getPlayer(uuid)`, `Bukkit.getOnlinePlayers()`.
+  `getType()`, `isValid()`, `isDead()`, `isOnGround()` (javap-proven: reads
+  the raw NMS `Entity.onGround()` field directly, NOT through `getHandle()`,
+  so no `ensureTickThread` — at worst a benign stale-boolean read; do NOT
+  assume it throws), `world.getPVP()`, `Bukkit.getPlayer(uuid)`,
+  `Bukkit.getOnlinePlayers()`.
 
 The 2.0.x regression that taught this: `HitPacketListener.onPacketReceive`
 resolved the target with `getEntityById` and called

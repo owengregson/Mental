@@ -56,8 +56,28 @@ public final class KnockbackPipeline implements Listener {
         ARROW
     }
 
-    private static final long PENDING_EXPIRY_NANOS = 100_000_000L; // 2 ticks
+    /**
+     * The pre-delivered pending must live from the netty pre-send until the
+     * entity tracker fires {@code PlayerVelocityEvent} — the event where
+     * {@link #onPlayerVelocity} serves the adopted vector and arms the
+     * duplicate suppressor. On Paper that whole netty→damage→entity-tracking
+     * chain completes inside one ~50&nbsp;ms tick, so two ticks always covers
+     * it. On Folia the netty→region-next-tick→entity-tracking-phase chain spans
+     * several region ticks; with the Paper window the adopted vector expires
+     * before the tracker fires, {@code onPlayerVelocity} drops it without
+     * serving or suppressing, and vanilla's own velocity packet ships — which
+     * for an airborne victim carries no vertical boost (the falling {@code y}),
+     * i.e. DOWNWARD knockback on the second combo hit. A wider Folia window
+     * keeps the wire stamp authoritative without changing Paper's era timing.
+     */
+    private static final long PAPER_PENDING_EXPIRY_NANOS = 100_000_000L; // 2 ticks
+    private static final long FOLIA_PENDING_EXPIRY_NANOS = 300_000_000L; // ~6 ticks of headroom
     private static final long APPLIED_TAG_TTL_NANOS = 25_000_000L; // half a tick
+
+    /** The pending lifetime for this platform; see the constants above. */
+    static long pendingExpiryNanos(boolean folia) {
+        return folia ? FOLIA_PENDING_EXPIRY_NANOS : PAPER_PENDING_EXPIRY_NANOS;
+    }
 
     private record Pending(
             @Nullable KnockbackVector vector,
@@ -68,8 +88,8 @@ public final class KnockbackPipeline implements Listener {
             boolean groundedAtSubmit,
             long stampNanos) {
 
-        boolean expired(long nowNanos) {
-            return nowNanos - stampNanos > PENDING_EXPIRY_NANOS;
+        boolean expired(long nowNanos, long expiryNanos) {
+            return nowNanos - stampNanos > expiryNanos;
         }
     }
 
@@ -78,6 +98,7 @@ public final class KnockbackPipeline implements Listener {
 
     private final MentalServices services;
     private final VictimMotion ledger;
+    private final long pendingExpiryNanos;
     private final ConcurrentHashMap<UUID, Pending> pending = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, AppliedTag> applied = new ConcurrentHashMap<>();
     private volatile @Nullable VelocityDuplicateSuppressor suppressor;
@@ -85,6 +106,7 @@ public final class KnockbackPipeline implements Listener {
     public KnockbackPipeline(@NotNull MentalServices services, @NotNull VictimMotion ledger) {
         this.services = services;
         this.ledger = ledger;
+        this.pendingExpiryNanos = pendingExpiryNanos(services.capabilities().folia());
     }
 
     /** Wired by the bootstrap once PacketEvents is initialized. */
@@ -165,13 +187,42 @@ public final class KnockbackPipeline implements Listener {
     }
 
     /**
+     * Drops a pending only when it was queued by {@code onlyIfCause} — so a melee
+     * cancel does not evict a concurrent projectile/arrow knock sharing the
+     * victim's single pending slot.
+     */
+    public void withdraw(@NotNull Player victim, @NotNull Cause onlyIfCause) {
+        pending.computeIfPresent(victim.getUniqueId(),
+                (id, p) -> p.cause() == onlyIfCause ? null : p);
+    }
+
+    /**
      * Whether a live pre-delivered vector is queued for the victim — the
      * authoritative damage pass adopts it instead of recomputing, so both
      * stamps of one hit can never disagree.
      */
-    public boolean hasFreshPreDelivered(@NotNull Player victim) {
+    public boolean hasFreshPreDelivered(@NotNull Player victim, @Nullable LivingEntity attacker) {
         Pending stored = pending.get(victim.getUniqueId());
-        return stored != null && stored.preDelivered() != null && !stored.expired(System.nanoTime());
+        if (stored == null || stored.preDelivered() == null
+                || stored.expired(System.nanoTime(), pendingExpiryNanos)) {
+            return false;
+        }
+        // Scope adoption to the attacker that registered the pre-send. The wider
+        // Folia window keeps a consumed-late pending live longer, so a lingering
+        // pending must never be adopted by a DIFFERENT attacker's hit (which
+        // would ship hit-1's owner/direction for hit-2). The connectionless
+        // pinned case carries no attacker to scope on.
+        UUID storedAttacker = stored.attacker() != null ? stored.attacker().getUniqueId() : null;
+        UUID hitAttacker = attacker != null ? attacker.getUniqueId() : null;
+        return sameAttacker(storedAttacker, hitAttacker);
+    }
+
+    /** Whether a pre-delivered pending registered by {@code stored} is adoptable by {@code hit}. */
+    static boolean sameAttacker(@Nullable UUID stored, @Nullable UUID hit) {
+        if (stored == null || hit == null) {
+            return stored == hit;
+        }
+        return stored.equals(hit);
     }
 
     /**
@@ -184,8 +235,14 @@ public final class KnockbackPipeline implements Listener {
         services.scheduling().runOn(
                 victim,
                 () -> {
+                    // This is the SOLE delivery path for modern thrown projectiles
+                    // (no vanilla velocity event fires for them), so it must not be
+                    // gated on the adoption-window expiry: on Folia the next-region-
+                    // tick defer can exceed that window and the knock would silently
+                    // vanish. Leak protection here is the per-UUID overwrite, the
+                    // withdraw() on cancel, and the retired callback — not a clock.
                     Pending stored = pending.get(victimId);
-                    if (stored != null && stored.vector() != null && !stored.expired(System.nanoTime())) {
+                    if (stored != null && stored.vector() != null) {
                         victim.setVelocity(stored.vector().toBukkit());
                     }
                 },
@@ -202,7 +259,7 @@ public final class KnockbackPipeline implements Listener {
             return;
         }
         long now = System.nanoTime();
-        if (stored.expired(now)) {
+        if (stored.expired(now, pendingExpiryNanos)) {
             debug(() -> "dropped expired " + stored.cause() + " vector for " + victim.getName());
             return;
         }
@@ -230,7 +287,7 @@ public final class KnockbackPipeline implements Listener {
             // listener changing the vector falls through to a corrective send.
             shipped = stored.preDelivered().toBukkit();
             if (stored.wireDelivered() && suppressor != null) {
-                suppressor.armFor(victim);
+                suppressor.armFor(victim, shipped);
             }
         } else {
             shipped = deliveryAdjusted(

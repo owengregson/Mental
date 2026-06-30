@@ -207,6 +207,76 @@ class SprintTrackerTest {
         assertNull(tracker.takeAttackVerdict(attacker, t(0) + 151_000_000L));
     }
 
+    @Test
+    void attackVerdictTtlIsWidenedOnFoliaButUnchangedOnPaper() {
+        // Paper keeps the era ~1-tick window; Folia widens to the pending window
+        // so the netty->region damage latency cannot expire the verdict.
+        assertEquals(150_000_000L, SprintTracker.attackStampTtlNanos(false));
+        assertEquals(300_000_000L, SprintTracker.attackStampTtlNanos(true));
+
+        // A Folia tracker still serves the verdict past Paper's 150ms boundary.
+        SprintTracker folia = new SprintTracker(true);
+        UUID attacker = UUID.randomUUID();
+        folia.stampAttackVerdict(attacker, true, Boolean.TRUE, t(0));
+        SprintTracker.AttackVerdict late = folia.takeAttackVerdict(attacker, t(0) + 250_000_000L);
+        assertNotNull(late, "Folia keeps the verdict alive across the region-tick latency");
+        assertEquals(t(0), late.nanos(), "the verdict carries its registration instant");
+
+        // Paper drops the same stamp at 250ms.
+        SprintTracker paper = new SprintTracker(false);
+        paper.stampAttackVerdict(attacker, true, Boolean.TRUE, t(0));
+        assertNull(paper.takeAttackVerdict(attacker, t(0) + 250_000_000L));
+    }
+
+    @Test
+    void clearWireSprintNeverOverwritesANewerWirePress() {
+        SprintTracker tracker = new SprintTracker();
+        UUID attacker = UUID.randomUUID();
+        tracker.consultWire(true);
+
+        // A re-press arrives on the wire (hit-2's sprint), THEN hit-1's deferred
+        // clear runs — but stamped with hit-1's earlier registration nanos.
+        tracker.onWireSprint(attacker, true, t(20));
+        tracker.clearWireSprint(attacker, t(10));
+
+        SprintTracker.WireVerdict verdict = tracker.peekWire(attacker);
+        assertNotNull(verdict);
+        assertTrue(verdict.sprinting(),
+                "a clear older than the latest wire press must not win — the re-press is newer truth");
+
+        // A clear newer than the last wire write still clears (the common case).
+        tracker.clearWireSprint(attacker, t(30));
+        SprintTracker.WireVerdict cleared = tracker.peekWire(attacker);
+        assertNotNull(cleared);
+        assertFalse(cleared.sprinting());
+    }
+
+    @Test
+    void reconcileDoesNotResurrectSprintWhileAClearIsPending() {
+        SprintTracker tracker = new SprintTracker();
+        UUID attacker = UUID.randomUUID();
+        tracker.consultWire(true);
+
+        tracker.onWireSprint(attacker, true, t(0));
+        tracker.markClearPending(attacker, t(5));
+        tracker.clearWireSprint(attacker, t(5)); // wire now false
+
+        // The deferred setSprinting(false) has not landed: the live flag is
+        // stale-high. Past the quiet window the reconcile would normally adopt
+        // it — but the pending clear blocks that resurrection.
+        tracker.reconcileWire(attacker, true, t(5) + 200_000_000L);
+        SprintTracker.WireVerdict held = tracker.peekWire(attacker);
+        assertNotNull(held);
+        assertFalse(held.sprinting(), "a pending clear blocks live-sprint readoption");
+
+        // Once the deferred clear resolves, a genuine later sprint reconciles in.
+        tracker.resolveClearPending(attacker);
+        tracker.reconcileWire(attacker, true, t(5) + 400_000_000L);
+        SprintTracker.WireVerdict adopted = tracker.peekWire(attacker);
+        assertNotNull(adopted);
+        assertTrue(adopted.sprinting());
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Block-hitting sprint reset (1.7/1.8)                                */
     /* ------------------------------------------------------------------ */

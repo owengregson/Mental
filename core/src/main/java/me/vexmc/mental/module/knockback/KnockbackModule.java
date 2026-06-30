@@ -1,5 +1,6 @@
 package me.vexmc.mental.module.knockback;
 
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
@@ -76,7 +77,20 @@ public final class KnockbackModule extends CombatModule implements Listener {
                 || !(event.getEntity() instanceof Player victim)) {
             return;
         }
+        if (MeleeReentryGuard.active()) {
+            // A rod (or other module) is dealing this ENTITY_ATTACK through
+            // victim.damage(victim, source) — not a melee hit. The dealing module
+            // owns the knock and the attacker-side bookkeeping; treating it as
+            // melee would self-slow/clear the wrong player and strand a MELEE
+            // pending the source's own submit clobbers.
+            return;
+        }
         KnockbackProfile profile = services.knockbackProfiles().resolve(victim);
+        // The hit's registration instant — the wire stamp's nanos when the fast
+        // path registered it, else now. The post-hit sprint clear is stamped
+        // with this (not the deferred clear's wall-clock) so a wire re-press that
+        // arrived after registration is never clobbered by a late Folia clear.
+        long registrationNanos = System.nanoTime();
         try {
             // Era rule: blocking shaped DAMAGE only — knockBack had already
             // run when the sword-block halving applied, so a blocking victim
@@ -90,6 +104,10 @@ public final class KnockbackModule extends CombatModule implements Listener {
                     && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
                     && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0
                     && event.getFinalDamage() <= 0.0) {
+                // Withdraw any pre-delivered pending so it cannot be adopted by an
+                // unrelated later velocity event or inherited by the next hit
+                // (vanilla never knocks through a full modern-shield block).
+                pipeline.withdraw(victim, KnockbackPipeline.Cause.MELEE);
                 debug.log(() -> victim.getName() + " fully blocked — knockback skipped");
                 return;
             }
@@ -99,6 +117,10 @@ public final class KnockbackModule extends CombatModule implements Listener {
             // applies the 1.8 knock unopposed — Mental submits nothing.
             Player decider = attacker instanceof Player attackerPlayer ? attackerPlayer : victim;
             if (services.ocmGate().handles(OcmMechanic.MELEE_KNOCKBACK, decider)) {
+                // OCM applies the knock from its own LOWEST handler; drop any
+                // pre-delivered pending so Mental neither double-stamps nor leaks
+                // it onto the next hit.
+                pipeline.withdraw(victim, KnockbackPipeline.Cause.MELEE);
                 debug.log(() -> "OCM owns melee knockback for " + decider.getName() + " — yielding");
                 return;
             }
@@ -115,6 +137,9 @@ public final class KnockbackModule extends CombatModule implements Listener {
                     ? services.sprintTracker().takeAttackVerdict(
                             attackerPlayer.getUniqueId(), System.nanoTime())
                     : null;
+            if (verdict != null) {
+                registrationNanos = verdict.nanos();
+            }
             boolean attackerSprinting = attacker instanceof Player attackerPlayer
                     && (verdict != null ? verdict.sprinting() : attackerPlayer.isSprinting());
 
@@ -123,7 +148,7 @@ public final class KnockbackModule extends CombatModule implements Listener {
             // here would double-stamp the client with a slightly different value
             // (the era servers stamped once). Spend the sprint freshness the
             // pre-send only peeked at, so the tracker state stays truthful.
-            if (pipeline.hasFreshPreDelivered(victim)) {
+            if (pipeline.hasFreshPreDelivered(victim, attacker)) {
                 if (attackerSprinting && attacker instanceof Player attackerPlayer) {
                     spendFreshness(attackerPlayer);
                 }
@@ -158,8 +183,29 @@ public final class KnockbackModule extends CombatModule implements Listener {
                             + " residual=(" + victimState.vx() + ", " + victimState.vy() + ", " + victimState.vz() + ")"
                             + " -> (" + vector.x() + ", " + vector.y() + ", " + vector.z() + ")");
         } finally {
-            clearVanillaSprint(attacker);
+            clearVanillaSprint(attacker, registrationNanos);
         }
+    }
+
+    /**
+     * A protection plugin cancelling the melee hit also withdraws the queued
+     * knock — mirroring {@code ProjectileKnockbackModule}. Without it a netty
+     * pre-send's pending lingers the full expiry window (longer on Folia) and
+     * the next melee hit's {@code hasFreshPreDelivered} adopts the stale vector,
+     * or an unrelated velocity event serves it and arms the suppressor against a
+     * real packet.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onMeleeDamageCancelled(@NotNull EntityDamageByEntityEvent event) {
+        if (!event.isCancelled()
+                || event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK
+                || !(event.getEntity() instanceof Player victim)) {
+            return;
+        }
+        if (MeleeReentryGuard.active()) {
+            return; // rod re-entry: never a Mental MELEE pending to withdraw
+        }
+        pipeline.withdraw(victim, KnockbackPipeline.Cause.MELEE);
     }
 
     /**
@@ -221,16 +267,28 @@ public final class KnockbackModule extends CombatModule implements Listener {
      * Runs after every use of the flag in this handler (engine input and
      * freshness reads happen above), on the attacker's owning thread.
      */
-    private void clearVanillaSprint(@NotNull LivingEntity attacker) {
+    private void clearVanillaSprint(@NotNull LivingEntity attacker, long registrationNanos) {
         if (attacker instanceof Player attackerPlayer && attackerPlayer.isSprinting()) {
+            UUID id = attackerPlayer.getUniqueId();
             // The wire view clears immediately — the era flag dropped the
             // instant the bonus branch ran, while the runOn task may land a
-            // tick later; without this an attack registering in the gap
-            // would read a sprint the era had already spent.
-            services.sprintTracker().clearWireSprint(
-                    attackerPlayer.getUniqueId(), System.nanoTime());
+            // tick later (several ticks on Folia); without this an attack
+            // registering in the gap would read a sprint the era had already
+            // spent. Stamped with the hit's registration nanos so a newer wire
+            // re-press is not clobbered by a late clear.
+            services.sprintTracker().clearWireSprint(id, registrationNanos);
+            // The live flag stays stale-high until the deferred clear lands;
+            // mark it pending so the per-tick reconcile does not readopt it and
+            // resurrect the cleared sprint. Resolved when the clear runs (or the
+            // attacker retires first).
+            services.sprintTracker().markClearPending(id, registrationNanos);
             services.scheduling().runOn(
-                    attackerPlayer, () -> attackerPlayer.setSprinting(false), () -> {});
+                    attackerPlayer,
+                    () -> {
+                        attackerPlayer.setSprinting(false);
+                        services.sprintTracker().resolveClearPending(id);
+                    },
+                    () -> services.sprintTracker().resolveClearPending(id));
         }
     }
 }

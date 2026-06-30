@@ -54,8 +54,35 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class SprintTracker implements Listener {
 
-    /** A faithful client's post-attack sprint drop lands within ~a tick. */
-    private static final long ATTACK_STAMP_TTL_NANOS = 150_000_000L;
+    /**
+     * How long a registration-time attack verdict stays usable. On Paper a
+     * faithful client's post-attack sprint drop lands within ~a tick, so the
+     * netty→main damage chain always completes inside the window. On Folia that
+     * chain spans several region ticks — the same latency the pre-delivered
+     * pending window was widened for ({@code KnockbackPipeline.FOLIA_PENDING_EXPIRY_NANOS})
+     * — so the verdict must outlive it, or {@link #takeAttackVerdict} returns
+     * {@code null} and the authoritative pass falls back to the already-cleared
+     * live sprint flag, skipping the attacker self-slow and leaking unspent
+     * freshness into the next trade hit.
+     */
+    private static final long PAPER_ATTACK_STAMP_TTL_NANOS = 150_000_000L; // ~a tick
+    private static final long FOLIA_ATTACK_STAMP_TTL_NANOS = 300_000_000L; // matches the Folia pending window
+
+    /** The attack-verdict lifetime for this platform; see the constants above. */
+    static long attackStampTtlNanos(boolean folia) {
+        return folia ? FOLIA_ATTACK_STAMP_TTL_NANOS : PAPER_ATTACK_STAMP_TTL_NANOS;
+    }
+
+    private final long attackStampTtlNanos;
+
+    /** Paper-default tracker (used by the unit tests). */
+    public SprintTracker() {
+        this(false);
+    }
+
+    public SprintTracker(boolean folia) {
+        this.attackStampTtlNanos = attackStampTtlNanos(folia);
+    }
 
     /**
      * Wire silence after which the server's own flag wins a disagreement —
@@ -72,7 +99,7 @@ public final class SprintTracker implements Listener {
      * registration — the authoritative pass then falls back to consuming
      * the Bukkit-armed ledger, today's behavior.
      */
-    public record AttackVerdict(boolean sprinting, @Nullable Boolean fresh) {}
+    public record AttackVerdict(boolean sprinting, @Nullable Boolean fresh, long nanos) {}
 
     /** The wire view at one instant: the in-order flag plus armed freshness. */
     public record WireVerdict(boolean sprinting, boolean fresh) {}
@@ -84,6 +111,15 @@ public final class SprintTracker implements Listener {
     private final Set<UUID> fresh = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<UUID, AttackStamp> attackStamps = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, WireState> wire = new ConcurrentHashMap<>();
+    /**
+     * Attackers whose post-hit {@code setSprinting(false)} has been issued but
+     * not yet applied. On Folia that clear is deferred to the attacker's region
+     * and lands several ticks late, leaving the live sprint flag stale-high in
+     * the meantime; {@link #reconcileWire} consults this so it never readopts
+     * that stale flag and resurrects a sprint the hit already cleared. The value
+     * is the clear's registration nanos (unused today beyond presence).
+     */
+    private final ConcurrentHashMap<UUID, Long> pendingClear = new ConcurrentHashMap<>();
     /**
      * The client's RAW sprint flag, straight from its START/STOP entity-action
      * packets — never touched by the post-hit clears the wire view and the
@@ -110,6 +146,7 @@ public final class SprintTracker implements Listener {
         attackStamps.remove(event.getPlayer().getUniqueId());
         wire.remove(event.getPlayer().getUniqueId());
         clientSprinting.remove(event.getPlayer().getUniqueId());
+        pendingClear.remove(event.getPlayer().getUniqueId());
     }
 
     /* ------------------------------------------------------------------ */
@@ -173,10 +210,35 @@ public final class SprintTracker implements Listener {
                 return new WireState(liveSprinting, false, nanos);
             }
             if (state.sprinting() != liveSprinting && nanos - state.nanos() > WIRE_QUIET_NANOS) {
+                // A post-hit setSprinting(false) issued but not yet applied (the
+                // Folia-deferred clear) keeps the live flag stale-high — adopting
+                // it here would readopt the very sprint the hit cleared and grant a
+                // non-w-tapped follow-up the era-denied bonus. A genuine re-sprint
+                // arrives on the wire (onWireSprint) instead, so suppressing the
+                // live-flag adoption while a clear is pending loses nothing.
+                if (liveSprinting && pendingClear.containsKey(player)) {
+                    return state;
+                }
                 return new WireState(liveSprinting, state.armed(), nanos);
             }
             return state;
         });
+    }
+
+    /**
+     * Records that a post-hit {@code setSprinting(false)} has been issued for the
+     * attacker but not yet applied (the Folia-deferred clear), so
+     * {@link #reconcileWire} does not readopt the stale-high live flag until the
+     * clear lands. Paired with {@link #resolveClearPending}, called when the
+     * deferred task runs (or the entity retires).
+     */
+    public void markClearPending(@NotNull UUID player, long nanos) {
+        pendingClear.put(player, nanos);
+    }
+
+    /** The deferred sprint clear has landed (or the attacker retired). */
+    public void resolveClearPending(@NotNull UUID player) {
+        pendingClear.remove(player);
     }
 
     /**
@@ -201,7 +263,14 @@ public final class SprintTracker implements Listener {
      */
     public void clearWireSprint(@NotNull UUID player, long nanos) {
         wire.computeIfPresent(player, (id, state) ->
-                new WireState(false, state.armed(), nanos));
+                // Stamped with the hit's REGISTRATION nanos (not the deferred
+                // clear's wall-clock), so a wire re-press that arrived after the
+                // hit registered — newer information — is never overwritten by a
+                // clear that lands late on Folia. The era cleared inside the
+                // attack; a STOP/START after that point still wins.
+                nanos < state.nanos()
+                        ? state
+                        : new WireState(false, state.armed(), nanos));
     }
 
     /** Spends the wire-armed freshness, beside {@link #consumeFresh}. */
@@ -235,10 +304,10 @@ public final class SprintTracker implements Listener {
      */
     public @Nullable AttackVerdict takeAttackVerdict(@NotNull UUID attacker, long nowNanos) {
         AttackStamp stamp = attackStamps.remove(attacker);
-        if (stamp == null || nowNanos - stamp.nanos() > ATTACK_STAMP_TTL_NANOS) {
+        if (stamp == null || nowNanos - stamp.nanos() > attackStampTtlNanos) {
             return null;
         }
-        return new AttackVerdict(stamp.sprinting(), stamp.fresh());
+        return new AttackVerdict(stamp.sprinting(), stamp.fresh(), stamp.nanos());
     }
 
     /* ------------------------------------------------------------------ */
@@ -265,5 +334,6 @@ public final class SprintTracker implements Listener {
         attackStamps.clear();
         wire.clear();
         clientSprinting.clear();
+        pendingClear.clear();
     }
 }

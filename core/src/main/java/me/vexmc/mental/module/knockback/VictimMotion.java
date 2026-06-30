@@ -155,17 +155,6 @@ public final class VictimMotion {
     public void recordLiftoff(
             @NotNull UUID victim, boolean rising, boolean sprinting, float yawDegrees,
             long nowNanos, double gravity, double jumpImpulse, int tick) {
-        Motion current = current(victim, nowNanos, false, gravity);
-        Sample previous = samples.get(victim);
-        // The liftoff tick's own pre-move friction is still GROUND drag (the
-        // era selected friction before the move that lifted the victim), so
-        // the carried horizontals take one more grounded decay before the
-        // airborne segment starts. Measured on real 1.7.10: chain residuals
-        // run 0.4 × slip² × 0.91^k — two grounded decays (knock tick +
-        // liftoff tick), e.g. ice hit 2 = 0.4821 = 0.4 × 0.8918² × 0.91⁷.
-        double launchDrag = previous != null && previous.grounded()
-                ? previous.slip() * AIR_DRAG
-                : 1.0;
         double pushX = 0.0;
         double pushZ = 0.0;
         if (rising && sprinting) {
@@ -173,11 +162,32 @@ public final class VictimMotion {
             pushX = -Math.sin(yawRadians) * SPRINT_JUMP_PUSH;
             pushZ = Math.cos(yawRadians) * SPRINT_JUMP_PUSH;
         }
-        double vx = current.vx() * launchDrag + pushX;
-        double vy = rising ? jumpImpulse : groundedEquilibrium(gravity);
-        double vz = current.vz() * launchDrag + pushZ;
-        samples.compute(victim, (id, existing) -> new Sample(
-                vx, vy, vz, false, DEFAULT_SLIPPERINESS, nowNanos, tick, displaced(existing, tick)));
+        double facingPushX = pushX;
+        double facingPushZ = pushZ;
+        samples.compute(victim, (id, existing) -> {
+            // Read-modify-write atomically: the carried residual and the launch
+            // drag are derived from the sample INSIDE compute(). Reading them
+            // before compute() (as this once did) opens a gap in which a
+            // region-thread record() — the knock — is silently overwritten by a
+            // transition built on the stale pre-knock motion, corrupting the
+            // residual the next combo hit reads. scaleHorizontal already reads
+            // inside its mutator; this matches it.
+            Motion current = read(existing, nowNanos, false, gravity);
+            // The liftoff tick's own pre-move friction is still GROUND drag (the
+            // era selected friction before the move that lifted the victim), so
+            // the carried horizontals take one more grounded decay before the
+            // airborne segment starts. Measured on real 1.7.10: chain residuals
+            // run 0.4 × slip² × 0.91^k — two grounded decays (knock tick +
+            // liftoff tick), e.g. ice hit 2 = 0.4821 = 0.4 × 0.8918² × 0.91⁷.
+            double launchDrag = existing != null && existing.grounded()
+                    ? existing.slip() * AIR_DRAG
+                    : 1.0;
+            double vx = current.vx() * launchDrag + facingPushX;
+            double vy = rising ? jumpImpulse : groundedEquilibrium(gravity);
+            double vz = current.vz() * launchDrag + facingPushZ;
+            return new Sample(
+                    vx, vy, vz, false, DEFAULT_SLIPPERINESS, nowNanos, tick, displaced(existing, tick));
+        });
     }
 
     /**
@@ -191,10 +201,15 @@ public final class VictimMotion {
 
     public void recordLanding(
             @NotNull UUID victim, long nowNanos, double gravity, double slipperiness, int tick) {
-        Motion current = current(victim, nowNanos, false, gravity);
-        samples.compute(victim, (id, existing) -> new Sample(
-                current.vx(), groundedEquilibrium(gravity), current.vz(), true, slipperiness,
-                nowNanos, tick, displaced(existing, tick)));
+        samples.compute(victim, (id, existing) -> {
+            // Atomic read-modify-write — see recordLiftoff: deriving the carried
+            // horizontals from a pre-read sample outside compute() would drop a
+            // knock record() that raced in from the velocity-event thread.
+            Motion current = read(existing, nowNanos, false, gravity);
+            return new Sample(
+                    current.vx(), groundedEquilibrium(gravity), current.vz(), true, slipperiness,
+                    nowNanos, tick, displaced(existing, tick));
+        });
     }
 
     /**
