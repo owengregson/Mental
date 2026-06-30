@@ -140,7 +140,7 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
 
         if (victim instanceof Player victimPlayer) {
             pipeline.submit(victimPlayer, vector, rodder, KnockbackPipeline.Cause.ROD);
-            pipeline.ensureDelivery(victimPlayer);
+            pipeline.ensureDelivery(victimPlayer, KnockbackPipeline.Cause.ROD);
         } else if (vector != null) {
             victim.setVelocity(vector.toBukkit());
         }

@@ -159,7 +159,7 @@ public final class ProjectileKnockbackModule extends CombatModule implements Lis
                 services.knockbackProfiles().resolve(victim), null, ThreadLocalRandom.current());
 
         pipeline.submit(victim, vector, shooterEntity(projectile), KnockbackPipeline.Cause.PROJECTILE);
-        pipeline.ensureDelivery(victim);
+        pipeline.ensureDelivery(victim, KnockbackPipeline.Cause.PROJECTILE);
         debug.log(() -> event.getEntity().getType() + " hit " + victim.getName()
                 + (vector == null
                         ? " — legacy resistance cancelled the knock"
