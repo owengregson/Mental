@@ -86,6 +86,28 @@ final class PendingStore {
     }
 
     /**
+     * Returns the OLDEST non-expired pending WITHOUT removing anything — the
+     * {@code EntityKnockbackEvent} mirror peeks what {@link #pollLive} will hand
+     * the next velocity event so an observer of vanilla's knockback event (an
+     * anticheat, SimpleBoxer) sees Mental's value instead. Expired heads are
+     * skipped here but only ever dropped by {@link #pollLive} at the
+     * authoritative apply, so the peek and the consume agree on the head.
+     */
+    @Nullable Pending peekLiveHead(UUID victim, long nowNanos, long expiryNanos) {
+        Pending[] head = {null};
+        pending.computeIfPresent(victim, (id, dq) -> {
+            for (Pending p : dq) { // ArrayDeque iterates head -> tail: oldest first
+                if (!p.expired(nowNanos, expiryNanos)) {
+                    head[0] = p;
+                    break;
+                }
+            }
+            return dq;
+        });
+        return head[0];
+    }
+
+    /**
      * Whether a non-expired pre-delivered pending registered by {@code attacker}
      * is queued — the authoritative pass adopts that wire stamp instead of
      * recomputing. Scoped to the registering attacker so the wider Folia window

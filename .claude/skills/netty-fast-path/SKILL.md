@@ -121,6 +121,41 @@ Two corollaries:
 - Duplicates are fine by design: the authoritative path re-emits through
   vanilla; clients treat them as no-op corrections.
 
+## Two knockback events — Mental writes the LATE one; mirror the early one
+
+There are TWO server knockback events and Mental only writes to the second:
+
+- `LivingEntity.knockback(...)` fires **`EntityKnockbackEvent`** (Paper, 1.20.6+)
+  with vanilla's DELTA, *inside* the damage pass — `setDeltaMovement(current +
+  delta)` runs AFTER the event. Airborne vertical is
+  `onGround() ? min(0.4, dm.y/2+strength) : dm.y`, so an airborne victim's delta
+  `y` is **0**.
+- `ServerEntity.sendChanges` (the entity tracker, per-region on Folia) later
+  fires **`PlayerVelocityEvent`** just before `ClientboundSetEntityMotionPacket`.
+  This is the ONLY event Mental's `KnockbackPipeline.onPlayerVelocity` overrides,
+  so the real client gets Mental's value on both Paper and Folia.
+
+The trap (cost the entire 2026-06-29 Folia audit — ~19 fixes that changed
+nothing): **anything reading `EntityKnockbackEvent` sees vanilla's value, never
+Mental's.** SimpleBoxer on Folia (`eventBasedKnockback = autoTicksEntities() &&
+eventAvailable()`) reads exactly that event → `current + delta` = the falling
+velocity on the airborne 2nd combo hit = "downward knockback." On classic Paper
+it polls `hurtMarked` (the final, post-override deltaMovement) so it reads
+correctly — which is why the bug looked Folia-specific. The symptom was a
+measurement artifact; real clients were always fine.
+
+Fix (`KnockbackEventMirror`, 2.1.3): on 1.20.6+ (`Capabilities.knockbackEvent`),
+a reflective listener at HIGH/`ignoreCancelled` **peeks** the victim's head
+pending (`KnockbackPipeline.peekMirror`, non-consuming) and sets
+`knockback = target − victim.getVelocity()` so the mid-pass delta any observer
+(anticheat, SimpleBoxer) reads equals what the velocity event will ship. It does
+NOT fire `KnockbackApplyEvent` and does NOT consume the pending —
+`PlayerVelocityEvent` stays the single authoritative apply, so the final wire
+velocity is unchanged (era-exact). `peekMirror` shares `preDeliveredWins` +
+`deliveryAdjusted` with `onPlayerVelocity` so the mirror can never diverge from
+the apply. `getVelocity()` in the handler is region-safe — the event fires on the
+victim's owning region thread.
+
 ## PacketEvents specifics
 
 - Shaded + relocated (`me.vexmc.mental.lib.packetevents.*`) — external code

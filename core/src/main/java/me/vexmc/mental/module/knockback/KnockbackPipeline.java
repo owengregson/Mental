@@ -212,6 +212,75 @@ public final class KnockbackPipeline implements Listener {
         return stored.equals(hit);
     }
 
+    /** Mirror classification of the FIFO head for {@link #peekMirror}. */
+    enum MirrorKind {
+        /** No live Mental pending — leave vanilla's knockback (non-Mental hit, OCM-owned). */
+        NONE,
+        /** The head's legacy resistance roll will suppress — cancel the knockback event. */
+        CANCEL,
+        /** Mirror the value the velocity event will ship. */
+        SHIP
+    }
+
+    /**
+     * What the {@code EntityKnockbackEvent} mirror should assert for the victim's
+     * head pending. {@link #NONE} leaves vanilla's value untouched; {@link #CANCEL}
+     * cancels the knockback event (the resistance roll suppresses); otherwise
+     * {@code target} is mirrored so the resulting {@code deltaMovement} equals what
+     * {@link #onPlayerVelocity} will ship.
+     */
+    record MirrorDecision(boolean cancel, @Nullable Vector target) {
+        static final MirrorDecision NONE = new MirrorDecision(false, null);
+        static final MirrorDecision CANCEL = new MirrorDecision(true, null);
+    }
+
+    /** Classifies the head pending; {@code null} (no live head) is {@link MirrorKind#NONE}. */
+    static MirrorKind mirrorKind(@Nullable Pending head) {
+        if (head == null) {
+            return MirrorKind.NONE;
+        }
+        return head.vector() == null ? MirrorKind.CANCEL : MirrorKind.SHIP;
+    }
+
+    /**
+     * Whether {@link #onPlayerVelocity} ships {@code p}'s pre-delivered value
+     * verbatim for {@code apiVelocity} — the wire/pinned knock the client already
+     * has (dup-suppressed for wired victims) — versus falling through to
+     * {@link #deliveryAdjusted}. Shared by the velocity event and {@link #peekMirror}
+     * so the mirror can never assert a value the authoritative apply would not ship.
+     */
+    static boolean preDeliveredWins(@NotNull Pending p, @NotNull Vector apiVelocity) {
+        return p.preDelivered() != null && apiVelocity.equals(p.vector().toBukkit());
+    }
+
+    /**
+     * Non-consuming peek for the {@code EntityKnockbackEvent} mirror: classify the
+     * victim's head pending and, for a {@link MirrorKind#SHIP}, compute the EXACT
+     * value {@link #onPlayerVelocity} will ship for it. It deliberately does NOT
+     * fire {@link KnockbackApplyEvent} and does NOT consume the pending — the
+     * velocity event remains the single authoritative apply (API event, duplicate
+     * suppressor, ledger record). The mirror only corrects the intermediate,
+     * observable knockback delta so a mid-pass observer sees Mental's value; the
+     * final wire velocity is unchanged.
+     */
+    @NotNull MirrorDecision peekMirror(@NotNull Player victim) {
+        Pending head = pending.peekLiveHead(
+                victim.getUniqueId(), System.nanoTime(), pendingExpiryNanos);
+        MirrorKind kind = mirrorKind(head);
+        if (kind == MirrorKind.NONE) {
+            return MirrorDecision.NONE;
+        }
+        if (kind == MirrorKind.CANCEL) {
+            return MirrorDecision.CANCEL;
+        }
+        // SHIP: head and head.vector() are non-null by mirrorKind's contract.
+        Vector velocity = head.vector().toBukkit();
+        Vector target = preDeliveredWins(head, velocity)
+                ? head.preDelivered().toBukkit()
+                : deliveryAdjusted(victim, velocity, head.cause(), head.groundedAtSubmit());
+        return new MirrorDecision(false, target);
+    }
+
     /**
      * Safety net for sources vanilla never arms a velocity event for (modern
      * ender pearls, thrown projectiles): one tick later, if the submission for
@@ -274,13 +343,14 @@ public final class KnockbackPipeline implements Listener {
         }
 
         Vector shipped;
-        if (stored.preDelivered() != null && apply.velocity().equals(stored.vector().toBukkit())) {
+        if (preDeliveredWins(stored, apply.velocity())) {
             // The registration-time value wins: for wire-delivered knocks the
             // client already has it and the duplicate outbound packet is
             // cancelled — one stamp per hit, like the era servers; for pinned
             // knocks (no connection to pre-send on) the same era-moment value
             // ships through this event normally, nothing to suppress. An API
             // listener changing the vector falls through to a corrective send.
+            // The EntityKnockbackEvent mirror shares this exact predicate.
             shipped = stored.preDelivered().toBukkit();
             if (stored.wireDelivered() && suppressor != null) {
                 suppressor.armFor(victim, shipped);
