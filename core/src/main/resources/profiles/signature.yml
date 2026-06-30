@@ -2,40 +2,46 @@
 #  signature — Mental's signature knockback
 #
 #  An ORIGINAL Mental tuning (not a ported fork config) derived from the
-#  archived `velt` shape. It keeps velt's late-era "dead consistent" feel —
-#  near-total residual wipe (friction 0.1, nothing stacks), a vertical pinned
-#  at exactly 0.36 every grounded hit (cap == base), and the full 0.5 sprint
-#  horizontal so w-tapping still decides trades — with ONE change.
+#  archived `velt` shape, then refined by playtesting. It keeps velt's late-era
+#  "dead consistent" feel — near-total residual wipe (friction 0.1, nothing
+#  stacks) and the full 0.5 sprint horizontal so w-tapping still decides
+#  trades — and tunes the combo arc with three small changes from velt:
 #
-#  The change:  air.horizontal 1.0 -> 0.92  (everything else is velt verbatim).
+#      air.horizontal  1.0  -> 0.92   (airborne horizontal trim — the pocket)
+#      base.vertical   0.36 -> 0.365  (a touch more lift on descending hits)
+#      air.vertical    1.0  -> 0.98   (airborne vertical trim — the follow-ups)
 #
-#  Why:  a combo's opener lands on a GROUNDED victim, whose launch tick decays
-#  at ground drag (stone ~0.546); every follow-up lands on an AIRBORNE victim,
-#  whose launch tick decays at air drag (0.91). For the same launch velocity
-#  the airborne hit keeps 0.91/0.546 ~ 1.67x as much horizontal on that first
-#  tick, so hits 2+ carry the victim a hair past the reach pocket and the
-#  combo "drifts." The engine applies the `air` multipliers ONLY to airborne
-#  victims, so air.horizontal is the one knob that retunes the follow-ups
-#  WITHOUT touching the grounded opener, the sprint bonus, the 0.36 vertical,
-#  or the residual wipe.
+#  Horizontal — holding the reach pocket:  a combo's opener lands on a GROUNDED
+#  victim, whose launch tick decays at ground drag (stone ~0.546); every
+#  follow-up lands on an AIRBORNE victim, whose launch tick decays at air drag
+#  (0.91). For the same launch velocity the airborne hit keeps 0.91/0.546 ~
+#  1.67x as much horizontal on that first tick, so hits 2+ carry the victim a
+#  hair past the reach pocket and the combo "drifts." The engine applies the
+#  `air` multipliers ONLY to airborne victims, so air.horizontal is the one
+#  knob that retunes the follow-ups without touching the grounded opener.
+#  air.horizontal 0.92 removes ~0.063 (~8%) of horizontal launch velocity per
+#  airborne hit — full grounded-parity over the 2-tick combo window would be
+#  ~0.81, which over-damps; 0.92 is ~40% of the way there: enough to hold
+#  reach, small enough to keep velt's punch.
 #
-#  The magnitude:  full grounded-parity over the 2-tick combo window would be
-#  ~0.81 (a 19% cut) — that over-damps and feels sticky. 0.92 is ~40% of the
-#  way there: it removes ~0.063 (~8%) of horizontal launch velocity per
-#  airborne hit, ~a tenth of a block of pocket creep per inter-hit interval at
-#  combo cadence. Enough to hold reach, small enough to keep velt's punch.
-#  Vertical is left at 1.0 on purpose — the complaint is distance, not height,
-#  and the pinned 0.36 is the signature.
+#  Vertical — the arc:  base.vertical 0.365 sits just above the 0.36 cap, so a
+#  resting/rising victim still pins at 0.36 (the cap bites) while a DESCENDING
+#  victim — the combo case — keeps a touch more lift (up to +0.005). air.vertical
+#  0.98 then trims the airborne follow-ups' vertical 2%. Net of the two: the
+#  opener gets a hair more height on a falling victim, the follow-ups a hair
+#  less — the arc the owner found held combos best.
 #
 #  This preset is regenerated when the file is missing; your edits stay.
 # ──────────────────────────────────────────────────────────────────────────
 display-name: Signature
-description: "Mental's signature feel — velt's residual wipe and pinned 0.36 vertical, with airborne combo hits trimmed 8% to hold the reach pocket."
+description: "Mental's signature feel — velt's residual wipe and full sprint horizontal, tuned to hold the combo reach pocket (airborne hits trimmed h x0.92 / v x0.98, base vertical 0.365)."
 
 knockback:
   base:
     horizontal: 0.325
-    vertical: 0.36
+    # Just above the 0.36 cap: resting hits pin at 0.36, descending (combo)
+    # hits keep a touch more lift. See the header.
+    vertical: 0.365
   vertical-mode: add
   extra:
     horizontal: 0.5
@@ -49,17 +55,18 @@ knockback:
     y: 0.1
     z: 0.1
   limits:
-    # Equal to the base on purpose: every grounded hit pins at 0.36.
+    # The cap stays 0.36; base.vertical 0.365 sits just above it so the cap
+    # bites on resting/rising hits while descending hits land a hair under.
     vertical: 0.36
     vertical-min: -3.9
     horizontal: -1
   air:
-    # The signature tweak. 0.92 trims the horizontal push for AIRBORNE victims
-    # only — i.e. the second-and-later combo hits — by 8%, holding the victim
-    # in the reach pocket without touching the grounded opener (hit 1) or
-    # velt's vertical. See the header for the full derivation.
+    # The signature tweaks, applied to AIRBORNE victims only — i.e. the
+    # second-and-later combo hits. horizontal 0.92 trims the follow-ups' push
+    # 8% to hold the reach pocket without touching the grounded opener (hit 1);
+    # vertical 0.98 trims their height 2%. See the header for the derivation.
     horizontal: 0.92
-    vertical: 1.0
+    vertical: 0.98
   add:
     horizontal: 0.0
     vertical: 0.0

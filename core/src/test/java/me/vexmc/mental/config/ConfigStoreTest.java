@@ -125,6 +125,96 @@ class ConfigStoreTest {
         assertEquals(afterFirst, Files.readString(mmc.toPath(), StandardCharsets.UTF_8));
     }
 
+    /**
+     * The signature body as shipped in 2.2.0 (values-complete): velt plus only
+     * the horizontal pocket trim, before 2.2.1 added the vertical tuning. The
+     * description must match {@code SupersededPresets.SIGNATURE_2_2_0} exactly
+     * or the upgrade silently stops recognizing it.
+     */
+    private static final String SIGNATURE_2_2_0_BODY = """
+            display-name: Signature
+            description: "Mental's signature feel — velt's residual wipe and pinned 0.36 vertical, with airborne combo hits trimmed 8% to hold the reach pocket."
+            knockback:
+              base:
+                horizontal: 0.325
+                vertical: 0.36
+              vertical-mode: add
+              extra:
+                horizontal: 0.5
+                vertical: 0.0
+              wtap-extra:
+                enabled: false
+                horizontal: 0.5
+                vertical: 0.0
+              friction:
+                x: 0.1
+                y: 0.1
+                z: 0.1
+              limits:
+                vertical: 0.36
+                vertical-min: -3.9
+                horizontal: -1
+              air:
+                horizontal: 0.92
+                vertical: 1.0
+              delivery:
+                melee: tracker
+                projectile: tracker
+              modifiers:
+                sprint: 1.0
+                combos: false
+                armor-resistance: none
+                shield-blocking-cancels: true
+            """;
+
+    @Test
+    void unTunedSignaturePresetUpgradesToTheVerticalTuning() throws Exception {
+        ConfigStore store = store();
+        File signature = new File(dataFolder, ConfigStore.PROFILES_DIR + "/signature.yml");
+        assertTrue(signature.getParentFile().mkdirs());
+        // A 2.2.0 install that never tuned signature: only air.horizontal 0.92.
+        Files.writeString(signature.toPath(), SIGNATURE_2_2_0_BODY, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration upgraded = YamlConfiguration.loadConfiguration(signature);
+        assertEquals(0.365, upgraded.getDouble("knockback.base.vertical"),
+                "the upgrade must carry the 2.2.1 base-vertical lift");
+        assertEquals(0.98, upgraded.getDouble("knockback.air.vertical"),
+                "the upgrade must carry the 2.2.1 airborne vertical trim");
+        assertEquals(0.92, upgraded.getDouble("knockback.air.horizontal"),
+                "the horizontal pocket trim is unchanged");
+        assertTrue(logged.stream().anyMatch(line ->
+                        line.contains("signature.yml") && line.contains("upgraded")),
+                () -> "expected an upgrade report, logged: " + logged);
+
+        // Idempotent: the corrected file no longer matches the 2.2.0 revision.
+        String afterFirst = Files.readString(signature.toPath(), StandardCharsets.UTF_8);
+        store.ensureDefaultFiles();
+        assertEquals(afterFirst, Files.readString(signature.toPath(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void tunedSignaturePresetIsNeverTouched() throws Exception {
+        ConfigStore store = store();
+        File signature = new File(dataFolder, ConfigStore.PROFILES_DIR + "/signature.yml");
+        assertTrue(signature.getParentFile().mkdirs());
+        // One tuned value (air.horizontal 0.92 → 0.95) = an owner edit.
+        String tuned = SIGNATURE_2_2_0_BODY.replace("horizontal: 0.92", "horizontal: 0.95");
+        Files.writeString(signature.toPath(), tuned, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration kept = YamlConfiguration.loadConfiguration(signature);
+        assertEquals(0.95, kept.getDouble("knockback.air.horizontal"),
+                "owner-tuned values must survive every upgrade pass");
+        assertEquals(1.0, kept.getDouble("knockback.air.vertical"),
+                "an owner-tuned file is never upgraded");
+        assertFalse(logged.stream().anyMatch(line ->
+                        line.contains("signature.yml") && line.contains("upgraded")),
+                () -> "no upgrade may be reported for a tuned file, logged: " + logged);
+    }
+
     @Test
     void tunedSupersededPresetIsNeverTouched() throws Exception {
         ConfigStore store = store();
