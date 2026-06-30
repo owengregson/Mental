@@ -326,7 +326,6 @@ public final class GroundTransitionWatcher implements Listener {
                 : VictimMotion.JUMP_IMPULSE + 0.1 * (effect.getAmplifier() + 1);
     }
 
-
     private void debugLog(@NotNull UUID id, @NotNull java.util.function.Supplier<String> message) {
         services.debug().log(DebugCategory.KNOCKBACK, () -> message.get() + " [" + id + "]");
     }
