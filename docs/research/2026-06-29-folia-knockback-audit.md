@@ -107,3 +107,38 @@ on Folia — gameplay suites drive cross-region state from one context, which Fo
 forbids). The Folia-specific fixes rest on the `javap` ground truth, the decompile /
 timing analysis, and the unit pins; confirm end-to-end on a live Folia server by
 enabling the `KNOCKBACK` debug category and reproducing.
+
+## Coda (2026-06-30): the symptom was a measurement artifact
+
+The "downward 2nd combo hit on Folia" that drove this entire audit was **not a
+Mental bug**. It was the SimpleBoxer test harness reading the wrong event.
+Confirmed against `folia-1.21.11.jar` bytecode and both codebases:
+
+- Mental applies its knockback only at `PlayerVelocityEvent` (HIGH) — the latest
+  point, fired by `ServerEntity.sendChanges` just before the
+  `ClientboundSetEntityMotionPacket`. There is no `EntityKnockbackEvent` listener
+  in Mental. A real client on Folia therefore receives Mental's era-correct value.
+- SimpleBoxer, **on Folia only** (`eventBasedKnockback = autoTicksEntities() &&
+  eventAvailable()`), captures Paper's `EntityKnockbackEvent` at MONITOR and
+  computes `victim.getVelocity() + getKnockback()`. On classic Paper it polls
+  `hurtMarked` — the *final* deltaMovement, after Mental's override — which is why
+  it always read correctly there.
+- `EntityKnockbackEvent` fires *inside* `LivingEntity.knockback(...)`, **before**
+  `PlayerVelocityEvent`, carrying vanilla's delta. Vanilla's airborne vertical is
+  `onGround() ? min(0.4, dm.y/2 + strength) : dm.y` — for an airborne victim it
+  KEEPS the current (falling) `y`, so the delta `y` is `0` and SimpleBoxer
+  reconstructs the falling velocity = downward. Grounded hit 1 gets `+0.4`, so only
+  the airborne 2nd hit looked wrong.
+
+So SimpleBoxer-on-Folia could never reflect Mental's knockback, by construction —
+it reads an event Mental does not write to. "Nothing changed across the ~19 fixes"
+because every fix lived in the `PlayerVelocityEvent`/pending path this observer
+never reads.
+
+**The actual fix (2.1.3):** a `KnockbackEventMirror` that, on 1.20.6+, mirrors the
+value the velocity event will ship onto the `EntityKnockbackEvent` delta — so any
+observer of the standard knockback event (anticheats, SimpleBoxer, other plugins)
+sees Mental's value, with the final wire velocity unchanged. Spec:
+`docs/superpowers/specs/2026-06-30-knockback-event-mirror-design.md`. The 2.1.1 /
+2.1.2 fixes were chasing a ghost but remain valid hardening (region-safety, pending
+lifecycle, the boundary exclusion) and are kept.

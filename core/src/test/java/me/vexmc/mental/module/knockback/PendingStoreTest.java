@@ -128,6 +128,48 @@ class PendingStoreTest {
     }
 
     @Test
+    void peekLiveHeadReturnsTheOldestWithoutConsuming() {
+        PendingStore store = new PendingStore();
+        UUID victim = UUID.randomUUID();
+        Pending hit1 = plain(KnockbackPipeline.Cause.MELEE, 1L);
+        Pending hit2 = plain(KnockbackPipeline.Cause.MELEE, 2L);
+        store.enqueue(victim, hit1);
+        store.enqueue(victim, hit2);
+        // The EntityKnockbackEvent mirror peeks what the velocity event will
+        // ship next (the FIFO head) WITHOUT removing it — onPlayerVelocity is
+        // still the single authoritative consume.
+        assertSame(hit1, store.peekLiveHead(victim, 3L, NEVER));
+        assertEquals(2, store.depth(victim), "peek must not consume");
+        assertSame(hit1, store.peekLiveHead(victim, 3L, NEVER), "a second peek still sees the head");
+        // The real consume still hands back the same head in order.
+        assertSame(hit1, store.pollLive(victim, 3L, NEVER, n -> {}));
+    }
+
+    @Test
+    void peekLiveHeadSkipsExpiredHeadsWithoutDroppingThem() {
+        PendingStore store = new PendingStore();
+        UUID victim = UUID.randomUUID();
+        store.enqueue(victim, plain(KnockbackPipeline.Cause.MELEE, 0L));
+        Pending live = plain(KnockbackPipeline.Cause.MELEE, 100L);
+        store.enqueue(victim, live);
+        // now=120, expiry 50: the head (age 120) is expired, the next (age 20) is
+        // live. Peek returns the first LIVE pending but leaves the deque intact —
+        // pollLive owns dropping the expired head later.
+        assertSame(live, store.peekLiveHead(victim, 120L, 50L));
+        assertEquals(2, store.depth(victim), "peek never drops an expired head");
+    }
+
+    @Test
+    void peekLiveHeadIsNullWhenEmptyOrAllExpired() {
+        PendingStore store = new PendingStore();
+        UUID victim = UUID.randomUUID();
+        assertNull(store.peekLiveHead(victim, 1L, NEVER), "no pending -> nothing to mirror");
+        store.enqueue(victim, plain(KnockbackPipeline.Cause.MELEE, 0L));
+        assertNull(store.peekLiveHead(victim, 1_000L, 10L), "every head expired -> nothing to mirror");
+        assertEquals(1, store.depth(victim), "peek leaves the expired pending for pollLive to drop");
+    }
+
+    @Test
     void concurrentEnqueueAndPollNeverLoseOrDuplicateAPending() throws InterruptedException {
         // The blocker the panel flagged: the single-slot store was race-free only
         // because each op was one atomic ConcurrentHashMap call. A bare deque

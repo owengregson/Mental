@@ -37,6 +37,7 @@ import me.vexmc.mental.module.hitreg.HitRegistrationModule;
 import me.vexmc.mental.module.hitreg.WtapRegistrationModule;
 import me.vexmc.mental.module.knockback.GroundPacketTap;
 import me.vexmc.mental.module.knockback.GroundTransitionWatcher;
+import me.vexmc.mental.module.knockback.KnockbackEventMirror;
 import me.vexmc.mental.module.knockback.KnockbackModule;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackProfiles;
@@ -325,6 +326,14 @@ public final class MentalPlugin extends JavaPlugin {
         groundWatcher = new GroundTransitionWatcher(services, victimMotion, serverTickClock);
         getServer().getPluginManager().registerEvents(groundWatcher, this);
         groundWatcher.watchOnlinePlayers();
+        // Mirror Mental's knockback onto Paper's EntityKnockbackEvent (1.20.6+) so
+        // mid-pass observers (anticheats, SimpleBoxer) see Mental's value, not
+        // vanilla's pre-override delta. A no-op below 1.20.6 (capability absent)
+        // and while the knockback module is disabled; the velocity event stays the
+        // authoritative apply, so the final wire velocity is unchanged.
+        if (services.capabilities().knockbackEvent()) {
+            new KnockbackEventMirror(services, knockbackPipeline).register(this);
+        }
 
         KnockbackModule knockback = new KnockbackModule(services, victimMotion, knockbackPipeline);
         LatencyCompensationModule compensation = new LatencyCompensationModule(services, victimMotion);

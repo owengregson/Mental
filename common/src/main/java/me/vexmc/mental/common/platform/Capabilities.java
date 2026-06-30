@@ -14,7 +14,8 @@ public record Capabilities(
         boolean folia,
         boolean modernSchedulers,
         boolean brigadierCommands,
-        boolean registryAttributes) {
+        boolean registryAttributes,
+        boolean knockbackEvent) {
 
     public static @NotNull Capabilities detect() {
         boolean folia = classPresent("io.papermc.paper.threadedregions.RegionizedServer");
@@ -22,14 +23,18 @@ public record Capabilities(
                 folia || classPresent("io.papermc.paper.threadedregions.scheduler.EntityScheduler");
         boolean brigadier = classPresent("io.papermc.paper.command.brigadier.Commands");
         boolean registryAttributes = !Attribute.class.isEnum();
-        return new Capabilities(folia, modernSchedulers, brigadier, registryAttributes);
+        // Paper's modern knockback event (1.20.6+), the one mid-pass observers
+        // (anticheats, SimpleBoxer) read; absent below it, where the mirror is a no-op.
+        boolean knockbackEvent = classPresent("io.papermc.paper.event.entity.EntityKnockbackEvent");
+        return new Capabilities(folia, modernSchedulers, brigadier, registryAttributes, knockbackEvent);
     }
 
     public @NotNull String describe() {
         return "folia=" + folia
                 + " modernSchedulers=" + modernSchedulers
                 + " brigadierCommands=" + brigadierCommands
-                + " registryAttributes=" + registryAttributes;
+                + " registryAttributes=" + registryAttributes
+                + " knockbackEvent=" + knockbackEvent;
     }
 
     private static boolean classPresent(@NotNull String className) {
