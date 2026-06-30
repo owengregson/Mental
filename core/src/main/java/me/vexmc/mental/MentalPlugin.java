@@ -133,7 +133,7 @@ public final class MentalPlugin extends JavaPlugin {
         this.services = new MentalServices(
                 this, config, capabilities, environment, scheduling, debug,
                 new AnticheatGate(), new OcmGate(),
-                new SprintTracker(),
+                new SprintTracker(capabilities.folia()),
                 new KnockbackProfiles(config));
         this.management = new ManagementService(this);
         this.modules = new ModuleRegistry(getLogger());

@@ -42,7 +42,16 @@ public final class FoliaScheduling implements Scheduling {
 
     @Override
     public void runOn(@NotNull Entity entity, @NotNull Runnable task, @NotNull Runnable retired) {
-        entity.getScheduler().run(plugin, scheduled -> task.run(), retired);
+        ScheduledTask scheduled = entity.getScheduler().run(plugin, ignored -> task.run(), retired);
+        if (scheduled == null) {
+            // The entity was already retired at schedule time: Folia's run()
+            // returns null WITHOUT invoking the retired callback (verified by
+            // javap — EntityScheduler.schedule returns false at tickCount==-1
+            // without firing the consumer), unlike repeatOn/runOnLater below.
+            // Fire it here so callers' cleanup (e.g. the pipeline's pending
+            // removal) always runs, matching BukkitScheduling's contract.
+            retired.run();
+        }
     }
 
     @Override

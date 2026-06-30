@@ -2,6 +2,7 @@ package me.vexmc.mental.module.knockback;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntSupplier;
 import me.vexmc.mental.MentalServices;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.common.scheduling.TaskHandle;
@@ -197,9 +198,11 @@ public final class GroundTransitionWatcher implements Listener {
         // Tick-stamped so boundary reads can apply the era ordering: an
         // attack and a victim movement packet landing in the same tick were
         // judged attack-first (the attacker's connection slot ran before the
-        // victim's). Bukkit#getCurrentTick is a plain static counter — safe
-        // to read from the netty thread at tick grain.
-        int tick = Bukkit.getCurrentTick();
+        // victim's). On Paper Bukkit#getCurrentTick is a plain static counter —
+        // safe to read from this netty thread; on Folia it routes through
+        // RegionizedServer#getCurrentTick, which throws off a region thread, so
+        // the packet feed uses NO_TICK there (see packetMovementTick).
+        int tick = packetMovementTick(services.capabilities().folia(), Bukkit::getCurrentTick);
         if (grounded) {
             debugLog(id, () -> "ground-tap LANDING y=" + knownY);
             ledger.recordLanding(id, nowNanos, gravity,
@@ -318,6 +321,26 @@ public final class GroundTransitionWatcher implements Listener {
         return effect == null
                 ? VictimMotion.JUMP_IMPULSE
                 : VictimMotion.JUMP_IMPULSE + 0.1 * (effect.getAmplifier() + 1);
+    }
+
+    /**
+     * The tick to stamp a packet-fed transition with. {@link #onClientMovement}
+     * runs on the victim's netty thread (never a region thread), and on Folia
+     * {@code Bukkit.getCurrentTick()} routes to
+     * {@code RegionizedServer.getCurrentTick()}, which throws
+     * {@code IllegalStateException("No currently ticking region")} there
+     * (verified by javap on the 1.21.11 Folia server jar). That throw was
+     * swallowed by {@link GroundPacketTap}'s catch-all, silently dropping every
+     * real client's liftoff/landing from the ledger — the ledger then froze
+     * grounded and combos shipped floaty grounded re-stamps. Folia exposes no
+     * region tick a netty thread may read, so the packet feed there uses the
+     * inclusive {@link VictimMotion#NO_TICK} view (the same the boundary
+     * exclusion gives packetless players); the sub-tick attack-ordering
+     * refinement is unavailable off-region regardless. The supplier is invoked
+     * only on the non-Folia branch, so the throwing call is never reached.
+     */
+    static int packetMovementTick(boolean folia, @NotNull IntSupplier serverTick) {
+        return folia ? VictimMotion.NO_TICK : serverTick.getAsInt();
     }
 
     private void debugLog(@NotNull UUID id, @NotNull java.util.function.Supplier<String> message) {

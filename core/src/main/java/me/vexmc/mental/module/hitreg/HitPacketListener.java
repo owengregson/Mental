@@ -213,20 +213,42 @@ final class HitPacketListener implements PacketListener {
                         + " — in-order w-tap/s-tap registration");
             }
 
-            if (settings.preSendFeedback() && playerVictim != null) {
-                preSendCombatFeedback(attacker, attackerSnap, playerVictim, now, settings,
-                        attackerSprinting, freshSprint);
+            // The attack packet is already cancelled (line above), so vanilla
+            // will never deliver this hit — any throw between here and the
+            // dispatch below must NOT skip it, or the victim takes nothing at all
+            // (no vanilla, no Mental). The stamp and the pre-send get SEPARATE
+            // guards so a pre-send failure cannot also drop the verdict.
+
+            // Stamp the attack verdict FIRST and in its own guard: it must survive
+            // a pre-send failure, or the deferred damage pass falls back to the
+            // already-cleared live sprint flag and denies the era bonus. A
+            // faithful client drops its own sprint right after attacking and the
+            // sync packet beats the deferred damage to the server, so a live read
+            // there would lose that race. The wire-resolved freshness rides
+            // along; null keeps the authoritative pass on its Bukkit ledger.
+            try {
+                if (attackerSnap != null || wire != null) {
+                    services.sprintTracker().stampAttackVerdict(
+                            attackerId, attackerSprinting, wireFresh, System.nanoTime());
+                }
+            } catch (Throwable stampFailure) {
+                services.plugin().getLogger().warning(
+                        "Attack-verdict stamp failed; the authoritative hit still applies: " + stampFailure);
             }
 
-            // Stamped for the deferred damage pass: a faithful client drops
-            // its own sprint right after attacking and the sync packet beats
-            // the deferred damage to the server — a live read there would
-            // deny the era's sprint bonus to every perfectly-timed
-            // authoritative hit. The wire-resolved freshness rides along;
-            // null keeps the authoritative pass on its Bukkit ledger.
-            if (attackerSnap != null || wire != null) {
-                services.sprintTracker().stampAttackVerdict(
-                        attackerId, attackerSprinting, wireFresh, System.nanoTime());
+            try {
+                if (settings.preSendFeedback() && playerVictim != null) {
+                    preSendCombatFeedback(attacker, attackerSnap, playerVictim, now, settings,
+                            attackerSprinting, freshSprint);
+                }
+            } catch (Throwable presendFailure) {
+                // The pending is recorded only AFTER its wire packet ships (see
+                // preSendCombatFeedback), so a pre-send failure leaves no orphaned
+                // "delivered" pending to clean up: the authoritative pass simply
+                // recomputes and ships a real velocity. The dispatch below always
+                // runs once the attack packet is claimed.
+                services.plugin().getLogger().warning(
+                        "Pre-send feedback failed; the authoritative hit still applies: " + presendFailure);
             }
             // Damage runs on the region that owns the TARGET. Player victims
             // resolve by UUID there (Bukkit#getPlayer is region-agnostic), so
@@ -306,6 +328,10 @@ final class HitPacketListener implements PacketListener {
         }
 
         Vector velocity = null;
+        // Stashed and submitted only AFTER the victim burst ships, so an orphaned
+        // "delivered" pending can never outlive a failed send (see below).
+        KnockbackVector preVector = null;
+        KnockbackVector preShipped = null;
         if (!services.anticheatGate().allowVelocityPreSend()) {
             debug(attacker, () -> "velocity pre-send suppressed by anticheat policy");
         } else if (attackerSnap.ocmOwnsMeleeKnockback()) {
@@ -341,20 +367,20 @@ final class HitPacketListener implements PacketListener {
                             victimSnap.gravity());
                     shipped = new KnockbackVector(decayed.vx(), decayed.vy(), decayed.vz());
                 }
+                // Compute the wire velocity now, but DEFER recording the pending
+                // until after the burst actually ships (below). The
+                // authoritative pass adopts this exact delivery and the duplicate
+                // end-of-tick packet is suppressed — one wire stamp per hit, like
+                // the era servers; a connectionless victim has no burst, so its
+                // pinned vector ships once through the normal velocity event.
                 if (wired) {
                     velocity = shipped.toBukkit();
-                    // The authoritative pass adopts this exact delivery and
-                    // the duplicate end-of-tick packet is suppressed — one
-                    // wire stamp per hit, like the era servers.
-                    pipeline.submitPreDelivered(victim, vector, shipped, attacker);
                 } else {
-                    // Nothing was (or could be) sent: pin the era-moment
-                    // values for the authoritative pass and let the normal
-                    // velocity event ship them once, at vanilla cadence.
-                    pipeline.submitPinned(victim, vector, shipped, attacker);
                     debug(attacker, () -> "pre-send pinned: " + safeName(victim)
                             + " has no connection — registration vector ships authoritatively");
                 }
+                preVector = vector;
+                preShipped = shipped;
             }
         }
 
@@ -367,6 +393,21 @@ final class HitPacketListener implements PacketListener {
         if (wired) {
             senders.sendVictimBurst(
                     victim, victimSnap.entityId(), velocity, hurtYaw, settings.bundleFeedback());
+        }
+        // Record the pending only AFTER the wire carried it. If the burst above
+        // threw, execution unwinds to the caller's catch and this submit is
+        // skipped — no orphaned "delivered" marker, so the authoritative pass
+        // recomputes and ships a real velocity instead of adopting a vector whose
+        // packet never went out and having the suppressor cancel the corrective
+        // send. Recorded BEFORE the attacker flinch so a sendHurt failure cannot
+        // strand a pinned pending, and a post-burst sendHurt failure cannot
+        // trigger a double-knockback recompute (the burst already shipped).
+        if (preShipped != null) {
+            if (wired) {
+                pipeline.submitPreDelivered(victim, preVector, preShipped, attacker);
+            } else {
+                pipeline.submitPinned(victim, preVector, preShipped, attacker);
+            }
         }
         senders.sendHurt(attacker, victimSnap.entityId(), hurtYaw);
     }

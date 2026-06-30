@@ -11,6 +11,7 @@ import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackPipeline;
 import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.module.knockback.MeleeReentryGuard;
 import me.vexmc.mental.module.ocm.OcmMechanic;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -70,6 +71,26 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onProjectileHit(@NotNull ProjectileHitEvent event) {
+        try {
+            handleRodHit(event);
+        } catch (Throwable offRegionOrOther) {
+            // On Folia a long rod cast can land the hit on the victim's region
+            // while the rodder is owned by another: rodder.getGameMode() and
+            // victim.damage(amount, rodder) then trip the off-region guard
+            // (CraftEntity.getHandle -> ensureTickThread). Degrade to no rod knock
+            // for that cast rather than letting an uncaught exception spam the log
+            // and leave a half-applied hit. Paper never throws here — byte-identical.
+            if (services.capabilities().folia()) {
+                // Expected on Folia for a cross-region cast — keep it quiet.
+                debug.log(() -> "rod hit skipped (off-region rodder on Folia): " + offRegionOrOther);
+            } else {
+                // Paper never throws here: a throw is a genuine fault, surface it.
+                services.plugin().getLogger().warning("Rod hit handler failed: " + offRegionOrOther);
+            }
+        }
+    }
+
+    private void handleRodHit(@NotNull ProjectileHitEvent event) {
         FishingKnockbackSettings settings = services.config().fishingKnockback();
         if (!settings.enabled()
                 || !(event.getEntity() instanceof FishHook)
@@ -101,7 +122,11 @@ public final class FishingKnockbackModule extends CombatModule implements Listen
             return;
         }
 
-        victim.damage(settings.damage(), rodder);
+        // Dealt through the vanilla pipeline as ENTITY_ATTACK by the rodder — the
+        // re-entry guard keeps the melee knockback module from mistaking it for a
+        // melee hit and applying the rodder's attacker self-slow / sprint clear /
+        // a stray MELEE pending. The rod's own ROD-cause submit follows below.
+        MeleeReentryGuard.during(() -> victim.damage(settings.damage(), rodder));
         if (victim.getNoDamageTicks() <= victim.getMaximumNoDamageTicks() / 2.0) {
             debug.log(() -> "rod hit on " + describe(victim) + " was cancelled — no knockback");
             return;
