@@ -11,10 +11,14 @@ import com.google.common.collect.Multimap;
 import io.github.retrooper.packetevents.util.SpigotConversionUtil;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import me.vexmc.mental.config.MentalConfig;
+import me.vexmc.mental.module.hitreg.DamageCalculator;
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.EffectiveMaterial;
 import org.bukkit.Material;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeModifier;
@@ -75,6 +79,10 @@ import org.jetbrains.annotations.Nullable;
 public final class WeaponAttributeTooltipHider implements PacketListener {
 
     private final MentalConfig config;
+
+    /** Stable display id for the era attack-damage modifier this rewriter stamps on the packet copy (rule 3). */
+    private static final UUID LEGACY_ATTACK_ID =
+            UUID.nameUUIDFromBytes("mental:legacy:attack_damage".getBytes(StandardCharsets.UTF_8));
 
     /* ---- Modern NMS path (A) handles, resolved once; null when absent ---- */
     private final @Nullable Object nmsAttributeModifiersType; // DataComponents.ATTRIBUTE_MODIFIERS
@@ -164,12 +172,12 @@ public final class WeaponAttributeTooltipHider implements PacketListener {
     public void onPacketSend(@NotNull PacketSendEvent event) {
         Object type = event.getPacketType();
         if (PacketType.Play.Server.SET_SLOT.equals(type)) {
-            if (!config.cooldown().enabled()) {
-                return; // zero-touch when the attack-cooldown module is off
+            if (!anyRuleActive()) {
+                return; // zero-touch when no era-display rule is active
             }
             try {
                 WrapperPlayServerSetSlot wrapper = new WrapperPlayServerSetSlot(event);
-                ItemStack hidden = hideWeaponAttributes(wrapper.getItem());
+                ItemStack hidden = rewriteAttributes(wrapper.getItem());
                 if (hidden != null) {
                     wrapper.setItem(hidden);
                     event.markForReEncode(true);
@@ -180,7 +188,7 @@ public final class WeaponAttributeTooltipHider implements PacketListener {
             return;
         }
         if (PacketType.Play.Server.WINDOW_ITEMS.equals(type)) {
-            if (!config.cooldown().enabled()) {
+            if (!anyRuleActive()) {
                 return;
             }
             try {
@@ -189,7 +197,7 @@ public final class WeaponAttributeTooltipHider implements PacketListener {
                 List<ItemStack> rewritten = new ArrayList<>(items.size());
                 boolean changed = false;
                 for (ItemStack item : items) {
-                    ItemStack hidden = hideWeaponAttributes(item);
+                    ItemStack hidden = rewriteAttributes(item);
                     if (hidden != null) {
                         rewritten.add(hidden);
                         changed = true;
@@ -207,31 +215,142 @@ public final class WeaponAttributeTooltipHider implements PacketListener {
         }
     }
 
+    /** Whether any of the three era-display rules is active — the packet listener is otherwise a full no-op. */
+    private boolean anyRuleActive() {
+        return config.cooldown().enabled()
+                || config.armourStrength().enabled()
+                || config.hitReg().legacyToolDamage();
+    }
+
     /**
-     * Returns a copy of {@code peStack} with ONLY the {@code attack_speed} modifier
-     * removed (the {@code attack_damage} modifier — and its tooltip line — is kept),
-     * or {@code null} when no change is needed: an empty slot, a non-weapon/tool
-     * item (only those carry an {@code attack_speed} modifier), or any version where
-     * neither reflective path can resolve and drop the modifier (the speed line then
-     * stays — graceful no-op, never breakage).
+     * Returns a display copy of {@code peStack} with its attribute tooltip made era-correct, or {@code null}
+     * when no change is needed. Three per-rule transforms, each gated on its own module (Mental owns the era
+     * decision — nothing here fires unless a restore module elects it):
+     *
+     * <ol>
+     *   <li><b>Rule 1 — strip attack_speed</b> (weapons, {@code attack-cooldown}): the existing surgical strip
+     *       of the cooldown-spoof speed line from vanilla weapon defaults; keeps attack_damage. Paths A/B below.</li>
+     *   <li><b>Rule 2 — strip armour_toughness</b> (armour, {@code old-armour-strength}): the 1.8 model has no
+     *       toughness, so the era display omits the line. Explicit-modifier items only (e.g. a heroic piece).</li>
+     *   <li><b>Rule 3 — re-value attack_damage</b> (weapons, {@code legacy-tool-damage}): show the era number
+     *       ({@code legacyAttackDamage} of the item's EFFECTIVE material — marker-aware), so tooltip == the
+     *       damage this hit actually deals. An explicit modifier set also suppresses the item defaults, so the
+     *       speed line drops for free. Explicit-modifier items only.</li>
+     * </ol>
+     *
+     * <p>Display-only, on the packet copy — never the real stack. Graceful no-op on any version/reflection miss
+     * (the line simply stays). Rules 2/3 key off {@code getAttributeModifiers()} (the item's EXPLICIT set), so
+     * they touch only items a plugin stamped and never mangle a vanilla item's implicit defaults.</p>
      */
-    private @Nullable ItemStack hideWeaponAttributes(@Nullable ItemStack peStack) {
+    private @Nullable ItemStack rewriteAttributes(@Nullable ItemStack peStack) {
         if (peStack == null || peStack.isEmpty()) {
             return null;
         }
         org.bukkit.inventory.ItemStack bukkit = SpigotConversionUtil.toBukkitItemStack(peStack);
-        if (bukkit == null || !isWeaponOrTool(bukkit.getType())) {
+        if (bukkit == null) {
             return null;
         }
-
-        // (A) Modern NMS component path — try first (the owner's likely server, 1.20.5+).
-        ItemStack viaComponent = stripAttackSpeedViaComponent(bukkit);
-        if (viaComponent != null) {
-            return viaComponent;
+        Material type = bukkit.getType();
+        if (isWeaponOrTool(type)) {
+            // Rule 3 first: it re-values attack_damage AND drops speed (explicit set suppresses defaults).
+            if (config.hitReg().legacyToolDamage()) {
+                ItemStack legacy = rewriteLegacyAttack(bukkit);
+                if (legacy != null) {
+                    return legacy;
+                }
+            }
+            // Rule 1: strip only the attack_speed line from vanilla weapon defaults (the cooldown spoof).
+            if (config.cooldown().enabled()) {
+                ItemStack viaComponent = stripAttackSpeedViaComponent(bukkit);
+                return viaComponent != null ? viaComponent : stripAttackSpeedViaBukkitMeta(bukkit);
+            }
+            return null;
         }
+        if (isArmour(type) && config.armourStrength().enabled()) {
+            return stripToughnessExplicit(bukkit); // Rule 2
+        }
+        return null;
+    }
 
-        // (B) Legacy Bukkit Material-defaults path (≤1.20.x).
-        return stripAttackSpeedViaBukkitMeta(bukkit);
+    /**
+     * Rule 3 — re-value an explicit-modifier weapon's {@code attack_damage} to the era total for its EFFECTIVE
+     * material (the {@code combat:effective_material} marker when present, else its own type), so a display-swapped
+     * diamond-in-disguise shows the diamond-era number rather than the display material's. Returns {@code null}
+     * when the item carries no explicit attack_damage (a vanilla weapon — left to rule 1) or is not a legacy melee
+     * tool. The explicit set also suppresses the item's default modifiers, so the speed line drops with it.
+     */
+    private @Nullable ItemStack rewriteLegacyAttack(@NotNull org.bukkit.inventory.ItemStack bukkit) {
+        Attribute attackDamage = Attributes.attackDamage();
+        if (attackDamage == null) {
+            return null;
+        }
+        ItemMeta meta = bukkit.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+        Multimap<Attribute, AttributeModifier> explicit = meta.getAttributeModifiers();
+        if (explicit == null || !explicit.containsKey(attackDamage)) {
+            return null; // implicit-default (vanilla) weapon — not ours to re-value; rule 1 handles its speed line
+        }
+        Double legacyTotal = DamageCalculator.legacyAttackDamage(EffectiveMaterial.of(bukkit));
+        if (legacyTotal == null) {
+            return null; // not a legacy melee tool (hoe, rod, …)
+        }
+        double amount = legacyTotal - 1.0; // player base attack is 1.0; the modifier carries the remainder
+        if (amount <= 0.0) {
+            return null;
+        }
+        Multimap<Attribute, AttributeModifier> rebuilt = LinkedHashMultimap.create();
+        for (var e : explicit.entries()) {
+            if (!attackDamage.equals(e.getKey())) {
+                rebuilt.put(e.getKey(), e.getValue()); // keep any non-attack modifiers the plugin set
+            }
+        }
+        rebuilt.put(attackDamage, new AttributeModifier(
+                LEGACY_ATTACK_ID, "mental.legacy.attack_damage", amount,
+                AttributeModifier.Operation.ADD_NUMBER, EquipmentSlot.HAND));
+        meta.setAttributeModifiers(rebuilt);
+        bukkit.setItemMeta(meta);
+        return SpigotConversionUtil.fromBukkitItemStack(bukkit);
+    }
+
+    /**
+     * Rule 2 — drop the {@code armor_toughness} line from an explicit-modifier armour piece (the 1.8 model has no
+     * toughness). Returns {@code null} when the item has no explicit toughness (a vanilla piece — its implicit
+     * defaults are left untouched, matching the era math which reads only the armour attribute).
+     */
+    private @Nullable ItemStack stripToughnessExplicit(@NotNull org.bukkit.inventory.ItemStack bukkit) {
+        Attribute toughness = Attributes.armorToughness();
+        if (toughness == null) {
+            return null;
+        }
+        ItemMeta meta = bukkit.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+        Multimap<Attribute, AttributeModifier> explicit = meta.getAttributeModifiers();
+        if (explicit == null || !explicit.containsKey(toughness)) {
+            return null;
+        }
+        Multimap<Attribute, AttributeModifier> kept = LinkedHashMultimap.create();
+        for (var e : explicit.entries()) {
+            if (!toughness.equals(e.getKey())) {
+                kept.put(e.getKey(), e.getValue());
+            }
+        }
+        meta.setAttributeModifiers(kept);
+        bukkit.setItemMeta(meta);
+        return SpigotConversionUtil.fromBukkitItemStack(bukkit);
+    }
+
+    /** Worn-armour pieces (the toughness line lives here). */
+    private static boolean isArmour(@Nullable Material material) {
+        if (material == null) {
+            return false;
+        }
+        String name = material.name();
+        return name.endsWith("_HELMET") || name.endsWith("_CHESTPLATE")
+                || name.endsWith("_LEGGINGS") || name.endsWith("_BOOTS");
     }
 
     /**

@@ -34,6 +34,8 @@ public final class Attributes {
             resolve("MAX_HEALTH", "GENERIC_MAX_HEALTH");
     private static final @Nullable Attribute ARMOR =
             resolve("ARMOR", "GENERIC_ARMOR");
+    private static final @Nullable Attribute ARMOR_TOUGHNESS =
+            resolve("ARMOR_TOUGHNESS", "GENERIC_ARMOR_TOUGHNESS");
 
     private Attributes() {}
 
@@ -80,6 +82,15 @@ public final class Attributes {
      */
     public static @Nullable Attribute armor() {
         return ARMOR;
+    }
+
+    /**
+     * {@code ARMOR_TOUGHNESS} (modern, 1.21.3+) / {@code GENERIC_ARMOR_TOUGHNESS} (legacy) — present on all
+     * supported versions. The 1.8 model has no toughness; the era tooltip strips this line from armour so the
+     * display matches the era math (which ignores it).
+     */
+    public static @Nullable Attribute armorToughness() {
+        return ARMOR_TOUGHNESS;
     }
 
     /** The attribute's current value, or {@code fallback} when absent on this entity or version. */

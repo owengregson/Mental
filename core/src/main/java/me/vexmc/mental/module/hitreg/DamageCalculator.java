@@ -227,7 +227,7 @@ public final class DamageCalculator {
      * legacy tool classes, or null for anything whose modern attribute
      * already matches the era (hands, hoes) or postdates it.
      */
-    static @Nullable Double legacyAttackDamage(@NotNull Material type) {
+    public static @Nullable Double legacyAttackDamage(@NotNull Material type) {
         String name = type.name();
         double tool;
         if (name.endsWith("_SWORD")) {
