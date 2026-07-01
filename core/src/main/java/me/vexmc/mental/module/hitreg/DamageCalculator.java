@@ -2,6 +2,7 @@ package me.vexmc.mental.module.hitreg;
 
 import java.lang.reflect.Method;
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.EffectiveMaterial;
 import me.vexmc.mental.platform.Enchantments;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -95,7 +96,13 @@ public final class DamageCalculator {
             return Math.max(0.0, damage + vanillaEnchantmentBonus(weapon));
         }
 
-        Double legacy = legacyToolDamage && weapon != null ? legacyAttackDamage(weapon.getType()) : null;
+        // The legacy table keys off the weapon's EFFECTIVE material (the neutral combat:effective_material
+        // marker when present, else its own type), so a display-swapped "diamond in disguise" (e.g. a heroic
+        // gold sword marked DIAMOND_SWORD) gets diamond-era damage instead of the gold display value. Unmarked
+        // items resolve to their own type — a pure no-op. Gated on legacyToolDamage: Mental owns the era.
+        Double legacy = legacyToolDamage && weapon != null
+                ? legacyAttackDamage(EffectiveMaterial.of(weapon))
+                : null;
         double damage = legacy != null
                 ? legacy
                 : Attributes.valueOr(attacker, Attributes.attackDamage(), 1.0);
