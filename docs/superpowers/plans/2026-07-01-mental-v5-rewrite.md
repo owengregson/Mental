@@ -61,8 +61,8 @@ expected PASS with identical pinned values → commit.
 - Produces: the `:kernel` module every later task targets; package root
   `me.vexmc.mental.kernel`.
 
-- [ ] **Step 1:** `git checkout -b rewrite/v5`
-- [ ] **Step 2:** Add `include("kernel")` to `settings.gradle.kts`. Create
+- [x] **Step 1:** `git checkout -b rewrite/v5`
+- [x] **Step 2:** Add `include("kernel")` to `settings.gradle.kts`. Create
   `kernel/build.gradle.kts`:
 
 ```kotlin
@@ -88,7 +88,7 @@ configurations.all {
 
 (Root `build.gradle.kts` already applies the JDK-25/release-17 toolchain to all
 subprojects — verify `:kernel` inherits it.)
-- [ ] **Step 3:** Write the failing classpath test:
+- [x] **Step 3:** Write the failing classpath test:
 
 ```java
 package me.vexmc.mental.kernel;
@@ -105,9 +105,9 @@ class KernelClasspathTest {
 }
 ```
 
-- [ ] **Step 4:** Run `./gradlew :kernel:test` — expected PASS (module empty but
+- [x] **Step 4:** Run `./gradlew :kernel:test` — expected PASS (module empty but
   test runs; if Bukkit leaks in later, this fails).
-- [ ] **Step 5:** Commit `build(kernel): scaffold the Bukkit-free kernel module`.
+- [x] **Step 5:** Commit `build(kernel): scaffold the Bukkit-free kernel module`.
 
 ### Task 1.1: Value types — KnockbackVector, EntityState, GroundFriction
 
@@ -137,7 +137,7 @@ class KernelClasspathTest {
   table values byte-identical; `under(Player)` stays behind for core.
 - Test expectations unchanged; test calls adjusted to the new seams only.
 
-- [ ] Steps: port → run `./gradlew :kernel:test` → PASS → commit
+- [x] Steps: port → run `./gradlew :kernel:test` → PASS → commit
   `feat(kernel): port the knockback value types and friction table`.
 
 ### Task 1.2: Decay statics from VictimMotion
@@ -158,7 +158,7 @@ class KernelClasspathTest {
   `Decay.groundedEquilibrium(double gravity)` with signatures identical to the
   current statics; the constants referenced by Phase 2's `MotionLedger`.
 
-- [ ] Steps: port → run → PASS (pins identical) → commit
+- [x] Steps: port → run → PASS (pins identical) → commit
   `feat(kernel): extract the pure motion-decay authority from VictimMotion`.
 
 ### Task 1.3: Profile schema + engine (the crown jewel)
@@ -186,7 +186,7 @@ class KernelClasspathTest {
   (kohi/mmc/lunar/velt/minehq/badlion/signature) as the acceptance spec for
   Phase 3's parser.
 
-- [ ] Steps: port schema → port engine → port tests → run → PASS with identical
+- [x] Steps: port schema → port engine → port tests → run → PASS with identical
   pinned vectors (standing (0.4, 0.3608), sprint (0.9, 0.4607), …) → commit
   `feat(kernel): port the knockback engine and profile schema with all pins`.
 
@@ -213,7 +213,7 @@ class KernelClasspathTest {
   `DamageTables.sharpnessBonus(int level)`, `DamageTables.critMultiplier()` —
   material parameters as enum-name strings.
 
-- [ ] Steps: port → run → PASS → commit
+- [x] Steps: port → run → PASS → commit
   `feat(kernel): port the hit-registration math (reach, burst plan, cps, damage tables)`.
 
 ### Task 1.5: Latency cluster — port two, re-derive one
@@ -239,7 +239,7 @@ class KernelClasspathTest {
   method names; `MotionMath` statics named as above (same names as the old class —
   the *names* are API, the *implementation* is fresh).
 
-- [ ] Steps: port/derive → run → PASS → commit
+- [x] Steps: port/derive → run → PASS → commit
   `feat(kernel): port latency correlation and re-derive MotionMath clean-room`.
 
 ### Task 1.6: OCM-port math cluster
@@ -258,7 +258,7 @@ values identical), plus `PunchMath.java` extracted from
   listed seam; `PunchMath.withPunch(KnockbackVector base, double flightX, double
   flightZ, int level)`.
 
-- [ ] Steps: port → run → PASS → commit
+- [x] Steps: port → run → PASS → commit
   `feat(kernel): port the OCM-era rule math with pins intact`.
 
 ### Task 1.7: EffectiveMaterial resolution (kernel-pure)
@@ -274,19 +274,41 @@ values identical), plus `PunchMath.java` extracted from
 - Produces: `EffectiveMaterial.resolve(String, String)`; the PDC-reading shell is
   rebuilt in core in Phase 4 (loadout family).
 
-- [ ] Steps: port → run → PASS → commit
+- [x] Steps: port → run → PASS → commit
   `feat(kernel): port the effective-material contract resolution`.
 
 ### Task 1.8: Phase gate
 
-- [ ] Run `./gradlew build` — everything green including all pre-existing modules
+- [x] Run `./gradlew build` — everything green including all pre-existing modules
   (the old core is untouched) and `:kernel:test`.
-- [ ] Verify the kernel main-source compile classpath is empty of external deps:
+- [x] Verify the kernel main-source compile classpath is empty of external deps:
   `./gradlew :kernel:dependencies --configuration compileClasspath` shows no
   entries.
-- [ ] Commit any stragglers; push the branch.
+- [x] Commit any stragglers; push the branch.
 
 ---
+
+## Phase 1 outcomes (gate verified 2026-07-01)
+
+Complete: 8 commits (`0e21b58`…`5f43baa`), 191 kernel tests green, full build green,
+kernel compileClasspath literally empty, engine/test bodies diff-verified verbatim
+modulo declared seams. Facts later phases must carry:
+
+- **`MotionMath.ticksToFall` uses vanilla move-then-decay order** (mandate §4.2), so
+  `ticksToFall(0.0, 1.0, 0.08) == 6` where the retired GPL-lineage class pinned 5
+  (decay-before-move — the landing-predictor bug class B11 replaced). Phase 4's
+  compensation consumer must expect the vanilla-order values.
+- **`EffectiveMaterial` kernel resolve covers the pure subset only** (null/blank →
+  fallback, pass-through, never throws); the unknown-name **registry** degradation
+  and its original pin stay with core's shell (Phase 4 loadout family).
+- **`KnockbackProfilesTest` was not portable** — all three cases are
+  YamlConfiguration selection logic; they move with the parser in Phase 3.
+- Extra kernel citizens beyond the task list: `wire.PositionRing` (PositionHistory,
+  fully pure, needed by ReachValidator) and `profile.Presets` (canonical preset
+  value constants incl. LEGACY_18/CUSTOM — Phase 3's parser acceptance spec).
+- Renames landed: `FeedbackPlan` (was FeedbackBurst), `LatencyModel` (was
+  LatencyTracker), `Decay` (VictimMotion statics), `DamageTables.weaponDamage(String)`
+  (was legacyAttackDamage(Material)), `GroundFriction.of(String)`.
 
 ## Execution notes
 
