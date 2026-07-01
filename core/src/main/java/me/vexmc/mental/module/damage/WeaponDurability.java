@@ -1,5 +1,6 @@
 package me.vexmc.mental.module.damage;
 
+import java.lang.reflect.Method;
 import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.common.debug.DebugCategory;
 import me.vexmc.mental.common.debug.DebugLog;
@@ -40,6 +41,14 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class WeaponDurability {
 
+    /**
+     * {@code Damageable.hasMaxDamage()}/{@code getMaxDamage()} — the custom {@code max_damage} component
+     * (Minecraft 1.20.5+, absent on the 1.17.1 compile floor), reflected once. {@code null} on an older
+     * platform, where the effective max is simply the material max.
+     */
+    private static final Method HAS_MAX_DAMAGE = probe("hasMaxDamage");
+    private static final Method GET_MAX_DAMAGE = probe("getMaxDamage");
+
     private WeaponDurability() {}
 
     /**
@@ -66,7 +75,10 @@ public final class WeaponDurability {
         }
 
         int newDamage = meta.getDamage() + 1;
-        int max = weapon.getType().getMaxDurability();
+        // Break against the item's EFFECTIVE max: the custom max_damage component when the item carries one
+        // (1.20.5+), else the material max. A display-swapped diamond-in-disguise (e.g. a heroic gold sword
+        // with a diamond max_damage of 1561) then wears like diamond, not gold's 32 — the pre-fix bug.
+        int max = effectiveMax(weapon, meta);
         if (newDamage >= max) {
             breakWeapon(attacker, weapon, meta);
             debug.log(DebugCategory.HITREG, () ->
@@ -98,5 +110,42 @@ public final class WeaponDurability {
             attacker.getInventory().setItemInMainHand(weapon);
         }
         attacker.playSound(attacker.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.0f, 1.0f);
+    }
+
+    /**
+     * The item's effective maximum durability: the custom {@code max_damage} component when the meta
+     * carries one (1.20.5+, read reflectively), else the material max. Reads the component through
+     * {@code meta} (which the caller already resolved), so no second meta fetch.
+     */
+    private static int effectiveMax(@NotNull ItemStack weapon, @NotNull Damageable meta) {
+        int materialMax = weapon.getType().getMaxDurability();
+        if (HAS_MAX_DAMAGE == null || GET_MAX_DAMAGE == null) {
+            return materialMax;
+        }
+        try {
+            if (Boolean.TRUE.equals(HAS_MAX_DAMAGE.invoke(meta))) {
+                return effectiveMax(materialMax, true, ((Number) GET_MAX_DAMAGE.invoke(meta)).intValue());
+            }
+        } catch (ReflectiveOperationException ignored) {
+            // probed present at class load; fall back to the material max on any reflective slip
+        }
+        return materialMax;
+    }
+
+    /**
+     * Pure choice of effective max: the custom component max when present and positive, else the material
+     * max. Unit-pinned — {@code (32, true, 1561) → 1561}; {@code (32, false, …) → 32}.
+     */
+    static int effectiveMax(int materialMax, boolean hasCustomMax, int customMax) {
+        return hasCustomMax && customMax > 0 ? customMax : materialMax;
+    }
+
+    /** Reflect a no-arg {@code Damageable} method (1.20.5+); {@code null} on an older platform. */
+    private static Method probe(@NotNull String name) {
+        try {
+            return Damageable.class.getMethod(name);
+        } catch (NoSuchMethodException absent) {
+            return null;
+        }
     }
 }
