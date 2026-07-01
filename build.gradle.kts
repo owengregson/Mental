@@ -1,6 +1,6 @@
 allprojects {
     group = "me.vexmc"
-    version = "2.2.1"
+    version = "2.2.2"
 
     repositories {
         mavenCentral()
