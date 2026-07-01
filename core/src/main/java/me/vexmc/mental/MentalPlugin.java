@@ -196,10 +196,11 @@ public final class MentalPlugin extends JavaPlugin {
                 .registerListener(new CooldownSpoofListener(config),
                         PacketListenerPriority.NORMAL);
 
-        // While the cooldown module is on, the high attack_speed base leaks into
-        // weapon/tool tooltips as a huge "Attack Speed" line.  This strips only
-        // that line from outgoing weapon/tool items (keeping Attack Damage, which
-        // 1.8 weapons showed) — display-only, gated on the same flag.
+        // Era-faithful attribute tooltips (display-only, on the outgoing packet copy). Three per-rule
+        // transforms, each gated on its own restore module: strip the cooldown-spoof attack_speed line
+        // (attack-cooldown), strip the meaningless toughness line (old-armour-strength), and re-value a
+        // display-swapped weapon's attack_damage to the era number (legacy-tool-damage, marker-aware). A full
+        // no-op when none are on; registered for the plugin lifetime, it gates internally.
         PacketEvents.getAPI().getEventManager()
                 .registerListener(new WeaponAttributeTooltipHider(config),
                         PacketListenerPriority.NORMAL);
