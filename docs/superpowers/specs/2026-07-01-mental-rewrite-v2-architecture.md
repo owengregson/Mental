@@ -1,7 +1,9 @@
 # Mental rewrite v2 — architecture decision document
 
-**Status: AWAITING OWNER APPROVAL. No rewrite code exists or may be written until the
-owner approves exactly one direction from §5.**
+**Status: APPROVED 2026-07-01 — the owner approved Candidate B (Two-Realm Kernel) by
+explicit written selection, and chose to KEEP bStats (overriding the §6.1 default;
+it becomes a config-gated descriptor). The mandate's hard human checkpoint is
+satisfied; spec → plan → build may proceed.**
 
 This document is the first deliverable of the 2026-07-01 rewrite mandate
 (`docs/` prompt, commit 2f0fccb). It presents three candidate architectures, evaluates
