@@ -22,7 +22,7 @@ public final class GroundFriction {
             case "ICE", "PACKED_ICE", "FROSTED_ICE" -> 0.98;
             case "BLUE_ICE" -> 0.989;
             case "SLIME_BLOCK" -> 0.8;
-            default -> 0.6;
+            default -> Decay.DEFAULT_SLIPPERINESS;
         };
     }
 }
