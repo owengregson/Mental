@@ -46,6 +46,20 @@ class PlatformProfileTest {
     }
 
     @Test
+    void projectileKnockbackRestoredFollowsThe1212Boundary() {
+        // Below 1.21.2 vanilla dropped projectile-KB-vs-players — Mental substitutes.
+        PlatformProfile below = PlatformProfile.resolve(
+                ServerEnvironment.parse("1.21.1-R0.1-SNAPSHOT"), Capabilities.detect(), message -> {});
+        assertFalse(below.projectileKnockbackRestored(),
+                "below 1.21.2 the era projectile-KB substitution stands");
+        // 1.21.2+ restored it (mandate §10 / MC-2110) — the substitution is a no-op.
+        PlatformProfile restored = PlatformProfile.resolve(
+                ServerEnvironment.parse("1.21.2-R0.1-SNAPSHOT"), Capabilities.detect(), message -> {});
+        assertTrue(restored.projectileKnockbackRestored(),
+                "1.21.2+ restored vanilla projectile knockback");
+    }
+
+    @Test
     void anOptionalSinceAbsenceYieldsTheDeclaredFallback() {
         OptionalSince<Boolean> absent = OptionalSince.resolve(
                 "flag:projectile_kb_restored", "1.21.2", Boolean.FALSE, "Mental substitutes it", () -> null);

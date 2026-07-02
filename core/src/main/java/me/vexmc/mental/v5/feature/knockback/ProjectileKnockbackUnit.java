@@ -83,11 +83,20 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     private final TickClock clock;
     private final NamespacedKey punchKey;
 
+    /**
+     * True on 1.21.2+ where vanilla restored projectile-KB-vs-players (mandate
+     * §10 / MC-2110). Boot-resolved from {@link
+     * me.vexmc.mental.v5.platform.PlatformProfile#projectileKnockbackRestored()},
+     * frozen for the unit's life.
+     */
+    private final boolean projectileKnockbackRestored;
+
     private final ConcurrentHashMap<UUID, Flight> arrowFlight = new ConcurrentHashMap<>();
 
     public ProjectileKnockbackUnit(
             Plugin plugin, SessionService sessions, OcmBinding ocmBinding, Scheduling scheduling,
-            Supplier<Snapshot> snapshot, HitIds ids, TickClock clock) {
+            Supplier<Snapshot> snapshot, HitIds ids, TickClock clock,
+            boolean projectileKnockbackRestored) {
         this.sessions = sessions;
         this.ocmBinding = ocmBinding;
         this.scheduling = scheduling;
@@ -95,6 +104,19 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         this.ids = ids;
         this.clock = clock;
         this.punchKey = new NamespacedKey(plugin, "punch-level");
+        this.projectileKnockbackRestored = projectileKnockbackRestored;
+    }
+
+    /**
+     * Whether Mental still substitutes the era thrown-projectile knockback on
+     * this platform. Below 1.21.2 vanilla dropped projectile-KB-vs-players, so
+     * Mental substitutes (the era positional knock + the negligible-damage keep-
+     * alive); on 1.21.2+ vanilla restored it (mandate §10 / MC-2110), so every
+     * thrown-projectile substitution path is a NO-OP — vanilla knocks, and Mental
+     * must not double it. Arrows (Punch) are always Mental's and are unaffected.
+     */
+    static boolean substitutesThrownKnockback(boolean projectileKnockbackRestored) {
+        return !projectileKnockbackRestored;
     }
 
     @Override
@@ -146,6 +168,12 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         if (!isThrown(projectile) || !(event.getHitEntity() instanceof Player victim)) {
             return;
         }
+        // 1.21.2+ restored vanilla projectile-KB-vs-players — the era substitution
+        // is a NO-OP there (vanilla knocks; Mental must not double it). Below
+        // 1.21.2 the substitution stands, byte-identical to the era.
+        if (!substitutesThrownKnockback(projectileKnockbackRestored)) {
+            return;
+        }
         if (!ocmBinding.mentalOwns(MechanicToken.PROJECTILE_KNOCKBACK, victim.getUniqueId())) {
             return;
         }
@@ -174,7 +202,10 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     @SuppressWarnings("deprecation") // DamageModifier is the only absorption-zeroing API Bukkit has
     public void onProjectileDamage(EntityDamageByEntityEvent event) {
         ProjectileKnockbackSettings settings = settings();
-        if (event.getDamage() != 0.0) {
+        // 1.21.2+ restored vanilla projectile knockback — the negligible-damage
+        // keep-alive substitution is a NO-OP there (the vanilla hurt pipeline is
+        // no longer dropped for thrown projectiles).
+        if (!substitutesThrownKnockback(projectileKnockbackRestored) || event.getDamage() != 0.0) {
             return;
         }
         double substitute;

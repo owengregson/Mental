@@ -476,7 +476,8 @@ public final class MentalPluginV5 extends JavaPlugin {
                 sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));
         reconciler.register(new RodVelocityUnit(ocmBinding, scheduling));
         reconciler.register(new ProjectileKnockbackUnit(
-                this, sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock));
+                this, sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock,
+                platformProfile.projectileKnockbackRestored()));
 
         // The damage family (4B). The fast-path legacy composition (tool table,
         // era potion values, era crit) lives in the shaper above and is read live
