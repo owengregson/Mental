@@ -6,15 +6,19 @@ import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.fake.FakePlayer;
 import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.gui.Menu;
 import org.bukkit.Bukkit;
+import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * The minimal v5 {@code /mental} executor (spec §13): {@code reload} re-reads the
- * config with the {@code mental.command.reload} permission; every other form is a
- * one-line placeholder — the in-game management GUI arrives in Phase 6, so its
- * assertion is a note-SKIP here. Both the console and a permitted player must see
- * the command handled (the executor always returns true).
+ * The {@code /mental} command surface (spec §13): {@code reload} re-reads the
+ * config with the {@code mental.command.reload} permission; a bare {@code /mental}
+ * from a permitted player opens the descriptor-driven management menu (Phase 6),
+ * and from the console prints the reload hint. Both the console and a permitted
+ * player must see the command handled (the executor always returns true), and the
+ * player's menu must actually open — the holder-identity contract the click router
+ * routes on.
  */
 public final class CommandSuite {
 
@@ -32,7 +36,7 @@ public final class CommandSuite {
                             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mental"));
                     context.expect(bare, "bare 'mental' from the console was not handled");
                 }),
-                new TestCase("command: a permitted player's bare /mental is handled (GUI: Phase 6)", context -> {
+                new TestCase("command: a permitted player opens the dashboard menu", context -> {
                     FakePlayer player = new FakePlayer(tester, mental.scheduling());
                     try {
                         context.syncRun(() ->
@@ -43,13 +47,23 @@ public final class CommandSuite {
                             return Bukkit.dispatchCommand(player.player(), "mental");
                         });
                         context.expect(handled, "bare /mental was not handled for a permitted player");
-                        // The v5 command surface is a reload + placeholder only; the in-game
-                        // management menu (and its holder-open assertion) lands in Phase 6.
-                        context.note("management GUI deferred to Phase 6 — bare /mental returns "
-                                + "the placeholder message (verified handled above)");
+                        // open() defers the inventory work onto the player's region
+                        // thread (a tick on Paper); give it a few ticks, then assert
+                        // the holder-identity contract the click router routes on.
+                        context.awaitTicks(3);
+                        boolean menuOpen = context.sync(() -> menuOpen(player));
+                        context.expect(menuOpen, "/mental did not open a Mental management menu");
                     } finally {
-                        context.syncRun(player::remove);
+                        context.syncRun(() -> {
+                            player.player().closeInventory();
+                            player.remove();
+                        });
                     }
                 }));
+    }
+
+    private static boolean menuOpen(@NotNull FakePlayer player) {
+        InventoryHolder holder = player.player().getOpenInventory().getTopInventory().getHolder();
+        return holder instanceof Menu;
     }
 }
