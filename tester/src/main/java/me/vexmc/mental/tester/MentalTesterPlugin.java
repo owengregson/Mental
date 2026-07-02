@@ -6,6 +6,7 @@ import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.tester.suite.BlockingSuite;
 import me.vexmc.mental.tester.suite.BootSuite;
+import me.vexmc.mental.tester.suite.CommandSuite;
 import me.vexmc.mental.tester.suite.ConsumableRulesSuite;
 import me.vexmc.mental.tester.suite.CosmeticSmokeSuite;
 import me.vexmc.mental.tester.suite.DamageRulesSuite;
@@ -14,6 +15,7 @@ import me.vexmc.mental.tester.suite.FishingSuite;
 import me.vexmc.mental.tester.suite.HitboxSuite;
 import me.vexmc.mental.tester.suite.InventoryRulesSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
+import me.vexmc.mental.tester.suite.OcmCoexistenceSuite;
 import me.vexmc.mental.tester.suite.ProfileSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
 import me.vexmc.mental.tester.suite.ReloadSuite;
@@ -27,12 +29,12 @@ import org.bukkit.plugin.java.JavaPlugin;
  * server down. On Folia only the boot suite runs — gameplay suites drive
  * cross-region state from a single context by design.
  *
- * <p>At the 4A2 swap the suite list was trimmed to the families the v5 plugin
- * supported; 4B restored the damage family, 4C the cadence + sustain families,
- * and 4D the loadout family: the active list is now {@code Boot, Knockback,
- * Profile, Fishing, Projectile, EraParity, DamageRules, Blocking, ConsumableRules,
- * CosmeticSmoke, Hitbox, InventoryRules, Reload, ZeroTouch}. The OCM coexistence
- * suite remains delisted here and is restored in 4E.</p>
+ * <p>4E restores the FULL suite list. On a plain server the active list is
+ * {@code Boot, Knockback, Profile, Fishing, Projectile, EraParity, DamageRules,
+ * Blocking, ConsumableRules, CosmeticSmoke, Hitbox, InventoryRules, Command,
+ * Reload, ZeroTouch}; with OldCombatMechanics installed it is {@code Boot +
+ * OcmCoexistence} (the coexistence suite asserts the ownership split the era
+ * suites cannot, since OCM contests ownership).</p>
  */
 public final class MentalTesterPlugin extends JavaPlugin {
 
@@ -57,11 +59,11 @@ public final class MentalTesterPlugin extends JavaPlugin {
             if (mental.capabilities().folia()) {
                 getLogger().info("Folia detected — running the boot suite only.");
             } else if (ocmInstalled) {
-                // The coexistence suite is delisted for this sub-phase (it
-                // returns in 4E); with OCM present the era suites assert
-                // Mental's ownership, which OCM contests, so run boot only.
-                getLogger().info("OldCombatMechanics detected — running the boot suite only "
-                        + "(the coexistence suite returns in 4E).");
+                // With OCM present the era suites assert Mental's ownership,
+                // which OCM contests; the coexistence suite (restored in 4E)
+                // instead asserts the ownership split through the live binding.
+                getLogger().info("OldCombatMechanics detected — running boot + the coexistence suite.");
+                suite.addAll(OcmCoexistenceSuite.tests(mental, this));
             } else {
                 suite.addAll(KnockbackSuite.tests(mental, this));
                 suite.addAll(ProfileSuite.tests(mental, this));
@@ -74,6 +76,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(CosmeticSmokeSuite.tests(mental, this));
                 suite.addAll(HitboxSuite.tests(mental, this));
                 suite.addAll(InventoryRulesSuite.tests(mental, this));
+                suite.addAll(CommandSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
             }
