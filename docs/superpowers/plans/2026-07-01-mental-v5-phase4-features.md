@@ -253,3 +253,44 @@ impl moves to v5 (facade + ServicesManager registration; `apiVersion()` returns 
   at each open, carrying forward the previous sub-phase's outcomes.
 - Every sub-phase report: per-task commits, test counts, RAW gate outputs
   (build tails, matrix output, test-results.txt freshness evidence), deviations.
+
+---
+
+## Sub-phase 4A2 outcomes (2026-07-02)
+
+**THE SWAP IS IN.** `plugin.yml main:` is `me.vexmc.mental.v5.MentalPluginV5`; the
+shipped jar is v5. Gate green: `./gradlew build` + the SEQUENTIAL
+`integrationTestMatrix` (per the gate amendment) — all 7 versions (1.17.1, 1.18.2,
+1.19.4, 1.20.6, 1.21.4, 1.21.11, 26.1.2) FRESH PASS, 26/26 suites each.
+
+Commits (in order): `4633d04` API facade + management seam + `/mental reload`
+executor (the three forward-pulled 4E seams; facade in the static holder AND
+ServicesManager, `apiVersion()`=2); `f64433a` tester re-plumb; `5c11b8a` the
+swap; `0a1a398` + `63d942d` + `bcf59d7` the three live-gate fixes below.
+
+- **Suites now derive from the kernel/v5 seams** (VALUES unchanged): expectation
+  math is the kernel `KnockbackEngine`/`Decay`, the EraOracle's constants are
+  `Decay`'s (no local re-impl), victims are captured via the production
+  `EntityStates.captureVictim` over the session `MotionLedger`; ledger queries are
+  tick-based on `sessions().sessionFor(uuid).ledger()`; profiles/toggles go through
+  the `Management` seam + `Feature`; `mental.featureActive`. Profile/EraParity wait
+  a tick after a global profile switch (v5 freezes the profile into the per-tick
+  view). Delisted suites stay compiled against the old classes (OcmCoexistence
+  carries local old-typed helper copies). tester now `compileOnly(:kernel)`.
+- **Three v5 behavior fixes** the first live run exposed (all correct per the era
+  pins; real players were affected too, not just tests): (1) the projectile/rod
+  no-natural-event ensure fallback shipped one ground-friction step short —
+  `victim.setVelocity` next-tick lets the tracker fire the velocity event AFTER a
+  physics tick; now it re-submits fresh + triggers a DeskRouter-overridden event
+  (the full TRACKER stamp), matching the melee path and the old core's
+  onPlayerVelocity override. (2) packetless players (fake players) never fed the
+  ledger liftoff/landing (v5's GroundFsm is packet-only) so combo residuals decayed
+  at ground drag instead of air — restored the old GroundStateWatcher's tick-sampler
+  in `SessionService`, gated to packetless players via `ConnectionDomains.has`. (3)
+  the fake-player direct-registration fallback (1.17.x, where placeNewPlayer misses)
+  never fired `PlayerJoinEvent`, so v5's join-driven sessions were absent and every
+  knock no-op'd — the fallback now fires it, mirroring `remove()`'s PlayerQuitEvent.
+- **Deviation noted:** `Mental.MentalApi.apiVersion()` added as a default method to
+  the frozen `api/` interface (binary-compatible; spec §11 mandates the generation
+  marker). Kernel change was additive-only (`DeliveryDesk.pendingVectorFor`); no pin
+  edits. No suite VALUE changed.
