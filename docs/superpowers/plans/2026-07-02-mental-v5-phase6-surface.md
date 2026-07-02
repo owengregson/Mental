@@ -160,3 +160,95 @@ facade; a player-facing DebugLog sink), and the plan scopes the GUI to
 descriptors + Management/overlay writes. The debug screen still manages
 `debug.enabled` and every channel; a subscribe tile can return when a v5
 PlayerDebugSink lands.
+
+---
+
+## Phase 6 run B outcomes (Tasks 6.2–6.4, 2026-07-02)
+
+**Commits:** `c72abdb` chore(version) — the 5.0.0 single-source cutover +
+branding sweep (6.2); `ebfed16` docs(v5) — every doc + skill reconciled to the
+shipped v5 delivery core, with the docs-cannot-drift test (6.3); this commit —
+the phase gate evidence (6.4).
+
+**6.2 — version + branding.** `version=5.0.0` lives ONCE in `gradle.properties`;
+the root build reads it (`providers.gradleProperty("version")`), and it flows
+gradle.properties → project.version → core `processResources` → plugin.yml →
+`Mental.version()` (`getDescription().getVersion()`) and bStats. The built jar's
+plugin.yml reads `version: '5.0.0'` (verified from `Mental-5.0.0.jar`);
+`apiVersion()` stays 2; the api-version floor still derives from
+support-matrix.json. `release.yml` reads the version from gradle.properties and
+its legacy-v4-tag changelog exclusion is DELETED — `previous_tag` reverts to a
+plain `git tag --sort=-version:refname` pick because 5 > 4 sorts naturally.
+Branding sweep: `grep -ri strikesync` outside .git returns exactly three files —
+`docs/superpowers/prompts/2026-06-30-mental-rewrite-prompt.md` (the mandate's
+§2.5 problem statement), `docs/superpowers/specs/2026-07-01-mental-rewrite-v2-architecture.md`
+(the 5.0.0 decision provenance), and this plan (the sweep instruction itself) —
+all legitimate historical citations; zero product/build/CI hits. The repo
+DIRECTORY is still named `StrikeSync` — the rename is the owner's out-of-band
+action.
+
+**6.3 — docs + skills.** `docs/knockback-profiles.md` is global-model-only (ten
+presets; per-world → default resolution; the per-player narrative and the
+`/mental kb` command family deleted; management = the GUI Knockback screen +
+overlay write-back + `Mental.setKnockbackProfile(String)` +
+`KnockbackProfileChangeEvent`). `docs/fast-path.md` / `docs/legacy-combat.md` /
+`docs/ocm-coexistence.md` / `docs/effective-material-contract.md`: every
+dead-class mention updated to the v5 seams (DamageCalculator/HitApplier →
+DamageShaper+DamageTables, the pipeline → the delivery desk + journal,
+snapshot → the published PlayerView, SprintTracker wire view → SprintWire,
+module names → the v5 units) with every domain truth kept verbatim. The
+**docs-cannot-drift test** shipped as `KnockbackDocsTest` (core unit test, runs
+in `./gradlew build`): it walks up from the working dir to the repo root, reads
+the real `docs/knockback-profiles.md`, asserts every `KnockbackProfile` schema
+knob YAML key is documented, and pins the record's component count so a new
+knob fails the build until the doc and the key list are updated. `CLAUDE.md`
+rewritten to v5 (module list, the three single-writer domains +
+desk/journal/valve/rim, kernel additive-only + Bukkit-free invariants, the gate
+= build + sequential `integrationTestMatrix` (+Folia) + `integrationTestOcm`
+with the NONCE honesty rule replacing the mtime ritual; the skills table
+verbatim). Skills: `mental-conventions` and `netty-fast-path` fully reconciled
+(v5 structure/threading/lifecycle; every measured value and trap narrative
+preserved with "was X" v5 mappings appended — 15 annotations in netty-fast-path
+alone; the "no Folia combat coverage" corollary updated to the
+one-smoke-wide truth); `knockback-profiles` and `matrix-gate` got the lighter
+pass (global model + overlay; nonce, sequential-local rule, the Folia matrix
+entry, the reproducible OCM pin); `live-server-testing` gained the Phase 5 run C
+Folia FakePlayer findings (region-thread spawn via `runAt`, `teleportAsync`, the
+double-remove "Already retired" region crash, cross-region melee un-drivability,
+`FoliaCombatSmoke`); `era-accuracy` / `legacy-motion-physics` /
+`ocm-coexistence` had their named dead classes (VictimMotion, SprintTracker,
+HitPacketListener, GroundPacketTap, OcmGate…) annotated to their v5 successors;
+`nms-archaeology` / `paper-cross-version` named no dead classes — untouched.
+
+**6.4 — the phase gate (fresh, nonce-verified).** One invocation:
+`./gradlew clean build integrationTestMatrix integrationTestOcm`, launched
+05:41:05 PDT 2026-07-02, **BUILD SUCCESSFUL in 10m 12s**. `clean build` ran
+every unit test (including `KnockbackDocsTest`) + japicmp
+(`api-5.0.0.jar` vs the committed `api-2.2.2` baseline — only the additive
+`apiVersion()` delta). All 10 live entries, each check accepting ONLY its own
+run's nonce; no `test-failures.txt` anywhere:
+
+```
+run/1.17.1/…/test-results.txt        PASS nonce=682bd499-ea7f-430b-8fe5-098957ea642e  (mtime Jul  2 05:42:23 2026)
+run/1.18.2/…/test-results.txt        PASS nonce=f74e1b19-fce4-49e4-94d7-4d05dfc91e0a  (mtime Jul  2 05:43:41 2026)
+run/1.19.4/…/test-results.txt        PASS nonce=753acfc7-4362-4996-bf56-9e5ea58ce17f  (mtime Jul  2 05:45:00 2026)
+run/1.20.6/…/test-results.txt        PASS nonce=7de3966d-bb7d-4eec-b540-21305a3caf23  (mtime Jul  2 05:46:22 2026)
+run/1.21.4/…/test-results.txt        PASS nonce=b544a83f-fb32-4bdc-a231-f24809d3844b  (mtime Jul  2 05:47:46 2026)
+run/1.21.11/…/test-results.txt       PASS nonce=419dadc9-b5d9-4ac7-88f7-b97eaff32ca5  (mtime Jul  2 05:49:09 2026)
+run/26.1.2/…/test-results.txt        PASS nonce=00d0e94e-c143-406f-8cb8-d89447adbd52  (mtime Jul  2 05:50:31 2026)
+run/folia/26.1.2/…/test-results.txt  PASS nonce=370985fd-fe8f-46e6-884f-2533bc247195  (mtime Jul  2 05:50:47 2026)
+run/ocm/1.17.1/…/test-results.txt    PASS nonce=1e97eab3-8a14-4cb5-94de-056f1a430459  (mtime Jul  2 05:51:00 2026)
+run/ocm/26.1.2/…/test-results.txt    PASS nonce=7424ee77-098f-4367-83da-9ec47edcd04d  (mtime Jul  2 05:51:16 2026)
+```
+
+The OCM entries ran against the locally staged fork jar (`run/ocm-jar/`, the
+developer-override path — hash not enforced by design).
+
+**Deviations:** none of substance. Notes: (1) `KnockbackDocsTest` lives in
+core (not kernel) so the drift check can also see the parser-side YAML key
+names; the kernel stays JUnit-only-pure. (2) The 6.2 sweep briefly re-introduced
+the word "StrikeSync" in a gradle.properties comment and was immediately
+reworded — build files stay brand-free; the historical brand lives only in the
+three provenance docs.
+
+**PHASE 6 COMPLETE.**
