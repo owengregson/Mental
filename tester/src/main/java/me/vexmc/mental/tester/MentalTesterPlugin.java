@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.common.scheduling.TaskHandle;
+import me.vexmc.mental.tester.suite.BlockingSuite;
 import me.vexmc.mental.tester.suite.BootSuite;
+import me.vexmc.mental.tester.suite.DamageRulesSuite;
 import me.vexmc.mental.tester.suite.EraParitySuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
@@ -21,11 +23,11 @@ import org.bukkit.plugin.java.JavaPlugin;
  * server down. On Folia only the boot suite runs — gameplay suites drive
  * cross-region state from a single context by design.
  *
- * <p>At the 4A2 swap the suite list is trimmed to the families the v5 plugin
- * supports: {@code Boot, Knockback, Profile, Fishing, Projectile, EraParity,
- * Reload, ZeroTouch}. The damage/cadence/sustain/loadout suites (and the OCM
- * coexistence suite) are delisted here and restored family-by-family across
- * 4B–4E.</p>
+ * <p>At the 4A2 swap the suite list was trimmed to the families the v5 plugin
+ * supported; 4B restores the damage family: the active list is now {@code Boot,
+ * Knockback, Profile, Fishing, Projectile, EraParity, DamageRules, Blocking,
+ * Reload, ZeroTouch}. The cadence/sustain/loadout suites (and the OCM
+ * coexistence suite) remain delisted here and are restored across 4C–4E.</p>
  */
 public final class MentalTesterPlugin extends JavaPlugin {
 
@@ -61,6 +63,8 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(FishingSuite.tests(mental, this));
                 suite.addAll(ProjectileSuite.tests(mental, this));
                 suite.addAll(EraParitySuite.tests(mental, this));
+                suite.addAll(DamageRulesSuite.tests(mental, this));
+                suite.addAll(BlockingSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
             }
