@@ -61,11 +61,20 @@ import org.jetbrains.annotations.Nullable;
  * the v5 seams). Snowballs, eggs and ender pearls were full zero-damage hits and
  * arrows added Punch, all knocking away from where the <em>shooter stood</em> —
  * the positional direction modern servers changed in 1.21.2 and Mental changes
- * back. The negligible-damage substitution keeps the vanilla hurt pipeline on
- * versions that drop zero-damage hits; the vector itself is the engine's, from
- * the shooter position and the victim's residual ledger. The 1.21.2+ substitution
- * stays a no-op (the thrown vector is computed at hit time regardless of whether a
- * damage event follows).
+ * back on EVERY version: the vector is the engine's, from the shooter position
+ * and the victim's residual ledger, computed at hit time regardless of whether a
+ * damage event follows (the desk swaps it into vanilla's velocity event when one
+ * fires; {@link #scheduleEnsure} force-ships it when none does — so vanilla's
+ * restored knock is never doubled, only overridden).
+ *
+ * <p>The negligible-damage substitution keeps the vanilla hurt pipeline alive on
+ * platforms that drop zero-damage player hits, and is a NO-OP on 1.21.2+ where
+ * vanilla restored projectile knockback (mandate §10; the
+ * {@code flag:projectile_kb_restored} manifest entry). Decompile note (1.21.11,
+ * {@code LivingEntity.hurtServer}): the CraftBukkit lineage still early-returns
+ * a ServerPlayer hit whose event damage AND original amount are both zero, so on
+ * 1.21.2+ an unsubstituted thrown hit takes the {@code scheduleEnsure} delivery —
+ * the era vector ships either way, wire-proven on real Paper 1.21.4.</p>
  */
 public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
 
@@ -108,14 +117,18 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     }
 
     /**
-     * Whether Mental still substitutes the era thrown-projectile knockback on
-     * this platform. Below 1.21.2 vanilla dropped projectile-KB-vs-players, so
-     * Mental substitutes (the era positional knock + the negligible-damage keep-
-     * alive); on 1.21.2+ vanilla restored it (mandate §10 / MC-2110), so every
-     * thrown-projectile substitution path is a NO-OP — vanilla knocks, and Mental
-     * must not double it. Arrows (Punch) are always Mental's and are unaffected.
+     * Whether the negligible-damage substitution runs on this platform. Below
+     * 1.21.2 vanilla dropped zero-damage player hits entirely, so Mental
+     * substitutes a negligible positive damage to keep the hurt pipeline alive;
+     * on 1.21.2+ vanilla restored projectile knockback (mandate §10), so the
+     * substitution is a NO-OP — the hit keeps its era-true zero damage and the
+     * era vector still ships through the desk / {@code scheduleEnsure} pair. The
+     * positional VECTOR substitution is deliberately NOT gated: it is the era
+     * restoration itself (the suite pins it on every version), and the desk
+     * override replaces vanilla's knock rather than adding to it, so the
+     * restored platforms cannot double-knock.
      */
-    static boolean substitutesThrownKnockback(boolean projectileKnockbackRestored) {
+    static boolean substitutesZeroDamage(boolean projectileKnockbackRestored) {
         return !projectileKnockbackRestored;
     }
 
@@ -168,12 +181,6 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         if (!isThrown(projectile) || !(event.getHitEntity() instanceof Player victim)) {
             return;
         }
-        // 1.21.2+ restored vanilla projectile-KB-vs-players — the era substitution
-        // is a NO-OP there (vanilla knocks; Mental must not double it). Below
-        // 1.21.2 the substitution stands, byte-identical to the era.
-        if (!substitutesThrownKnockback(projectileKnockbackRestored)) {
-            return;
-        }
         if (!ocmBinding.mentalOwns(MechanicToken.PROJECTILE_KNOCKBACK, victim.getUniqueId())) {
             return;
         }
@@ -203,9 +210,9 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     public void onProjectileDamage(EntityDamageByEntityEvent event) {
         ProjectileKnockbackSettings settings = settings();
         // 1.21.2+ restored vanilla projectile knockback — the negligible-damage
-        // keep-alive substitution is a NO-OP there (the vanilla hurt pipeline is
-        // no longer dropped for thrown projectiles).
-        if (!substitutesThrownKnockback(projectileKnockbackRestored) || event.getDamage() != 0.0) {
+        // keep-alive substitution is a NO-OP there: the hit keeps its era-true
+        // zero damage, and the era vector ships via the desk / scheduleEnsure.
+        if (!substitutesZeroDamage(projectileKnockbackRestored) || event.getDamage() != 0.0) {
             return;
         }
         double substitute;

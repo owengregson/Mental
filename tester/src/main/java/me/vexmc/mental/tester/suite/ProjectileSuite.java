@@ -90,14 +90,20 @@ public final class ProjectileSuite {
                 context.expectNear(expected.z(), applied.getZ(), EPSILON, "projectile knockback z");
 
                 Double observedDamage = captors.damageOf(victim.uuid());
-                if (observedDamage != null) {
+                if (observedDamage == null) {
+                    context.note("no zero-damage event on this version — Mental's positional knock "
+                            + "still applied and was verified above");
+                } else if (mental.platformProfile().projectileKnockbackRestored()) {
+                    // F4: on 1.21.2+ (vanilla restored projectile knockback) the
+                    // negligible-damage substitution is a NO-OP — the hit keeps
+                    // its era-true zero damage; the era vector was asserted above.
+                    context.expectNear(0.0, observedDamage, 1.0e-6,
+                            "era-true zero damage (the 1.21.2+ substitution no-op)");
+                } else {
                     ProjectileKnockbackSettings settings = mental.snapshot().settings(
                             (SettingsKey<ProjectileKnockbackSettings>) Feature.PROJECTILE_KNOCKBACK.settingsKey());
                     double substituted = settings.snowballDamage();
                     context.expectNear(substituted, observedDamage, 1.0e-6, "substituted snowball damage");
-                } else {
-                    context.note("no zero-damage event on this version (1.21.2+ native path) — "
-                            + "Mental's positional knock still applied and was verified above");
                 }
             } finally {
                 context.syncRun(() -> {

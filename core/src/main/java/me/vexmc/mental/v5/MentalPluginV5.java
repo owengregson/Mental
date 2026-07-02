@@ -429,6 +429,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         return environment;
     }
 
+    /** The boot-resolved platform manifest — the tester reads version-gated flags through it. */
+    public @NotNull PlatformProfile platformProfile() {
+        return platformProfile;
+    }
+
     /** The config write-back seam behind the API facade and the (Phase 6) GUI. */
     public @NotNull Management management() {
         return management;

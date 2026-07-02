@@ -6,23 +6,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 /**
- * The 1.21.2 projectile-knockback boundary (mandate §10 / MC-2110): below
- * 1.21.2 Mental substitutes the era thrown-projectile knock; on 1.21.2+ vanilla
- * restored projectile-KB-vs-players, so the substitution is a NO-OP — Mental
- * must not double vanilla's knock. Both sides of the flag are pinned here; the
- * flag's own version derivation is pinned in {@code PlatformProfileTest}.
+ * The 1.21.2 projectile boundary (mandate §10): below 1.21.2 the
+ * negligible-damage substitution keeps the vanilla hurt pipeline alive for
+ * zero-damage thrown hits; on 1.21.2+ — where vanilla restored projectile
+ * knockback — the substitution is a NO-OP and the hit keeps its era-true zero
+ * damage. The positional VECTOR substitution is deliberately ungated: it is the
+ * era restoration itself (the live suite pins it on every version), and the
+ * desk override replaces vanilla's knock rather than adding to it, so the
+ * restored platforms cannot double-knock. Both sides of the flag are pinned
+ * here; the flag's own version derivation is pinned in
+ * {@code PlatformProfileTest}.
  */
 class ProjectileKnockbackUnitTest {
 
     @Test
-    void substitutesBelow1212() {
-        assertTrue(ProjectileKnockbackUnit.substitutesThrownKnockback(false),
-                "below 1.21.2 vanilla drops projectile-KB-vs-players — the era substitution stands");
+    void substitutesZeroDamageBelow1212() {
+        assertTrue(ProjectileKnockbackUnit.substitutesZeroDamage(false),
+                "below 1.21.2 the zero-damage hit is dropped by vanilla — the substitution keeps it alive");
     }
 
     @Test
-    void noOpsWhenVanillaRestoredProjectileKnockback() {
-        assertFalse(ProjectileKnockbackUnit.substitutesThrownKnockback(true),
-                "1.21.2+ restored vanilla projectile knockback — the substitution is a no-op");
+    void damageSubstitutionNoOpsWhereVanillaRestoredProjectileKnockback() {
+        assertFalse(ProjectileKnockbackUnit.substitutesZeroDamage(true),
+                "1.21.2+ restored vanilla projectile knockback — the damage substitution is a no-op");
     }
 }
