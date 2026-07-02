@@ -6,8 +6,7 @@ Multi-module Gradle: `api` / `kernel` / `platform` / `core` / `compat-folia` /
 build); `platform` is the Bukkit-facing seam (scheduling, capabilities, NMS
 resolvers) over the kernel; `core` is the plugin (shades PacketEvents + bStats,
 folds in `compat-folia` by name behind `Capabilities.folia()`); `tester` is the
-in-server integration harness. Version lives once in `gradle.properties`
-(`5.0.0`).
+in-server integration harness. Version lives once in `gradle.properties`.
 
 ## Use the skills
 

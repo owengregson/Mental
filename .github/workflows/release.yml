@@ -33,6 +33,7 @@ jobs:
       version: ${{ steps.facts.outputs.version }}
       tag: ${{ steps.facts.outputs.tag }}
       previous_tag: ${{ steps.facts.outputs.previous_tag }}
+      prerelease: ${{ steps.facts.outputs.prerelease }}
       should_release: ${{ steps.facts.outputs.should_release }}
       matrix: ${{ steps.facts.outputs.matrix }}
       jdks: ${{ steps.facts.outputs.jdks }}
@@ -49,10 +50,18 @@ jobs:
           version=$(grep -m1 -E '^version=' gradle.properties | sed -E 's/^version=//')
           tag="v$version"
 
-          # The most recent release tag by version order. Mental is 5.x now, so
-          # it sorts above the legacy v4.x tags naturally — a plain version sort
-          # is correct and needs no special-casing.
-          previous_tag=$(git tag --sort=-version:refname | grep -vFx "$tag" | head -n1)
+          # The changelog baseline: the nearest release tag in THIS commit's
+          # ancestry. Version sort would be wrong here — the legacy StrikeSync
+          # v4.x tags live in the same history and sort above Mental's 2.x
+          # line, but they were not the previous release of anything.
+          previous_tag=$(git describe --tags --abbrev=0 --exclude="$tag" HEAD 2>/dev/null || true)
+
+          # A hyphenated version (2.3.0-beta) publishes as a GitHub
+          # pre-release and never takes the "latest" marker.
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
 
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             should_release=false
@@ -71,6 +80,7 @@ jobs:
             echo "version=$version"
             echo "tag=$tag"
             echo "previous_tag=$previous_tag"
+            echo "prerelease=$prerelease"
             echo "should_release=$should_release"
             echo "matrix=$matrix"
           } >> "$GITHUB_OUTPUT"
@@ -324,4 +334,5 @@ jobs:
           body_path: release-notes.md
           files: ${{ steps.jar.outputs.path }}
           fail_on_unmatched_files: true
-          make_latest: 'true'
+          prerelease: ${{ needs.detect.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.detect.outputs.prerelease == 'true' && 'false' || 'true' }}
