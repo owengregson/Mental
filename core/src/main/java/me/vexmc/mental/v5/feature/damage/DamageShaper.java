@@ -6,6 +6,7 @@ import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.EffectiveMaterial;
 import me.vexmc.mental.platform.Enchantments;
+import me.vexmc.mental.platform.LegacyMaterialNames;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
@@ -129,7 +130,7 @@ public final class DamageShaper {
 
         int strengthAmp = oldPotionValues ? amplifier(attacker, STRENGTH) : -1;
         int weaknessAmp = oldPotionValues ? amplifier(attacker, WEAKNESS) : -1;
-        double weaponBase = legacyToolDamage ? legacyToolBase(weapon) : Double.NaN;
+        double weaponBase = legacyToolDamage ? eraToolBase(weapon) : Double.NaN;
         if (Double.isNaN(weaponBase)) {
             // No legacy tool value (hands, hoes, non-tool) or legacy tables off:
             // recover the pure weapon base from the live attribute so the era
@@ -142,10 +143,23 @@ public final class DamageShaper {
         return composeLegacy(weaponBase, strengthAmp, weaknessAmp, oldPotionValues, critical, sharpness);
     }
 
-    /** The legacy tool base for the weapon's effective material, or NaN when the table has none. */
-    private static double legacyToolBase(ItemStack weapon) {
+    /**
+     * The era weapon base for the weapon's effective material, or {@code NaN} when
+     * the legacy tool table has no entry (hands, hoes, non-tools). The effective
+     * material name is normalized through {@link LegacyMaterialNames#modernize}
+     * before it keys the kernel table: on a pre-flattening server {@code
+     * Material.name()} returns the OLD constant ({@code WOOD_SWORD}, {@code
+     * GOLD_SPADE}, …), which the kernel's modern-named {@code weaponDamage} would
+     * otherwise miss (returning null → era damage silently off, the Q1 defect).
+     * The kernel stays version-blind; this platform-seam call is the only
+     * translation point.
+     *
+     * <p>Public so the legacy-boot rules-smoke can assert this exact seam headlessly
+     * (a {@code WOOD_SWORD} stack must resolve to the {@code WOODEN_SWORD} pin).</p>
+     */
+    public static double eraToolBase(ItemStack weapon) {
         Material effective = EffectiveMaterial.of(weapon);
-        Double base = DamageTables.weaponDamage(effective.name());
+        Double base = DamageTables.weaponDamage(LegacyMaterialNames.modernize(effective.name()));
         return base == null ? Double.NaN : base;
     }
 
