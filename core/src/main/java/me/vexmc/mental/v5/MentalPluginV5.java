@@ -20,6 +20,8 @@ import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.SchedulingFactory;
+import me.vexmc.mental.platform.debug.DebugCategory;
+import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
@@ -121,6 +123,9 @@ public final class MentalPluginV5 extends JavaPlugin {
     private Overlay overlay;
     private volatile Snapshot snapshot;
 
+    /** The verbose debug seam (zero-cost when off) — config-driven, re-applied on reload. */
+    private final DebugLog debug = new DebugLog();
+
     private TickClock clock;
     private CounterTickClock foliaClock;
     private TaskHandle foliaClockTask;
@@ -182,6 +187,14 @@ public final class MentalPluginV5 extends JavaPlugin {
         }
         this.overlay = new Overlay(configStore.overridesFile());
         this.snapshot = parseSnapshot();
+
+        // The verbose debug seam (DebugLog): zero-cost when off — a sink fires
+        // only for an active category and message suppliers run only then. The
+        // sink is registered once; the active categories come from the config
+        // debug section and are re-applied on every reload.
+        debug.addSink((category, message) ->
+                getLogger().info("[debug/" + category.key() + "] " + message));
+        applyDebug(snapshot.debug());
 
         // The tick clock — the only clock currency in the delivery core. Paper
         // reads getCurrentTick() (netty-safe there); Folia advances a global
@@ -357,8 +370,23 @@ public final class MentalPluginV5 extends JavaPlugin {
         configStore.ensureDefaultFiles();
         this.overlay = new Overlay(configStore.overridesFile());
         this.snapshot = parseSnapshot();
+        applyDebug(snapshot.debug());
         reconciler.converge(snapshot);
         return parseIssues;
+    }
+
+    /**
+     * Applies the config {@code debug} section onto the {@link DebugLog}: the
+     * master switch plus the active category keys (unknown keys are ignored — the
+     * framework stays forward-compatible with keys a newer config may carry).
+     */
+    private void applyDebug(@NotNull me.vexmc.mental.v5.config.settings.DebugSettings settings) {
+        debug.enabled(settings.enabled());
+        EnumSet<DebugCategory> active = EnumSet.noneOf(DebugCategory.class);
+        for (String key : settings.categories()) {
+            DebugCategory.byKey(key).ifPresent(active::add);
+        }
+        debug.activateAll(active);
     }
 
     /** The current immutable config snapshot — read through a reference the reload swaps. */
@@ -454,7 +482,8 @@ public final class MentalPluginV5 extends JavaPlugin {
 
         HitRegistrationUnit hitRegistration = new HitRegistrationUnit(
                 sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
-                this::snapshot, scheduling, valve, hitIds, damageShaper, toolWear, folia, modernProtocol);
+                this::snapshot, scheduling, valve, hitIds, damageShaper, toolWear, folia, modernProtocol,
+                debug.scoped(DebugCategory.HITREG));
         LatencyCompensationUnit latencyCompensation =
                 new LatencyCompensationUnit(latency, scheduling, this::snapshot);
         sessions.addForgetHook(hitRegistration::forget);
@@ -470,7 +499,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
         reconciler.register(new KnockbackUnit(
-                sessions, domains, ocmBinding, latency, scheduling, this::snapshot));
+                sessions, domains, ocmBinding, latency, scheduling, this::snapshot,
+                debug.scoped(DebugCategory.KNOCKBACK)));
         reconciler.register(latencyCompensation);
         reconciler.register(new FishingKnockbackUnit(
                 sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));

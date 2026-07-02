@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
+import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -61,16 +62,19 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private final LatencyModel latency;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
+    private final DebugLog.Scoped debug;
 
     public KnockbackUnit(
             SessionService sessions, ConnectionDomains domains, OcmBinding ocmBinding,
-            LatencyModel latency, Scheduling scheduling, Supplier<Snapshot> snapshot) {
+            LatencyModel latency, Scheduling scheduling, Supplier<Snapshot> snapshot,
+            DebugLog.Scoped debug) {
         this.sessions = sessions;
         this.domains = domains;
         this.ocmBinding = ocmBinding;
         this.latency = latency;
         this.scheduling = scheduling;
         this.snapshot = snapshot;
+        this.debug = debug;
     }
 
     @Override
@@ -114,6 +118,10 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // tick): skip before any attacker read — the swallowed-throw trap.
         if (!scheduling.isOwnedByCurrentRegion(attacker)) {
             desk.withdraw(tx.context().id());
+            // DROPPED (logged skip). UUIDs only — the attacker sits off this
+            // region, so a live getName() would throw on Folia.
+            debug.log(() -> "melee knock DROPPED (logged skip): attacker " + tx.context().attackerId()
+                    + " is off victim " + victim.getUniqueId() + "'s region");
             return;
         }
         KnockbackProfile profile = profileFor(session, victim);

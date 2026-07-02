@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import me.vexmc.mental.api.event.AsyncHitRegisterEvent;
 import me.vexmc.mental.platform.Scheduling;
+import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
@@ -87,6 +88,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
     private final me.vexmc.mental.v5.VelocityValve valve;
     private final me.vexmc.mental.v5.feature.damage.DamageShaper shaper;
     private final me.vexmc.mental.v5.feature.damage.ToolWear toolWear;
+    private final DebugLog.Scoped debug;
 
     private final CpsLimiter cps = new CpsLimiter();
     private final FeedbackGate feedbackGate = new FeedbackGate();
@@ -98,7 +100,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             me.vexmc.mental.v5.VelocityValve valve, me.vexmc.mental.v5.delivery.HitIds ids,
             me.vexmc.mental.v5.feature.damage.DamageShaper shaper,
             me.vexmc.mental.v5.feature.damage.ToolWear toolWear,
-            boolean folia, boolean modernProtocol) {
+            boolean folia, boolean modernProtocol, DebugLog.Scoped debug) {
         this.sessions = sessions;
         this.domains = domains;
         this.latency = latency;
@@ -113,6 +115,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
         this.toolWear = toolWear;
         this.folia = folia;
         this.modernProtocol = modernProtocol;
+        this.debug = debug;
     }
 
     @Override
@@ -464,7 +467,11 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 return;
             }
             if (!scheduling.isOwnedByCurrentRegion(attacker)) {
-                retract(victimUuid, tx); // cross-region: logged skip, drop the pending
+                retract(victimUuid, tx); // cross-region: drop the pending
+                // DROPPED (logged skip). UUIDs only — the attacker sits off this
+                // region, so a live getName() would throw on Folia.
+                debug.log(() -> "fast-path hit DROPPED (logged skip): attacker " + attackerUuid
+                        + " is off victim " + victimUuid + "'s region");
                 return;
             }
             if (!attacker.isOnline() || attacker.getGameMode() == GameMode.SPECTATOR) {
