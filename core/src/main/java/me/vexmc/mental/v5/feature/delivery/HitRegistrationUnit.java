@@ -281,13 +281,20 @@ public final class HitRegistrationUnit implements FeatureUnit {
                         verdict.fresh() != null && verdict.fresh() && verdict.sprinting());
             }
 
+            // B4: the pacing gate paces the VELOCITY component ONLY. A hurt-only
+            // burst (velocity suppressed — a LEGACY resistance roll, OCM ownership,
+            // an anticheat force-safe posture) must NEVER debit the budget, or it
+            // starves a later eligible velocity pre-send. Compute the velocity
+            // eligibility first, then consult the gate only when a velocity would
+            // actually ship — i.e. the FeedbackPlan includes the VELOCITY component.
             long minInterval = settings.feedbackMinIntervalMillis() >= 0
                     ? settings.feedbackMinIntervalMillis()
                     : Math.max(0, victimView.maxNoDamageTicks() / 2 - 1) * 50L;
-            boolean gatePassed = !victimHasWire || feedbackGate.tryPreSend(victimId, now, minInterval);
+            boolean velocityShips = admitVelocityPreSend(
+                    feedbackGate, victimId, victimHasWire, vector != null, now, minInterval);
 
             KnockbackVector shipped = null;
-            if (vector != null && gatePassed) {
+            if (velocityShips) {
                 shipped = vector; // TRACKER (full stamp); TRACKER_DECAYED handled by the desk record
                 tx.planned();
                 if (victimHasWire) {
@@ -302,7 +309,13 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     attackerView == null ? 0 : positionZ(attackerId),
                     positionX(victimId), positionZ(victimId),
                     domains.domainFor(victimId).lastYaw());
-            if (victimHasWire && gatePassed) {
+            // The wire burst ships whenever the victim has a wire and the hit is
+            // NOT an eligible-but-gated velocity: the velocity when it passed the
+            // gate (shipped != null), else a hurt-only burst — which is gated by
+            // nothing. An eligible velocity paced out this window skips the wire
+            // (the authoritative pass delivers it), preserving the pacing.
+            boolean shipBurst = victimHasWire && (vector == null || velocityShips);
+            if (shipBurst) {
                 senders.ship(PacketEvents.getAPI().getPlayerManager().getUser(playerVictim),
                         victimView.entityId(), shipped, hurtYaw, settings.bundleFeedback());
             }
@@ -361,6 +374,28 @@ public final class HitRegistrationUnit implements FeatureUnit {
     }
 
     /* ---------------------------- shared helpers ---------------------------- */
+
+    /**
+     * Whether the netty velocity pre-send is admitted for this hit. The pacing
+     * {@link FeedbackGate} is consulted ONLY when a velocity would actually ship —
+     * the FeedbackPlan includes the VELOCITY component ({@code velocityEligible})
+     * AND the victim has a wire. A hurt-only burst (no eligible velocity) never
+     * touches the gate, so it can never debit the pacing budget and starve a later
+     * eligible velocity pre-send (B4). A connectionless victim is pinned, never
+     * paced by the wire gate. Pure over the gate so the pacing contract is
+     * unit-pinned at this seam.
+     */
+    static boolean admitVelocityPreSend(
+            FeedbackGate gate, UUID victimId, boolean victimHasWire,
+            boolean velocityEligible, long nowMillis, long minIntervalMillis) {
+        if (!velocityEligible) {
+            return false; // hurt-only: never debit the gate
+        }
+        if (!victimHasWire) {
+            return true; // connectionless: pinned pre-send, no wire pacing
+        }
+        return gate.tryPreSend(victimId, nowMillis, minIntervalMillis);
+    }
 
     private SprintVerdict sprintVerdict(UUID attackerId) {
         if (wtapConsultWire.get()) {
