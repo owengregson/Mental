@@ -246,11 +246,19 @@ public final class PlatformProfile {
                 + "; features disabled: " + (disabledFeatures.isEmpty() ? "none" : disabledFeatures);
     }
 
-    /** Reflect a no-arg {@code Damageable} meta method (1.20.5+); {@code null} on an older platform. */
+    /**
+     * Reflect a no-arg {@code Damageable} meta method (1.20.5+); {@code null} on an older platform.
+     *
+     * <p>Resolved by NAME rather than the {@code Damageable.class} literal: the {@code Damageable} meta
+     * interface itself is absent below 1.13, where the class literal is a {@code NoClassDefFoundError} at
+     * this always-on boot probe (the legacy backport reaches to 1.9.4). Class-not-found, method-not-found,
+     * and any other linkage slip all degrade to {@code null} — tool durability then uses the material max.</p>
+     */
     private static @Nullable Method probeDamageable(@NotNull String name) {
         try {
-            return Damageable.class.getMethod(name);
-        } catch (NoSuchMethodException absent) {
+            Class<?> damageable = Class.forName("org.bukkit.inventory.meta.Damageable");
+            return damageable.getMethod(name);
+        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError absent) {
             return null;
         }
     }

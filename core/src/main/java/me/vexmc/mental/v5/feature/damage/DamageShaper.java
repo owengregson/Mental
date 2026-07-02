@@ -34,8 +34,6 @@ import org.bukkit.potion.PotionEffectType;
  */
 public final class DamageShaper {
 
-    private static final NamespacedKey RESISTANCE_KEY = NamespacedKey.minecraft("resistance");
-
     /** Strength/Weakness effect types, resolved once (registry key on 1.20.5+, legacy name below). */
     private static final PotionEffectType STRENGTH = resolveEffect("strength", "INCREASE_DAMAGE");
     private static final PotionEffectType WEAKNESS = resolveEffect("weakness", "WEAKNESS");
@@ -182,24 +180,21 @@ public final class DamageShaper {
             if (resolved instanceof PotionEffectType type) {
                 return type;
             }
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // Fall through to the legacy name accessor below.
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            // Fall through to the legacy name accessor below. LinkageError also catches NamespacedKey (the
+            // class, and #minecraft) being absent below 1.12 — this resolver runs at class-init (STRENGTH /
+            // WEAKNESS), so it must never let a missing modern symbol poison the whole damage path.
         }
         return PotionEffectType.getByName(legacyName);
     }
 
-    /** The resistance effect type (registry key on 1.20.5+, legacy name below) — used by the armour unit. */
-    @SuppressWarnings("deprecation") // getByName is the pre-1.20.5 spelling
+    /**
+     * The resistance effect type (registry key on 1.20.5+, legacy name below) — used by the armour unit.
+     * Delegates to {@link #resolveEffect} so the modern registry key is built inside the same
+     * LinkageError-guarded path (no static {@code NamespacedKey} field, which would break class-init below
+     * 1.12 where the type is absent).
+     */
     public static PotionEffectType resistanceType() {
-        try {
-            Method byKey = PotionEffectType.class.getMethod("getByKey", NamespacedKey.class);
-            Object resolved = byKey.invoke(null, RESISTANCE_KEY);
-            if (resolved instanceof PotionEffectType type) {
-                return type;
-            }
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // Fall through to the legacy name accessor below.
-        }
-        return PotionEffectType.getByName("DAMAGE_RESISTANCE");
+        return resolveEffect("resistance", "DAMAGE_RESISTANCE");
     }
 }

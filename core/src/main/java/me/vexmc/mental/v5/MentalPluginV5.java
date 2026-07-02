@@ -129,8 +129,8 @@ public final class MentalPluginV5 extends JavaPlugin {
     private final DebugLog debug = new DebugLog();
 
     private TickClock clock;
-    private CounterTickClock foliaClock;
-    private TaskHandle foliaClockTask;
+    private CounterTickClock counterClock;
+    private TaskHandle counterClockTask;
 
     private OcmBinding ocmBinding;
     private BukkitRegistrar registrar;
@@ -207,14 +207,17 @@ public final class MentalPluginV5 extends JavaPlugin {
                 getLogger().info("[debug/" + category.key() + "] " + message));
         applyDebug(snapshot.debug());
 
-        // The tick clock — the only clock currency in the delivery core. Paper
-        // reads getCurrentTick() (netty-safe there); Folia advances a global
-        // counter any thread may read, starting at NO_TICK so a stalled counter
-        // degrades to no-exclusion rather than a false universal match.
-        if (capabilities.folia()) {
-            this.foliaClock = new CounterTickClock();
-            this.foliaClockTask = scheduling.repeatGlobal(1L, 1L, foliaClock::advance);
-            this.clock = foliaClock;
+        // The tick clock — the only clock currency in the delivery core. Modern
+        // Paper reads getCurrentTick() (netty-safe there). Folia AND the legacy
+        // backport targets below Bukkit.getCurrentTick() advance a global counter
+        // any thread may read, starting at NO_TICK so a stalled counter degrades to
+        // no-exclusion rather than a false universal match. The getCurrentTick
+        // method reference lives only in the else branch, so it never links on a
+        // server that lacks the method (invokedynamic bootstraps per taken branch).
+        if (capabilities.folia() || !capabilities.currentTick()) {
+            this.counterClock = new CounterTickClock();
+            this.counterClockTask = scheduling.repeatGlobal(1L, 1L, counterClock::advance);
+            this.clock = counterClock;
         } else {
             this.clock = new PaperTickClock(Bukkit::getCurrentTick);
         }
@@ -357,10 +360,10 @@ public final class MentalPluginV5 extends JavaPlugin {
                 sessions.shutdown();
             }
         });
-        isolate("folia clock", () -> {
-            if (foliaClockTask != null) {
-                foliaClockTask.cancel();
-                foliaClockTask = null;
+        isolate("counter clock", () -> {
+            if (counterClockTask != null) {
+                counterClockTask.cancel();
+                counterClockTask = null;
             }
         });
         isolate("PacketEvents.terminate", () -> {

@@ -71,8 +71,9 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
         Method m = null;
         try {
             m = PotionEffectType.class.getMethod("getByKey", NamespacedKey.class);
-        } catch (NoSuchMethodException ignored) {
-            // Pre-1.20.5 — getByName fallback.
+        } catch (NoSuchMethodException | LinkageError ignored) {
+            // Pre-1.20.5 — getByName fallback. LinkageError also catches the NamespacedKey.class literal
+            // being absent below 1.12 (the backport's oldest targets), so this static init is safe.
         }
         GET_BY_KEY = m;
         RESISTANCE = resolveResistance();
