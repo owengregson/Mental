@@ -242,6 +242,13 @@ v1_13_R2, v1_14_R1, v1_15_R1, v1_16_R3` (restricted to the viable set V).
   for era hitbox reach. Use javap against the Phase-0 downloaded server jars
   (`run/legacy-probe/<v>/`) — never guess (nms-archaeology).
 - `tester FakePlayer` — moved to Phase 5.
+- **AMENDMENT (2026-07-02, Phase 3 discovery): ARMOUR_STRENGTH on 1.9.4/1.10.2.**
+  The manifest disables the feature there because `attribute:armor_toughness`
+  resolves only from 1.11.2 (javap-verified live). The 1.8 flat cascade does
+  not need to zero a toughness that does not exist — rework the unit to
+  tolerate an absent toughness attribute (manifest entry becomes
+  OptionalSince(1.11) for this owner), restoring the feature on both versions.
+  Era values unchanged (kernel DefenceMath).
 - **AMENDMENT (2026-07-02, orchestrator review): projectile knockback below
   1.14.** Phase 1 correctly left `ProjectileKnockbackUnit` dormant on
   1.9.4–1.13.2 (its handlers name `AbstractArrow`, a 1.14+ type Bukkit
@@ -327,6 +334,23 @@ already handled by the releaser). Verify tag/assets/notes as for 2.3.0-beta.
 - The matrix is SEQUENTIAL on this machine (one port). Never run two gates
   concurrently. A full matrix run will grow toward ~20 minutes as entries
   are promoted; budget accordingly.
+
+## Phase 3 outcomes (2026-07-02, commits 3f8751d..93f0bec — reviewed, accepted)
+
+Q1–Q4 cleared; 15/15 matrix + OCM pair fresh-nonce green; kernel untouched;
+modern range byte-identical (identity normalizer, aliases never consulted,
+keyed gapple path unchanged on 1.16.5+). Line-review verdict: zero
+corrections. Facts later phases rely on: `Bukkit.getRecipe(key)` is 1.16.5+
+and `removeRecipe(key)` 1.15.2+ (representation and lifecycle are independent
+axes — 1.13.2/1.15.2 are flattened but key-lifecycle-less; the universal
+`recipeIterator` manages 1.9.4–1.15.2); Enchantments needed NO change (all
+legacy fallback names javap-verified, zero handle misses live); the era pins
+WOOD_SWORD→5.0 / GOLD_SWORD→5.0 / WOOD_SPADE→2.0 assert the kernel's own
+DamageTablesTest values through the full platform seam on live pre-1.13
+servers. Accepted residual (compat-doc in Phase 6): the ≤1.15.2 recipe scan
+identifies the notch recipe by result shape, so a third-party notch recipe
+de-dupes with ours (and feature-disable could remove theirs) — default-OFF
+feature, benign direction.
 
 ## Orchestrator review — Phases 1–2 (2026-07-02)
 
