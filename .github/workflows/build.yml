@@ -15,10 +15,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Read the JDK set from support-matrix.json
+        id: jdks
+        run: |
+          # The build/runtime JDKs are the unique jdk set in the matrix — no JDK
+          # literal lives in this workflow (support-matrix.json is the only home).
+          # The Gradle toolchain (build JDK) picks the newest; the compile floor
+          # keeps the jar loadable on the oldest.
+          { echo 'list<<EOF'; jq -r '[.entries[].jdk] | unique | .[]' support-matrix.json; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          java-version: ${{ steps.jdks.outputs.list }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -60,7 +69,7 @@ jobs:
       fail-fast: true
       matrix:
         # Each matrix job is its own VM, so they run fully in parallel. The
-        # per-version JDK comes from support-matrix.json (both 17 and 25 are
+        # per-version JDK comes from support-matrix.json (the unique jdk set is
         # installed below; the Gradle toolchain selects per entry).
         version: ${{ fromJSON(needs.matrix.outputs.versions) }}
 
@@ -68,12 +77,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Read the JDK set from support-matrix.json
+        id: jdks
+        run: |
+          # Install every JDK the matrix targets (the unique jdk set); the Gradle
+          # toolchain selects the right one per entry. No JDK literal here.
+          { echo 'list<<EOF'; jq -r '[.entries[].jdk] | unique | .[]' support-matrix.json; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+
       - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: |
-            17
-            25
+          java-version: ${{ steps.jdks.outputs.list }}
           distribution: 'temurin'
 
       - name: Set up Gradle

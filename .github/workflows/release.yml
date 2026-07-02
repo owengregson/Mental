@@ -35,6 +35,7 @@ jobs:
       previous_tag: ${{ steps.facts.outputs.previous_tag }}
       should_release: ${{ steps.facts.outputs.should_release }}
       matrix: ${{ steps.facts.outputs.matrix }}
+      jdks: ${{ steps.facts.outputs.jdks }}
 
     steps:
       - name: Checkout (full history + tags)
@@ -74,6 +75,15 @@ jobs:
             echo "matrix=$matrix"
           } >> "$GITHUB_OUTPUT"
 
+          # The unique JDK set the matrix targets — support-matrix.json is the
+          # only JDK home, so every job below installs exactly these (the Gradle
+          # toolchain, the build JDK, selects the newest per entry).
+          {
+            echo 'jdks<<EOF'
+            jq -r '[.entries[].jdk] | unique | .[]' support-matrix.json
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
   unit:
     needs: detect
     if: needs.detect.outputs.should_release == 'true'
@@ -83,10 +93,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          # Derived from support-matrix.json (no JDK literal here); the build
+          # toolchain selects the newest.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -112,9 +124,9 @@ jobs:
       - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: |
-            17
-            25
+          # Derived from support-matrix.json (no JDK literal here); the Gradle
+          # toolchain selects the right JDK per matrix entry.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -167,10 +179,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          # Derived from support-matrix.json (no JDK literal here); the build
+          # toolchain selects the newest.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -206,9 +220,9 @@ jobs:
       - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: |
-            17
-            25
+          # Derived from support-matrix.json (no JDK literal here); the Gradle
+          # toolchain selects the right JDK per matrix entry.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -235,10 +249,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          # Derived from support-matrix.json (no JDK literal here); the build
+          # toolchain selects the newest.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle

@@ -1,4 +1,8 @@
 [versions]
+# paper-api compile-API artifacts, NOT support-matrix members: the three API
+# levels the modules compile AGAINST (floor / Folia / modern), chosen for the
+# symbols each needs — never the runtime versions the plugin is TESTED on. The
+# tested Minecraft versions live only in support-matrix.json.
 paper-floor = "1.17.1-R0.1-SNAPSHOT"
 paper-folia = "1.20.4-R0.1-SNAPSHOT"
 paper-modern = "1.20.6-R0.1-SNAPSHOT"
