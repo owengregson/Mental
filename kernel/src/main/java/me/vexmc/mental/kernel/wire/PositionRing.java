@@ -40,6 +40,10 @@ public final class PositionRing {
             }
             return matched;
         }
+
+        synchronized Sample latest() {
+            return samples[(head - 1 + CAPACITY) % CAPACITY];
+        }
     }
 
     private final ConcurrentHashMap<UUID, Ring> rings = new ConcurrentHashMap<>();
@@ -62,6 +66,17 @@ public final class PositionRing {
             return List.of();
         }
         return ring.within(instantNanos - windowNanos, instantNanos + windowNanos);
+    }
+
+    /**
+     * The most recently recorded sample for {@code player}, or {@code null} when
+     * untracked — the netty fast path's off-region-safe position source (the
+     * owning-thread sampler records it, the netty reader consumes the frozen
+     * value; no live-entity read).
+     */
+    public Sample latest(UUID player) {
+        Ring ring = rings.get(player);
+        return ring == null ? null : ring.latest();
     }
 
     public void forget(UUID player) {

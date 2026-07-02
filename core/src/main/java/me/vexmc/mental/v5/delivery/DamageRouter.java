@@ -1,10 +1,8 @@
 package me.vexmc.mental.v5.delivery;
 
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.model.HitContext;
-import me.vexmc.mental.kernel.model.HitId;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.SprintVerdict;
 import me.vexmc.mental.kernel.port.TickClock;
@@ -35,11 +33,12 @@ public final class DamageRouter implements Listener {
 
     private final SessionService sessions;
     private final TickClock clock;
-    private final AtomicLong ids = new AtomicLong();
+    private final HitIds ids;
 
-    public DamageRouter(SessionService sessions, TickClock clock) {
+    public DamageRouter(SessionService sessions, TickClock clock, HitIds ids) {
         this.sessions = sessions;
         this.clock = clock;
+        this.ids = ids;
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -54,12 +53,18 @@ public final class DamageRouter implements Listener {
         HitTransaction active = session.activeInbound();
         if (active != null) {
             // A fast-path/synthetic hit is in flight — its HitSource is already
-            // typed. 4A1 has no consumer; the dispatch seam lands in 4A2/4B.
+            // typed (Melee, RodPull, …). Establish it as this event's transaction
+            // for the knockback unit (MONITOR) to read.
+            session.beginEvent(active);
             return;
         }
-        // Vanilla source: mint the transaction (no fast path set the slot). Not
-        // submitted anywhere in 4A1 — the DamageShaper consumes it in 4B.
-        mintVanilla(sourceFor(null, event.getCause()), attackerId(event), victim.getUniqueId());
+        // No fast path set the slot: mint a Vanilla transaction with an
+        // owning-thread-built context and establish it for this event. A
+        // server-side melee (a mob, another plugin, or the tester's server-side
+        // attack) is Vanilla(ENTITY_ATTACK) — the knockback unit treats that as
+        // melee; a RodPull is never re-derived here (B6).
+        session.beginEvent(mintVanilla(
+                new HitSource.Vanilla(event.getCause().name()), attackerId(event), victim.getUniqueId()));
     }
 
     /** The typed source of this hit: an in-flight transaction's, or a fresh Vanilla one. */
@@ -70,7 +75,7 @@ public final class DamageRouter implements Listener {
     /** Mints a REGISTERED Vanilla transaction with an owning-thread-built context. */
     HitTransaction mintVanilla(HitSource source, UUID attackerId, UUID victimId) {
         HitContext context = new HitContext(
-                new HitId(ids.incrementAndGet()), source, attackerId, victimId,
+                ids.next(), source, attackerId, victimId,
                 new SprintVerdict(false, null, clock.current()), false, false, null, clock.current());
         return new HitTransaction(context);
     }

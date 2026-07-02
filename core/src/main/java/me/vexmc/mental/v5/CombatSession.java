@@ -35,6 +35,17 @@ public final class CombatSession {
      */
     private HitTransaction activeInbound;
 
+    /**
+     * The transaction the {@code DamageRouter} established for the currently
+     * dispatching {@code EntityDamageByEntityEvent} (spec §3.4 "read-or-mint"):
+     * the {@link #activeInbound} slot when a fast-path/synthetic hit is in flight,
+     * else a freshly-minted {@code Vanilla} transaction. Set at the LOWEST damage
+     * listener and read by the knockback unit at MONITOR — the shared per-event
+     * hand-off. Overwritten by every player-victim damage event, so a read is
+     * always this event's; owning thread only.
+     */
+    private HitTransaction eventTransaction;
+
     public CombatSession(double gravity, int entityId, TickClock clock, int journalCapacity) {
         this.ledger = new MotionLedger(gravity);
         this.desk = new DeliveryDesk(entityId, clock, journalCapacity);
@@ -71,6 +82,16 @@ public final class CombatSession {
     /** Clear the slot on damage-task exit (asserts one-in-one-out by usage). */
     public void clearActiveInbound() {
         this.activeInbound = null;
+    }
+
+    /** The DamageRouter establishes this event's transaction (LOWEST); owning thread only. */
+    public void beginEvent(HitTransaction transaction) {
+        this.eventTransaction = transaction;
+    }
+
+    /** The knockback unit reads this event's transaction (MONITOR), or null; owning thread only. */
+    public HitTransaction currentEventTransaction() {
+        return eventTransaction;
     }
 
     /**

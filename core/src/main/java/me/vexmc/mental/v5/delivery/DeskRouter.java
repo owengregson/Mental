@@ -69,6 +69,9 @@ public final class DeskRouter implements Listener {
         Vector velocity = api.velocity();
         Directive directive = desk.resolve(velocity.getX(), velocity.getY(), velocity.getZ());
         DirectiveExecutor.apply(directive, sinkFor(event), victim.getUniqueId(), valve);
+        if (context != null) {
+            Deliveries.recordDelivered(session, context.source(), directive.ship());
+        }
     }
 
     private static VelocitySink sinkFor(PlayerVelocityEvent event) {

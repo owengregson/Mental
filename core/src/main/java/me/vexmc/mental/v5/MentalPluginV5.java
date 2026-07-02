@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import me.vexmc.mental.common.platform.Capabilities;
 import me.vexmc.mental.common.platform.ServerEnvironment;
 import me.vexmc.mental.common.scheduling.Scheduling;
@@ -14,7 +15,9 @@ import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.LatencyModel;
+import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.SchedulingFactory;
+import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Migrations;
@@ -23,10 +26,14 @@ import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
 import me.vexmc.mental.v5.delivery.DamageRouter;
 import me.vexmc.mental.v5.delivery.DeskRouter;
+import me.vexmc.mental.v5.delivery.HitIds;
 import me.vexmc.mental.v5.delivery.MirrorListener;
 import me.vexmc.mental.v5.feature.BukkitRegistrar;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.Reconciler;
+import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
+import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
+import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.rim.PacketTap;
 import me.vexmc.mental.v5.rim.ProbeRim;
@@ -80,6 +87,10 @@ public final class MentalPluginV5 extends JavaPlugin {
     private SessionService sessions;
     private ConnectionDomains domains;
     private LatencyModel latency;
+    private PositionRing positions;
+    private HitIds hitIds;
+    private AnticheatPolicy anticheatPolicy;
+    private final AtomicBoolean wtapConsultWire = new AtomicBoolean(true);
 
     private List<String> parseIssues = List.of();
 
@@ -139,7 +150,9 @@ public final class MentalPluginV5 extends JavaPlugin {
         // Always-on infrastructure — observation only, so zero-touch holds.
         this.valve = new VelocityValve();
         this.viewBuilder = new ViewBuilder(clock);
-        this.sessions = new SessionService(scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot);
+        this.positions = new PositionRing();
+        this.sessions = new SessionService(
+                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions);
         sessions.start(this);
 
         // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —
@@ -148,6 +161,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         // only. Registered BEFORE PacketEvents.init(); PE teardown unregisters them.
         this.domains = new ConnectionDomains(clock);
         this.latency = new LatencyModel();
+        this.hitIds = new HitIds();
+        this.anticheatPolicy = new AnticheatPolicy();
         sessions.addForgetHook(domains::forget);
         sessions.addForgetHook(latency::forget);
         sessions.addForgetHook(valve::forget);
@@ -159,16 +174,17 @@ public final class MentalPluginV5 extends JavaPlugin {
         // writer, the damage-pass router, and the capability-gated knockback-event
         // mirror. Always-on infra, inert while nothing submits to a desk (all of 4A1).
         getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve), this);
-        getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock), this);
+        getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock, hitIds), this);
         if (capabilities.knockbackEvent()) {
             new MirrorListener(sessions).register(this);
         }
 
-        // The feature reconciler. 4A1 registers ZERO units — the spine is a
-        // no-op server. Later sub-phases register their families here before the
-        // converge.
+        // The feature reconciler. The delivery + knockback families register here
+        // (4A2); the damage/cadence/sustain/loadout families follow in 4B–4D. A
+        // feature with no registered unit is simply never converged.
         this.registrar = new BukkitRegistrar(this, ocmBinding);
         this.reconciler = new Reconciler(registrar, message -> getLogger().warning(message));
+        registerUnits();
         reconciler.converge(snapshot);
 
         // PacketEvents comes up LAST, after every always-on listener has
@@ -257,7 +273,45 @@ public final class MentalPluginV5 extends JavaPlugin {
         return capabilities;
     }
 
+    /** True when {@code feature} has an open scope right now (the tester's module-active check). */
+    public boolean featureActive(@NotNull Feature feature) {
+        return reconciler.active(feature);
+    }
+
+    /**
+     * Runtime module toggle via the machine overlay + reconverge — the write-back
+     * seam the tester and (Phase 6) the GUI use. The human config files are never
+     * touched; the overlay wins over them, so a reload picks up the toggle.
+     */
+    public @NotNull List<String> setModuleEnabled(@NotNull String yamlKey, boolean enabled) {
+        overlay.set("modules." + yamlKey, enabled);
+        return reloadAll();
+    }
+
     /* ------------------------------------------------------------------ */
+
+    /**
+     * Registers the delivery and knockback feature units on the reconciler
+     * (sub-phase 4A2). Always-on infrastructure (anticheat coexistence) and the
+     * seven era engine features default ON; the reconciler converges each against
+     * the snapshot. The fast path and the compensation transport register per-player
+     * forget hooks so their CPS/gate/combat state does not leak across sessions.
+     */
+    private void registerUnits() {
+        boolean folia = capabilities.folia();
+        boolean modernProtocol = environment.isAtLeast(1, 19, 4);
+
+        HitRegistrationUnit hitRegistration = new HitRegistrationUnit(
+                sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
+                this::snapshot, scheduling, valve, hitIds, folia, modernProtocol);
+        sessions.addForgetHook(hitRegistration::forget);
+
+        reconciler.register(new AnticheatCompatUnit(
+                anticheatPolicy, this::snapshot, message -> getLogger().info(message)));
+        reconciler.register(hitRegistration);
+        reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
+        // The knockback family units register in 4A2.1.
+    }
 
     private Snapshot parseSnapshot() {
         ConfigStore.Sources sources = configStore.loadSources();

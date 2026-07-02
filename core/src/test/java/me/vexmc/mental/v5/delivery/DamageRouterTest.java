@@ -45,7 +45,7 @@ class DamageRouterTest {
 
     @Test
     void mintVanillaBuildsARegisteredTransactionStampedFromTheClock() {
-        DamageRouter router = new DamageRouter(null, () -> new TickStamp(7));
+        DamageRouter router = new DamageRouter(null, () -> new TickStamp(7), new HitIds());
 
         HitTransaction tx = router.mintVanilla(new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM);
 

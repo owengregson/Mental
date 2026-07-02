@@ -16,6 +16,7 @@ import me.vexmc.mental.kernel.model.LedgerEvent;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.VelocityValve;
@@ -64,6 +65,7 @@ public final class SessionService implements Listener, SessionAccess {
     private final VelocityValve valve;
     private final OcmBinding ocmBinding;
     private final Supplier<Snapshot> snapshot;
+    private final PositionRing positions;
 
     private final ConcurrentHashMap<UUID, CombatSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Integer> entityIdByPlayer = new ConcurrentHashMap<>();
@@ -75,13 +77,20 @@ public final class SessionService implements Listener, SessionAccess {
 
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
-            VelocityValve valve, OcmBinding ocmBinding, Supplier<Snapshot> snapshot) {
+            VelocityValve valve, OcmBinding ocmBinding, Supplier<Snapshot> snapshot,
+            PositionRing positions) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
         this.valve = valve;
         this.ocmBinding = ocmBinding;
         this.snapshot = snapshot;
+        this.positions = positions;
+    }
+
+    /** The per-player position ring the fast path rewinds through (reach) and reads latest (pre-send). */
+    public PositionRing positions() {
+        return positions;
     }
 
     /** Registers the join/quit/world-change listeners and adopts already-online players. */
@@ -188,6 +197,7 @@ public final class SessionService implements Listener, SessionAccess {
         if (entityId != null) {
             playerIdByEntityId.remove(entityId, id);
         }
+        positions.forget(id);
         for (Consumer<UUID> hook : forgetHooks) {
             try {
                 hook.accept(id);
@@ -206,6 +216,12 @@ public final class SessionService implements Listener, SessionAccess {
         PlayerView view = buildView(player, session);
         session.tickStep(view);
         valve.clearStale(player.getUniqueId());
+        // One owning-thread position sample per tick — the fast path's reach
+        // rewind source and its off-region-safe pre-send position source (the
+        // netty thread reads frozen samples, never the live entity).
+        Location location = player.getLocation();
+        positions.record(player.getUniqueId(),
+                location.getX(), location.getY(), location.getZ(), System.nanoTime());
     }
 
     /**
