@@ -3,14 +3,15 @@ package me.vexmc.mental.tester.suite;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
-import me.vexmc.mental.MentalPlugin;
-import me.vexmc.mental.module.hitbox.EraReach;
+import me.vexmc.mental.kernel.math.EraReach;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -48,7 +49,7 @@ public final class HitboxSuite {
     private HitboxSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("hitbox: era reach attribute is applied on 1.20.5+", context ->
                         runReachAttribute(mental, tester, context)),
@@ -61,7 +62,7 @@ public final class HitboxSuite {
     /* ------------------------------------------------------------------ */
 
     private static void runReachAttribute(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         // Capability gate (mirrors EntityInteractionRange.supported()): below
         // 1.20.5 the attribute does not exist and the module is a no-op here.
         Attribute reach = Attributes.entityInteractionRange();
@@ -71,7 +72,7 @@ public final class HitboxSuite {
             return;
         }
 
-        FakePlayer subject = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer subject = new FakePlayer(tester, mental.scheduling());
         try {
             context.syncRun(() -> {
                 Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
@@ -112,7 +113,7 @@ public final class HitboxSuite {
     /* ------------------------------------------------------------------ */
 
     private static void runAttackRangeComponent(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         // Capability gate (mirrors AttackRangeComponents' constructor probe):
         // the component lever exists only where DataComponents.ATTACK_RANGE does
         // (verified present 1.21.11, absent 1.21.4).
@@ -123,7 +124,7 @@ public final class HitboxSuite {
             return;
         }
 
-        FakePlayer subject = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer subject = new FakePlayer(tester, mental.scheduling());
         try {
             context.syncRun(() -> {
                 Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
@@ -241,14 +242,16 @@ public final class HitboxSuite {
     /*  Shared helpers (copied from ZeroTouchSuite)                        */
     /* ------------------------------------------------------------------ */
 
-    /** Toggles through the real console command path and waits for convergence. */
+    /** Toggles through the v5 management write-back seam and waits for convergence. */
     private static void toggleModule(TestContext context, String id, boolean enabled) throws Exception {
-        context.syncRun(() -> ((MentalPlugin) Bukkit.getPluginManager().getPlugin("Mental"))
-                .management().setModuleEnabled(id, enabled));
+        Feature feature = Feature.byModuleId(id)
+                .orElseThrow(() -> new AssertionError("unknown module id '" + id + "'"));
+        context.syncRun(() -> ((MentalPluginV5) Bukkit.getPluginManager().getPlugin("Mental"))
+                .management().setModuleEnabled(feature, enabled));
         context.awaitTicks(1);
     }
 
-    private static boolean moduleActive(MentalPlugin mental, String id) {
-        return mental.modules().byId(id).map(module -> module.active()).orElse(false);
+    private static boolean moduleActive(MentalPluginV5 mental, String id) {
+        return Feature.byModuleId(id).map(mental::featureActive).orElse(false);
     }
 }

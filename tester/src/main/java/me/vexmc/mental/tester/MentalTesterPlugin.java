@@ -11,6 +11,8 @@ import me.vexmc.mental.tester.suite.CosmeticSmokeSuite;
 import me.vexmc.mental.tester.suite.DamageRulesSuite;
 import me.vexmc.mental.tester.suite.EraParitySuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
+import me.vexmc.mental.tester.suite.HitboxSuite;
+import me.vexmc.mental.tester.suite.InventoryRulesSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
 import me.vexmc.mental.tester.suite.ProfileSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
@@ -26,11 +28,11 @@ import org.bukkit.plugin.java.JavaPlugin;
  * cross-region state from a single context by design.
  *
  * <p>At the 4A2 swap the suite list was trimmed to the families the v5 plugin
- * supported; 4B restored the damage family and 4C the cadence + sustain families:
- * the active list is now {@code Boot, Knockback, Profile, Fishing, Projectile,
- * EraParity, DamageRules, Blocking, ConsumableRules, CosmeticSmoke, Reload,
- * ZeroTouch}. The loadout suites (and the OCM coexistence suite) remain delisted
- * here and are restored across 4D–4E.</p>
+ * supported; 4B restored the damage family, 4C the cadence + sustain families,
+ * and 4D the loadout family: the active list is now {@code Boot, Knockback,
+ * Profile, Fishing, Projectile, EraParity, DamageRules, Blocking, ConsumableRules,
+ * CosmeticSmoke, Hitbox, InventoryRules, Reload, ZeroTouch}. The OCM coexistence
+ * suite remains delisted here and is restored in 4E.</p>
  */
 public final class MentalTesterPlugin extends JavaPlugin {
 
@@ -70,6 +72,8 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(BlockingSuite.tests(mental, this));
                 suite.addAll(ConsumableRulesSuite.tests(mental, this));
                 suite.addAll(CosmeticSmokeSuite.tests(mental, this));
+                suite.addAll(HitboxSuite.tests(mental, this));
+                suite.addAll(InventoryRulesSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
             }
