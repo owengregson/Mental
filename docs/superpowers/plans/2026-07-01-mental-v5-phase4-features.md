@@ -398,3 +398,65 @@ spoof + tooltip hider + sweep re-disable, one scope) + `WeaponTooltipAdapter` on
   speculative `PlayerInteractEvent` onto `ProjectileLaunchEvent` on the actual thrown
   entity (B13). Kernel change: none (additive-only honoured; no pin edits). No suite VALUE
   changed.
+
+## Sub-phase 4D outcomes (2026-07-02)
+
+**The loadout family is live.** All three LOADOUT features are on the v5 seams and the
+`Hitbox` + `Inventory` (InventoryRules) suites are back in the list. Gate GREEN:
+`./gradlew build` + the SEQUENTIAL `integrationTestMatrix` (gate amendment) — all 7
+versions FRESH PASS (result files rewritten 01:49:09 → 01:57:11 on 2026-07-02 against a
+01:47:53 matrix start, each `run/<v>/plugins/MentalTester/test-results.txt` = `PASS`,
+verified at clock 01:57:39; 44/44 cases each, up from 4C's 39/39 — +2 Hitbox,
++3 InventoryRules). Matrix wall time 9m 18s.
+
+Commits (in order): `fec0383` `CraftingUnit`; `f7fd263` `OffhandUnit`; `434050a`
+`HitboxUnit` + `EraReachAttribute` + the boot-probed `AttackRangeAdapter` on
+`PlatformProbe`; `6c4e19c` tester restore + re-plumb.
+
+- **CraftingUnit** nulls a `PrepareItemCraftEvent` result whose material is in the live
+  `disable-crafting.blocked` set (SHIELD by default — the retired module's exact
+  mechanism, per OCM's ModuleDisableCrafting). The recipe registry is never touched:
+  blocking the RESULT is fully reversible, so the scope-level listener teardown IS the
+  zero-touch restore (the contract's "recipes removed/blocked with the scope, restored on
+  disable" — result-blocking satisfies it with zero persistent state, exactly as the old
+  DisableCraftingModule behaved). Settings read LIVE from the snapshot per event.
+- **OffhandUnit** blocks every off-hand route (F-key swap, SWAP_OFFHAND click, number-key
+  / cursor-drop on slot 40, shield shift-click, spanning drag) and strips a persisted
+  disallowed item on join / world-change / enable (returned to inventory, overflow
+  dropped). The filter decision is the kernel `OffhandPolicy` (String-keyed material set)
+  over the live `OffhandSettings`; region-safe via `Scheduling.runOn`.
+- **HitboxUnit** pulls whichever era-reach lever the running server exposes, resolved by
+  capability, never a version literal: the `ENTITY_INTERACTION_RANGE` attribute (1.20.5+;
+  `EraReachAttribute`, captured-base restore on quit/disable) and the `ATTACK_RANGE` item
+  component (1.21.5+; the new boot-probed loud-fail `AttackRangeAdapter` on
+  `PlatformProbe`, era values from kernel `EraReach`: max_reach 3.0, hitbox_margin 0.1),
+  reconciled on join/hotbar/swap/world and stripped on drop/death/world/quit/disable;
+  1.17.1–1.20.4 is a documented complete no-op. The IRRECOVERABLE-limit doc is carried in
+  the unit's javadoc: the CLIENT picks the melee target (fixed entityId, no server
+  raytrace), so the server only widens/narrows the validation window — era reach DISTANCE
+  + margin, never client parity. One reach truth: every value is a kernel `EraReach`
+  constant, the same source the fast path's reach-validation default (3.0) mirrors; the
+  unit does not touch the fast path's deliberately-wide sanity ring (different purpose),
+  so the sources cannot disagree. `HitboxUnitTest` is the B8 teardown guard (listener +
+  restore task die with the scope).
+- **Suites re-plumbed, VALUES unchanged.** Both route toggles through
+  `management().setModuleEnabled(Feature, …)` and read `featureActive`; same asserts
+  (attribute pinned at era 3.0, held sword carries ATTACK_RANGE, disallowed swap
+  cancelled, sweep event cancelled, module-active for crafting). Tier evidence is honest:
+  1.20.6/1.21.4 assert the real attribute pin and note-SKIP the component (absent below
+  1.21.5); 1.21.11/26.1.2 assert BOTH levers with real staging; ≤1.19.4 note-SKIPs both
+  (the documented no-op tier).
+- **effective_material check:** nothing in this family needs the `combat:effective_material`
+  PDC beyond what 4B ships — the hitbox component keys off the weapon-material suffix set,
+  not the damage shell. Verified no new consumer.
+- **Deviations:** (1) the old `HitboxModule`'s enable/disable apply-restore halves live in
+  the unit's `scope.task` starter/closer (the v5 shape of onEnable/onDisable) — behaviour
+  identical, teardown INLINE on the disabling thread. (2) `OffhandUnit` does NOT route
+  through `EphemeralDecoration`: the old module never injected a temp item (that web
+  belongs to sword-blocking, which already reuses the service); off-hand stripping is a
+  one-shot inventory correction with nothing to revert, so a revert web would be dead
+  machinery. (3) `CraftingUnit` blocks the crafting RESULT rather than unregistering
+  recipes — the retired module's exact behavior contract (and OCM's), preferred over
+  registry removal because it is atomic, reload-safe, and leaves zero persistent state.
+  Kernel change: none needed (EraReach/OffhandPolicy already present; no pin edits). No
+  suite VALUE changed.
