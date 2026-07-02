@@ -371,3 +371,169 @@ Task 5.6's Folia `"boot"`/`"combat-smoke"` distinction); (4) release-notes'
 "Requires Java 17+" literal stays — a runtime requirement statement, not a
 matrix member. Remaining Phase-5 work: 5.6 Folia discovery + matrix entry,
 5.7 phase gate.
+
+---
+
+## Phase 5 run C outcomes (2026-07-02)
+
+Tasks 5.6–5.7 landed on `rewrite/v5` (from `be30284`). Task 5.6 is one
+conventional commit (`e93f828` feat(ci) — Folia matrix entry); Task 5.7 is this
+outcomes append + the push.
+
+### Task 5.6 — Folia: discovery, then the matrix entry
+
+**Discovery first.** Booted the newest Folia release (26.1.2 — the same version
+as the Paper ceiling; the Folia project on the PaperMC API tops out there) via a
+real `RunServer` pointed at the Folia downloads service, with the v5 jar +
+MentalTester staged. Four probes, each with pasted log evidence:
+
+- **(a) v5 boots byte-clean on Folia.** `platform profile — 25/25 handles
+  resolved; sword-block=BLOCKS_ATTACKS attack-range=component max-damage=component
+  hurt-protocol=modern; features disabled: none`, then `Mental v5 enabled —
+  server 26.1.2 (year scheme), scheduling=folia, folia=true modernSchedulers=true
+  … knockbackEvent=true`. The `CounterTickClock` global-region task advances a
+  counter any thread reads: the probe read `t1=39 … t2=42 advancing=true` across a
+  3-tick gap from the driver thread. PE lifecycle clean, zero errors.
+
+- **(b) FakePlayer bootstrap works UNDER regionized threading — but only on the
+  owning region thread.** The Paper-shaped spawn (via the tester's `runGlobal`
+  sync hop) threw `NullPointerException: … ServerLevel.getCurrentWorldData() is
+  null` from inside `PlayerList.placeNewPlayer`; javap on the Folia jar confirmed
+  placeNewPlayer does `getCurrentWorldData().connections.add(connection)`, and
+  `getCurrentWorldData()` returns the region-thread-local `RegionizedWorldData`
+  (null off a region tick). Driving the spawn on the target location's OWNING
+  REGION thread (`Scheduling.runAt`) cleared it: placeNewPlayer succeeds,
+  `PlayerJoinEvent` fires (`registered attacker=true victim=true online=2`), a
+  `CombatSession` is created for both (`session attacker=true victim=true`), and
+  its `repeatOn` entity-scheduler task ticks (`viewOf(after 6t) attacker=true
+  victim=true`). One further tester-side blocker surfaced next: Folia bans
+  synchronous `Entity#teleport` while region-threading
+  (`UnsupportedOperationException: Must use teleportAsync …`) — the spawn's final
+  relocate now uses `teleportAsync` on Folia.
+
+- **(c) Two fakes in ONE region record a journal-recorded desk delivery with the
+  canonical standing vector.** With the hit driven via `Scheduling.runOn(attacker)`
+  (the suite-delivery seam, `FakePlayer.attack`): `attacker-region owns
+  victim=true`, then the victim's `DeliveryDesk` journal recorded
+  `shipped=(0.0,0.3608,0.4) wireCarried=false source=Vanilla[ENTITY_ATTACK]` —
+  the byte-exact canonical standing vector the kernel `KnockbackEngine` computes
+  (`shipped-vs-expected delta 0/0/0`). 0.3608 is the era standing-hit vertical
+  (the non-sprint sibling of `KnockbackSuite`'s pinned 0.4608 sprint), 0.4 the
+  base horizontal along the knock bearing.
+
+- **(d) Zero-touch holds.** With the knockback module disabled through the
+  management seam, the same hit recorded NO new desk decision (`journal size
+  before=1 after=1 zeroTouch=true`).
+
+**Zero v5 Folia bugs.** The two-realm engine needed no Folia change: the session
+ticks on the entity scheduler, the `KnockbackUnit` runs on the victim's region
+thread inside the damage pass (its `isOwnedByCurrentRegion(attacker)` guard
+consulted — logged true for the same-region pair), the `DeskRouter` resolves the
+velocity event there, and the desk journal records the era vector. The only
+accommodations are tester-side (`FakePlayer`), both gated on
+`scheduling.describe()=="folia"` so Paper stays byte-identical: `teleportAsync` at
+spawn, and — the one bug discovery earned a debugging round —
+`FakePlayer.remove` skips its direct reflective `PlayerList.remove` on Folia,
+because `kickPlayer` already queues a disconnect that Folia's `tickConnections`
+turns into a single removal + `EntityScheduler` retire; a second direct remove
+retires the scheduler AGAIN → `IllegalStateException("Already retired")`, an
+uncaught region-tick failure that HARD-CRASHES the region a tick later (not
+catchable at the call site — it throws inside `tickConnections`, which is why the
+first suite run died mid-test with no result). javap on the crash stack pinned the
+double-retire.
+
+**Implemented (best case — the plan's preferred outcome).** `FoliaCombatSmoke`:
+a same-region fake pair driven entirely on their owning region threads (spawn via
+`runAt`, attack via `runOn(attacker)`, journal read + teardown via
+`runOn(player)`), asserting the journal-recorded canonical standing vector against
+the kernel `KnockbackEngine`/`SuiteDelivery` authority + a zero-touch case. The
+tester runtime-detects Folia and runs the boot suite + this smoke — the FIRST live
+combat coverage Mental has ever had on Folia (the `netty-fast-path` skill's "there
+is no Folia combat coverage" is now one smoke narrower).
+
+**Cross-region melee (the intended drop) — documented, not driven.**
+`FakePlayer.attack` routes through NMS `Player.attack(victim)`, which reads the
+victim's live state and so itself throws Folia's `ensureTickThread` off-region
+BEFORE any Mental code runs — a two-region melee is not live-drivable via a fake
+player. Real melee always shares a region; the `KnockbackUnit`'s
+`isOwnedByCurrentRegion(attacker)` guard is the boundary-straddle / dispatch-tick
+pearl belt, and the smoke pins that the same-region ownership check is consulted
+and returns true.
+
+**Matrix wiring (Task 5.3's plumbing extended for platform=folia).**
+`support-matrix.json` gains the folia entry (`26.1.2`, jdk 25, platform folia,
+suites `combat-smoke`, ci `release`) — the `suites` field's first real consumer.
+`registerIntegrationServer` gained a `platform` param; a folia entry sets the
+`RunServer`'s Folia `downloadsApiService` so it fetches + boots a real Folia
+server, chained AFTER the paper entries (shared port) and kept in a separate
+`foliaCheckTasks` list so the floor+ceiling `integrationTest` smoke stays
+paper-only (its name filter would otherwise also match a Folia task on the shared
+`26.1.2` ceiling). New `integrationTestFolia` task; `integrationTestMatrix` now
+covers paper + folia. `release.yml` gained a release-only `folia` job (JDK 25 —
+Folia's 26.x runtime requires it) wired into the release gate; the release-notes
+already advertise "· Folia". The PR workflow and the concurrent
+`integration-matrix.sh` stay paper-only (documented): both boot cached Paper jars
+directly, and a real Folia server per PR is too costly — Folia rides the Gradle
+sequential path.
+
+### Task 5.7 — Phase gate (fresh, nonce-verified, through the new plumbing)
+
+`./gradlew clean build` GREEN — unit tests + the japicmp `apiCompat` gate under
+`:api:check`; the only API delta is the additive `+++ NEW METHOD: PUBLIC(+) int
+apiVersion()` (the default method), so the additive-only gate passes.
+
+Sequential `./gradlew integrationTestMatrix integrationTestOcm` — `BUILD
+SUCCESSFUL in 10m 8s`; every entry FRESH PASS, each verdict nonce-stamped and
+nonce-verified by the check logic, zero `test-failures.txt` files, mtimes strictly
+climbing in the sequential chain (paper → folia → OCM):
+
+| entry | test-results.txt | mtime |
+| --- | --- | --- |
+| 1.17.1 (paper) | `PASS nonce=3c50a0f2…` | 04:32:35 |
+| 1.18.2 (paper) | `PASS nonce=3d85f4b0…` | 04:33:53 |
+| 1.19.4 (paper) | `PASS nonce=72969c0e…` | 04:35:12 |
+| 1.20.6 (paper) | `PASS nonce=52f9fbfd…` | 04:36:33 |
+| 1.21.4 (paper) | `PASS nonce=5bc9cacc…` | 04:37:55 |
+| 1.21.11 (paper) | `PASS nonce=82c7405f…` | 04:39:17 |
+| 26.1.2 (paper) | `PASS nonce=7f180572…` | 04:40:37 |
+| **26.1.2 (folia)** | `PASS nonce=6ea112a3…` | **04:40:49** |
+| 1.17.1 +OCM | `PASS nonce=bdbd2d56…` | 04:41:02 |
+| 26.1.2 +OCM | `PASS nonce=bd24f067…` | 04:41:23 |
+
+The OCM run used the pinned path fresh (the local staged jar was deleted first):
+`[ocm] downloading pinned OldCombatMechanics 2.5.0 …` then `[ocm] verified
+sha256=bdca6747…`. The Folia entry's server log is clean — 25/25 handles,
+`scheduling=folia`, zero `Already retired` / `ensureTickThread` / `Asynchronous …
+call` lines during the run, both combat-smoke cases (canonical-vector + zero-touch)
+green.
+
+### Kernel / suite discipline / deviations
+
+Kernel untouched (additive-only honoured — no kernel edits this run). Suite VALUES
+sacred: the Folia smoke asserts the SAME kernel `KnockbackEngine`/`SuiteDelivery`
+authority the Paper `KnockbackSuite` uses (0.3608 standing vertical is the
+non-sprint sibling of the pinned 0.4608 sprint), and every Paper expectation is
+unchanged (proven by the FRESH paper matrix pass). Deviations, all small and
+reasoned: (1) the two `FakePlayer` Folia branches (teleportAsync, remove) are
+`describe()=="folia"` gated so Paper is byte-identical — the crash they dodge is a
+Folia tester-teardown quirk, not a v5 bug; (2) the concurrent `integration-matrix.sh`
+stays paper-only (it boots cached Paper jars directly; Folia rides the Gradle path),
+so the fast local gate does not cover Folia — the Gradle sequential matrix and the
+release workflow do; (3) cross-region melee is documented, not driven, because
+`FakePlayer.attack` throws Folia's `ensureTickThread` off-region before any Mental
+code runs (the same-region path proves the ownership guard is consulted).
+
+## Phase 5 outcomes (2026-07-02)
+
+Phase 5 is complete across three executor runs (A: 5.0–5.2, B: 5.3–5.5, C:
+5.6–5.7). The platform layer is finished (`:common` dissolved into `:platform`,
+the Scheduling TCK + retired-callback contract, the `PlatformProfile` manifest),
+`support-matrix.json` is the single machine-readable source of truth with a
+freshness nonce that makes stale results structurally impossible, OCM staging is
+byte-reproducible from a pinned release, the `:api` binary compat is japicmp-gated
+(additive-only), and Folia has its first-class matrix entry with real live combat
+coverage. Final Phase-5 gate (run C): `clean build` + japicmp green, the sequential
+`integrationTestMatrix` (7 paper + Folia) + `integrationTestOcm` all FRESH,
+nonce-verified PASS (`BUILD SUCCESSFUL in 10m 8s`). Commits: run A `fe5ce5b` /
+`4eced36` / `1c66d61`; run B `581164e` / `1298439` / `bfdcdc0`; run C `e93f828` +
+this outcomes append.
