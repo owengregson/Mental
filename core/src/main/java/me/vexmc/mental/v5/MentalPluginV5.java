@@ -21,6 +21,9 @@ import me.vexmc.mental.v5.config.Migrations;
 import me.vexmc.mental.v5.config.Overlay;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
+import me.vexmc.mental.v5.delivery.DamageRouter;
+import me.vexmc.mental.v5.delivery.DeskRouter;
+import me.vexmc.mental.v5.delivery.MirrorListener;
 import me.vexmc.mental.v5.feature.BukkitRegistrar;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.Reconciler;
@@ -151,6 +154,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(new PacketTap(domains, sessions, clock));
         PacketEvents.getAPI().getEventManager().registerListener(new ValveListener(valve));
         PacketEvents.getAPI().getEventManager().registerListener(new ProbeRim(latency));
+
+        // The delivery routers (spec §3.4–§3.6): the desk's sole PlayerVelocityEvent
+        // writer, the damage-pass router, and the capability-gated knockback-event
+        // mirror. Always-on infra, inert while nothing submits to a desk (all of 4A1).
+        getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve), this);
+        getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock), this);
+        if (capabilities.knockbackEvent()) {
+            new MirrorListener(sessions).register(this);
+        }
 
         // The feature reconciler. 4A1 registers ZERO units — the spine is a
         // no-op server. Later sub-phases register their families here before the

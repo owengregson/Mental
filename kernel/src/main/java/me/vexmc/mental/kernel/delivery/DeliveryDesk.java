@@ -87,6 +87,11 @@ public final class DeliveryDesk {
         return pending == null ? null : pendingVector;
     }
 
+    /** The pending decision's compute-once context (attacker, hit id, source), or null. */
+    public me.vexmc.mental.kernel.model.HitContext pendingContext() {
+        return pending == null ? null : pending.context();
+    }
+
     /** Resolve at PlayerVelocityEvent time with the post-listener api velocity. */
     public Directive resolve(double apiX, double apiY, double apiZ) {
         drainWire();

@@ -28,6 +28,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -153,6 +154,13 @@ public final class SessionService implements Listener, SessionAccess {
         // residual so no phantom knock crosses it (the FSM resyncs on the next
         // movement packet independently).
         enqueue(event.getPlayer().getUniqueId(), new LedgerEvent.Reset(clock.current()));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDeath(PlayerDeathEvent event) {
+        // Death → respawn re-grounds the player; forget the flight residual so no
+        // pre-death knock survives into the respawn.
+        enqueue(event.getEntity().getUniqueId(), new LedgerEvent.Reset(clock.current()));
     }
 
     void join(Player player) {
