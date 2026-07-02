@@ -1,7 +1,9 @@
 package me.vexmc.mental.tester.suite;
 
 import java.lang.reflect.Method;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import me.vexmc.mental.kernel.coexist.ArbiterCore;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
@@ -61,7 +63,63 @@ public final class OcmCoexistenceSuite {
                 new TestCase("ocm: rod combat defers to old-fishing-knockback", context ->
                         runRodDeferral(mental, tester, context)),
                 new TestCase("ocm: thrown projectiles defer to projectile-knockback", context ->
-                        runProjectileDeferral(mental, tester, context)));
+                        runProjectileDeferral(mental, tester, context)),
+                new TestCase("ocm: double-enabled rule modules each warn, never silent (R9)", context ->
+                        runDoubleEnableWarnings(mental, context)));
+    }
+
+    /**
+     * R9 detect-and-warn (DoD §8.6). The ported RULE modules are OCM-agnostic:
+     * unlike the arbitrated six, their ownership is never settled against OCM, so
+     * enabling the same rule in BOTH plugins double-applies it. The arbiter must
+     * detect that and warn — one loud line per rule — and never silently yield.
+     *
+     * <p>OCM's default 2.5.0 config enables {@code old-golden-apples},
+     * {@code old-player-regen} and {@code disable-attack-cooldown} in its
+     * default modesets, so enabling those same rules on Mental's side must
+     * produce a per-token double-enable warning. This asserts through the live
+     * binding's derived warnings — the exact seam the plugin logs at startup —
+     * without mutating global combat state, since {@code warnings(mentalEnabled)}
+     * takes the Mental-enabled set as its argument (as the plugin does).</p>
+     */
+    private static void runDoubleEnableWarnings(MentalPluginV5 mental, TestContext context) {
+        context.expect(mental.ocmBinding().mode() == ArbiterCore.Mode.BOUND,
+                "OCM must be bound for the double-enable check, got " + mental.ocmBinding().mode());
+
+        // A representative set of ported rules OCM 2.5.0 default-enables (golden
+        // apples + regen in the "old" modeset, attack-cooldown likewise). Each is
+        // Mental-owned — never arbitrated — so both sides applying it double-applies.
+        Set<MechanicToken> representative = EnumSet.of(
+                MechanicToken.GOLDEN_APPLES, MechanicToken.REGEN, MechanicToken.ATTACK_COOLDOWN);
+        for (MechanicToken token : representative) {
+            context.expect(!token.arbitrated(),
+                    token + " must be a Mental-owned rule — arbitrated tokens coordinate, never double-apply");
+        }
+
+        List<String> doubleApply = mental.ocmBinding().warnings(representative).stream()
+                .filter(line -> line.contains("Both Mental and OldCombatMechanics enable"))
+                .toList();
+
+        // Every representative rule OCM also enables must produce EXACTLY ONE line
+        // naming the token and its OCM module key — the detect-and-warn contract,
+        // never silent. (OCM 2.5.0 enables all three by default.)
+        for (MechanicToken token : representative) {
+            long lines = doubleApply.stream().filter(line -> line.contains(token.name())).count();
+            context.expect(lines == 1,
+                    "expected exactly one double-enable warning for " + token + " (OCM module '"
+                            + token.ocmKey() + "'), got " + lines + " — warnings=" + doubleApply);
+            context.expect(doubleApply.stream()
+                            .anyMatch(line -> line.contains(token.name()) && line.contains(token.ocmKey())),
+                    "the " + token + " double-enable warning must name its OCM module key " + token.ocmKey());
+        }
+
+        // The warning is driven by the intersection, not a blanket emit: with NO
+        // rule enabled on Mental's side, there is no double-enable line at all.
+        List<String> noneEnabled = mental.ocmBinding().warnings(EnumSet.noneOf(MechanicToken.class)).stream()
+                .filter(line -> line.contains("Both Mental and OldCombatMechanics enable"))
+                .toList();
+        context.expect(noneEnabled.isEmpty(),
+                "no rule enabled on Mental's side must yield no double-enable lines, got " + noneEnabled);
     }
 
     private static void runBindingCheck(MentalPluginV5 mental, TestContext context) {
