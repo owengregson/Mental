@@ -82,3 +82,81 @@ unchanged or stronger). Gate: full build + sequential `integrationTestMatrix`
 Full `./gradlew clean build` (japicmp incl.) + sequential matrix (paper+folia) +
 `integrationTestOcm` — all fresh, nonce-verified, evidence pasted. Append
 "Phase 6 outcomes / PHASE 6 COMPLETE"; push.
+
+---
+
+## Phase 6 run A outcomes (Tasks 6.0–6.1, 2026-07-02)
+
+**Commits:** `cba3787` feat(gui) — the descriptor-driven management GUI (6.0);
+`382a026` test(v5) — the CommandSuite dashboard-open assertion un-SKIPped (6.1).
+
+**6.0 — what shipped.** `me.vexmc.mental.v5.gui`: `Menu`/`MenuManager`/
+`MenuContext`/`Icon` reprise the retired GUI's holder-identity interaction model
+(single-viewer menus, click routing on `getHolder() instanceof Menu`, drags
+cancelled, close-on-disable) on the v5 seams. THE CATALOG IS THE REGISTRY:
+`DashboardModel` derives the dashboard's sections from `Family.values()` and each
+section's entries from the non-infrastructure `Feature` constants declaring that
+family; `Family` gained per-section display metadata (title/icon/blurb) so
+sections are self-describing descriptors, and every entry's toggle copy reads the
+feature's own `displayName/blurb/iconName`. No string-keyed parallel catalog
+exists; `DashboardModelTest.everyNonInfraFeatureIsSurfaced` pins
+`allSurfaced() == every non-infra descriptor` against the exact methods
+`DashboardMenu`/`FamilyMenu` render from, so a new `Feature` constant appears in
+the GUI with zero GUI edits. Screens: dashboard (status plate + one nav tile per
+family + compatibility + debug + reload/close), `FamilyMenu` (generic toggles via
+`Management.setModuleEnabled`; the KNOCKBACK section additionally carries the
+server-wide profile picker from `Snapshot.profileNames()/defaultProfile()` applied
+via `Management.setGlobalProfile`), `CompatibilityMenu` (anticheat.mode +
+compatibility.old-combat-mechanics via their overlay keys), `DebugMenu`
+(debug.enabled + debug.categories.* via their overlay keys). Every write flows
+through Management / the machine overlay — the human YAML is never re-serialized;
+every mutation hops through `Scheduling.runGlobal` (the old ManagementService
+rule), inventory work through `Scheduling.runOn(viewer)`. Icon materials resolve
+through the platform layer's new `MenuMaterials` name-probe resolver (the retired
+`gui/Materials` moved to `platform`, renamed to disambiguate from
+`EffectiveMaterial`): a missing constant degrades to STONE, never throws, no raw
+`Material.valueOf` on the render path. Reuse-ledger assets restored verbatim:
+`Buttons.wrap` + `ButtonsTest`, `text/Brand` (now `v5/text/Brand`), the
+`gui/MaterialsTest` (now `MenuMaterialsTest`). `/mental` (bare, permission
+`mental.command.use`) now opens the dashboard — the 4A2.2 placeholder is gone;
+the console keeps the reload hint; `MentalPluginV5` registers the `MenuManager`
+as always-on infrastructure and shuts it down in the teardown chain. Additive
+seams: `Snapshot.profile(String)` (the picker's value preview).
+
+**6.1 — suites.** The CommandSuite note-SKIP is gone: a permitted player's bare
+`/mental` must now actually open the management menu, asserted through the same
+holder-identity contract the click router uses (`getOpenInventory()
+.getTopInventory().getHolder() instanceof v5.gui.Menu`) — the pre-4E GUI-era
+assertion restored verbatim onto the v5 type; the console-reload case is
+unchanged. CosmeticSmoke carried no GUI assertions in history (verified at
+`7c1a533`) — nothing to restore there.
+
+**Gate (fresh, nonce-verified: `./gradlew build` then sequential
+`integrationTestMatrix`, launched 05:01:07 PDT 2026-07-02, BUILD SUCCESSFUL in
+9m 36s, all 8 entries):**
+
+```
+run/1.17.1/…/test-results.txt        PASS nonce=d26c9706-c859-4f7d-a264-2fae12e243b3  (mtime Jul  2 05:02:42 2026)
+run/1.18.2/…/test-results.txt        PASS nonce=6c762b20-8ea4-4deb-886e-68a07c019da8  (mtime Jul  2 05:04:00 2026)
+run/1.19.4/…/test-results.txt        PASS nonce=086a3465-6116-4c6b-9a0e-7ad58972e98a  (mtime Jul  2 05:05:20 2026)
+run/1.20.6/…/test-results.txt        PASS nonce=40dbaac2-20d9-4e0d-8169-06ceb8d65b9d  (mtime Jul  2 05:06:42 2026)
+run/1.21.4/…/test-results.txt        PASS nonce=273914a2-340d-4ca7-99ac-23832ab9efd9  (mtime Jul  2 05:08:04 2026)
+run/1.21.11/…/test-results.txt       PASS nonce=76690ace-c3a2-447c-8136-128fd9d2a9df  (mtime Jul  2 05:09:27 2026)
+run/26.1.2/…/test-results.txt        PASS nonce=c5c2037d-2c69-4b90-a860-553737989bbd  (mtime Jul  2 05:10:49 2026)
+run/folia/26.1.2/…/test-results.txt  PASS nonce=b2fe5ef1-b763-42b7-b289-c9462a3d49cb  (mtime Jul  2 05:11:00 2026)
+```
+
+The new `command: a permitted player opens the dashboard menu` case ran and
+PASSED on the floor (1.17.1, 500 ms) and the ceiling (26.1.2, 505 ms); the Folia
+entry ran boot + the Folia combat smoke as designed.
+
+**Deviations:** none of substance. Notes: (1) the retired `gui/Materials` was
+restored into `platform` as `MenuMaterials` rather than into `v5/gui`, per the
+run brief's "icon materials resolve through the platform layer" — behaviour and
+test verbatim, only home/name moved; (2) the retired DashboardMenu's per-viewer
+ping tile and DebugMenu's in-chat subscribe tile were not carried over — both
+read seams the v5 tree does not yet expose (a public per-player ping read on the
+facade; a player-facing DebugLog sink), and the plan scopes the GUI to
+descriptors + Management/overlay writes. The debug screen still manages
+`debug.enabled` and every channel; a subscribe tile can return when a v5
+PlayerDebugSink lands.
