@@ -242,6 +242,15 @@ v1_13_R2, v1_14_R1, v1_15_R1, v1_16_R3` (restricted to the viable set V).
   for era hitbox reach. Use javap against the Phase-0 downloaded server jars
   (`run/legacy-probe/<v>/`) — never guess (nms-archaeology).
 - `tester FakePlayer` — moved to Phase 5.
+- **AMENDMENT (2026-07-02, orchestrator review): projectile knockback below
+  1.14.** Phase 1 correctly left `ProjectileKnockbackUnit` dormant on
+  1.9.4–1.13.2 (its handlers name `AbstractArrow`, a 1.14+ type Bukkit
+  hard-resolves at listener registration), but no phase owned restoring it —
+  this phase now does. Rework the arrow handlers to version-neutral types
+  (`Projectile`/`Arrow` with runtime shape checks, or a boot-selected listener
+  variant) so era arrow/punch knockback works on every legacy version; the
+  in-memory punch fallback from Phase 1 already covers the pre-1.14 PDC gap.
+  Era vectors unchanged (kernel); this is listener-shape work only.
 
 **Gate 4:** manifest boot report on each legacy version shows the expected
 resolution set (BootSuite gains a manifest-assertion: expected
@@ -318,6 +327,35 @@ already handled by the releaser). Verify tag/assets/notes as for 2.3.0-beta.
 - The matrix is SEQUENTIAL on this machine (one port). Never run two gates
   concurrently. A full matrix run will grow toward ~20 minutes as entries
   are promoted; budget accordingly.
+
+## Orchestrator review — Phases 1–2 (2026-07-02)
+
+Full line-level review of the landed diff (ca3e934..5dcdcf1, 38 files):
+**zero corrections required to landed code.** Verdict per area: rim/namespace
+(triple-gated match, cancel-only-on-match, floorMod wrap — clean), boot wiring
+(single rim selection, counter-clock fallback with the invokedynamic
+linkage rationale in place, consolidated B10 warning — clean), stateful
+fallbacks (in-memory shield identity and arrow-punch map mirror the PDC
+lifecycles, single-writer confined — clean), probes (class/method presence,
+never version parses; LinkageError catches on every static-init reflection —
+clean), build wiring (OCM pair and PR smoke pinned by version against the
+re-sort, sequential chaining intact — clean), tester tiers (boot-only checked
+before Folia/OCM precedence, correct for all 15 entries — clean).
+
+Findings:
+- **F-BP1 (gap, now owned):** projectile KB dormant below 1.14 had no owning
+  phase → Phase 4 amendment above.
+- **F-BP2 (accepted residual):** pre-1.14 in-memory shield identity can
+  misattribute a player's real shield if they swap one into the off-hand
+  inside the sub-second temp-shield window; bounded by the refuse-to-overwrite
+  guard + tracked-membership check. Document in the Phase 6 compat notes.
+- **F-BP3 (Phase 6 hardening):** "no Component crosses a Bukkit boundary" is
+  grep-proven; add a build-time jar assertion (zero un-relocated `net/kyori`
+  references) so it cannot rot.
+- **F-BP4 (known limitation):** transaction-probe RTT round-trip is not
+  live-verified (clientless fake players echo nothing); selection + send-path
+  encode are live-pinned per version. Wire proof needs a real client
+  (SimpleBoxer or the owner's setup) — carried to Phase 5 notes.
 
 ## Decision log
 
