@@ -294,3 +294,43 @@ swap; `0a1a398` + `63d942d` + `bcf59d7` the three live-gate fixes below.
   the frozen `api/` interface (binary-compatible; spec §11 mandates the generation
   marker). Kernel change was additive-only (`DeliveryDesk.pendingVectorFor`); no pin
   edits. No suite VALUE changed.
+
+## Sub-phase 4B outcomes (2026-07-02)
+
+**The damage family is live.** All five DAMAGE features are on the v5 seams and the
+`Damage` (DamageRules) + `Blocking` suites are back in the list. Gate GREEN:
+`./gradlew build` + the SEQUENTIAL `integrationTestMatrix` (gate amendment) — all 7
+versions FRESH PASS (result files rewritten 00:40–00:47 after a 00:39 clear;
+31/31 cases each, up from 4A2's 26/26 — +3 DamageRules, +2 Blocking).
+
+Commits (in order): `6c93403` fast-path legacy composition (`DamageShaper`) + shared
+`DamageOwnership` + `CritFallbackUnit`; `905c791` `ArmourStrengthUnit` +
+`ArmourDurabilityUnit`; `c3b80a5` `ToolDurabilityUnit`/`PotionValuesUnit` + `ToolWear`
+on a boot-probed `v5/platform/PlatformProbe`; `c6dc65b` `SwordBlockingUnit` +
+`EphemeralDecoration`; `ed7b82f` tester restore + re-plumb.
+
+- **Composition is kernel math** (`DamageTables`, `DefenceMath`, `ArmourDurabilityMath`,
+  `ToolDurabilityMath`, `SwordBlockReduction`); the fast-path amount moved off the bare
+  attribute onto `DamageShaper.compose` — weapon base → era Str/Weak → crit ×1.5 →
+  Sharpness 1.25·level, keyed off the `combat:effective_material` PDC shell — with the
+  vanilla-shaped handoff when OCM owns (era pin `sharpness-5 diamond = 14.25`, unit-pinned).
+- **Forgotten-gate class is dead:** ONE `DamageOwnership` is threaded to BOTH the fast
+  path and `CritFallbackUnit`; both resolve crit/tool-damage ownership through it over the
+  hit's `HitContext`. `DamageShaperTest` pins the shared source (identity) + the OR verdict.
+- **Armour** is the 1.8 flat cascade EntityDamageEvent-wide (no toughness), rewriting only
+  applicable defensive modifiers; DamageRules pins `final = base × 0.2` for full diamond on
+  a REAL attack (PASS, 1.20.6). KB resistance stays probabilistic-all-or-nothing, default
+  NONE (already in `KnockbackEngine`). **Blocking** reduces `(dmg-1)*0.5` AFTER the knock
+  ran (never cancels/never touches velocity → full knockback), skips the native
+  BLOCKS_ATTACKS tier, and re-arms the block-hit sprint reset on the RAW `SprintWire` flag;
+  Blocking PASS on Tier C (off-hand shield, 1.20.6) AND Tier A (native, 26.1.2).
+  `EphemeralDecoration` (B12) guarantees revert on every exit incl. inline quit/disable.
+- **Deviations:** (1) `PlatformProbe`/`SwordBlockAdapter` add a LOUD boot log on a
+  version-expected mapping break (mandate B10) — the retired module was silent-degrade;
+  hot-path reflective slips still degrade to a clean no-op (never corrupt an item). (2)
+  `EphemeralDecoration` sits at `v5/feature/`; the sword-block adapter mutates the REAL held
+  item (an in-place server block pose is impossible via a packet-local copy — the
+  packet-local-copies clause is a 4C tooltip/attr-spoof concern). (3) `ShieldReductionUnit`
+  folds into `SwordBlockingUnit` (one `SWORD_BLOCKING` descriptor; the modern-shield
+  full-block cancel already lives in `KnockbackUnit`). No kernel change beyond none needed;
+  no suite VALUE changed.
