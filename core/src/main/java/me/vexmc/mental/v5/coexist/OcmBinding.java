@@ -28,10 +28,21 @@ import org.bukkit.configuration.ConfigurationSection;
 public final class OcmBinding {
 
     private volatile ArbiterCore arbiter;
+    private volatile ArbiterCore.Mode mode;
     private volatile CoexistWarnings.OcmFacts facts;
 
     public OcmBinding() {
         clear();
+    }
+
+    /**
+     * How ownership questions are being answered right now — ABSENT (Mental owns
+     * everything), BOUND (per-player modeset precision via OCM's service API), or
+     * CONFIG (global verdicts from OCM's config file). Drives the coexistence
+     * bStats chart and the live coexistence suite's binding assertion.
+     */
+    public ArbiterCore.Mode mode() {
+        return mode;
     }
 
     /**
@@ -59,6 +70,7 @@ public final class OcmBinding {
             }
         };
         this.arbiter = new ArbiterCore(ArbiterCore.Mode.BOUND, knownToOcm, staticVerdicts, resolver);
+        this.mode = ArbiterCore.Mode.BOUND;
         this.facts = facts;
     }
 
@@ -66,6 +78,7 @@ public final class OcmBinding {
     public void configOnly(Set<MechanicToken> staticVerdicts, CoexistWarnings.OcmFacts facts) {
         this.arbiter = new ArbiterCore(
                 ArbiterCore.Mode.CONFIG, EnumSet.noneOf(MechanicToken.class), staticVerdicts, null);
+        this.mode = ArbiterCore.Mode.CONFIG;
         this.facts = facts;
     }
 
@@ -73,6 +86,7 @@ public final class OcmBinding {
     public void clear() {
         this.arbiter = new ArbiterCore(ArbiterCore.Mode.ABSENT,
                 EnumSet.noneOf(MechanicToken.class), EnumSet.noneOf(MechanicToken.class), null);
+        this.mode = ArbiterCore.Mode.ABSENT;
         this.facts = new CoexistWarnings.OcmFacts(false, false, null, Set.of());
     }
 

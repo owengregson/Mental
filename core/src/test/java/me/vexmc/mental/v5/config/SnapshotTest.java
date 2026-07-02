@@ -81,10 +81,26 @@ class SnapshotTest {
         assertEquals(OcmCoordination.AUTO, snapshot.ocmCoordination());
         assertEquals(KnockbackProfile.LEGACY_17, snapshot.profileFor("anything"));
         assertEquals(KnockbackProfile.LEGACY_17, snapshot.profileFor("world_nether"));
+        // bStats is on by default; the absent `metrics` section reads true without an issue.
+        assertTrue(snapshot.metricsEnabled());
     }
 
     private static AnticheatMode AnticheatModeDefault() {
         return AnticheatMode.AUTO;
+    }
+
+    @Test
+    void metricsToggleReadsFromTheConfig() throws Exception {
+        SnapshotParser.Result off = parse("""
+                metrics:
+                  enabled: false
+                """, "", "", "");
+        assertTrue(off.issues().isEmpty(), () -> "unexpected issues: " + off.issues());
+        assertFalse(off.snapshot().metricsEnabled());
+
+        // Explicit true and an absent section both read true.
+        assertTrue(parse("metrics:\n  enabled: true\n", "", "", "").snapshot().metricsEnabled());
+        assertTrue(parse("", "", "", "").snapshot().metricsEnabled());
     }
 
     @Test

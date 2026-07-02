@@ -64,6 +64,10 @@ public final class SnapshotParser {
         builder.debug(parseDebug(reader(main, "debug", "config.yml", issues)));
         builder.ocmCoordination(reader(main, "compatibility", "config.yml", issues)
                 .oneOf("old-combat-mechanics", OcmCoordination.AUTO, OcmCoordination.class));
+        // bStats metrics toggle (spec §13). Parse-with-default: an absent
+        // `metrics` section (or key) reads true silently — the frozen bundled
+        // config need not carry it. Warn-and-fallback on a non-boolean value.
+        builder.metricsEnabled(reader(main, "metrics", "config.yml", issues).flag("enabled", true));
 
         return new Result(builder.build(), issues.all());
     }

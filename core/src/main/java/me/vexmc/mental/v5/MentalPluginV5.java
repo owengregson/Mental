@@ -6,8 +6,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.bstats.bukkit.Metrics;
+import org.bstats.charts.SimplePie;
 import me.vexmc.mental.common.platform.Capabilities;
 import me.vexmc.mental.common.platform.ServerEnvironment;
 import me.vexmc.mental.common.scheduling.Scheduling;
@@ -26,8 +29,11 @@ import me.vexmc.mental.v5.manage.Management;
 import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Migrations;
 import me.vexmc.mental.v5.config.Overlay;
+import me.vexmc.mental.v5.config.ProbeStrategy;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
+import me.vexmc.mental.v5.config.settings.CompensationSettings;
+import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.delivery.DamageRouter;
 import me.vexmc.mental.v5.delivery.DeskRouter;
 import me.vexmc.mental.v5.delivery.HitIds;
@@ -97,6 +103,11 @@ public final class MentalPluginV5 extends JavaPlugin {
 
     /** Per-victim journal ring depth — the bounded "what did we ship" seam (spec §3.6). */
     static final int JOURNAL_CAPACITY = 16;
+
+    /** bStats plugin id (spec §13; kept from the retired plugin, config-gated on {@code metrics.enabled}). */
+    private static final int BSTATS_PLUGIN_ID = 31788;
+
+    private Metrics metrics;
 
     private Capabilities capabilities;
     private ServerEnvironment environment;
@@ -247,6 +258,24 @@ public final class MentalPluginV5 extends JavaPlugin {
             getLogger().warning("plugin.yml is missing the 'mental' command — the reload command is unavailable.");
         }
 
+        // bStats (spec §13; owner decision: KEEP). Config-gated on metrics.enabled
+        // (default true) — warn-and-fallback: absent section reads true. The four
+        // charts read the v5 sources live through suppliers, so a reload's changed
+        // anticheat/OCM/probe posture is reflected on the next report.
+        if (snapshot.metricsEnabled()) {
+            this.metrics = new Metrics(this, BSTATS_PLUGIN_ID);
+            metrics.addCustomChart(new SimplePie("anticheat_mode",
+                    () -> snapshot().anticheat().mode().name().toLowerCase(Locale.ROOT)));
+            metrics.addCustomChart(new SimplePie("probe_strategy",
+                    () -> probeStrategy().name().toLowerCase(Locale.ROOT)));
+            metrics.addCustomChart(new SimplePie("scheduling_backend",
+                    () -> scheduling.describe()));
+            metrics.addCustomChart(new SimplePie("ocm_coordination",
+                    () -> ocmBinding.mode().name().toLowerCase(Locale.ROOT)));
+        } else {
+            getLogger().info("bStats metrics disabled (metrics.enabled=false).");
+        }
+
         getLogger().info(() -> "Mental v5 enabled — server " + environment.describe()
                 + ", scheduling=" + scheduling.describe() + ", " + capabilities.describe());
     }
@@ -255,6 +284,12 @@ public final class MentalPluginV5 extends JavaPlugin {
     public void onDisable() {
         // Reverse order, each step isolated (B8 teardown isolation): one failing
         // teardown never skips the rest.
+        isolate("bStats shutdown", () -> {
+            if (metrics != null) {
+                metrics.shutdown();
+                metrics = null;
+            }
+        });
         isolate("api facade unregister", () -> {
             Mental.register(null);
             if (facade != null) {
@@ -463,6 +498,14 @@ public final class MentalPluginV5 extends JavaPlugin {
         }
         this.parseIssues = result.issues();
         return result.snapshot();
+    }
+
+    /** The active latency-probe strategy — the {@code probe_strategy} bStats chart source. */
+    @SuppressWarnings("unchecked")
+    private ProbeStrategy probeStrategy() {
+        SettingsKey<CompensationSettings> key =
+                (SettingsKey<CompensationSettings>) Feature.LATENCY_COMPENSATION.settingsKey();
+        return snapshot().settings(key).probeStrategy();
     }
 
     /** The tokens every enabled feature restores — the input to the coexistence warnings. */

@@ -28,6 +28,7 @@ public final class Snapshot {
     private final AnticheatSettings anticheat;
     private final DebugSettings debug;
     private final OcmCoordination ocmCoordination;
+    private final boolean metricsEnabled;
 
     private Snapshot(Builder builder) {
         this.enabled = new EnumMap<>(builder.enabled);
@@ -38,6 +39,7 @@ public final class Snapshot {
         this.anticheat = builder.anticheat;
         this.debug = builder.debug;
         this.ocmCoordination = builder.ocmCoordination;
+        this.metricsEnabled = builder.metricsEnabled;
     }
 
     /** Whether the module toggle for {@code feature} is on (modules.* / infra always on). */
@@ -94,6 +96,11 @@ public final class Snapshot {
         return ocmCoordination;
     }
 
+    /** Whether bStats metrics reporting is on ({@code metrics.enabled}, default true). */
+    public boolean metricsEnabled() {
+        return metricsEnabled;
+    }
+
     /** Built by the parser; every field is set before {@link #build()}. */
     static final class Builder {
         private final Map<Feature, Boolean> enabled = new EnumMap<>(Feature.class);
@@ -105,6 +112,7 @@ public final class Snapshot {
         private AnticheatSettings anticheat = AnticheatSettings.DEFAULTS;
         private DebugSettings debug = DebugSettings.DEFAULTS;
         private OcmCoordination ocmCoordination = OcmCoordination.AUTO;
+        private boolean metricsEnabled = true;
 
         Builder enable(Feature feature, boolean on) {
             enabled.put(feature, on);
@@ -135,6 +143,11 @@ public final class Snapshot {
 
         Builder ocmCoordination(OcmCoordination ocmCoordination) {
             this.ocmCoordination = ocmCoordination;
+            return this;
+        }
+
+        Builder metricsEnabled(boolean metricsEnabled) {
+            this.metricsEnabled = metricsEnabled;
             return this;
         }
 
