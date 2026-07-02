@@ -1,12 +1,13 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
-import me.vexmc.mental.MentalPlugin;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -56,7 +57,7 @@ public final class ConsumableRulesSuite {
     private ConsumableRulesSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("rules: old-golden-apples applies the 1.8 notch-apple effects", context ->
                         runGoldenApples(mental, tester, context)),
@@ -73,8 +74,8 @@ public final class ConsumableRulesSuite {
     /* ------------------------------------------------------------------ */
 
     private static void runGoldenApples(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer eater = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer eater = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "old-golden-apples", true);
@@ -152,8 +153,8 @@ public final class ConsumableRulesSuite {
     /* ------------------------------------------------------------------ */
 
     private static void runEnderPearlCooldown(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer thrower = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer thrower = new FakePlayer(tester, mental.scheduling());
 
         try {
             // Control first: with the module OFF, a 1.9+ server applies the
@@ -233,8 +234,8 @@ public final class ConsumableRulesSuite {
     /* ------------------------------------------------------------------ */
 
     private static void runPotionDurations(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer drinker = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer drinker = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "old-potion-durations", true);
@@ -313,8 +314,8 @@ public final class ConsumableRulesSuite {
     /* ------------------------------------------------------------------ */
 
     private static void runPlayerRegen(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer hurt = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer hurt = new FakePlayer(tester, mental.scheduling());
 
         try {
             // Control: with the module OFF the satiated-regen event must survive
@@ -474,14 +475,16 @@ public final class ConsumableRulesSuite {
     /*  Module toggling (copied from ZeroTouchSuite)                       */
     /* ------------------------------------------------------------------ */
 
-    /** Toggles through the real console command path and waits for convergence. */
+    /** Toggles through the v5 management write-back seam and waits for convergence. */
     private static void toggleModule(TestContext context, String id, boolean enabled) throws Exception {
-        context.syncRun(() -> ((MentalPlugin) Bukkit.getPluginManager().getPlugin("Mental"))
-                .management().setModuleEnabled(id, enabled));
+        Feature feature = Feature.byModuleId(id)
+                .orElseThrow(() -> new AssertionError("unknown module id '" + id + "'"));
+        context.syncRun(() -> ((MentalPluginV5) Bukkit.getPluginManager().getPlugin("Mental"))
+                .management().setModuleEnabled(feature, enabled));
         context.awaitTicks(1);
     }
 
-    private static boolean moduleActive(MentalPlugin mental, String id) {
-        return mental.modules().byId(id).map(module -> module.active()).orElse(false);
+    private static boolean moduleActive(MentalPluginV5 mental, String id) {
+        return Feature.byModuleId(id).map(mental::featureActive).orElse(false);
     }
 }
