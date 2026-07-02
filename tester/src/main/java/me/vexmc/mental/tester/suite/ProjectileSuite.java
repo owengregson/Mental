@@ -2,9 +2,12 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
-import me.vexmc.mental.MentalPlugin;
-import me.vexmc.mental.module.knockback.KnockbackEngine;
-import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
+import me.vexmc.mental.v5.feature.Feature;
+import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -29,12 +32,13 @@ public final class ProjectileSuite {
 
     private ProjectileSuite() {}
 
+    @SuppressWarnings("unchecked")
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(new TestCase("projectile: snowball knocks away from the shooter", context -> {
             Captors captors = Captors.register(tester);
-            FakePlayer shooter = new FakePlayer(tester, mental.services().scheduling());
-            FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+            FakePlayer shooter = new FakePlayer(tester, mental.scheduling());
+            FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
             try {
                 Location victimSpot = context.sync(() -> {
@@ -58,7 +62,7 @@ public final class ProjectileSuite {
                     snowball.setShooter(shooter.player());
                     snowball.setVelocity(new Vector(0, 0.0, 0.5));
                     var victimState = KnockbackSuite.restingVictim(victim);
-                    var profile = mental.services().knockbackProfiles().resolve(victim.player());
+                    var profile = mental.snapshot().profileFor(victim.player().getWorld().getName());
                     return SuiteDelivery.projectile(
                             KnockbackEngine.computeBase(
                                     victimState,
@@ -87,7 +91,9 @@ public final class ProjectileSuite {
 
                 Double observedDamage = captors.damageOf(victim.uuid());
                 if (observedDamage != null) {
-                    double substituted = mental.services().config().projectileKnockback().snowballDamage();
+                    ProjectileKnockbackSettings settings = mental.snapshot().settings(
+                            (SettingsKey<ProjectileKnockbackSettings>) Feature.PROJECTILE_KNOCKBACK.settingsKey());
+                    double substituted = settings.snowballDamage();
                     context.expectNear(substituted, observedDamage, 1.0e-6, "substituted snowball damage");
                 } else {
                     context.note("no zero-damage event on this version (1.21.2+ native path) — "

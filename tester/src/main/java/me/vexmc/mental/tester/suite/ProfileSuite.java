@@ -2,12 +2,13 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import me.vexmc.mental.MentalPlugin;
 import me.vexmc.mental.api.event.KnockbackProfileChangeEvent;
-import me.vexmc.mental.config.KnockbackProfile;
-import me.vexmc.mental.module.knockback.EntityState;
-import me.vexmc.mental.module.knockback.KnockbackEngine;
-import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.v5.EntityStates;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.manage.Management;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -24,25 +25,31 @@ import org.jetbrains.annotations.NotNull;
 
 /**
  * Knockback profiles end to end on a live server. Mental's knockback is
- * <em>global</em>: selecting a profile (through the management GUI, which calls
- * {@code ManagementService.setGlobalProfile}) must reroute every subsequent hit
- * through the preset's parsed values — file → parse → resolve → engine →
- * velocity event — server-wide. The archived-server presets must demonstrate
- * their structural levers on the wire: mmc's heavier friction survival on the
- * soft dev123 base, and lunar's vertical cap that sits BELOW its base (every
- * grounded hit pins at the cap, a shape no base/extra pair can fake). Each
- * scenario restores the legacy-1.7 default in its finally so suites stay
- * isolated.
+ * <em>global</em>: selecting a profile (through the management seam, which the
+ * GUI and the API both call) must reroute every subsequent hit through the
+ * preset's parsed values — file → parse → resolve → engine → velocity event —
+ * server-wide. The archived-server presets must demonstrate their structural
+ * levers on the wire: mmc's heavier friction survival on the soft dev123 base,
+ * and lunar's vertical cap that sits BELOW its base (every grounded hit pins at
+ * the cap, a shape no base/extra pair can fake). Each scenario restores the
+ * legacy-1.7 default in its finally so suites stay isolated.
+ *
+ * <p>v5: the active profile is frozen into the per-tick {@code PlayerView}, so a
+ * global switch is followed by a short wait before the attack — the view (and
+ * with it the knockback unit's profile) picks up the new snapshot on the next
+ * session tick.</p>
  */
 public final class ProfileSuite {
 
     private static final double EPSILON = 1.0e-3;
     private static final String DEFAULT_PROFILE = "legacy-1.7";
+    /** Ticks to let the session view adopt a freshly-swapped snapshot profile. */
+    private static final int PROPAGATE_TICKS = 3;
 
     private ProfileSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("profile: selecting kohi globally reroutes the next hit", context ->
                         runKohiScenario(mental, tester, context)),
@@ -56,10 +63,10 @@ public final class ProfileSuite {
 
     /** A hit under a global kohi selection must equal kohi math, not the legacy default. */
     private static void runKohiScenario(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -69,18 +76,18 @@ public final class ProfileSuite {
             });
             context.awaitTicks(5);
 
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile("kohi"),
+                    "kohi preset missing — every bundled profile must be selectable"));
+            context.awaitTicks(PROPAGATE_TICKS);
+
             KnockbackVector expected = context.sync(() -> {
-                context.expect(mental.management().setGlobalProfile("kohi"),
-                        "kohi preset missing — every bundled profile must be selectable");
-                KnockbackProfile resolved = mental.services().knockbackProfiles()
-                        .resolve(victim.player());
+                KnockbackProfile resolved = profileFor(mental, victim);
                 context.expect("kohi".equals(resolved.name()),
                         "global selection did not win resolution (got " + resolved.name() + ")");
                 victim.player().setNoDamageTicks(0);
                 var victimState = KnockbackSuite.restingVictim(victim);
                 KnockbackVector vector = KnockbackEngine.compute(
-                        EntityState.capture(attacker.player()),
-                        victimState, resolved, null);
+                        EntityStates.capture(attacker.player()), victimState, resolved, null);
                 captors.reset();
                 attacker.attack(victim.player());
                 return SuiteDelivery.melee(vector, resolved, victimState.grounded());
@@ -115,10 +122,10 @@ public final class ProfileSuite {
      * in the vertical term.
      */
     private static void runMmcScenario(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -128,13 +135,16 @@ public final class ProfileSuite {
             });
             context.awaitTicks(5);
 
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile("mmc"),
+                    "mmc preset missing"));
+            context.awaitTicks(PROPAGATE_TICKS);
+
             KnockbackVector expected = context.sync(() -> {
-                context.expect(mental.management().setGlobalProfile("mmc"), "mmc preset missing");
                 victim.player().setNoDamageTicks(0);
                 KnockbackVector vector = KnockbackEngine.compute(
-                        EntityState.capture(attacker.player()),
+                        EntityStates.capture(attacker.player()),
                         KnockbackSuite.restingVictim(victim),
-                        mental.services().knockbackProfiles().resolve(victim.player()), null);
+                        profileFor(mental, victim), null);
                 captors.reset();
                 attacker.attack(victim.player());
                 return vector;
@@ -173,10 +183,10 @@ public final class ProfileSuite {
      * the superseded recreation (base 0.3535 == cap) couldn't show.
      */
     private static void runLunarScenario(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -186,13 +196,16 @@ public final class ProfileSuite {
             });
             context.awaitTicks(5);
 
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile("lunar"),
+                    "lunar preset missing"));
+            context.awaitTicks(PROPAGATE_TICKS);
+
             KnockbackVector expected = context.sync(() -> {
-                context.expect(mental.management().setGlobalProfile("lunar"), "lunar preset missing");
                 victim.player().setNoDamageTicks(0);
                 KnockbackVector vector = KnockbackEngine.compute(
-                        EntityState.capture(attacker.player()),
+                        EntityStates.capture(attacker.player()),
                         KnockbackSuite.restingVictim(victim),
-                        mental.services().knockbackProfiles().resolve(victim.player()), null);
+                        profileFor(mental, victim), null);
                 captors.reset();
                 attacker.attack(victim.player());
                 return vector;
@@ -220,12 +233,12 @@ public final class ProfileSuite {
 
     /**
      * The global selection contract: {@code setGlobalProfile} rejects unknown
-     * names, persists the chosen default (so {@code defaultProfileName} reflects
+     * names, persists the chosen default (so the snapshot's default reflects
      * it), and fires {@link KnockbackProfileChangeEvent} once per actual
      * transition (a re-select of the active profile is a no-op success).
      */
     private static void runGlobalApiScenario(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         List<String> transitions = new CopyOnWriteArrayList<>();
         Listener probe = new Listener() {
             @EventHandler
@@ -238,7 +251,7 @@ public final class ProfileSuite {
             context.syncRun(() -> Bukkit.getPluginManager().registerEvents(probe, tester));
 
             context.syncRun(() -> {
-                var management = mental.management();
+                Management management = mental.management();
                 management.setGlobalProfile(DEFAULT_PROFILE); // normalise the starting point
                 transitions.clear();
 
@@ -248,8 +261,7 @@ public final class ProfileSuite {
                 context.expect(management.setGlobalProfile("kohi"),
                         "re-selecting the active profile is a no-op success");
                 context.expect(management.setGlobalProfile("mmc"), "switch to mmc");
-                context.expect("mmc".equals(
-                                mental.services().knockbackProfiles().defaultProfileName()),
+                context.expect("mmc".equals(mental.snapshot().defaultProfile()),
                         "the global default must reflect the last selection");
             });
 
@@ -261,5 +273,9 @@ public final class ProfileSuite {
                 mental.management().setGlobalProfile(DEFAULT_PROFILE);
             });
         }
+    }
+
+    private static KnockbackProfile profileFor(MentalPluginV5 mental, FakePlayer victim) {
+        return mental.snapshot().profileFor(victim.player().getWorld().getName());
     }
 }

@@ -2,9 +2,13 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
-import me.vexmc.mental.MentalPlugin;
-import me.vexmc.mental.module.knockback.KnockbackEngine;
-import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.v5.EntityStates;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
+import me.vexmc.mental.v5.feature.Feature;
+import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -29,12 +33,13 @@ public final class FishingSuite {
 
     private FishingSuite() {}
 
+    @SuppressWarnings("unchecked")
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(new TestCase("fishing: hook hit damages and knocks from the angler", context -> {
             Captors captors = Captors.register(tester);
-            FakePlayer rodder = new FakePlayer(tester, mental.services().scheduling());
-            FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+            FakePlayer rodder = new FakePlayer(tester, mental.scheduling());
+            FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
             try {
                 context.syncRun(() -> {
@@ -71,7 +76,9 @@ public final class FishingSuite {
                     return;
                 }
 
-                double expectedDamage = mental.services().config().fishingKnockback().damage();
+                FishingKnockbackSettings settings = mental.snapshot().settings(
+                        (SettingsKey<FishingKnockbackSettings>) Feature.FISHING_KNOCKBACK.settingsKey());
+                double expectedDamage = settings.damage();
                 context.expectNear(expectedDamage, observedDamage, 1.0e-6, "rod hit damage");
 
                 // The fresh victim has an empty residual ledger and neither
@@ -79,7 +86,7 @@ public final class FishingSuite {
                 // bare base knock away from where the angler stands.
                 KnockbackVector expected = context.sync(() -> {
                     var victimState = KnockbackSuite.restingVictim(victim);
-                    var profile = mental.services().knockbackProfiles().resolve(victim.player());
+                    var profile = mental.snapshot().profileFor(victim.player().getWorld().getName());
                     return SuiteDelivery.projectile(
                             KnockbackEngine.computeBase(
                                     victimState,

@@ -3,10 +3,13 @@ package me.vexmc.mental.tester.suite;
 import java.lang.reflect.Method;
 import java.util.List;
 import me.vexmc.mental.MentalPlugin;
+import me.vexmc.mental.config.KnockbackDelivery;
+import me.vexmc.mental.config.KnockbackProfile;
 import me.vexmc.mental.module.hitreg.HitApplier;
 import me.vexmc.mental.module.knockback.EntityState;
 import me.vexmc.mental.module.knockback.KnockbackEngine;
 import me.vexmc.mental.module.knockback.KnockbackVector;
+import me.vexmc.mental.module.knockback.VictimMotion;
 import me.vexmc.mental.module.ocm.OcmGate;
 import me.vexmc.mental.module.ocm.OcmMechanic;
 import me.vexmc.mental.platform.Attributes;
@@ -115,12 +118,12 @@ public final class OcmCoexistenceSuite {
 
             KnockbackVector expected = context.sync(() -> {
                 freshVictim.player().setNoDamageTicks(0);
-                var victimState = KnockbackSuite.restingVictim(freshVictim);
-                var profile = mental.services().knockbackProfiles().resolve(freshVictim.player());
+                EntityState victimState = restingVictim(freshVictim);
+                KnockbackProfile profile = mental.services().knockbackProfiles().resolve(freshVictim.player());
                 KnockbackVector vector = KnockbackEngine.compute(
                         EntityState.capture(attacker.player()), victimState, profile, null);
                 attacker.attack(freshVictim.player());
-                return SuiteDelivery.melee(vector, profile, victimState.grounded());
+                return delivery(vector, profile, victimState.grounded());
             });
             context.expect(expected != null, "engine returned no vector for an unresisted hit");
             context.awaitTicks(3);
@@ -337,5 +340,38 @@ public final class OcmCoexistenceSuite {
             Method method = apiClass.getMethod("setModesetForPlayer", Player.class, String.class);
             method.invoke(api, player, modeset);
         }
+    }
+
+    /*
+     * Local old-typed copies of the shared knockback helpers. This suite is
+     * delisted for the 4A2 sub-phase and still speaks the old
+     * module.knockback types (its OcmGate/OcmMechanic/HitApplier dependencies
+     * have no v5 equivalent until the coexistence family lands in 4E); the
+     * shared SuiteDelivery/KnockbackSuite helpers were re-plumbed onto the
+     * kernel types for the retained suites, so this suite carries its own to
+     * keep compiling unchanged in behavior.
+     */
+
+    /** The victim's engine input with a fresh ledger: grounded equilibrium motion. */
+    private static EntityState restingVictim(FakePlayer victim) {
+        EntityState live = EntityState.capture(victim.player());
+        double vy = live.grounded()
+                ? VictimMotion.groundedEquilibrium(VictimMotion.DEFAULT_GRAVITY)
+                : 0.0;
+        return new EntityState(
+                live.x(), live.y(), live.z(), live.yaw(), 0.0, vy, 0.0,
+                live.grounded(), live.sprinting(),
+                live.knockbackEnchantLevel(), live.knockbackResistance());
+    }
+
+    /** The melee wire delivery (a TRACKER_DECAYED profile ships one physics tick late). */
+    private static KnockbackVector delivery(
+            KnockbackVector vector, KnockbackProfile profile, boolean grounded) {
+        if (vector == null || profile.meleeDelivery() != KnockbackDelivery.TRACKER_DECAYED) {
+            return vector;
+        }
+        VictimMotion.Motion decayed = VictimMotion.decayOnce(
+                vector.x(), vector.y(), vector.z(), grounded, VictimMotion.DEFAULT_GRAVITY);
+        return new KnockbackVector(decayed.vx(), decayed.vy(), decayed.vz());
     }
 }
