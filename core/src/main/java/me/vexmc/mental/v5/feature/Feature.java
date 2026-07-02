@@ -311,6 +311,24 @@ public enum Feature {
         this.settingsKey = settingsKey;
     }
 
+    /**
+     * The feature whose {@code modules.*} toggle string equals {@code moduleId},
+     * or empty for an unknown id or an always-on infrastructure descriptor (which
+     * carries no yaml toggle). The public API's {@code moduleEnabled(String)} and
+     * the runtime toggle seam resolve module ids through here.
+     */
+    public static java.util.Optional<Feature> byModuleId(String moduleId) {
+        if (moduleId == null) {
+            return java.util.Optional.empty();
+        }
+        for (Feature feature : values()) {
+            if (moduleId.equals(feature.yamlKey)) {
+                return java.util.Optional.of(feature);
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
     /** The {@code modules.*} config string, or {@code null} for always-on infrastructure. */
     public String yamlKey() {
         return yamlKey;

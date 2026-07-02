@@ -67,6 +67,21 @@ public final class Snapshot {
         return profile != null ? profile : KnockbackProfile.LEGACY_17;
     }
 
+    /** The server-wide default knockback profile name (the {@code knockback.profile} selection). */
+    public String defaultProfile() {
+        return defaultProfile;
+    }
+
+    /** Every loaded profile name — the API's {@code knockbackProfiles()} surface. */
+    public java.util.Set<String> profileNames() {
+        return profiles.keySet();
+    }
+
+    /** Whether a profile by {@code name} is loaded (the global-selection guard). */
+    public boolean hasProfile(String name) {
+        return profiles.containsKey(name);
+    }
+
     public AnticheatSettings anticheat() {
         return anticheat;
     }

@@ -17,8 +17,12 @@ import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.SchedulingFactory;
+import me.vexmc.mental.api.Mental;
+import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.coexist.OcmBinding;
+import me.vexmc.mental.v5.command.MentalCommand;
+import me.vexmc.mental.v5.manage.Management;
 import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Migrations;
 import me.vexmc.mental.v5.config.Overlay;
@@ -46,7 +50,9 @@ import me.vexmc.mental.v5.rim.ValveListener;
 import me.vexmc.mental.v5.session.SessionService;
 import me.vexmc.mental.v5.session.ViewBuilder;
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.command.PluginCommand;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -96,6 +102,9 @@ public final class MentalPluginV5 extends JavaPlugin {
     private HitIds hitIds;
     private AnticheatPolicy anticheatPolicy;
     private final AtomicBoolean wtapConsultWire = new AtomicBoolean(true);
+
+    private Management management;
+    private MentalFacade facade;
 
     private List<String> parseIssues = List.of();
 
@@ -196,6 +205,21 @@ public final class MentalPluginV5 extends JavaPlugin {
         // registered (4A1 registers none; the rim registers in 4A1.2).
         PacketEvents.getAPI().init();
 
+        // The management write-back seam + the public API facade (spec §11; the
+        // 4E seams pulled forward). The facade is published both in the static
+        // Mental holder and the Bukkit ServicesManager; the /mental executor is
+        // the minimal reload surface (the GUI arrives in Phase 6).
+        this.management = new Management(this);
+        this.facade = new MentalFacade(this, management, latency);
+        Mental.register(facade);
+        getServer().getServicesManager().register(Mental.MentalApi.class, facade, this, ServicePriority.Normal);
+        PluginCommand command = getCommand("mental");
+        if (command != null) {
+            command.setExecutor(new MentalCommand(this));
+        } else {
+            getLogger().warning("plugin.yml is missing the 'mental' command — the reload command is unavailable.");
+        }
+
         getLogger().info(() -> "Mental v5 enabled — server " + environment.describe()
                 + ", scheduling=" + scheduling.describe() + ", " + capabilities.describe());
     }
@@ -204,6 +228,12 @@ public final class MentalPluginV5 extends JavaPlugin {
     public void onDisable() {
         // Reverse order, each step isolated (B8 teardown isolation): one failing
         // teardown never skips the rest.
+        isolate("api facade unregister", () -> {
+            Mental.register(null);
+            if (facade != null) {
+                getServer().getServicesManager().unregister(Mental.MentalApi.class, facade);
+            }
+        });
         isolate("reconciler.closeAll", () -> {
             if (reconciler != null) {
                 reconciler.closeAll();
@@ -276,6 +306,25 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** Boot-time capability report (Folia, knockback event, …). */
     public @NotNull Capabilities capabilities() {
         return capabilities;
+    }
+
+    /** The parsed server-version report (major/minor/patch, recognized, raw). */
+    public @NotNull ServerEnvironment environment() {
+        return environment;
+    }
+
+    /** The config write-back seam behind the API facade and the (Phase 6) GUI. */
+    public @NotNull Management management() {
+        return management;
+    }
+
+    /**
+     * Writes one machine-overlay key (persisted to {@code state/overrides.yml});
+     * the caller reloads to pick it up. The management seam and the GUI route
+     * their writes through here so the human config files are never re-serialized.
+     */
+    public void overlaySet(@NotNull String key, @NotNull Object value) {
+        overlay.set(key, value);
     }
 
     /** True when {@code feature} has an open scope right now (the tester's module-active check). */
