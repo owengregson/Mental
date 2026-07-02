@@ -1,0 +1,27 @@
+config-version: 1
+modules:
+  hit-registration:
+    enabled: true
+    max-cps: 16
+    fast-path:
+      enabled: true
+      simulate-crits: false
+  knockback:
+    enabled: true
+    base:
+      horizontal: 0.42
+      vertical: 0.36
+    modifiers:
+      sprint: 1.5
+      combos: false
+  latency-compensation:
+    enabled: false
+    ping-offset-ms: 40
+  fishing-knockback:
+    enabled: true
+    reel-in: cancel
+anticheat:
+  mode: force-safe
+  known: [GrimAC]
+debug:
+  enabled: true

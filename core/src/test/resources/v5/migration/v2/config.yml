@@ -1,0 +1,8 @@
+# A v2 split-layout config.yml: flat module toggles, config-version stamped 2.
+config-version: 2
+modules:
+  knockback: true
+  hit-registration: true
+  latency-compensation: true
+anticheat:
+  mode: auto
