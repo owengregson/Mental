@@ -27,6 +27,7 @@ import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
@@ -157,6 +158,21 @@ public final class FakePlayer {
         // Bukkit teleport afterwards is the authoritative way to take them
         // to the requested location on every version.
         bukkitPlayer.teleport(location);
+
+        // placeNewPlayer fires PlayerJoinEvent itself; the direct-registration
+        // fallback (older servers where placeNewPlayer misses — 1.17.x) does not.
+        // Join-driven plugins set up per-player state on that event — Mental v5
+        // creates the player's combat session there — so announce the join on the
+        // fallback path, mirroring remove()'s explicit PlayerQuitEvent. Guarded
+        // like remove(): a version needing a Component message must not abort spawn.
+        if (!placedViaPlayerList) {
+            try {
+                Bukkit.getPluginManager().callEvent(
+                        new PlayerJoinEvent(bukkitPlayer, name + " joined the game"));
+            } catch (Throwable ignored) {
+                // Direct join listeners still ran on the versions that accept this ctor.
+            }
+        }
 
         this.tickTask = scheduling.repeatOn(bukkitPlayer, 1L, 1L, this::tickServerPlayer, () -> {});
     }
