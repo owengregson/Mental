@@ -122,3 +122,130 @@ logged-skip if drivable, else document).
 Full `./gradlew build` + sequential matrix (all entries incl. Folia) + OCM run +
 japicmp, all through the new support-matrix plumbing, all fresh (nonce-verified),
 evidence pasted. Append "Phase 5 outcomes" to this plan; push.
+
+---
+
+## Phase 5 run A outcomes (2026-07-02)
+
+Tasks 5.0–5.2 landed on `rewrite/v5` (from `ab5c75a`). Three conventional
+commits, one per task; both regression gates (module move, manifest rewiring)
+verified with FRESH sequential-matrix PASS evidence.
+
+Commits: `fe5ce5b` refactor(platform) — dissolve common (5.0); `4eced36`
+test(platform) — Scheduling TCK + retired-callback contract (5.1); `1c66d61`
+feat(platform) — PlatformProfile manifest R10/B10 (5.2).
+
+### Task 5.0 — the `platform` module (dissolve `common`)
+
+A pure MOVE (package renames only, byte-identical behaviour). New Gradle module
+`:platform` (compileOnly Paper 1.17.1, `api(project(":kernel"))`). Moved in:
+`common/scheduling/*` (Scheduling, TaskHandle), `common/platform/*`
+(Capabilities, ServerEnvironment) → flat `me.vexmc.mental.platform`;
+`common/debug/*` (DebugLog, DebugCategory) → `me.vexmc.mental.platform.debug`;
+core's `platform/{Attributes, Enchantments, SchedulingFactory, BukkitScheduling,
+EffectiveMaterial}` (+ AttributesTest, EffectiveMaterialTest) — package
+unchanged, module changed; SchedulingFactory/BukkitScheduling dropped their
+now-same-package `common.*` imports. `:common` deleted from settings, its build
+script removed. `core` swapped `api(project(":common"))` → `api(project(
+":platform"))` (platform re-exports kernel; both shade into `Mental.jar`);
+`tester` and `compat-folia` retargeted their compileOnly project dep;
+FoliaScheduling's imports moved to `me.vexmc.mental.platform.*`. 51 files, all
+consumer imports rewritten (no `me.vexmc.mental.common.*` reference — import,
+FQN, or javadoc — remains). **Deviation from spec §14's porting map:**
+EffectiveMaterial was moved WHOLE into `:platform` per Task 5.0's explicit list,
+not split into a kernel-pure `resolve` + core PDC shell; that split is a rewrite,
+out of scope for a pure move, and is left for a later task.
+
+Gate: `./gradlew build` GREEN. `Mental-2.2.2.jar`: `grep -c
+'me/vexmc/mental/common'` = **0**, `grep -c 'me/vexmc/mental/platform'` = **16**
+(the relocated classes; the `v5/platform` adapters are a distinct path).
+Sequential `integrationTestMatrix` — all seven versions FRESH PASS
+(test-results.txt mtimes 02:49:32 → 02:57:59, each `PASS`, zero test-failures
+files), `BUILD SUCCESSFUL in 9m 44s`.
+
+### Task 5.1 — Scheduling TCK
+
+The retired-callback thread+timing contract was written into the `Scheduling`
+interface javadoc FIRST (the honest common denominator: retired may fire on
+either thread, MUST fire exactly once, no thread-affinity assumption — the two
+backends' historical divergence stated, then reduced to the testable invariant).
+`SchedulingTck` is a backend-agnostic abstract suite published as a **test
+fixture** (`:platform` gains `java-test-fixtures`); it is tick-driven (no
+wall-clock waits) via abstract driver hooks. Five cases — runOn/valid runs on the
+owning thread and never retires; runOn/retired fires retired exactly once and
+never re-fires; repeatOn stops after handle cancel; repeatGlobal fires
+periodically until cancelled; runAsync runs off the owning thread. Run against
+`BukkitScheduling` with a stubbed `BukkitScheduler` (`BukkitSchedulingTckTest`: a
+single-threaded "main" executor the tick hook advances, a separate async thread,
+and dynamic-proxy fake entities/scheduler) — **tests=5, failures=0**. Full
+platform suite green (21 cases across the module).
+
+**Honest limit (as planned):** FoliaScheduling gets compile-level coverage only
+this run — it implements the same `Scheduling` interface the TCK targets and
+builds clean against `:platform`; its LIVE conformance run is Task 5.6's Folia
+matrix entry (another run). The fixture is already published so 5.6 can extend it
+without moving the suite.
+
+### Task 5.2 — the PlatformProfile manifest (R10/B10)
+
+`PlatformProfile` is the single boot-time resolution owner, built once at enable
+from a manifest of typed `ManifestEntry`s (sealed: `Required<T>` /
+`OptionalSince<T>`). It wraps the EXISTING probing techniques — it does not
+re-derive them: the Attributes/Enchantments modern-then-legacy name-probes are
+the entry resolvers; the three v5 adapters + the max_damage accessors become
+manifest consumers (the retired `PlatformProbe` is deleted, its
+`effectiveMaxDurability` moved onto the profile). A Required miss disables ONLY
+its owning `Feature` (one loud log) or — engine-critical — fails the boot; an
+OptionalSince absence yields the declared fallback. The profile is handed to the
+`Reconciler` as a platform veto (backward-compatible new constructor) and emits
+ONE boot-report line. Unit tests (`PlatformProfileTest`, 4 cases): Required-miss
+disables owner only; engine-critical miss throws; OptionalSince absence yields
+the fallback; every entry is self-describing (name/since/fallback, no magic
+literal) and the report is one line.
+
+**Bare-nullable resolution-site audit — routed through manifest entries** (25
+entries; the profile is now their single owner + boot report + disable authority):
+
+| Prior bare-nullable / raw resolution site | Manifest entry |
+| --- | --- |
+| `Attributes.attackDamage/attackSpeed/knockbackResistance/maxHealth/armor/armorToughness` (6 static `resolve`) | `attribute:*` **Required** (owners HIT_REGISTRATION / ATTACK_COOLDOWN / KNOCKBACK / REGEN / ARMOUR_STRENGTH ×2) |
+| `Attributes.gravity`, `Attributes.entityInteractionRange` (2 static `resolve`, absent < 1.20.5) | `attribute:gravity`, `attribute:entity_interaction_range` **OptionalSince 1.20.5** |
+| `Enchantments.sharpness/punch/knockback/protection/fireProtection/featherFalling/blastProtection/projectileProtection/unbreaking` (9) | `enchant:*` **Required** (owners HIT_REGISTRATION / PROJECTILE_KNOCKBACK / KNOCKBACK / ARMOUR_STRENGTH ×5 / TOOL_DURABILITY) |
+| `MentalPluginV5` `environment.isAtLeast(1,19,4)` modernProtocol | `capability:hurt_animation_bundle` **OptionalSince 1.19.4** (read via `profile.modernHurtProtocol()`) |
+| `Capabilities.knockbackEvent` | `capability:knockback_event` **OptionalSince 1.20.6** |
+| `PlatformProbe` `@Nullable Method hasMaxDamage/getMaxDamage` | `component:max_damage` **OptionalSince 1.20.5** (+ `effectiveMaxDurability` on the profile) |
+| `SwordBlockAdapter` tier probe | `component:sword_block` **OptionalSince 1.21.0** |
+| `WeaponTooltipAdapter` path probe (gained `supported()`) | `component:weapon_tooltip` **OptionalSince 1.20.5** |
+| `AttackRangeAdapter` support probe | `component:attack_range` **OptionalSince 1.21.5** |
+| (newly declared) projectile-KB restored, join-protection layout | `flag:projectile_kb_restored`, `marker:join_protection_layout` **OptionalSince 1.21.2** |
+
+**Scope note (deliberate):** the `Attributes`/`Enchantments` static accessors
+are KEPT as the plan-sanctioned resolution TECHNIQUE the entries call; the ~30
+hot-path READ sites (DamageShaper, SessionService, EntityStates,
+ArmourStrengthUnit's enum-constant static-init, RegenUnit, EraReachAttribute,
+AttackChargeReset, the tester suites, …) still call them and are unchanged —
+rerouting sacred combat reads (several of them static-init that cannot take an
+instance) would risk the era-byte-identical invariant for no behavioural gain.
+The manifest OWNS these resolutions (declares each as a typed entry, drives the
+boot report + feature-disable); it does not force a read-site rewrite. This is
+the "restructure ownership, do not re-derive" reading of the task.
+
+Gate: full `./gradlew build` GREEN (PlatformProfileTest 4/4; ReconcilerTest
+still 6/6 on the new veto constructor). Sequential `integrationTestMatrix` — all
+seven versions FRESH PASS (test-results.txt mtimes 03:17:33 → 03:25:47, each
+`PASS`, zero test-failures files), `BUILD SUCCESSFUL in 9m 31s`. Live boot line:
+`platform profile — 16/25 handles resolved; sword-block=NONE
+attack-range=attribute-only max-damage=material hurt-protocol=legacy; features
+disabled: none` on the 1.17.1 floor; `25/25 … sword-block=BLOCKS_ATTACKS
+attack-range=component max-damage=component hurt-protocol=modern; features
+disabled: none` on the 26.1.2 ceiling.
+
+### Kernel / suite discipline
+
+Kernel untouched (additive-only honoured — no kernel edits this run). Suite
+VALUES sacred: no `test-results` expectation changed; the module move and the
+manifest rewiring are both behaviour-preserving, proven by two independent FRESH
+matrix passes. No OCM run this cycle (not a 5.0–5.2 gate requirement; the OCM
+staging is Task 5.4). Remaining Phase-5 work: 5.3 support-matrix.json + nonce,
+5.4 OCM staging, 5.5 japicmp, 5.6 Folia entry (the TCK's live half), 5.7 phase
+gate.
