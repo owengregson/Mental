@@ -185,6 +185,18 @@ per-hit answers come from `CompensationQuery`); `WtapRegistrationUnit` (enables
 `SprintWire` consult in the fast path). All are pure vector computers — the desk
 alone applies and records.
 
+> **GATE AMENDMENT (2026-07-01, after the first 4A2 run):** the 7-server concurrent
+> `scripts/integration-matrix.sh` FAILS on this host for the OLD plugin (host
+> starvation: 4 FAIL / 3 PASS concurrent, PASS in isolation). Local live gates for
+> the rest of Phase 4 therefore use the SEQUENTIAL chain
+> `./gradlew integrationTestMatrix` (one server at a time); the concurrent script
+> remains valid on beefier hosts/CI. Additionally, three small 4E seams are pulled
+> forward into 4A2.2 because every live gate needs them: the minimal `mental
+> reload` command executor, the v5 `Mental` facade registration (`apiVersion()=2`,
+> ServicesManager + static holder), and the global-profile management seam
+> (overlay `knockback.profile` write + reloadAll + `KnockbackProfileChangeEvent`,
+> API shape verbatim).
+
 ### Task 4A2.2: Tester adaptation + THE SWAP + 4A2 gate
 Trim the tester suite list to `{Boot, Knockback, Profile, Fishing, Projectile,
 EraParity, Reload, ZeroTouch}` (edit `MentalTesterPlugin`'s selection; delist suites
