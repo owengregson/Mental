@@ -77,7 +77,7 @@ public record SprintVerdict(boolean sprinting, Boolean fresh, TickStamp at) {}
 public interface TickClock { TickStamp current(); }
 ```
 
-- [ ] Write `TickStampTest`: NO_TICK is not `known()`; `recentAt` false when either
+- [x] Write `TickStampTest`: NO_TICK is not `known()`; `recentAt` false when either
   side unknown; true at distance 0 and 4, false at 5 and for future stamps
   (now < this). Run (fails: classes missing) → implement → run PASS → commit
   `feat(kernel): add tick/identity primitives for the delivery core`.
@@ -129,7 +129,7 @@ public final class MotionLedger {
    mandate §4.3 says dead after 60: **read the old `VictimMotion` source; whichever
    value its tests pin is the truth to carry** — report which in the commit body).
 
-- [ ] Port/write tests → fail → implement (delegate the decay math to `Decay`) →
+- [x] Port/write tests → fail → implement (delegate the decay math to `Decay`) →
   PASS → commit `feat(kernel): single-writer motion ledger over the decay authority`.
 
 ### Task 2.2: GroundFsm + SprintWire — the connection-domain observers
@@ -199,7 +199,7 @@ exist — `grep -rl "GroundTransitionWatcher\|SprintTracker" core/src/test` firs
    ≥3 ticks old or absent; a fresh wire STOP is never overwritten by a stale-high
    server flag.
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(kernel): connection-domain ground and sprint observers`.
 
 ### Task 2.3: HitContext + HitTransaction state machine
@@ -246,7 +246,7 @@ public final class HitTransaction {
 `PINNED` can never reach a state that arms a valve (asserted by the desk in 2.4, but
 pin here that `carried()` on PINNED is flagged `wireCarried() == false`).
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(kernel): the hit transaction state machine`.
 
 ### Task 2.4: DeliveryDesk decision core + journal + valve payloads
@@ -345,7 +345,7 @@ sprint+KB II `(1.9, 0.4607)` — the same constants
 `KnockbackEngineTest` pins, now proven through the desk path. (Build the
 `EntityState` fixtures exactly as `KnockbackEngineTest` does — copy its helpers.)
 
-- [ ] Tests (every numbered semantic + the four canonical pins) → fail → implement
+- [x] Tests (every numbered semantic + the four canonical pins) → fail → implement
   → PASS → commit `feat(kernel): the delivery desk — single-owner resolution with journal and valve payloads`.
 
 ### Task 2.5: PlayerView publication + CompensationQuery
@@ -399,7 +399,7 @@ public final class CompensationQuery {
   order — see the Phase 1 outcomes note in the master plan). Port the double-hit
   guard: no correction when `noDamageTicks > 8`.
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(kernel): the per-tick player view and stateless compensation query`.
 
 ### Task 2.6: The interleaving harness + scripted scenarios
@@ -437,7 +437,7 @@ It owns: a settable `TickClock`, per-player inboxes
    valve; journal carries the modified value.
 6. **Pinned victim:** PINNED tx resolves SHIP, no valve, journal `wireCarried=false`.
 
-- [ ] Scenarios → fail → implement harness → PASS → commit
+- [x] Scenarios → fail → implement harness → PASS → commit
   `test(kernel): deterministic interleaving harness for the delivery core`.
 
 ### Task 2.7: Core shells (unwired) — TickClock impls, valve listener, session scaffold
@@ -472,13 +472,38 @@ It owns: a settable `TickClock`, per-player inboxes
   order (events applied before decay, publish after — assert via a scripted
   sequence that reproduces interleaving scenario 1's view timing).
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(core): unwired v5 shells — tick clocks, velocity valve, session scaffold`.
 
 ### Task 2.8: Phase gate (orchestrator)
 
-- [ ] `./gradlew build` green (old modules untouched — verify with
+- [x] `./gradlew build` green (old modules untouched — verify with
   `git diff --stat <phase-start>..HEAD -- . ':!kernel' ':!core/src/main/java/me/vexmc/mental/v5' ':!core/src/test/java/me/vexmc/mental/v5' ':!docs'`
   showing nothing).
-- [ ] Canonical pins reproduce through the desk (Task 2.4 acceptance tests green).
-- [ ] Push; record outcomes in this file.
+- [x] Canonical pins reproduce through the desk (Task 2.4 acceptance tests green).
+- [x] Push; record outcomes in this file.
+
+## Phase 2 outcomes (gate verified 2026-07-01)
+
+Complete: 8 commits (`c7f4eeb`…`2ad1bd2`), 80 new tests green, full build green,
+diff-scope clean (the single allowed deviation: `core/build.gradle.kts` gains
+`implementation(project(":kernel"))`, per the spec §1 module table). Facts later
+phases must carry:
+
+- **Canonical bonus vertical is engine-exact `0.4608`** (= 0.3608 + 0.1); the
+  mandate's "0.4607" is the same value after wire short quantization
+  ((short)(0.4608×8000) = 3686 → 0.46075). Desk/journal pins assert 0.4608;
+  wire-level measurements assert the quantized short. Not a discrepancy.
+- **Ledger dead-after stays 200 ticks** (test-pinned); the mandate prose says 60,
+  but the constant is feel-invisible (0.91^60 ≈ 0.0035 with a 0.005 rest
+  threshold) — the era-parity suite must confirm invisibility in Phase 5.
+- `recordLanding` seeds vertical to grounded equilibrium and PRESERVES the decayed
+  horizontal (era pin `0.9×0.91^10` requires it); the landed block's slip arrives
+  with the next knock's `record()`.
+- `GroundFsm` emits `Liftoff(equilibrium)` for non-rising grounded→airborne steps
+  (the old watcher's rising=false path); Jump Boost "present" is amplifier ≥ 0
+  with a negative sentinel for absent.
+- `DeliveryDesk.awaitVelocityEvent` never resurrects a withdrawn decision; both
+  submit→await and await→submit orders are legal.
+- Scenario-1 boundary pin: declining vertical ≈ 0.2492 (flightVy×0.5 + 0.4) vs
+  the grounded 0.3608 re-stamp — asserted via the journal only.
