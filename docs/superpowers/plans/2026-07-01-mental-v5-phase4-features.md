@@ -334,3 +334,67 @@ on a boot-probed `v5/platform/PlatformProbe`; `c6dc65b` `SwordBlockingUnit` +
   folds into `SwordBlockingUnit` (one `SWORD_BLOCKING` descriptor; the modern-shield
   full-block cancel already lives in `KnockbackUnit`). No kernel change beyond none needed;
   no suite VALUE changed.
+
+## Sub-phase 4C outcomes (2026-07-02)
+
+**The cadence + sustain families are live.** All seven CADENCE/SUSTAIN features are on
+the v5 seams and the `Consumable` (ConsumableRules) + `CosmeticSmoke` suites are back in
+the list. Gate GREEN: `./gradlew build` + the SEQUENTIAL `integrationTestMatrix` (gate
+amendment) — all 7 versions FRESH PASS (result files rewritten 01:19:36 → 01:27:31 on
+2026-07-02, each `run/<v>/plugins/MentalTester/test-results.txt` = `PASS`, current clock
+01:27:47; 39/39 cases each, up from 4B's 31/31 — +4 ConsumableRules, +4 CosmeticSmoke).
+Matrix wall time 9m 10s.
+
+Commits (in order): `a460eb3` AttackCooldown complete contract (server rule + client
+spoof + tooltip hider + sweep re-disable, one scope) + `WeaponTooltipAdapter` on
+`PlatformProbe` + the split-brain unit test; `5bdec04` `AttackSoundsUnit` + `SweepUnit`
+(shared sweep helpers); `df17017` `GoldenApplesUnit`/`EnderPearlCooldownUnit`/`RegenUnit`/
+`PotionDurationsUnit`; `12cd166` tester restore + re-plumb.
+
+- **AttackCooldown is ONE contract in ONE scope (B5).** All four facets live in
+  `AttackCooldownUnit`'s scope, and `AttackCooldownUnitTest` (a recording-registrar
+  split-brain guard) proves every registration — crucially the three packet halves
+  (spoof, tooltip, sweep-particle) — dies on `scope.close()`; the split-brain class is
+  structurally dead. (a) server rule = `AttackChargeReset` (the `ServerAttackSpeed` port):
+  raises the `attack_speed` base so the vanilla `Player#attack` charge meter always reads
+  full-charge, sanitized capture/restore, applied on enable + join/respawn/world-change,
+  restored on quit + scope close. The fast path already defeats the meter by BYPASSING
+  `Player#attack` (verified 4B — `DamageShaper` composes off the attribute base with no
+  cooldown term); that bypass is the "fast-path already resets" seam. (b) spoof =
+  `CooldownSpoofListener` mutating only packet-local wrapper properties (B10), keyed by
+  the PacketEvents `Attributes.ATTACK_SPEED` IDENTITY (never a string — verified on 1.21.4,
+  the wire-key-rename version, PASS). (c) tooltip hider = `CooldownTooltipListener` via the
+  boot-probed `WeaponTooltipAdapter` on `PlatformProbe` (packet-local item copies, two
+  reflective paths, loud-fail once at boot when neither resolves). (d) sweep re-disable =
+  `SweepDamageListener` + `SweepParticleListener` (a full charge satisfies the `scale>0.9`
+  sweep gate on the vanilla path).
+- **B13 terminal-event application.** `GoldenApplesUnit` applies the kernel era tables to
+  the actual entity on a +1-tick `runOnLater` off the confirmed consume (napple recipe =
+  8 gold BLOCKS, registered/removed with the scope). `PotionDurationsUnit` rewrites to the
+  kernel era duration at the CONFIRMED terminal — the consumed item on drink, the ALREADY
+  thrown `ThrownPotion` entity on splash/lingering (`ProjectileLaunchEvent`, covering a
+  player throw AND a dispenser) — never a speculative hand mutation, so a cancelled
+  right-click cannot corrupt inventory. `RegenUnit` cancels the 1.9 SATIATED event and
+  drives the 1.8 cadence with a per-player `repeatOn` (kernel `RegenMath`, never a global
+  loop); `EnderPearlCooldownUnit` clears the 1.9 throw cooldown at launch. Era values come
+  from the kernel (`GoldenAppleEffects`/`PotionDurations`/`RegenMath`) — no local tables.
+  `PotionValues` (4B) verified: `fastPathDamage` HANDLED, others NONE — left unchanged.
+- **Suites re-plumbed, VALUES unchanged.** Both suites route toggles through
+  `management().setModuleEnabled(Feature, …)` and read `featureActive`; the same
+  decompile-cited asserts (notch amplifiers Regen V / Resistance I / Fire-Res I; Strength
+  drink lengthened past the modern 1800t ceiling; SATIATED cancel; the attack_speed base
+  raised to 1024 on enable + restored on disable). No measurement exception was needed —
+  keeping the attribute-raise mechanism means the CosmeticSmoke server-base assertion is
+  still the correct measurement of the v5 behavior.
+- **Deviations:** (1) B5(a) "reset the vanilla attack-charge meter" is realized as the
+  attribute-RAISE (`AttackChargeReset`, the `ServerAttackSpeed` behavior contract), not a
+  per-hit `resetAttackStrengthTicker`: resetting the ticker yields scale 0 (weakest hit),
+  the opposite of era truth, whereas raising the base makes the meter always clamp to
+  scale 1.0 — the era-faithful full-damage reconstruction that also reproduces vanilla's
+  differently-scaled enchant delta (unscaling after the fact cannot). The fast path's
+  `Player#attack` bypass is the parallel "reset" on that path. This matches the behavior
+  contract and the existing CosmeticSmoke measurement, so no suite VALUE changed.
+  (2) `PotionDurationsUnit` moved the splash/lingering rewrite off the retired module's
+  speculative `PlayerInteractEvent` onto `ProjectileLaunchEvent` on the actual thrown
+  entity (B13). Kernel change: none (additive-only honoured; no pin edits). No suite VALUE
+  changed.
