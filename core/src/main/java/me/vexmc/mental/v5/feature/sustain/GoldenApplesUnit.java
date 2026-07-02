@@ -51,6 +51,15 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
     /** {@code PotionEffectType.getByKey(NamespacedKey)} (Paper 1.20.5+); null on older builds. */
     private static final @Nullable Method GET_BY_KEY;
 
+    /**
+     * The enchanted-golden-apple material, resolved by NAME so the reference never hard-links to the
+     * {@code Material.ENCHANTED_GOLDEN_APPLE} enum constant — that constant is absent below 1.13 (the
+     * flattening), where a direct reference is a {@code NoSuchFieldError} at execution. {@code null}
+     * pre-1.13, which gates the whole feature off there (the data-value gapple + legacy recipe path is
+     * Phase 3; this phase only guarantees classload/boot safety).
+     */
+    private static final @Nullable Material ENCHANTED_GOLDEN_APPLE = Material.getMaterial("ENCHANTED_GOLDEN_APPLE");
+
     static {
         Method m = null;
         try {
@@ -63,12 +72,13 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
 
     private final Plugin plugin;
     private final Scheduling scheduling;
-    private final NamespacedKey nappleKey;
+
+    /** The notch-apple recipe key — built in {@link #assemble} (1.13+ only; NamespacedKey is absent pre-1.12). */
+    private @Nullable NamespacedKey nappleKey;
 
     public GoldenApplesUnit(@NotNull Plugin plugin, @NotNull Scheduling scheduling) {
         this.plugin = plugin;
         this.scheduling = scheduling;
-        this.nappleKey = new NamespacedKey(plugin, "enchanted_golden_apple");
     }
 
     @Override
@@ -78,6 +88,16 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
 
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
+        if (ENCHANTED_GOLDEN_APPLE == null) {
+            // Pre-1.13: the enchanted gapple is the data-value item GOLDEN_APPLE:1 and the notch-apple
+            // recipe needs the legacy (non-keyed) ShapedRecipe ctor — both are Phase 3 correctness work.
+            // Refuse to enable here with a loud line rather than register a broken recipe / crash.
+            plugin.getLogger().warning("golden-apples: disabled — the enchanted golden apple is a "
+                    + "pre-flattening data-value item on this server (< 1.13); era gapple support "
+                    + "arrives in a later backport phase.");
+            return;
+        }
+        this.nappleKey = new NamespacedKey(plugin, "enchanted_golden_apple");
         scope.listen(this);
         scope.task(() -> {
             registerNappleRecipe();
@@ -92,7 +112,7 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
             return; // already registered (rapid reload) — leave it
         }
         try {
-            ShapedRecipe recipe = new ShapedRecipe(nappleKey, new ItemStack(Material.ENCHANTED_GOLDEN_APPLE));
+            ShapedRecipe recipe = new ShapedRecipe(nappleKey, new ItemStack(ENCHANTED_GOLDEN_APPLE));
             recipe.shape("ggg", "gag", "ggg");
             recipe.setIngredient('g', Material.GOLD_BLOCK);
             recipe.setIngredient('a', Material.APPLE);
@@ -107,11 +127,11 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onConsume(@NotNull PlayerItemConsumeEvent event) {
         Material type = event.getItem().getType();
-        if (type != Material.GOLDEN_APPLE && type != Material.ENCHANTED_GOLDEN_APPLE) {
+        if (type != Material.GOLDEN_APPLE && type != ENCHANTED_GOLDEN_APPLE) {
             return;
         }
         Player player = event.getPlayer();
-        List<EffectSpec> specs = (type == Material.ENCHANTED_GOLDEN_APPLE)
+        List<EffectSpec> specs = (type == ENCHANTED_GOLDEN_APPLE)
                 ? GoldenAppleEffects.notchApple()
                 : GoldenAppleEffects.normalApple();
         // +1 tick: vanilla applies the modern component-food effects AFTER the

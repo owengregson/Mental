@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import me.vexmc.mental.platform.Capabilities;
+import me.vexmc.mental.platform.PersistentData;
+import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
@@ -170,6 +172,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.platformProfile = PlatformProfile.resolve(
                 environment, capabilities, message -> getLogger().warning(message));
         getLogger().info(platformProfile.bootReport());
+        // No silent degradation (mandate B10): one loud line covers every PDC consumer at once when the
+        // PersistentDataContainer API is absent (< 1.14). The effective-material marker becomes unreadable
+        // (items resolve to their own type) and the temporary-shield tag + arrow-punch stamp ride in-memory
+        // state instead of item NBT — documented, lifecycle-equivalent fallbacks, never a crash.
+        if (!PersistentData.supported()) {
+            getLogger().warning("persistent-data-container ABSENT (server < 1.14) — combat:effective_material "
+                    + "reads degrade to the item's own type; the temporary-shield marker and arrow-punch "
+                    + "stamp use in-memory fallbacks (no item NBT). See docs/effective-material-contract.md.");
+        }
         this.scheduling = SchedulingFactory.create(this, capabilities);
 
         // Config: extract the bundled defaults (a fresh install is a v2 tree),
@@ -311,7 +322,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         }
 
         getLogger().info(() -> "Mental v5 enabled — server " + environment.describe()
-                + ", scheduling=" + scheduling.describe() + ", " + capabilities.describe());
+                + ", scheduling=" + scheduling.describe() + ", ping=" + Pings.describe()
+                + ", " + capabilities.describe());
     }
 
     @Override

@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
+import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -84,13 +85,25 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
 
     private record Flight(Vector velocity, long stampNanos) {}
 
+    /** Pre-1.14 in-memory arrow-punch stamp (level + flight-start nanos for the staleness sweep). */
+    private record PunchStamp(int level, long stampNanos) {}
+
     private final SessionService sessions;
     private final OcmBinding ocmBinding;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
     private final HitIds ids;
     private final TickClock clock;
-    private final NamespacedKey punchKey;
+
+    /**
+     * The PDC key the bow's Punch level is stamped onto the arrow with — {@code null} below Bukkit 1.14
+     * (no PersistentDataContainer, and {@link NamespacedKey} itself is absent below 1.12). Without it the
+     * level rides in {@link #arrowPunch}: stamped on the shot, read+evicted on the hit, swept by staleness
+     * exactly as {@link #arrowFlight} is (the boot log in the plugin announces the fallback).
+     */
+    private final @Nullable NamespacedKey punchKey;
+
+    private final ConcurrentHashMap<UUID, PunchStamp> arrowPunch = new ConcurrentHashMap<>();
 
     /**
      * True on 1.21.2+ where vanilla restored projectile-KB-vs-players (mandate
@@ -112,7 +125,10 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         this.snapshot = snapshot;
         this.ids = ids;
         this.clock = clock;
-        this.punchKey = new NamespacedKey(plugin, "punch-level");
+        // NamespacedKey is a 1.12 API and PDC a 1.14 one; construct the stamp key only where PDC is
+        // present, else the level rides the in-memory arrowPunch map (see punchKey doc). This unit is
+        // ALWAYS-ON, so an unconditional NamespacedKey here would break the boot outright below 1.12.
+        this.punchKey = PersistentData.supported() ? new NamespacedKey(plugin, "punch-level") : null;
         this.projectileKnockbackRestored = projectileKnockbackRestored;
     }
 
@@ -159,8 +175,17 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         ItemStack bow = event.getBow();
         Enchantment punch = Enchantments.punch();
         int level = bow == null || punch == null ? 0 : bow.getEnchantmentLevel(punch);
-        if (level > 0) {
+        if (level <= 0) {
+            return;
+        }
+        if (punchKey != null) {
             arrow.getPersistentDataContainer().set(punchKey, PersistentDataType.INTEGER, level);
+        } else {
+            long now = System.nanoTime();
+            if (arrowPunch.size() > FLIGHT_SWEEP_THRESHOLD) {
+                arrowPunch.values().removeIf(stamp -> now - stamp.stampNanos() > FLIGHT_STALE_NANOS);
+            }
+            arrowPunch.put(arrow.getUniqueId(), new PunchStamp(level, now));
         }
     }
 
@@ -280,6 +305,7 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         }
         if (event.getDamager() instanceof AbstractArrow arrow) {
             arrowFlight.remove(arrow.getUniqueId());
+            arrowPunch.remove(arrow.getUniqueId());
         }
         CombatSession session = sessions.sessionFor(victim.getUniqueId());
         if (session != null) {
@@ -339,8 +365,12 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     }
 
     private int punchLevel(AbstractArrow arrow) {
-        Integer stamped = arrow.getPersistentDataContainer().get(punchKey, PersistentDataType.INTEGER);
-        return stamped != null ? stamped : 0;
+        if (punchKey != null) {
+            Integer stamped = arrow.getPersistentDataContainer().get(punchKey, PersistentDataType.INTEGER);
+            return stamped != null ? stamped : 0;
+        }
+        PunchStamp stamp = arrowPunch.remove(arrow.getUniqueId());
+        return stamp != null ? stamp.level() : 0;
     }
 
     private static boolean isThrown(Object entity) {

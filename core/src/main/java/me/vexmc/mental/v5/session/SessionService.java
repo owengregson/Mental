@@ -19,6 +19,7 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.GroundFsm;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.coexist.OcmBinding;
@@ -297,7 +298,7 @@ public final class SessionService implements Listener, SessionAccess {
                 gravity, Decay.JUMP_IMPULSE, jumpBoostAmplifier(player),
                 player.isSprinting(), player.getGameMode() == GameMode.CREATIVE, player.getWorld().getPVP(),
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
-                knockbackResistance, ocmOwnsMelee, profile, player.getPing(), kinematics);
+                knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics);
     }
 
     private static String blockUnderFeet(Player player, Location location) {
