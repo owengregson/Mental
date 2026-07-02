@@ -19,6 +19,7 @@ import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.BlockFace;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
@@ -57,7 +58,88 @@ public final class BlockingSuite {
                 new TestCase("block: right-click with a sword enters the blocking state", context ->
                         runEnterBlock(mental, tester, context)),
                 new TestCase("block: a blocked hit takes 1.8 (dmg-1)*0.5 and still knocks full", context ->
-                        runBlockedReduction(mental, tester, context)));
+                        runBlockedReduction(mental, tester, context)),
+                new TestCase("block: the off-hand shield decoration reverts on an exit trigger (B12)", context ->
+                        runOffhandRevert(mental, tester, context)));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Case 3 — B12: the off-hand temp shield reverts on an exit trigger  */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * B12 guaranteed revert on the off-hand tier (≤1.20.6): a right-click injects
+     * a PDC-marked temp shield into the off-hand, and an exit trigger must restore
+     * the original item — nothing sticks. This is the live half of the
+     * {@code EphemeralDecoration} proof: the temp-shield PDC and the inventory
+     * writes need a real server, so the unit test pins only the never-stuck
+     * orchestration. On the component tiers (1.21+) no off-hand shield is
+     * injected, so this note-SKIPs when the injection did not take (which also
+     * covers a clientless staging gap).
+     */
+    private static void runOffhandRevert(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer blocker = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            toggleModule(context, "sword-blocking", true);
+            context.expect(moduleActive(mental, "sword-blocking"),
+                    "sword-blocking module failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                blocker.spawn(Arena.offset(centre, 5, -2));
+                blocker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+                blocker.player().getInventory().setItemInOffHand(new ItemStack(Material.AIR));
+            });
+            context.awaitTicks(5);
+
+            // Right-click the sword → the off-hand tier injects the temp shield.
+            Boolean staged = context.sync(() -> {
+                try {
+                    PlayerInteractEvent event = new PlayerInteractEvent(
+                            blocker.player(),
+                            Action.RIGHT_CLICK_AIR,
+                            blocker.player().getInventory().getItemInMainHand(),
+                            null,
+                            BlockFace.SELF,
+                            EquipmentSlot.HAND);
+                    Bukkit.getPluginManager().callEvent(event);
+                    return Boolean.TRUE;
+                } catch (Throwable unsupported) {
+                    return null;
+                }
+            });
+            if (staged == null) {
+                context.note("this version cannot stage a RIGHT_CLICK_AIR interact — off-hand revert "
+                        + "covered by EphemeralDecorationTest");
+                return;
+            }
+            // Read before the ~10-tick release poll could revert it on its own.
+            context.awaitTicks(2);
+
+            boolean injected = context.sync(() ->
+                    blocker.player().getInventory().getItemInOffHand().getType() == Material.SHIELD);
+            if (!injected) {
+                context.note("no off-hand shield injected (component tier, or clientless staging gap) — the "
+                        + "off-hand revert path only runs on the off-hand tier; orchestration is unit-pinned");
+                return;
+            }
+
+            // An exit trigger — a held-slot change — must revert the off-hand.
+            context.syncRun(() -> Bukkit.getPluginManager().callEvent(
+                    new PlayerItemHeldEvent(blocker.player(), 0, 1)));
+            context.awaitTicks(2);
+
+            Material offhand = context.sync(() ->
+                    blocker.player().getInventory().getItemInOffHand().getType());
+            context.expect(offhand == Material.AIR,
+                    "the exit trigger did not revert the temp shield — off-hand is " + offhand
+                            + " (B12: nothing sticks)");
+        } finally {
+            toggleModule(context, "sword-blocking", false);
+            context.syncRun(blocker::remove);
+        }
     }
 
     /* ------------------------------------------------------------------ */
