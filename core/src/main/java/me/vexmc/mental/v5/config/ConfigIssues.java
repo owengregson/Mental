@@ -12,6 +12,11 @@ public final class ConfigIssues {
         issues.add(path + ": " + problem + " — using " + fallback);
     }
 
+    /** Records a fully self-describing issue line verbatim (already names its fallback). */
+    public void add(String issue) {
+        issues.add(issue);
+    }
+
     public List<String> all() {
         return List.copyOf(issues);
     }

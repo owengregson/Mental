@@ -15,9 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class LatencyModel {
 
-    /** Outbound keep-alive probe id base — distinctive for tracing, never required to be unique. */
-    public static final long KEEPALIVE_ID_BASE = 0x5_F1C_5_5C0_DEL;
-
     /** Outbound play-ping probe id base ('ME' in the high half of a positive int). */
     public static final int PING_ID_BASE = 0x4D45_0000;
 

@@ -135,8 +135,15 @@ public final class SnapshotParser {
 
     private static CompensationSettings parseCompensation(ConfigReader reader) {
         CompensationSettings d = CompensationSettings.DEFAULTS;
-        return new CompensationSettings(
+        // KEEPALIVE is retired — Mental measures only over the dedicated Play
+        // PING/PONG channel (F5). Selecting it falls back to PING with ONE loud
+        // config warning (surfaced through the reload issue report) rather than
+        // being silently ignored.
+        ProbeStrategy probeStrategy = ProbeStrategy.resolveEffective(
                 reader.oneOf("probe-strategy", d.probeStrategy(), ProbeStrategy.class),
+                message -> reader.issues().add("latency-compensation.yml: probe-strategy: " + message));
+        return new CompensationSettings(
+                probeStrategy,
                 reader.intAtLeast("ping-offset-ms", d.pingOffsetMillis(), 0),
                 reader.intAtLeast("spike-threshold-ms", d.spikeThresholdMillis(), 1),
                 reader.ticksAtLeast("probe-interval-ticks", d.probeIntervalTicks(), 1),

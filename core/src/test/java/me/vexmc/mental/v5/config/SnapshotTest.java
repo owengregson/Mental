@@ -140,6 +140,30 @@ class SnapshotTest {
     }
 
     @Test
+    void keepaliveProbeStrategyIsRetiredAndFallsBackToPingLoudly() throws Exception {
+        SnapshotParser.Result result = parse("", "", "", """
+                latency-compensation:
+                  probe-strategy: KEEPALIVE
+                """);
+        CompensationSettings comp = settings(result.snapshot(), Feature.LATENCY_COMPENSATION);
+        assertEquals(ProbeStrategy.PING, comp.probeStrategy(), "KEEPALIVE falls back to PING");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("KEEPALIVE probe strategy is retired; using PING"),
+                () -> "loud warning missing the retirement notice: " + result.issues().get(0));
+    }
+
+    @Test
+    void pingProbeStrategyParsesWithoutAnIssue() throws Exception {
+        SnapshotParser.Result result = parse("", "", "", """
+                latency-compensation:
+                  probe-strategy: PING
+                """);
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+        CompensationSettings comp = settings(result.snapshot(), Feature.LATENCY_COMPENSATION);
+        assertEquals(ProbeStrategy.PING, comp.probeStrategy());
+    }
+
+    @Test
     void snapshotIsImmutableAndFreshPerParse() throws Exception {
         SnapshotParser.Result first = parse("", "", "", "");
         SnapshotParser.Result second = parse("", "", "", "");
