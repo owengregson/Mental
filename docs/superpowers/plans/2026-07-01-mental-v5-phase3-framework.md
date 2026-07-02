@@ -121,7 +121,7 @@ playerDelay warning fires on any value ≠ 20 (including the default 18), the mo
 warning on the flag, one double-enable line per overlapping token, empty list when
 OCM absent.
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(kernel): total mechanic-token arbiter core and coexistence warnings`.
 
 ### Task 3.1: Core — Scope + registrations (transactional lifecycle)
@@ -167,7 +167,7 @@ public final class Scope implements AutoCloseable {
 4. Double-close is a no-op.
 5. `rule` without a token is unrepresentable (compile-time: there is no overload).
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(core): the transactional feature scope`.
 
 ### Task 3.2: Core — FeatureDescriptor registry
@@ -229,7 +229,7 @@ give them `yamlKey=null` and exclude them from the parser loop.)
    — enumeration test, fails on a new constant with missing declarations.
 4. SettingsKey identity: two features never share a key.
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(core): the enumerable feature descriptor registry`.
 
 ### Task 3.3: Core — section parsers + the typed Snapshot
@@ -292,7 +292,7 @@ default; unknown profile falls back with one warning) onto `Snapshot.profileFor`
    MentalConfigTest warn-behavior pins).
 3. Snapshot immutability: no setter surface; parser returns a fresh instance.
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(core): typed descriptor-keyed snapshot with the frozen knob surface`.
 
 ### Task 3.4: Core — ConfigStore: files, preset extraction, the overlay
@@ -320,7 +320,7 @@ default; unknown profile falls back with one warning) onto `Snapshot.profileFor`
   bundled YAML, assert the snapshot reflects both AND the main YAML files on disk
   are byte-identical to their bundled originals.
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(core): config store with sacred human files and a machine overlay`.
 
 ### Task 3.5: Core — migration chain v1→v2→v3
@@ -340,7 +340,7 @@ already-migrated tree is a no-op), and `config-version` is now READ (fixing the
 mandate §2.7 "written but never read"). Fixtures: a v1 single-file tree, a v2 tree
 (copy the current bundled layout), a v3 tree.
 
-- [ ] Tests (per step: shape before/after, backup exists, idempotence) → fail →
+- [x] Tests (per step: shape before/after, backup exists, idempotence) → fail →
   implement → PASS → commit `feat(core): explicit config-version migration chain`.
 
 ### Task 3.6: Core — Reconciler + zero-touch + arbiter binding
@@ -391,15 +391,59 @@ test class) — port the old OcmGate test pins.
 5. OcmBinding: ABSENT/BOUND/CONFIG transitions mirror the old OcmGate pins;
    `CoexistWarnings.derive` wired with real `OcmFacts` from the config scan.
 
-- [ ] Tests → fail → implement → PASS → commit
+- [x] Tests → fail → implement → PASS → commit
   `feat(core): the feature reconciler with zero-touch by construction`.
 
 ### Task 3.7: Phase gate (executor runs, orchestrator judges)
 
-- [ ] `./gradlew build` — paste last 5 lines + exit code.
-- [ ] `git diff --stat <phase3-start>..HEAD -- . ':!kernel' ':!core/src/main/java/me/vexmc/mental/v5' ':!core/src/test/java/me/vexmc/mental/v5' ':!core/src/test/resources/v5' ':!docs'` — paste output (expected empty).
-- [ ] `./gradlew :kernel:test :core:test --rerun` fresh — paste tails + the
+- [x] `./gradlew build` — paste last 5 lines + exit code.
+- [x] `git diff --stat <phase3-start>..HEAD -- . ':!kernel' ':!core/src/main/java/me/vexmc/mental/v5' ':!core/src/test/java/me/vexmc/mental/v5' ':!core/src/test/resources/v5' ':!docs'` — paste output (expected empty).
+- [x] `./gradlew :kernel:test :core:test --rerun` fresh — paste tails + the
   `<testsuite>` header lines for ProfileParserTest, ReconcilerTest, ArbiterCoreTest.
-- [ ] Paste `git log --oneline` for the phase; flip this file's checkboxes; append a
+- [x] Paste `git log --oneline` for the phase; flip this file's checkboxes; append a
   "Phase 3 outcomes" section (facts later phases must carry, incl. any ocmKey
   corrections from Task 3.0); commit; push; paste push output.
+
+## Phase 3 outcomes (gate verified 2026-07-02)
+
+Complete: 7 commits (`d47dda6`…`9eb3f48`), 70 new tests green (17 kernel-coexist
++ 53 core v5), full `./gradlew build` green (exit 0), diff-scope clean (every
+change under `kernel/` or `core/.../v5/` — the excluded-path diff is empty).
+Facts later phases (4–6) must carry:
+
+- **ocmKey corrections to the plan's guesses** (Task 3.0; the six arbitrated keys
+  matched `OcmMechanic` verbatim): `ATTACK_SOUNDS` → `disable-attack-sounds`,
+  `SWEEP` → `disable-sword-sweep` (roadmap L120); `TOOL_DURABILITY` →
+  `old-tool-damage` (OCM folds durability into `old-tool-damage`; it now shares
+  that key with the arbitrated `TOOL_DAMAGE` token); `HITBOX` → `attack-range`
+  (ground-truth §3; the alternative reading is `null` — warn-only, low risk).
+  `POTION_DURATIONS`/`POTION_VALUES` intentionally share `old-potion-effects`.
+- **Feature token ownership** (Phase 4 event handlers): `TOOL_DAMAGE` is owned by
+  `HIT_REGISTRATION` (fast-path damage), `ARROW_KNOCKBACK` + `MELEE_KNOCKBACK` by
+  `KNOCKBACK`, `CRITICAL_HITS` by `CRIT_FALLBACK`. Every arbitrated token has
+  exactly one declaring feature; every token has some owner.
+- **Settings-record shape**: v5 records live under `v5/config/settings/` and drop
+  the `enabled` field (module enablement is `Snapshot.enabled(Feature)`). Only 6
+  features carry tunables (HitReg, Compensation, FishingKnockback,
+  ProjectileKnockback, Crafting, Offhand); the other 17 + 2 infra share the empty
+  `NoSettings` (distinct `SettingsKey` identity each). `DebugSettings` keeps
+  category keys as `Set<String>` (decoupled from `common.DebugCategory`).
+- **Snapshot API notes for Phase 4/5**: `Snapshot` is built via a package-private
+  parser-owned `Builder` (no public constructor); `settings(SettingsKey<S>)` casts
+  unchecked and throws if a key was never registered (the parser registers all 25);
+  `profileFor(world)` resolves per-world → server-default → `LEGACY_17`;
+  `enabled(Feature)` returns `defaultEnabled()` for the two infra descriptors.
+- **config-version is now READ** and the bundle stays at `config-version: 2` (an
+  unmodifiable resource) → a fresh extract is a v2 tree the chain bumps to v3;
+  Phase 4 must decide the extract-vs-migrate ordering on a truly fresh install.
+- **Injected seams for testability** (Phase 4 supplies the real wiring):
+  `ConfigStore`/`Migrations` take a resource loader + log sink (the plain `(Path)`
+  ctor uses the classpath + silent log); `OcmBinding.bind` takes a
+  `Function<UUID,Object>` decider lookup (wire `Bukkit::getPlayer`) and its
+  `scanFacts` reads `attack-frequency.playerDelay` + treats `old-player-knockback`
+  reachability as the "default modeset" signal — refine when wiring the real scan.
+- **Registrar seam is unimplemented**: `Scope` routes through the `Registrar`
+  interface; Phase 4 provides the production impl (Bukkit events / PacketEvents /
+  `Scheduling`) and the token-gate consulted before each rule handler run (B14).
+- The retired `OcmGate` had **no unit tests** (only `OcmConfigScanTest`); its
+  behavioral pins were re-derived from the `handles` source onto `ArbiterCore`.
