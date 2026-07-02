@@ -47,6 +47,10 @@ import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
+import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
+import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
+import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProbe;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
@@ -424,6 +428,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new AttackCooldownUnit(scheduling, platformProbe.weaponTooltip()));
         reconciler.register(new AttackSoundsUnit());
         reconciler.register(new SweepUnit());
+
+        // The sustain family (4C). Golden apples + potion durations compute era
+        // values from the kernel and apply them at the confirmed terminal event
+        // (B13); regen drives per-player 80-tick heal tasks; the ender-pearl unit
+        // clears the 1.9 throw cooldown. All pure Bukkit + Scheduling.
+        reconciler.register(new GoldenApplesUnit(this, scheduling));
+        reconciler.register(new EnderPearlCooldownUnit(scheduling));
+        reconciler.register(new RegenUnit(scheduling));
+        reconciler.register(new PotionDurationsUnit());
     }
 
     private Snapshot parseSnapshot() {
