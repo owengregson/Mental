@@ -10,6 +10,9 @@ evaluationDependsOn(":tester")
 dependencies {
     api(project(":api"))
     api(project(":common"))
+    // v5 rewrite (spec §1): core depends on the pure kernel. Required for the
+    // Phase 2 unwired v5 shells under me.vexmc.mental.v5 to see kernel types.
+    implementation(project(":kernel"))
     compileOnly(libs.paper.api.floor)
     compileOnly(libs.jetbrains.annotations)
     implementation(libs.packetevents.spigot)
