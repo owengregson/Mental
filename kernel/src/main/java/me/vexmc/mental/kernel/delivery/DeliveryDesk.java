@@ -92,6 +92,22 @@ public final class DeliveryDesk {
         return pending == null ? null : pending.context();
     }
 
+    /**
+     * The still-live vector for exactly {@code id}, or null if that decision was
+     * already resolved (a natural velocity event shipped it), superseded, or
+     * dropped. Non-consuming — the no-natural-event fallback (rod/thrown ensure)
+     * reads it to decide whether it still needs to trigger delivery, without
+     * disturbing the decision (which it then re-submits fresh so the wire ships
+     * the full stamp rather than a physics-decayed setVelocity).
+     */
+    public KnockbackVector pendingVectorFor(HitId id) {
+        drainWire();
+        if (pending != null && pending.context().id().equals(id) && LIVE.contains(pending.state())) {
+            return vectorSubmitted ? pendingVector : pending.carried();
+        }
+        return null;
+    }
+
     /** Resolve at PlayerVelocityEvent time with the post-listener api velocity. */
     public Directive resolve(double apiX, double apiY, double apiZ) {
         drainWire();

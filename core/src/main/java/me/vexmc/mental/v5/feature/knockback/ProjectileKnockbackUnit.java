@@ -6,7 +6,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
-import me.vexmc.mental.kernel.delivery.Directive;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PunchMath;
@@ -24,7 +23,6 @@ import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.Snapshot;
-import me.vexmc.mental.v5.delivery.Deliveries;
 import me.vexmc.mental.v5.delivery.HitIds;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -261,13 +259,26 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         return new HitTransaction(context);
     }
 
+    /**
+     * Force the knock next tick when no vanilla velocity event delivered it (a
+     * snowball deals no vanilla knockback, so nothing resolves the desk). A bare
+     * {@code setVelocity} would ship the value one physics tick decayed — the
+     * tracker fires {@code PlayerVelocityEvent} only after the entity ticks — where
+     * the era wire is the FULL tracker stamp. So we re-submit fresh (stamped this
+     * tick, surviving this tick's sweep) and trigger the event: the {@code
+     * DeskRouter} overrides it to the full stamp, exactly as the melee path does.
+     */
     private void scheduleEnsure(Player victim, CombatSession session, HitTransaction tx) {
         scheduling.runOn(victim, () -> {
-            Directive directive = session.desk().ensure(tx.context().id());
-            if (directive.action() == Directive.Action.SHIP && directive.ship() != null) {
-                victim.setVelocity(Vectors.toBukkit(directive.ship()));
-                Deliveries.recordDelivered(session, tx.context().source(), directive.ship());
+            KnockbackVector base = session.desk().pendingVectorFor(tx.context().id());
+            if (base == null) {
+                return; // a vanilla velocity event already resolved (and shipped) it
             }
+            HitTransaction fresh = mint(
+                    tx.context().source(), tx.context().attackerId(), victim.getUniqueId());
+            session.desk().submit(fresh, base);
+            session.desk().awaitVelocityEvent(fresh);
+            victim.setVelocity(Vectors.toBukkit(base));
         }, () -> {});
     }
 

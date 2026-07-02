@@ -4,7 +4,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
-import me.vexmc.mental.kernel.delivery.Directive;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.EntityState;
@@ -21,7 +20,6 @@ import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.ReelInPolicy;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.Snapshot;
-import me.vexmc.mental.v5.delivery.Deliveries;
 import me.vexmc.mental.v5.delivery.HitIds;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -201,14 +199,27 @@ public final class FishingKnockbackUnit implements FeatureUnit, Listener {
         return new HitTransaction(context);
     }
 
-    /** Force the rod knock next tick if no vanilla velocity event delivered it. */
+    /**
+     * Force the rod knock next tick if no vanilla velocity event delivered it.
+     * The rod's {@code victim.damage(rodder)} normally sets hurtMarked, so a
+     * tracker velocity event fires this tick and the {@code DeskRouter} resolves
+     * it (undecayed) — this fallback then no-ops. When it IS needed, a bare
+     * {@code setVelocity} would ship the value one physics tick decayed, so we
+     * re-submit fresh (surviving this tick's sweep) and trigger a velocity event
+     * the {@code DeskRouter} overrides to the full stamp.
+     */
     private void scheduleEnsure(Player victim, CombatSession session, HitTransaction tx) {
         scheduling.runOn(victim, () -> {
-            Directive directive = session.desk().ensure(tx.context().id());
-            if (directive.action() == Directive.Action.SHIP && directive.ship() != null) {
-                victim.setVelocity(Vectors.toBukkit(directive.ship()));
-                Deliveries.recordDelivered(session, tx.context().source(), directive.ship());
+            KnockbackVector base = session.desk().pendingVectorFor(tx.context().id());
+            if (base == null) {
+                return; // a vanilla velocity event already resolved (and shipped) it
             }
+            HitTransaction fresh = new HitTransaction(new HitContext(
+                    ids.next(), tx.context().source(), tx.context().attackerId(), victim.getUniqueId(),
+                    new SprintVerdict(false, null, clock.current()), false, false, null, clock.current()));
+            session.desk().submit(fresh, base);
+            session.desk().awaitVelocityEvent(fresh);
+            victim.setVelocity(Vectors.toBukkit(base));
         }, () -> {});
     }
 
