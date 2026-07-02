@@ -121,7 +121,8 @@ public final class OcmCoexistenceSuite {
             // OCM hit fed the first victim's residual ledger, by design).
             context.syncRun(() -> OcmProbe.setModeset(attacker.player(), "new"));
             captors.reset();
-            context.expect(mental.ocmBinding().mentalOwns(MechanicToken.MELEE_KNOCKBACK, attacker.uuid()),
+            context.expect(context.sync(() -> mental.ocmBinding()
+                            .mentalOwns(MechanicToken.MELEE_KNOCKBACK, attacker.uuid())),
                     "binding must report Mental ownership for a new-modeset attacker");
 
             KnockbackVector expected = context.sync(() -> {
@@ -174,8 +175,8 @@ public final class OcmCoexistenceSuite {
             context.awaitTicks(5);
 
             // OCM owns tool damage for the default-modeset attacker (binding path).
-            context.expect(!mental.ocmBinding()
-                            .mentalOwns(MechanicToken.TOOL_DAMAGE, attacker.uuid()),
+            context.expect(context.sync(() -> !mental.ocmBinding()
+                            .mentalOwns(MechanicToken.TOOL_DAMAGE, attacker.uuid())),
                     "binding must report OCM ownership of tool damage under default OCM config");
 
             // When OCM owns, Mental hands the vanilla shape (modern diamond base
