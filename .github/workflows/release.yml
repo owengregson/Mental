@@ -148,6 +148,43 @@ jobs:
           name: release-integration-log-${{ matrix.version }}
           path: core/build/integration-test-logs/${{ matrix.version }}.log
 
+  # The Folia gate — release-only (ci: "release" in support-matrix.json). Boots
+  # a real Folia server (fetched from the Folia project on the PaperMC API by the
+  # RunServer's Folia downloads service) with Mental + the tester, which
+  # runtime-detects Folia and runs the boot suite + the Folia combat smoke (a
+  # same-region fake pair driven on their owning region threads, journal-asserted
+  # — the first live combat coverage Mental has on Folia; Task 5.6). Release-only
+  # on purpose: an extra real server per PR is too costly, and Folia's own runtime
+  # (26.x) requires JDK 25.
+  folia:
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 25 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Run the Folia integration entries
+        run: ./gradlew integrationTestFolia
+
+      - name: Upload Folia server logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-folia-logs
+          path: core/build/integration-test-logs/folia-*.log
+
   # The OldCombatMechanics coexistence gate — release-only. stageOcmJar
   # downloads the OCM release PINNED in support-matrix.json (url + sha256) and
   # verifies the hash, so the run is byte-reproducible; integrationTestOcm then
@@ -187,7 +224,7 @@ jobs:
           path: core/build/integration-test-logs/ocm-*.log
 
   release:
-    needs: [detect, unit, integration, ocm]
+    needs: [detect, unit, integration, folia, ocm]
     if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 

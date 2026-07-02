@@ -156,8 +156,15 @@ public final class FakePlayer {
 
         // The login pipeline relocates new players to the world spawn; the
         // Bukkit teleport afterwards is the authoritative way to take them
-        // to the requested location on every version.
-        bukkitPlayer.teleport(location);
+        // to the requested location on every version. Folia bans synchronous
+        // Entity#teleport (it throws "Must use teleportAsync while in region
+        // threading") — use the region-safe async form there; Paper keeps the
+        // byte-identical sync teleport the suites' timing depends on.
+        if ("folia".equals(scheduling.describe())) {
+            bukkitPlayer.teleportAsync(location);
+        } else {
+            bukkitPlayer.teleport(location);
+        }
 
         // placeNewPlayer fires PlayerJoinEvent itself; the direct-registration
         // fallback (older servers where placeNewPlayer misses — 1.17.x) does not.
@@ -177,7 +184,11 @@ public final class FakePlayer {
         this.tickTask = scheduling.repeatOn(bukkitPlayer, 1L, 1L, this::tickServerPlayer, () -> {});
     }
 
-    /** Must run on the global/main thread. */
+    /**
+     * Removes the fake player. On Paper: main thread. On Folia: the player's
+     * OWNING REGION thread (an off-region entity removal trips the tick-thread
+     * check).
+     */
     public void remove() {
         if (tickTask != null) {
             tickTask.cancel();
@@ -196,19 +207,30 @@ public final class FakePlayer {
         } catch (Throwable ignored) {
             // Stubbed connection — fall through to direct list removal.
         }
-        try {
-            Object playerList = playerList(minecraftServer());
-            Method remove = Reflect.methodAssignable(playerList.getClass(),
-                    remapMethod(playerList.getClass(), "remove", serverPlayer.getClass()),
-                    serverPlayer.getClass());
-            if (remove == null) {
-                remove = Reflect.methodAssignable(playerList.getClass(), "remove", serverPlayer.getClass());
+        // The direct reflective PlayerList.remove is the fallback for Paper, where
+        // kicking a stubbed connection may not fully deregister the player. On
+        // FOLIA it is HARMFUL: kickPlayer queues a disconnect that Folia processes
+        // in RegionizedWorldData.tickConnections, which removes the player and
+        // retires its EntityScheduler exactly once. A second direct remove here
+        // retires the scheduler again -> IllegalStateException("Already retired"),
+        // which is an uncaught region-tick failure that HARD-CRASHES the region
+        // (not catchable here — it throws on a later tick). So on Folia we let the
+        // kick's disconnect be the single removal path.
+        if (!"folia".equals(scheduling.describe())) {
+            try {
+                Object playerList = playerList(minecraftServer());
+                Method remove = Reflect.methodAssignable(playerList.getClass(),
+                        remapMethod(playerList.getClass(), "remove", serverPlayer.getClass()),
+                        serverPlayer.getClass());
+                if (remove == null) {
+                    remove = Reflect.methodAssignable(playerList.getClass(), "remove", serverPlayer.getClass());
+                }
+                if (remove != null) {
+                    remove.invoke(playerList, serverPlayer);
+                }
+            } catch (Throwable ignored) {
+                // Already removed by the kick path.
             }
-            if (remove != null) {
-                remove.invoke(playerList, serverPlayer);
-            }
-        } catch (Throwable ignored) {
-            // Already removed by the kick path.
         }
         bukkitPlayer = null;
     }

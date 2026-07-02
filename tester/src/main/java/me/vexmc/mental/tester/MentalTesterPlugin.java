@@ -12,6 +12,7 @@ import me.vexmc.mental.tester.suite.CosmeticSmokeSuite;
 import me.vexmc.mental.tester.suite.DamageRulesSuite;
 import me.vexmc.mental.tester.suite.EraParitySuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
+import me.vexmc.mental.tester.suite.FoliaCombatSmoke;
 import me.vexmc.mental.tester.suite.HitboxSuite;
 import me.vexmc.mental.tester.suite.InventoryRulesSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
@@ -26,8 +27,10 @@ import org.bukkit.plugin.java.JavaPlugin;
 /**
  * Boots inside a real server next to Mental, waits for the world to settle,
  * runs the suite, writes PASS/FAIL for the Gradle build, and shuts the
- * server down. On Folia only the boot suite runs — gameplay suites drive
- * cross-region state from a single context by design.
+ * server down. On Folia the boot suite runs plus the Folia combat smoke — a
+ * same-region pair driven entirely on their owning region threads (the
+ * Paper-shaped era suites drive cross-region state from one global context,
+ * which Folia forbids; see {@code FoliaCombatSmoke} and Task 5.6).
  *
  * <p>4E restores the FULL suite list. On a plain server the active list is
  * {@code Boot, Knockback, Profile, Fishing, Projectile, EraParity, DamageRules,
@@ -64,7 +67,12 @@ public final class MentalTesterPlugin extends JavaPlugin {
             boolean ocmInstalled = getServer().getPluginManager().getPlugin("OldCombatMechanics") != null;
             List<TestCase> suite = new ArrayList<>(BootSuite.tests(mental));
             if (mental.capabilities().folia()) {
-                getLogger().info("Folia detected — running the boot suite only.");
+                // The Paper-shaped era suites drive cross-region state from one
+                // global context, which Folia forbids; the Folia smoke instead
+                // drives a same-region pair with every action on its owning region
+                // thread and asserts the journal-recorded desk delivery (Task 5.6).
+                getLogger().info("Folia detected — running boot + the Folia combat smoke.");
+                suite.addAll(FoliaCombatSmoke.tests(mental, this));
             } else if (ocmInstalled) {
                 // With OCM present the era suites assert Mental's ownership,
                 // which OCM contests; the coexistence suite (restored in 4E)

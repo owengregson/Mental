@@ -5,6 +5,7 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
 import xyz.jpenilla.runpaper.task.RunServer
+import xyz.jpenilla.runtask.service.DownloadsAPIService
 
 plugins {
     alias(libs.plugins.shadow)
@@ -136,6 +137,7 @@ fun registerIntegrationServer(
     extraPluginJars: List<File>,
     flavour: String,
     jdk: Int,
+    platform: String = "paper",
 ): Pair<TaskProvider<RunServer>, TaskProvider<Task>> {
     val runDir = rootProject.layout.projectDirectory.dir("run/$runDirName").asFile
     val resultFile = runDir.resolve("plugins/MentalTester/test-results.txt")
@@ -152,9 +154,15 @@ fun registerIntegrationServer(
 
     val runTask = tasks.register<RunServer>("runIntegrationTest$taskSuffix") {
         group = "mental integration"
-        description = "Boots Paper $label with Mental + tester and runs the suite."
+        description = "Boots $platform $label with Mental + tester and runs the suite."
         dependsOn(tasks.shadowJar, testerShadowJar)
         runDirectory.set(runDir)
+        // Folia downloads from its own project on the PaperMC API; Paper is the
+        // RunServer default. Set the source before the version so the requested
+        // build is fetched from the right project (Task 5.6).
+        if (platform == "folia") {
+            downloadsApiService.set(DownloadsAPIService.folia(project))
+        }
         minecraftVersion(version)
         // disable.watchdog matters on slow CI runners: a >60s tick stall
         // trips the legacy watchdog, whose forced shutdown can deadlock old
@@ -251,6 +259,30 @@ paperEntries.forEach { entry ->
 }
 
 /* ────────────────────────────────────────────────────────────────────────
+ *  Folia integration entries (Task 5.6).
+ *
+ *  A Folia entry (platform: "folia") boots a real Folia server — fetched from
+ *  the Folia project on the PaperMC API by the RunServer's Folia downloads
+ *  service — with Mental + the tester. The tester runtime-detects Folia and
+ *  runs the boot suite + the Folia combat smoke (a same-region fake pair driven
+ *  on their owning region threads, journal-asserted). Chained AFTER the paper
+ *  entries so the sequential matrix never double-binds the port, and kept in a
+ *  SEPARATE list so the floor+ceiling `integrationTest` smoke stays paper-only
+ *  (its name filter would otherwise also match a Folia task on the shared
+ *  ceiling version).
+ * ──────────────────────────────────────────────────────────────────────── */
+val foliaEntries: List<SupportEntry> = supportEntries.filter { it.platform == "folia" }
+val foliaCheckTasks = mutableListOf<TaskProvider<Task>>()
+foliaEntries.forEach { entry ->
+    val suffix = "Folia_" + entry.version.replace(".", "_")
+    val (runTask, checkTask) = registerIntegrationServer(
+        suffix, entry.version, "folia/${entry.version}", emptyList(), " Folia", entry.jdk, "folia")
+    previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
+    previousCheck = checkTask
+    foliaCheckTasks.add(checkTask)
+}
+
+/* ────────────────────────────────────────────────────────────────────────
  *  OCM coexistence runs (Task 5.4: reproducible CI staging).
  *
  *  The OCM artifact is PINNED in support-matrix.json (an "ocm" object:
@@ -324,8 +356,14 @@ tasks.register("integrationTest") {
 
 tasks.register("integrationTestMatrix") {
     group = "mental integration"
-    description = "Runs the suite on every paper entry in support-matrix.json."
-    dependsOn(checkTasks)
+    description = "Runs the suite on every paper AND folia entry in support-matrix.json."
+    dependsOn(checkTasks + foliaCheckTasks)
+}
+
+tasks.register("integrationTestFolia") {
+    group = "mental integration"
+    description = "Runs the suite on every folia entry in support-matrix.json."
+    dependsOn(foliaCheckTasks)
 }
 
 tasks.register("integrationTestOcm") {

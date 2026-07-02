@@ -23,6 +23,11 @@
 #  Versions, per-version JDK, and the OCM floor/ceiling all come from
 #  support-matrix.json (via jq) — THE single source of truth. No version or
 #  JDK literal lives in this script.
+#
+#  This concurrent gate is PAPER-only (it boots from the cached run-paper Paper
+#  jars directly). The folia entry needs run-paper's Folia downloads service, so
+#  it runs via the Gradle path instead: `./gradlew integrationTestFolia` (or the
+#  full `integrationTestMatrix`, which chains it after the paper entries).
 # ──────────────────────────────────────────────────────────────────────────
 set -u
 cd "$(dirname "$0")/.."
