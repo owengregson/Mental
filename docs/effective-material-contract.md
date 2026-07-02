@@ -31,6 +31,17 @@ treats the item as that material for legacy stat computation and the era tooltip
 `combat:` is a neutral namespace both sides agree on — not owned by Mental or by any one reforge plugin —
 so any plugin can participate.
 
+## Version floor (1.14)
+
+The contract rides the `PersistentDataContainer` API, which arrived in Bukkit **1.14**. On the legacy
+backport's older targets (1.9.4–1.13.2) there is no PDC, so the marker is unreadable and
+`EffectiveMaterial.of(item)` degrades to the item's own `getType()` for every item — the display-swap
+contract simply does not apply below 1.14. The degradation is announced once, loudly, in Mental's boot
+log (`persistent-data-container ABSENT …`), never silent. Internally the key is built lazily via the
+`new NamespacedKey("combat", "effective_material")` constructor (present from 1.12) rather than the older
+`NamespacedKey.fromString` spelling (a 1.16 API that would break class-init on every server below it); the
+two produce the identical key, so writers on 1.16+ may use either form.
+
 ## What Mental does with it (v-next)
 
 Mental resolves the effective material via `me.vexmc.mental.platform.EffectiveMaterial.of(item)` (the
