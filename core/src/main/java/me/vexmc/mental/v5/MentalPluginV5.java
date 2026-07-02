@@ -34,6 +34,11 @@ import me.vexmc.mental.v5.feature.Reconciler;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
+import me.vexmc.mental.v5.feature.knockback.FishingKnockbackUnit;
+import me.vexmc.mental.v5.feature.knockback.KnockbackUnit;
+import me.vexmc.mental.v5.feature.knockback.LatencyCompensationUnit;
+import me.vexmc.mental.v5.feature.knockback.ProjectileKnockbackUnit;
+import me.vexmc.mental.v5.feature.knockback.RodVelocityUnit;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.rim.PacketTap;
 import me.vexmc.mental.v5.rim.ProbeRim;
@@ -304,13 +309,23 @@ public final class MentalPluginV5 extends JavaPlugin {
         HitRegistrationUnit hitRegistration = new HitRegistrationUnit(
                 sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
                 this::snapshot, scheduling, valve, hitIds, folia, modernProtocol);
+        LatencyCompensationUnit latencyCompensation =
+                new LatencyCompensationUnit(latency, scheduling, this::snapshot);
         sessions.addForgetHook(hitRegistration::forget);
+        sessions.addForgetHook(latencyCompensation::forget);
 
         reconciler.register(new AnticheatCompatUnit(
                 anticheatPolicy, this::snapshot, message -> getLogger().info(message)));
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
-        // The knockback family units register in 4A2.1.
+        reconciler.register(new KnockbackUnit(
+                sessions, domains, ocmBinding, latency, scheduling, this::snapshot));
+        reconciler.register(latencyCompensation);
+        reconciler.register(new FishingKnockbackUnit(
+                sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));
+        reconciler.register(new RodVelocityUnit(ocmBinding, scheduling));
+        reconciler.register(new ProjectileKnockbackUnit(
+                this, sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock));
     }
 
     private Snapshot parseSnapshot() {
