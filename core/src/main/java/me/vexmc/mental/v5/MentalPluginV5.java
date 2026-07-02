@@ -40,6 +40,10 @@ import me.vexmc.mental.v5.feature.damage.ArmourStrengthUnit;
 import me.vexmc.mental.v5.feature.damage.CritFallbackUnit;
 import me.vexmc.mental.v5.feature.damage.DamageOwnership;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
+import me.vexmc.mental.v5.feature.damage.PotionValuesUnit;
+import me.vexmc.mental.v5.feature.damage.ToolDurabilityUnit;
+import me.vexmc.mental.v5.feature.damage.ToolWear;
+import me.vexmc.mental.v5.platform.PlatformProbe;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
@@ -371,10 +375,12 @@ public final class MentalPluginV5 extends JavaPlugin {
         // the forgotten-gate bug class is structurally dead).
         DamageOwnership damageOwnership = new DamageOwnership(ocmBinding::mentalOwns);
         DamageShaper damageShaper = new DamageShaper(damageOwnership);
+        PlatformProbe platformProbe = PlatformProbe.probe(environment, message -> getLogger().warning(message));
+        ToolWear toolWear = new ToolWear(platformProbe);
 
         HitRegistrationUnit hitRegistration = new HitRegistrationUnit(
                 sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
-                this::snapshot, scheduling, valve, hitIds, damageShaper, folia, modernProtocol);
+                this::snapshot, scheduling, valve, hitIds, damageShaper, toolWear, folia, modernProtocol);
         LatencyCompensationUnit latencyCompensation =
                 new LatencyCompensationUnit(latency, scheduling, this::snapshot);
         sessions.addForgetHook(hitRegistration::forget);
@@ -401,6 +407,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new ArmourStrengthUnit());
         reconciler.register(new ArmourDurabilityUnit());
         reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
+        reconciler.register(new ToolDurabilityUnit());
+        reconciler.register(new PotionValuesUnit());
     }
 
     private Snapshot parseSnapshot() {

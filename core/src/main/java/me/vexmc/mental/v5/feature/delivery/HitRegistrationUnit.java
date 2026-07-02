@@ -86,6 +86,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
     private final me.vexmc.mental.v5.delivery.HitIds ids;
     private final me.vexmc.mental.v5.VelocityValve valve;
     private final me.vexmc.mental.v5.feature.damage.DamageShaper shaper;
+    private final me.vexmc.mental.v5.feature.damage.ToolWear toolWear;
 
     private final CpsLimiter cps = new CpsLimiter();
     private final FeedbackGate feedbackGate = new FeedbackGate();
@@ -96,6 +97,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             Supplier<Snapshot> snapshot, Scheduling scheduling,
             me.vexmc.mental.v5.VelocityValve valve, me.vexmc.mental.v5.delivery.HitIds ids,
             me.vexmc.mental.v5.feature.damage.DamageShaper shaper,
+            me.vexmc.mental.v5.feature.damage.ToolWear toolWear,
             boolean folia, boolean modernProtocol) {
         this.sessions = sessions;
         this.domains = domains;
@@ -108,6 +110,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
         this.valve = valve;
         this.ids = ids;
         this.shaper = shaper;
+        this.toolWear = toolWear;
         this.folia = folia;
         this.modernProtocol = modernProtocol;
     }
@@ -438,6 +441,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 return;
             }
             damageWithSlot(attacker, victim, victimUuid, tx);
+            applyToolWear(attacker);
         } catch (IllegalStateException offRegion) {
             if (!folia) {
                 throw offRegion;
@@ -461,6 +465,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
         // Damageable takes the retired HitApplier's flat 1.0.
         double amount = target instanceof LivingEntity ? composedAmount(attacker, null) : 1.0;
         target.damage(amount, attacker);
+        applyToolWear(attacker);
     }
 
     private void damageWithSlot(Player attacker, Player victim, UUID victimUuid, HitTransaction tx) {
@@ -498,6 +503,19 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 attacker, tx == null ? null : tx.context(),
                 settings.simulateCrits(), settings.legacyToolDamage(),
                 snapshot.get().enabled(Feature.POTION_VALUES));
+    }
+
+    /**
+     * Wears the attacker's weapon by one hit when {@code old-tool-durability} is
+     * enabled (the retired {@code HitApplier} durability step). Scheduled on the
+     * attacker's region — {@link ToolWear} re-reads the main-hand item, so a Folia
+     * hop cannot wear a stale or swapped item.
+     */
+    private void applyToolWear(Player attacker) {
+        if (!snapshot.get().enabled(Feature.TOOL_DURABILITY)) {
+            return;
+        }
+        scheduling.runOn(attacker, () -> toolWear.applyOneHit(attacker), () -> {});
     }
 
     private static Entity lookupEntity(Player attacker, int entityId) {
