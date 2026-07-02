@@ -27,6 +27,8 @@ class SupportEntry(
     val jdk: Int,
     val platform: String,
     val ci: String,
+    val suites: String,
+    val serverFlags: List<String>,
 )
 
 val supportMatrixFile = rootProject.layout.projectDirectory.file("support-matrix.json").asFile
@@ -46,6 +48,11 @@ val supportEntries: List<SupportEntry> =
             jdk = (entry["jdk"] as Number).toInt(),
             platform = entry["platform"] as String,
             ci = entry["ci"] as String,
+            // The suite tier the tester runs on this version (full | boot | combat-smoke); the boot tier
+            // is the legacy-backport classload/boot-safety suite. serverFlags are extra JVM args the legacy
+            // Paper builds need (e.g. -DPaper.IgnoreJavaVersion=true); absent ⇒ none.
+            suites = entry["suites"] as String,
+            serverFlags = (entry["serverFlags"] as? List<String>) ?: emptyList(),
         )
     }
 
@@ -151,6 +158,8 @@ fun registerIntegrationServer(
     flavour: String,
     jdk: Int,
     platform: String = "paper",
+    suites: String = "full",
+    serverFlags: List<String> = emptyList(),
 ): Pair<TaskProvider<RunServer>, TaskProvider<Task>> {
     val runDir = rootProject.layout.projectDirectory.dir("run/$runDirName").asFile
     val resultFile = runDir.resolve("plugins/MentalTester/test-results.txt")
@@ -180,8 +189,13 @@ fun registerIntegrationServer(
         // disable.watchdog matters on slow CI runners: a >60s tick stall
         // trips the legacy watchdog, whose forced shutdown can deadlock old
         // servers into a hung process that never writes a test result.
+        // serverFlags carries per-version boot flags from support-matrix.json (the
+        // legacy Paper builds ≥1.13 need -DPaper.IgnoreJavaVersion=true to run on
+        // Java 17); mental.tester.suites selects the tester's suite tier for this
+        // entry (boot ⇒ classload/boot-safety suite only).
         jvmArgs("-Dcom.mojang.eula.agree=true", "-Ddisable.watchdog=true", "-Xmx2G",
-                "-Dmental.tester.nonce=$nonce")
+                "-Dmental.tester.nonce=$nonce", "-Dmental.tester.suites=$suites")
+        jvmArgs(serverFlags)
         javaLauncher.set(javaToolchains.launcherFor {
             languageVersion.set(JavaLanguageVersion.of(jdk))
         })
@@ -198,6 +212,14 @@ fun registerIntegrationServer(
             // Companion plugins must start pristine too — their defaults are
             // part of what the coexistence suite asserts against.
             runDir.resolve("plugins/OldCombatMechanics").deleteRecursively()
+            // Belt-and-suspenders EULA acceptance: modern Paper honours the
+            // -Dcom.mojang.eula.agree property, but the legacy builds are more
+            // reliably satisfied by the eula.txt on disk. Idempotent everywhere.
+            runDir.mkdirs()
+            val eula = runDir.resolve("eula.txt")
+            if (!eula.exists()) {
+                eula.writeText("eula=true\n")
+            }
             val properties = runDir.resolve("server.properties")
             if (!properties.exists()) {
                 runDir.mkdirs()
@@ -265,7 +287,9 @@ fun registerIntegrationServer(
 paperEntries.forEach { entry ->
     val suffix = "_" + entry.version.replace(".", "_")
     val (runTask, checkTask) =
-        registerIntegrationServer(suffix, entry.version, entry.version, emptyList(), "", entry.jdk)
+        registerIntegrationServer(
+            suffix, entry.version, entry.version, emptyList(), "", entry.jdk,
+            suites = entry.suites, serverFlags = entry.serverFlags)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     checkTasks.add(checkTask)
@@ -289,7 +313,8 @@ val foliaCheckTasks = mutableListOf<TaskProvider<Task>>()
 foliaEntries.forEach { entry ->
     val suffix = "Folia_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
-        suffix, entry.version, "folia/${entry.version}", emptyList(), " Folia", entry.jdk, "folia")
+        suffix, entry.version, "folia/${entry.version}", emptyList(), " Folia", entry.jdk, "folia",
+        suites = entry.suites, serverFlags = entry.serverFlags)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     foliaCheckTasks.add(checkTask)
@@ -348,10 +373,16 @@ val stageOcmJar = tasks.register("stageOcmJar") {
 }
 
 val ocmCheckTasks = mutableListOf<TaskProvider<Task>>()
-listOf(paperEntries.first(), paperEntries.last()).distinctBy { it.version }.forEach { entry ->
+// The OCM coexistence gate runs on the FIXED 1.17.1 + 26.1.2 pair — its scope (the OCM ownership split)
+// is unchanged by the legacy backport, so it is pinned by version rather than positionally (the legacy
+// entries re-sorted 1.9.4 to entries[0], which would otherwise pull the floor of this pair down to a
+// boot-tier legacy version OCM does not target).
+val ocmVersions = listOf("1.17.1", "26.1.2")
+paperEntries.filter { it.version in ocmVersions }.distinctBy { it.version }.forEach { entry ->
     val suffix = "Ocm_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
-        suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk)
+        suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk,
+        suites = entry.suites, serverFlags = entry.serverFlags)
     runTask.configure { dependsOn(stageOcmJar) }
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
@@ -360,8 +391,13 @@ listOf(paperEntries.first(), paperEntries.last()).distinctBy { it.version }.forE
 
 tasks.register("integrationTest") {
     group = "mental integration"
-    description = "Runs the suite on the floor and newest supported versions."
-    val floorAndCeiling = setOf(paperEntries.first().version, paperEntries.last().version)
+    description = "Runs the suite on the modern floor and newest supported versions (PR smoke)."
+    // The floor+ceiling PR smoke stays on the FULL-tier range: the modern floor (first non-boot entry,
+    // 1.17.1) + the ceiling (last paper entry). The re-sort put a boot-tier legacy version at
+    // paperEntries.first(), which this smoke deliberately does not select — the legacy boot tier is
+    // covered by integrationTestMatrix, and whether a legacy floor joins the PR lane is a Phase 6 decision.
+    val modernFloor = paperEntries.first { it.suites != "boot" }.version
+    val floorAndCeiling = setOf(modernFloor, paperEntries.last().version)
     dependsOn(checkTasks.filter { provider ->
         floorAndCeiling.any { provider.name.endsWith("_" + it.replace(".", "_")) }
     })
