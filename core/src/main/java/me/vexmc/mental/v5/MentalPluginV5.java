@@ -52,6 +52,7 @@ import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
 import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
+import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProbe;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
@@ -439,9 +440,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new RegenUnit(scheduling));
         reconciler.register(new PotionDurationsUnit());
 
-        // The loadout family (4D). Crafting is a pure Bukkit-event rule that nulls
-        // a blocked crafting result (live snapshot read; SHIELD by default).
+        // The loadout family (4D). Crafting + off-hand are pure Bukkit-event rules:
+        // crafting nulls a blocked crafting result (SHIELD by default); off-hand
+        // blocks the 1.9 slot via the kernel OffhandPolicy (live snapshot reads).
         reconciler.register(new CraftingUnit(this::snapshot));
+        reconciler.register(new OffhandUnit(this::snapshot, scheduling));
     }
 
     private Snapshot parseSnapshot() {
