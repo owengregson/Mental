@@ -249,3 +249,125 @@ matrix passes. No OCM run this cycle (not a 5.0–5.2 gate requirement; the OCM
 staging is Task 5.4). Remaining Phase-5 work: 5.3 support-matrix.json + nonce,
 5.4 OCM staging, 5.5 japicmp, 5.6 Folia entry (the TCK's live half), 5.7 phase
 gate.
+
+---
+
+## Phase 5 run B outcomes (2026-07-02)
+
+Tasks 5.3–5.5 landed on `rewrite/v5` (from `cafde67`). Three conventional
+commits, one per task: `581164e` feat(ci) — support-matrix.json + freshness
+nonce (5.3); `1298439` feat(ci) — reproducible OCM staging from a pinned
+release (5.4); `bfdcdc0` build(api) — japicmp binary-compat gate (5.5).
+
+### Task 5.3 — `support-matrix.json` + freshness nonce
+
+Repo-root `support-matrix.json` is THE single machine-readable matrix source:
+`floorApi: "1.17"` plus seven paper entries `{version, jdk (17|25), platform,
+suites: "full", ci: "pr"|"release"}` (pr = 1.17.1, 1.20.6, 1.21.11, 26.1.2 —
+the sample build.yml historically ran). Consumers rewired:
+
+- `core/build.gradle.kts` parses it with JsonSlurper; integration task
+  registration and each entry's toolchain come from the descriptor. DELETED:
+  `integrationTestVersions` from gradle.properties, `parseMinecraftVersion`,
+  and the `requiredJavaVersion` mapping function — the JDK is a descriptor
+  FIELD now, not a derivation. `plugin.yml`'s `api-version` expands from
+  `floorApi` at processResources (verified `'1.17'` inside the built jar).
+- `scripts/integration-matrix.sh` reads the version list (reversed to
+  newest-first), the per-version JDK, and the OCM floor/ceiling via jq.
+- `.github/workflows/build.yml` gained a tiny `matrix` job that jq-reads the
+  `ci: "pr"` entries and feeds them to the integration job's matrix (GH can't
+  read a matrix from a file directly — the extra job is the standard idiom).
+- `release.yml`'s detect job jq-reads ALL paper entries; the release-notes
+  "Supports Paper X → Y" range string is computed from the descriptor at
+  compose time.
+
+The post-change version-literal grep (`*.kts|*.sh|*.yml|*.properties`,
+excluding support-matrix.json and run/) leaves exactly four hits, all
+config-documentation comments describing version-gated combat mechanics for
+admins (`hit-registration.yml:44` bundle-since-1.19.4 note; `config.yml:205,
+211,242` sword-block tier + attack-range gate notes) — mechanic gates, not
+matrix members, the same category as paper-api dependency coordinates (library
+versions, which the catalog owns). The Folia entry is Task 5.6's; the
+descriptor's top-level comment says so explicitly (the placeholder).
+
+**Freshness nonce.** Each run+check task pair generates a UUID at
+configuration time; the run task passes `-Dmental.tester.nonce`, the tester
+(TestResultWriter, threaded through TestHarness/MentalTesterPlugin, including
+the watchdog write and the Mental-missing write) writes `PASS nonce=<n>` /
+`FAIL nonce=<n>`, and BOTH check paths — the Gradle check task (regex
+`^(PASS|FAIL) nonce=(.+)$`, nonce equality enforced before the verdict) and
+the script (exact-match against the boot's uuidgen nonce; wrong nonce ⇒
+`STALE(<raw>)` verdict) — accept only this invocation's nonce. **Staleness
+proven live:** a 1.17.1 run wrote `PASS
+nonce=5606246b-c09a-4e43-a289-b7cdffb4ec89` and its check passed; re-running
+ONLY the check (`-x runIntegrationTest_1_17_1`) in a fresh invocation failed
+with `Stale test result for 1.17.1 — expected nonce=53bad2ca…, got
+nonce=5606246b…`. A leftover result is structurally incapable of passing.
+
+### Task 5.4 — reproducible OCM staging
+
+`support-matrix.json` gains the `ocm` pin: version **2.5.0** (the current
+kernitus stable release), url
+`https://github.com/kernitus/BukkitOldCombatMechanics/releases/download/v2.5.0/OldCombatMechanics.jar`,
+sha256 `bdca6747db811b6d1115b3526364c7efb21b49838c42cf040fd5e288c169b89e`
+(computed from a local download of that asset, jar structure verified).
+`stageOcmJar` stages `run/ocm-jar/OldCombatMechanics.jar`: a locally-present
+jar wins as-is (the fork-build override, hash deliberately not enforced);
+otherwise it downloads the pin and verifies the sha256 (mismatch deletes +
+fails). The OCM run tasks are now ALWAYS registered (no configuration-time
+gating on the jar) and dependOn stageOcmJar, wired only into
+`integrationTestOcm`. `release.yml` gained an `ocm` job (stage + run, release
+gated on it); the PR workflow deliberately skips OCM — two extra live servers
+plus a download per PR is the cost call — documented in both workflows.
+
+### Task 5.5 — API binary-compat gate
+
+Baseline: `gradle/api-baseline/api-2.2.2.jar` built from tag `v2.2.2` (commit
+`1c24b5f`) in a throwaway `git worktree` (added, `:api:jar` built, jar copied,
+worktree removed), committed with a provenance README (sha256
+`99c4a0fd775eabbe59147e54ceb3fb31652c3297fd8fe10df9dd89784494ab24`, bump
+procedure, never-rebuild-to-pass warning). Gate: `apiCompat` (JavaExec running
+the japicmp 0.23.1 self-contained CLI jar — Gradle-version-agnostic, chosen
+over the japicmp-gradle-plugin) compares the fresh `:api` jar to the baseline
+with `--error-on-binary-incompatibility --only-modified
+--ignore-missing-classes` (+HTML report), wired into `check` so `./gradlew
+build` enforces it. **Both directions proven:** as shipped the only delta is
+`+++ NEW METHOD: PUBLIC(+) int apiVersion()` — the additive default method —
+and the gate passes; temporarily deleting `MentalApi.version()` produced
+`---! REMOVED METHOD … version():METHOD_REMOVED / E: There is at least one
+incompatibility` and BUILD FAILED, then the deletion was reverted (working
+tree diff empty). Note: a stale `api/build/libs` had a dozen old
+`api-<oldversion>.jar`s; the task reads `tasks.jar.archiveFile`, never a glob,
+so it always compares the jar the current build produced.
+
+### Run-B gate (fresh, through the NEW plumbing)
+
+`./gradlew clean build` GREEN (unit tests + apiCompat under `:api:check`).
+Sequential `./gradlew integrationTestMatrix` — all seven versions FRESH PASS,
+every verdict nonce-stamped and nonce-verified by the new check logic
+(test-results.txt mtimes 03:53:42 → 04:02:01, `BUILD SUCCESSFUL in 9m 37s`,
+zero test-failures files): 1.17.1 `PASS nonce=e4639d1b…`, 1.18.2 `PASS
+nonce=e6717b5d…`, 1.19.4 `PASS nonce=c3e3cd6e…`, 1.20.6 `PASS nonce=ff862f49…`,
+1.21.4 `PASS nonce=8cae9093…`, 1.21.11 `PASS nonce=7417b192…`, 26.1.2 `PASS
+nonce=517d8c89…`. Then `integrationTestOcm` end-to-end through the NEW staging
+path: the staged jar was deleted first, so the one invocation downloaded the
+pin, verified `sha256=bdca6747…`, staged, and booted floor+ceiling — both
+FRESH PASS with matching nonces (04:02:45 / 04:03:06, 8 suite cases each,
+"OldCombatMechanics detected — running boot + the coexistence suite"). This
+also upgrades the coexistence evidence: previous OCM runs used the local
+2.6.0-beta fork build; this pass is against the pinned RELEASE v2.5.0 — the
+exact jar CI will stage.
+
+### Kernel / suite discipline / deviations
+
+Kernel untouched; suite VALUES sacred (no expectation changed — the nonce is
+carried in the verdict line the harness writes, not in any suite assertion).
+Deviations, all small and reasoned: (1) build.yml needed a helper `matrix` job
+to read the descriptor (GH Actions cannot template a matrix from a file
+inline); (2) a manual server boot without the property writes `nonce=0`, which
+no gate invocation ever expects — fail-safe by construction; (3) the `suites`
+field is declared for all entries but not yet consumed (its first consumer is
+Task 5.6's Folia `"boot"`/`"combat-smoke"` distinction); (4) release-notes'
+"Requires Java 17+" literal stays — a runtime requirement statement, not a
+matrix member. Remaining Phase-5 work: 5.6 Folia discovery + matrix entry,
+5.7 phase gate.
