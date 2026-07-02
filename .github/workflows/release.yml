@@ -45,12 +45,13 @@ jobs:
       - name: Read version, last release, and the test matrix
         id: facts
         run: |
-          version=$(grep -m1 -E '^\s*version = "' build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          version=$(grep -m1 -E '^version=' gradle.properties | sed -E 's/^version=//')
           tag="v$version"
 
-          # The nearest release tag by ANCESTRY, not semver sort — the
-          # legacy v4.x StrikeSync tags outsort every Mental 1.x forever.
-          previous_tag=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)
+          # The most recent release tag by version order. Mental is 5.x now, so
+          # it sorts above the legacy v4.x tags naturally — a plain version sort
+          # is correct and needs no special-casing.
+          previous_tag=$(git tag --sort=-version:refname | grep -vFx "$tag" | head -n1)
 
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             should_release=false

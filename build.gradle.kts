@@ -1,6 +1,7 @@
 allprojects {
     group = "me.vexmc"
-    version = "2.2.2"
+    // The single version home is gradle.properties; every module reads it here.
+    version = providers.gradleProperty("version").get()
 
     repositories {
         mavenCentral()
