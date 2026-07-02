@@ -252,3 +252,69 @@ reworded — build files stay brand-free; the historical brand lives only in the
 three provenance docs.
 
 **PHASE 6 COMPLETE.**
+
+---
+
+## Audit closure (2026-07-02)
+
+A final adversarial audit surfaced findings against the v5 rewrite. Each is
+closed by one conventional commit (finding → fix → commit); F4 took a second
+commit after the live gate caught the first cut's over-broad scope.
+
+| # | Finding | Fix | Commit(s) |
+| --- | --- | --- | --- |
+| **F1** | B4 pacing-gate violation — `HitRegistrationUnit` consulted `feedbackGate.tryPreSend` whenever the victim had a wire, BEFORE knowing whether a velocity ships. A velocity-suppressed hurt-only burst (LEGACY resistance roll / OCM-owned / anticheat force-safe) debited the pacing budget and could starve a later eligible velocity pre-send — and hurt-only bursts were themselves gated. | Consult the gate ONLY when the FeedbackPlan includes the VELOCITY component (eligible vector AND a wire); a connectionless victim is pinned; hurt-only bursts never debit and always ship. Lifted into a pure `admitVelocityPreSend` seam; `HitRegistrationPacingTest` pins the regression (suppressed hit → later eligible hit inside minInterval still pre-sends). | `e10d99a` |
+| **F2** | B12 proof — nothing proved the ephemeral sword-block decoration reverts on every exit path. | Split proof (a real decoration needs a server for the PDC/component writes; no Mockito/MockBukkit here). `EphemeralDecorationTest` (unit, dynamic-proxy stubs) pins the never-stuck/no-throw orchestration across every exit trigger — held-slot change, swap-hands, drop, off-hand click, death (drop-list rewrite AND keepInventory), world change, quit, disableAll, forget. `BlockingSuite` (live) adds the apply-then-revert half: a right-click injects the off-hand temp shield and a held-slot-change exit restores the original item; note-SKIPs on component tiers / clientless staging gaps. Wire-proven: hard PASS on 1.17.1 (real inject → revert), graceful note-skip on the tiers that cannot stage it. | `9f9034d` |
+| **F3** | OCM rule-module double-apply (DoD §8.6 / R9) had no coverage. | `OcmCoexistenceSuite` asserts the live binding's derived warnings fire exactly one per-token double-enable line for GOLDEN_APPLES / REGEN / ATTACK_COOLDOWN (all enabled in OCM 2.5.0's default `old` modeset), each naming the OCM module key — and none when Mental enables no rule (intersection-driven, never blanket). Warn-not-yield unchanged. Wire-proven: PASS on both OCM entries. | `5cb9dca` |
+| **F4** | The projectile no-op flag was unwired — `PlatformProfile.projectileKnockbackRestored()` existed but nothing consulted it. | `ProjectileKnockbackUnit` consults the flag; the mandated no-op is scoped to the NEGLIGIBLE-DAMAGE substitution (the unit javadoc's exact claim): on 1.21.2+ the thrown hit keeps its era-true zero damage. The positional VECTOR path stays on every version — it is the era restoration itself, and the desk override REPLACES vanilla's knock (never adds), so restored platforms cannot double-knock. Both sides of the flag unit-tested (`substitutesZeroDamage` + the 1.21.1/1.21.2 `PlatformProfileTest` boundary); `ProjectileSuite`'s damage branch reads the same flag (vector assertions untouched). | `e551fc3` + `f6dde98` |
+| **F5** | `ProbeStrategy.KEEPALIVE` selectable but silently ignored. | `ProbeStrategy.resolveEffective` warns once at config parse ("KEEPALIVE probe strategy is retired; using PING") and falls back to PING; the dead `LatencyModel.KEEPALIVE_ID_BASE` is removed; `SnapshotTest` pins the warning+fallback and the clean PING path. | `f1a56cf` |
+| **F6** | Workflow `setup-java` versions hardcoded 17/25 despite `support-matrix.json` being the single JDK home. | `build.yml`/`release.yml` derive the JDK set with jq (unique jdk list; release.yml computes once in `detect`, jobs reference the output). The justified non-members each carry a one-line comment: toolchain-25 (build JDK) + `options.release = 17` (compile floor) in `build.gradle.kts`; the paper-api coordinates (compile-API artifacts) in `libs.versions.toml`. | `946f382` |
+| **Minor** | Cross-region drop sites claimed "logged skip" but logged nothing. | Wired the platform `DebugLog` seam into the plugin (config `debug` section applied at enable + every reload; logger sink; zero-cost when off) and threaded scoped views into `KnockbackUnit` (KNOCKBACK) + `HitRegistrationUnit` (HITREG). Both drop sites emit "DROPPED (logged skip)" reading only UUIDs — never a live `getName()` off-region. | `c4bfe21` |
+
+**The F4 lesson (gate-caught, decompile-verified).** The first F4 cut gated
+BOTH thrown-projectile paths; the gate failed on real Paper 1.21.4 ("snowball
+hit produced no knockback velocity (damage event: 0.0)"). Ground truth from
+the 1.21.11 decomp (`LivingEntity.hurtServer`): the CraftBukkit lineage
+early-returns a ServerPlayer hit whose Bukkit-event damage AND original amount
+are both zero — so the mandate-§10 premise ("vanilla restored
+projectile-KB-vs-players") holds for vanilla but NOT for zero-damage thrown
+hits on players as-played on Paper. The era positional knock therefore remains
+Mental's on every version (the suite pins it); only the damage channel no-ops
+on 1.21.2+.
+
+**Explicitly accepted residuals** (audit-flagged, intentionally NOT changed):
+
+- **F7 — dead-after-200 adjudication.** Accepted as designed behavior; no change.
+- **RimArchitectureTest deny-list strength.** Accepted: the netty-rim guard is a
+  forbidden-token substring scan scoped to the rim package — a by-construction
+  tripwire, not a semantic proof. Kept as-is by design.
+- **B9 atomic-swap / B11 N-hits — structural-only coverage.** Accepted: both hold
+  by construction (immutable snapshot swap; the desk's per-hit records); no
+  dedicated behavioral test added this round.
+- **`libs.versions.toml` + compile-floor justifications.** Accepted as justified
+  non-members of `support-matrix.json`; F6 documents each in place rather than
+  folding them into the matrix.
+
+**Gate (after all fixes):** `./gradlew clean build` (all module unit tests
+PASS) + sequential `./gradlew integrationTestMatrix integrationTestOcm` —
+BUILD SUCCESSFUL in 10m 7s, all 10 entries fresh and nonce-verified (the
+per-invocation nonce is stamped into each boot and echoed into the verdict
+line; a stale result fails the check structurally). The OCM entries ran
+against the locally staged fork jar (`run/ocm-jar/`, the developer-override
+path — hash not enforced by design), whose regenerated 2.5.0-default config
+carries the `old` modeset the F3 double-enable check targets.
+
+```
+run/1.17.1/…/test-results.txt        PASS nonce=7c149807-0f1b-4acb-b1e7-1cd1d8558cba  (mtime Jul  2 07:16:05 2026)
+run/1.18.2/…/test-results.txt        PASS nonce=8233732f-c778-4a8b-8b46-486e9c3f43e9  (mtime Jul  2 07:17:23 2026)
+run/1.19.4/…/test-results.txt        PASS nonce=25a79732-1da6-4178-a588-ab69552e0a0e  (mtime Jul  2 07:18:42 2026)
+run/1.20.6/…/test-results.txt        PASS nonce=f9c494e9-eb58-4d5a-acb5-85c3afc8a7ec  (mtime Jul  2 07:20:05 2026)
+run/1.21.4/…/test-results.txt        PASS nonce=29608244-4f7f-4f64-ab63-edd93fd6cc60  (mtime Jul  2 07:21:27 2026)
+run/1.21.11/…/test-results.txt       PASS nonce=c36f30f6-08a5-4da6-94d3-9b0b3149189b  (mtime Jul  2 07:22:50 2026)
+run/26.1.2/…/test-results.txt        PASS nonce=a0ecbb40-9235-47c9-8c0a-5391c1606dda  (mtime Jul  2 07:24:12 2026)
+run/folia/26.1.2/…/test-results.txt  PASS nonce=015bc93f-225e-4b7c-839a-42f6ddc650c7  (mtime Jul  2 07:24:24 2026)
+run/ocm/1.17.1/…/test-results.txt    PASS nonce=846f16ad-e009-4a71-a661-7812dd3f88d2  (mtime Jul  2 07:24:37 2026)
+run/ocm/26.1.2/…/test-results.txt    PASS nonce=cfdb7ca3-ee64-425a-bc59-7721f4d1cc3f  (mtime Jul  2 07:24:53 2026)
+```
+
+**AUDIT CLOSED.**
