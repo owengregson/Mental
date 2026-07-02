@@ -51,6 +51,7 @@ import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
 import me.vexmc.mental.v5.feature.sustain.RegenUnit;
+import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProbe;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
@@ -437,6 +438,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new EnderPearlCooldownUnit(scheduling));
         reconciler.register(new RegenUnit(scheduling));
         reconciler.register(new PotionDurationsUnit());
+
+        // The loadout family (4D). Crafting is a pure Bukkit-event rule that nulls
+        // a blocked crafting result (live snapshot read; SHIELD by default).
+        reconciler.register(new CraftingUnit(this::snapshot));
     }
 
     private Snapshot parseSnapshot() {
