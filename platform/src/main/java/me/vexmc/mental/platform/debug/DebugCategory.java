@@ -1,4 +1,4 @@
-package me.vexmc.mental.common.debug;
+package me.vexmc.mental.platform.debug;
 
 import java.util.Locale;
 import java.util.Optional;

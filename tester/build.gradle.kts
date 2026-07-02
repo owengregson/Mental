@@ -4,7 +4,7 @@ plugins {
 
 dependencies {
     compileOnly(project(":api"))
-    compileOnly(project(":common"))
+    compileOnly(project(":platform"))
     compileOnly(project(":core"))
     // v5: the era-parity oracle and the knockback expectations derive from the
     // kernel motion authority directly — no third re-implementation (spec §12.7).

@@ -3,7 +3,7 @@ package me.vexmc.mental.v5.platform;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.function.Consumer;
-import me.vexmc.mental.common.platform.ServerEnvironment;
+import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.kernel.math.EraReach;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;

@@ -1,6 +1,6 @@
 package me.vexmc.mental.v5.feature.loadout;
 
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;

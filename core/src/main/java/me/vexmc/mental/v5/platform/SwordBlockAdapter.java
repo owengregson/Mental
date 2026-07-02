@@ -5,7 +5,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
-import me.vexmc.mental.common.platform.ServerEnvironment;
+import me.vexmc.mental.platform.ServerEnvironment;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.EquipmentSlot;

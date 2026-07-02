@@ -2,8 +2,8 @@ package me.vexmc.mental.tester;
 
 import java.util.ArrayList;
 import java.util.List;
-import me.vexmc.mental.common.scheduling.Scheduling;
-import me.vexmc.mental.common.scheduling.TaskHandle;
+import me.vexmc.mental.platform.Scheduling;
+import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.tester.suite.BlockingSuite;
 import me.vexmc.mental.tester.suite.BootSuite;
 import me.vexmc.mental.tester.suite.CommandSuite;

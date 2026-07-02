@@ -2,8 +2,8 @@ package me.vexmc.mental.v5.feature.knockback;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import me.vexmc.mental.common.scheduling.Scheduling;
-import me.vexmc.mental.common.scheduling.TaskHandle;
+import me.vexmc.mental.platform.Scheduling;
+import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.math.RodLaunchMath;
 import me.vexmc.mental.kernel.model.KnockbackVector;

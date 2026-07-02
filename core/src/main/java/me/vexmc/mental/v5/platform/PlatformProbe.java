@@ -2,7 +2,7 @@ package me.vexmc.mental.v5.platform;
 
 import java.lang.reflect.Method;
 import java.util.function.Consumer;
-import me.vexmc.mental.common.platform.ServerEnvironment;
+import me.vexmc.mental.platform.ServerEnvironment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
 import org.jetbrains.annotations.NotNull;

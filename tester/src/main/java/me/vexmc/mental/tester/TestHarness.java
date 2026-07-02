@@ -2,7 +2,7 @@ package me.vexmc.mental.tester;
 
 import java.util.ArrayList;
 import java.util.List;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;

@@ -3,7 +3,7 @@ package me.vexmc.mental.v5.feature.loadout;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.math.EraReach;
 import me.vexmc.mental.platform.Attributes;
 import org.bukkit.attribute.Attribute;

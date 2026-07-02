@@ -3,7 +3,7 @@ package me.vexmc.mental.v5.feature.knockback;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;

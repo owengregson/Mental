@@ -29,7 +29,7 @@ import org.jetbrains.annotations.Nullable;
  * The four standalone "old rules" consumable modules — {@code old-golden-apples},
  * {@code disable-enderpearl-cooldown}, {@code old-potion-durations}, and
  * {@code old-player-regen} — restore pre-1.9 item/regen behaviour with nothing
- * but the Bukkit API plus {@link me.vexmc.mental.common.scheduling.Scheduling}.
+ * but the Bukkit API plus {@link me.vexmc.mental.platform.Scheduling}.
  * Each scenario enables exactly one module through the real command path,
  * exercises it on a live server, asserts the decompile-cited era value, and
  * always toggles the module back off + cleans up its actors.

@@ -6,7 +6,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import me.vexmc.mental.v5.MentalPluginV5;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;

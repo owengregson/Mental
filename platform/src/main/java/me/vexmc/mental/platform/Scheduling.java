@@ -1,4 +1,4 @@
-package me.vexmc.mental.common.scheduling;
+package me.vexmc.mental.platform;
 
 import java.time.Duration;
 import org.bukkit.Location;

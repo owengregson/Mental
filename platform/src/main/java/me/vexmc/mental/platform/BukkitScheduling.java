@@ -2,8 +2,6 @@ package me.vexmc.mental.platform;
 
 import java.time.Duration;
 import java.util.Objects;
-import me.vexmc.mental.common.scheduling.Scheduling;
-import me.vexmc.mental.common.scheduling.TaskHandle;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;

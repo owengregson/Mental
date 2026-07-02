@@ -1,7 +1,5 @@
 package me.vexmc.mental.platform;
 
-import me.vexmc.mental.common.platform.Capabilities;
-import me.vexmc.mental.common.scheduling.Scheduling;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 

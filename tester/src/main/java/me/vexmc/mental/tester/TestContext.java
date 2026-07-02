@@ -7,8 +7,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 import java.util.logging.Logger;
-import me.vexmc.mental.common.scheduling.Scheduling;
-import me.vexmc.mental.common.scheduling.TaskHandle;
+import me.vexmc.mental.platform.Scheduling;
+import me.vexmc.mental.platform.TaskHandle;
 import org.jetbrains.annotations.NotNull;
 
 /**

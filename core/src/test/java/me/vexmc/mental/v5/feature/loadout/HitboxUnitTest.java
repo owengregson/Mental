@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
-import me.vexmc.mental.common.platform.ServerEnvironment;
+import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.v5.feature.Registrar;
 import me.vexmc.mental.v5.feature.Scope;

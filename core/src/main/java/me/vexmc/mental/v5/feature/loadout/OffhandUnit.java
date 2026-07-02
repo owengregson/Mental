@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.math.OffhandPolicy;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;

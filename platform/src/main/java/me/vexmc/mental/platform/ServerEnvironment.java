@@ -1,4 +1,4 @@
-package me.vexmc.mental.common.platform;
+package me.vexmc.mental.platform;
 
 import org.jetbrains.annotations.NotNull;
 

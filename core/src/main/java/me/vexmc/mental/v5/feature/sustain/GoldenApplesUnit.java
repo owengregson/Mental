@@ -4,7 +4,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects.EffectSpec;
 import me.vexmc.mental.v5.config.Snapshot;

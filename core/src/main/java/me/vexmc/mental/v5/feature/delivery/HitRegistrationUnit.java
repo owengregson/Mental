@@ -14,7 +14,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import me.vexmc.mental.api.event.AsyncHitRegisterEvent;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;

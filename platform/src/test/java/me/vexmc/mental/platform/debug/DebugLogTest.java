@@ -1,4 +1,4 @@
-package me.vexmc.mental.common.debug;
+package me.vexmc.mental.platform.debug;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

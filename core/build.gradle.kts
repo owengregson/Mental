@@ -9,9 +9,10 @@ evaluationDependsOn(":tester")
 
 dependencies {
     api(project(":api"))
-    api(project(":common"))
-    // v5 rewrite (spec §1): core depends on the pure kernel. Required for the
-    // Phase 2 unwired v5 shells under me.vexmc.mental.v5 to see kernel types.
+    // v5 rewrite (spec §1): core depends on the Bukkit-facing platform layer
+    // (scheduling, capabilities, boot-time NMS resolvers) and the pure kernel.
+    // Platform re-exports kernel transitively; both are shaded into Mental.jar.
+    api(project(":platform"))
     implementation(project(":kernel"))
     compileOnly(libs.paper.api.floor)
     compileOnly(libs.jetbrains.annotations)
