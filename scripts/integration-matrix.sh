@@ -17,17 +17,26 @@
 #  integrationTestOcm) remain the canonical sequential path (CI uses them);
 #  this is the fast local gate.
 #
-#  Usage:  scripts/integration-matrix.sh [--versions 1.17.1,26.1.2] [--no-ocm]
+#  Usage:  scripts/integration-matrix.sh [--versions <v1>,<v2>] [--no-ocm]
 #  Exit:   0 = every server PASS, 1 = anything else.
+#
+#  Versions, per-version JDK, and the OCM floor/ceiling all come from
+#  support-matrix.json (via jq) — THE single source of truth. No version or
+#  JDK literal lives in this script.
 # ──────────────────────────────────────────────────────────────────────────
 set -u
 cd "$(dirname "$0")/.."
 
+MATRIX="$PWD/support-matrix.json"
+command -v jq >/dev/null 2>&1 || { echo "jq is required (reads support-matrix.json)" >&2; exit 2; }
+
 # Newest first: the heavy modern servers ignite (paperclip, JIT, chunk IO)
 # while nothing else runs; the lightweight Java-17 trio boots last into a
-# calm machine instead of reaching its longest suites mid-ignition.
-VERSIONS_DEFAULT="26.1.2 1.21.11 1.21.4 1.20.6 1.19.4 1.18.2 1.17.1"
-OCM_VERSIONS="1.17.1 26.1.2"
+# calm machine instead of reaching its longest suites mid-ignition. The
+# descriptor lists oldest -> newest, so reverse it.
+VERSIONS_DEFAULT="$(jq -r '[.entries[] | select(.platform=="paper") | .version] | reverse | join(" ")' "$MATRIX")"
+# OCM runs on the floor and ceiling paper entries.
+OCM_VERSIONS="$(jq -r '[.entries[] | select(.platform=="paper") | .version] | .[0] + " " + .[-1]' "$MATRIX")"
 JAR_CACHE="$HOME/.gradle/caches/run-task-jars/paper/jars"
 OCM_JAR="$PWD/run/ocm-jar/OldCombatMechanics.jar"
 LIVE="$PWD/run/matrix-live.log"
@@ -51,9 +60,14 @@ fi
 
 JAVA17="$(/usr/libexec/java_home -v 17 2>/dev/null)/bin/java"
 JAVA25="$(/usr/libexec/java_home -v 25 2>/dev/null)/bin/java"
+# The per-version JDK is declared in the descriptor (17 for the pre-1.20.5
+# class-file targets, 25 otherwise). An off-matrix override version falls back
+# to the newest toolchain.
 java_for() {
-    case "$1" in
-        1.17.*|1.18.*|1.19.*) echo "$JAVA17" ;;  # class files target 17 below 1.20.5
+    local jdk
+    jdk=$(jq -r --arg v "$1" '.entries[] | select(.version==$v) | .jdk' "$MATRIX")
+    case "$jdk" in
+        17) echo "$JAVA17" ;;
         *) echo "$JAVA25" ;;
     esac
 }
@@ -109,9 +123,15 @@ run_one() {
     fi
 
     # The single-dash -add-plugin= form is what run-paper itself uses across
-    # this whole version range — proven from 1.17.1 up.
+    # this whole version range — proven from the floor up.
     local plugin_args="-add-plugin=$MENTAL_JAR -add-plugin=$TESTER_JAR"
     [ "$flavour" = ocm ] && plugin_args="$plugin_args -add-plugin=$OCM_JAR"
+
+    # A fresh freshness nonce per boot: the tester echoes it into the verdict
+    # line ("PASS nonce=<n>"), and we accept ONLY this nonce below — a leftover
+    # test-results.txt from an earlier boot can never be read as a PASS.
+    local nonce
+    nonce=$(uuidgen 2>/dev/null || echo "$RANDOM$RANDOM$RANDOM")
 
     echo "[$label] booting on port $port" >> "$LIVE"
     # 768M is generous for a flat test world; small heaps keep nine
@@ -121,7 +141,7 @@ run_one() {
     local keepawake=""
     command -v caffeinate >/dev/null 2>&1 && keepawake="caffeinate -i"
     ( cd "$dir" && exec $keepawake "$java" -Xmx768M -Dcom.mojang.eula.agree=true \
-            -Ddisable.watchdog=true \
+            -Ddisable.watchdog=true -Dmental.tester.nonce="$nonce" \
             -jar "$jar" --nogui --port "$port" $plugin_args ) > "$log" 2>&1 &
     local server=$!
 
@@ -140,8 +160,22 @@ run_one() {
     sleep 0.5
     kill "$relay" 2>/dev/null
 
+    # Verdict is the tester's line ONLY if it carries this boot's nonce; any
+    # other content (missing, wrong nonce, malformed) is not a PASS.
     local verdict="NO-RESULT"
-    [ -f "$result" ] && verdict=$(tr -d '[:space:]' < "$result")
+    if [ -f "$result" ]; then
+        local raw
+        raw=$(cat "$result")
+        if [ "$raw" = "PASS nonce=$nonce" ]; then
+            verdict="PASS"
+        elif [ "$raw" = "FAIL nonce=$nonce" ]; then
+            verdict="FAIL"
+        elif printf '%s' "$raw" | grep -q "nonce=$nonce"; then
+            verdict="ODD($raw)"
+        else
+            verdict="STALE($raw)"
+        fi
+    fi
     echo "[$label] finished: $verdict (log: $log)" >> "$LIVE"
     echo "$label $verdict" >> "$VERDICTS"
 }

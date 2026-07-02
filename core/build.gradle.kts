@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+import java.util.UUID
 import xyz.jpenilla.runpaper.task.RunServer
 
 plugins {
@@ -6,6 +8,45 @@ plugins {
 }
 
 evaluationDependsOn(":tester")
+
+/* ────────────────────────────────────────────────────────────────────────
+ *  support-matrix.json — THE single machine-readable source of truth for the
+ *  supported platform matrix. Every version, its JDK, its CI lane, the OCM
+ *  pin, and the plugin.yml api-version floor come from here; no Minecraft
+ *  version or JDK literal lives anywhere else in the build (Task 5.3).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/** One supported-platform row from support-matrix.json. */
+class SupportEntry(
+    val version: String,
+    val jdk: Int,
+    val platform: String,
+    val ci: String,
+)
+
+val supportMatrixFile = rootProject.layout.projectDirectory.file("support-matrix.json").asFile
+
+@Suppress("UNCHECKED_CAST")
+val supportMatrix: Map<String, Any> =
+    JsonSlurper().parse(supportMatrixFile) as Map<String, Any>
+
+/** The plugin.yml api-version floor (Bukkit compatibility level). */
+val floorApi: String = supportMatrix["floorApi"] as String
+
+@Suppress("UNCHECKED_CAST")
+val supportEntries: List<SupportEntry> =
+    (supportMatrix["entries"] as List<Map<String, Any>>).map { entry ->
+        SupportEntry(
+            version = entry["version"] as String,
+            jdk = (entry["jdk"] as Number).toInt(),
+            platform = entry["platform"] as String,
+            ci = entry["ci"] as String,
+        )
+    }
+
+// Paper is the only live integration platform today; the Folia entry
+// (platform: "folia") arrives with Task 5.6's Folia matrix wiring.
+val paperEntries: List<SupportEntry> = supportEntries.filter { it.platform == "paper" }
 
 dependencies {
     api(project(":api"))
@@ -29,7 +70,12 @@ dependencies {
 }
 
 tasks.processResources {
-    val props = mapOf("version" to project.version.toString())
+    // api-version derives from support-matrix.json's floorApi — the descriptor
+    // owns the Bukkit compatibility floor, not a hardcoded plugin.yml literal.
+    val props = mapOf(
+        "version" to project.version.toString(),
+        "apiVersion" to floorApi,
+    )
     inputs.properties(props)
     filesMatching("plugin.yml") {
         expand(props)
@@ -55,35 +101,12 @@ tasks.build {
 /* ────────────────────────────────────────────────────────────────────────
  *  Real-server integration matrix
  *
- *  For every version in gradle.properties' integrationTestVersions, a real
- *  Paper server boots with the Mental and MentalTester jars installed; the
- *  tester runs its suite in-process, writes PASS/FAIL, and shuts the server
- *  down; the paired check task fails the build on anything but PASS.
+ *  For every paper entry in support-matrix.json, a real Paper server boots
+ *  with the Mental and MentalTester jars installed; the tester runs its suite
+ *  in-process, writes "PASS nonce=<n>", and shuts the server down; the paired
+ *  check task fails the build unless the result carries THIS run's nonce and
+ *  reads PASS. The per-entry JDK also comes from the descriptor.
  * ──────────────────────────────────────────────────────────────────────── */
-
-val integrationTestVersions: List<String> =
-    (findProperty("integrationTestVersions") as String?)
-        ?.split(",")
-        ?.map { it.trim() }
-        ?.filter { it.isNotEmpty() }
-        ?: listOf("1.17.1", "26.1.2")
-
-fun parseMinecraftVersion(version: String): Triple<Int, Int, Int> {
-    val parts = version.split(".")
-    return Triple(
-        parts.getOrNull(0)?.toIntOrNull() ?: 0,
-        parts.getOrNull(1)?.toIntOrNull() ?: 0,
-        parts.getOrNull(2)?.toIntOrNull() ?: 0,
-    )
-}
-
-// 1.17–1.20.4 class files target Java 17; 1.20.5+ requires 21 and runs
-// happily on 25 — two toolchains cover the whole matrix.
-fun requiredJavaVersion(version: String): Int {
-    val (major, minor, patch) = parseMinecraftVersion(version)
-    if (major > 1 || minor > 20 || (minor == 20 && patch >= 5)) return 25
-    return 17
-}
 
 val javaToolchains = extensions.getByType<JavaToolchainService>()
 val testerShadowJar = project(":tester").tasks.named<AbstractArchiveTask>("shadowJar")
@@ -108,12 +131,20 @@ fun registerIntegrationServer(
     runDirName: String,
     extraPluginJars: List<File>,
     flavour: String,
+    jdk: Int,
 ): Pair<TaskProvider<RunServer>, TaskProvider<Task>> {
     val runDir = rootProject.layout.projectDirectory.dir("run/$runDirName").asFile
     val resultFile = runDir.resolve("plugins/MentalTester/test-results.txt")
     val failuresFile = runDir.resolve("plugins/MentalTester/test-failures.txt")
     val logFile = layout.buildDirectory.file("integration-test-logs/${runDirName.replace('/', '-')}.log")
     val label = version + flavour
+
+    // A fresh freshness nonce per Gradle invocation, shared by this run+check
+    // pair: the run task stamps it into the boot (-Dmental.tester.nonce), the
+    // tester echoes it into the verdict line, and the check accepts ONLY this
+    // nonce. A leftover test-results.txt from an earlier boot fails the check
+    // structurally — it can never masquerade as this run's PASS.
+    val nonce = UUID.randomUUID().toString()
 
     val runTask = tasks.register<RunServer>("runIntegrationTest$taskSuffix") {
         group = "mental integration"
@@ -124,9 +155,10 @@ fun registerIntegrationServer(
         // disable.watchdog matters on slow CI runners: a >60s tick stall
         // trips the legacy watchdog, whose forced shutdown can deadlock old
         // servers into a hung process that never writes a test result.
-        jvmArgs("-Dcom.mojang.eula.agree=true", "-Ddisable.watchdog=true", "-Xmx2G")
+        jvmArgs("-Dcom.mojang.eula.agree=true", "-Ddisable.watchdog=true", "-Xmx2G",
+                "-Dmental.tester.nonce=$nonce")
         javaLauncher.set(javaToolchains.launcherFor {
-            languageVersion.set(JavaLanguageVersion.of(requiredJavaVersion(version)))
+            languageVersion.set(JavaLanguageVersion.of(jdk))
         })
         pluginJars.from(tasks.shadowJar.flatMap { it.archiveFile })
         pluginJars.from(testerShadowJar.flatMap { it.archiveFile })
@@ -168,7 +200,7 @@ fun registerIntegrationServer(
 
     val checkTask = tasks.register("checkIntegrationTest$taskSuffix") {
         group = "mental integration"
-        description = "Verifies the $label suite reported PASS."
+        description = "Verifies the $label suite reported PASS with this run's nonce."
         dependsOn(runTask)
         doLast {
             val log = logFile.get().asFile
@@ -181,19 +213,34 @@ fun registerIntegrationServer(
                     logger.lifecycle("[$label] FAILURE: $it")
                 }
             }
-            when (val result = resultFile.readText().trim()) {
-                "PASS" -> logger.lifecycle("[$label] integration tests passed. Log: ${log.absolutePath}")
-                "FAIL" -> throw GradleException("Integration tests failed for $label. Log: ${log.absolutePath}")
-                else -> throw GradleException("Unknown test result '$result' for $label.")
+            val result = resultFile.readText().trim()
+            val match = Regex("""^(PASS|FAIL) nonce=(.+)$""").matchEntire(result)
+                ?: throw GradleException(
+                    "Unrecognised test result '$result' for $label (expected 'PASS nonce=<n>'). " +
+                            "Log: ${log.absolutePath}")
+            val (verdict, gotNonce) = match.destructured
+            if (gotNonce != nonce) {
+                throw GradleException(
+                    "Stale test result for $label — expected nonce=$nonce, got nonce=$gotNonce. " +
+                            "The tester did not boot this run (a leftover result was left behind). " +
+                            "Log: ${log.absolutePath}")
+            }
+            when (verdict) {
+                "PASS" -> logger.lifecycle(
+                    "[$label] integration tests passed (nonce=$nonce). Log: ${log.absolutePath}")
+                "FAIL" -> throw GradleException(
+                    "Integration tests failed for $label. Log: ${log.absolutePath}")
+                else -> throw GradleException("Unknown verdict '$verdict' for $label.")
             }
         }
     }
     return runTask to checkTask
 }
 
-integrationTestVersions.forEach { version ->
-    val suffix = "_" + version.replace(".", "_")
-    val (runTask, checkTask) = registerIntegrationServer(suffix, version, version, emptyList(), "")
+paperEntries.forEach { entry ->
+    val suffix = "_" + entry.version.replace(".", "_")
+    val (runTask, checkTask) =
+        registerIntegrationServer(suffix, entry.version, entry.version, emptyList(), "", entry.jdk)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     checkTasks.add(checkTask)
@@ -203,17 +250,17 @@ integrationTestVersions.forEach { version ->
  *  OCM coexistence runs. When run/ocm-jar/OldCombatMechanics.jar exists
  *  (build it in the BukkitOldCombatMechanics repo: ./gradlew shadowJar,
  *  then copy build/libs/OldCombatMechanics.jar there), the floor and
- *  ceiling versions also boot with OCM installed; the tester detects it
- *  and runs the coexistence suite instead of the era suites.
+ *  ceiling paper entries also boot with OCM installed; the tester detects
+ *  it and runs the coexistence suite instead of the era suites.
  * ──────────────────────────────────────────────────────────────────────── */
 val ocmJarFile = rootProject.layout.projectDirectory.file("run/ocm-jar/OldCombatMechanics.jar").asFile
 val ocmCheckTasks = mutableListOf<TaskProvider<Task>>()
 
 if (ocmJarFile.isFile) {
-    setOf(integrationTestVersions.first(), integrationTestVersions.last()).forEach { version ->
-        val suffix = "Ocm_" + version.replace(".", "_")
+    listOf(paperEntries.first(), paperEntries.last()).distinctBy { it.version }.forEach { entry ->
+        val suffix = "Ocm_" + entry.version.replace(".", "_")
         val (runTask, checkTask) = registerIntegrationServer(
-            suffix, version, "ocm/$version", listOf(ocmJarFile), " +OCM")
+            suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk)
         previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
         previousCheck = checkTask
         ocmCheckTasks.add(checkTask)
@@ -223,7 +270,7 @@ if (ocmJarFile.isFile) {
 tasks.register("integrationTest") {
     group = "mental integration"
     description = "Runs the suite on the floor and newest supported versions."
-    val floorAndCeiling = setOf(integrationTestVersions.first(), integrationTestVersions.last())
+    val floorAndCeiling = setOf(paperEntries.first().version, paperEntries.last().version)
     dependsOn(checkTasks.filter { provider ->
         floorAndCeiling.any { provider.name.endsWith("_" + it.replace(".", "_")) }
     })
@@ -231,7 +278,7 @@ tasks.register("integrationTest") {
 
 tasks.register("integrationTestMatrix") {
     group = "mental integration"
-    description = "Runs the suite on every version in integrationTestVersions."
+    description = "Runs the suite on every paper entry in support-matrix.json."
     dependsOn(checkTasks)
 }
 

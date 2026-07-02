@@ -60,10 +60,10 @@ jobs:
             echo "Version $version is unreleased (last release: ${previous_tag:-none}) — releasing."
           fi
 
-          # The integration matrix comes from gradle.properties, the same
-          # source of truth the build uses.
-          matrix=$(grep '^integrationTestVersions=' gradle.properties \
-            | cut -d= -f2 | jq -cR 'split(",") | map(gsub("\\s+";""))')
+          # The full integration matrix (every paper entry) comes from
+          # support-matrix.json — the same single source of truth the build,
+          # the local script, and the PR workflow read.
+          matrix=$(jq -c '[.entries[] | select(.platform=="paper") | .version]' support-matrix.json)
 
           {
             echo "version=$version"
@@ -194,8 +194,11 @@ jobs:
           changelog=$(git log "$range" --no-merges --pretty='- %s (`%h`)')
           count=$(printf '%s\n' "$changelog" | grep -c '^- ' || true)
 
+          # The supported range (floor → ceiling) comes from support-matrix.json.
+          support_range=$(jq -r '[.entries[] | select(.platform=="paper") | .version] | .[0] + " → " + .[-1]' support-matrix.json)
+
           {
-            echo "**Supports** Paper 1.17.1 → 26.1.2 · Folia — **Requires** Java 17+ — no plugin dependencies."
+            echo "**Supports** Paper $support_range · Folia — **Requires** Java 17+ — no plugin dependencies."
             echo
             echo "### Install"
             echo

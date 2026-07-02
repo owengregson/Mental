@@ -1,0 +1,13 @@
+{
+  "_comment": "THE single machine-readable source of truth for Mental's supported platform matrix. Every consumer — core/build.gradle.kts task registration + plugin.yml api-version, scripts/integration-matrix.sh, .github/workflows/{build,release}.yml, the release-notes range — reads this file (jq / JsonSlurper). No Minecraft version or JDK literal may live anywhere else. Folia (platform: folia) is added by Phase 5 Task 5.6; until then this matrix is paper-only.",
+  "floorApi": "1.17",
+  "entries": [
+    { "version": "1.17.1",  "jdk": 17, "platform": "paper", "suites": "full", "ci": "pr" },
+    { "version": "1.18.2",  "jdk": 17, "platform": "paper", "suites": "full", "ci": "release" },
+    { "version": "1.19.4",  "jdk": 17, "platform": "paper", "suites": "full", "ci": "release" },
+    { "version": "1.20.6",  "jdk": 25, "platform": "paper", "suites": "full", "ci": "pr" },
+    { "version": "1.21.4",  "jdk": 25, "platform": "paper", "suites": "full", "ci": "release" },
+    { "version": "1.21.11", "jdk": 25, "platform": "paper", "suites": "full", "ci": "pr" },
+    { "version": "26.1.2",  "jdk": 25, "platform": "paper", "suites": "full", "ci": "pr" }
+  ]
+}

@@ -19,10 +19,12 @@ final class TestHarness {
 
     private final JavaPlugin plugin;
     private final Scheduling scheduling;
+    private final String nonce;
 
-    TestHarness(@NotNull JavaPlugin plugin, @NotNull Scheduling scheduling) {
+    TestHarness(@NotNull JavaPlugin plugin, @NotNull Scheduling scheduling, @NotNull String nonce) {
         this.plugin = plugin;
         this.scheduling = scheduling;
+        this.nonce = nonce;
     }
 
     void run(@NotNull List<TestCase> suite) {
@@ -33,7 +35,7 @@ final class TestHarness {
                 return;
             }
             plugin.getLogger().severe("Test watchdog fired after " + WATCHDOG_SECONDS + "s — forcing FAIL");
-            TestResultWriter.write(plugin, false, List.of("watchdog: suite did not finish"));
+            TestResultWriter.write(plugin, false, List.of("watchdog: suite did not finish"), nonce);
             scheduling.runGlobal(Bukkit::shutdown);
         }, "mental-test-watchdog");
         watchdog.setDaemon(true);
@@ -65,7 +67,7 @@ final class TestHarness {
             boolean success = failures.isEmpty();
             plugin.getLogger().info("[test] Suite finished: " + (suite.size() - failures.size())
                     + "/" + suite.size() + " passed");
-            TestResultWriter.write(plugin, success, failures);
+            TestResultWriter.write(plugin, success, failures, nonce);
             watchdog.interrupt();
             scheduling.runGlobal(Bukkit::shutdown);
         }, "mental-test-driver");

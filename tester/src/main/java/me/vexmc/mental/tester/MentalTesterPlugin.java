@@ -42,10 +42,17 @@ public final class MentalTesterPlugin extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        // The run task stamps every boot with a fresh freshness nonce; the
+        // tester echoes it into the verdict line so a leftover test-results.txt
+        // from an earlier boot can never masquerade as this run's answer.
+        // Absent (a manual boot) it defaults to "0" — the check tasks then only
+        // pass when they too expect "0", which they never do under the gate.
+        String nonce = System.getProperty("mental.tester.nonce", "0");
+
         MentalPluginV5 mental = (MentalPluginV5) getServer().getPluginManager().getPlugin("Mental");
         if (mental == null) {
             getLogger().severe("Mental is not installed — cannot test");
-            TestResultWriter.write(this, false, List.of("Mental plugin missing"));
+            TestResultWriter.write(this, false, List.of("Mental plugin missing"), nonce);
             getServer().shutdown();
             return;
         }
@@ -80,7 +87,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
             }
-            new TestHarness(this, scheduling).run(suite);
+            new TestHarness(this, scheduling, nonce).run(suite);
         });
     }
 }

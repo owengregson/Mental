@@ -33,19 +33,35 @@ jobs:
           name: Mental
           path: core/build/libs/Mental-*.jar
 
-  integration:
+  # The PR integration sample — the entries flagged ci: "pr" in
+  # support-matrix.json (floor, the Folia-era midpoint, a recent release, the
+  # ceiling). The full matrix (every paper entry) runs before a release via
+  # the auto-release workflow.
+  matrix:
     needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.read.outputs.versions }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Read the PR matrix from support-matrix.json
+        id: read
+        run: |
+          versions=$(jq -c '[.entries[] | select(.platform=="paper" and .ci=="pr") | .version]' support-matrix.json)
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+
+  integration:
+    needs: [build, matrix]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: true
       matrix:
-        # A deliberate sample — floor, the Folia-era midpoint, a recent
-        # release, and the ceiling. Every version in gradle.properties'
-        # integrationTestVersions runs before a release via the
-        # auto-release workflow. Each matrix job is its own VM, so they
-        # run fully in parallel.
-        version: ['1.17.1', '1.20.6', '1.21.11', '26.1.2']
+        # Each matrix job is its own VM, so they run fully in parallel. The
+        # per-version JDK comes from support-matrix.json (both 17 and 25 are
+        # installed below; the Gradle toolchain selects per entry).
+        version: ${{ fromJSON(needs.matrix.outputs.versions) }}
 
     steps:
       - name: Checkout
