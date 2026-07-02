@@ -60,13 +60,23 @@ public final class MentalTesterPlugin extends JavaPlugin {
             return;
         }
 
+        // The suite tier for this boot, from the integration harness (-Dmental.tester.suites). "boot" is
+        // the legacy-backport classload/boot-safety tier: run BootSuite ONLY, whatever else is detected —
+        // feature correctness on those versions is promoted per-phase. Any other value (or absent, a manual
+        // boot) keeps the historical behavior, so every modern/Folia/OCM entry is untouched.
+        String suites = System.getProperty("mental.tester.suites", "");
+        boolean bootOnly = "boot".equals(suites);
+
         Scheduling scheduling = mental.scheduling();
         TaskHandle[] starter = new TaskHandle[1];
         starter[0] = scheduling.repeatGlobal(SETTLE_TICKS, 72_000L, () -> {
             starter[0].cancel();
             boolean ocmInstalled = getServer().getPluginManager().getPlugin("OldCombatMechanics") != null;
             List<TestCase> suite = new ArrayList<>(BootSuite.tests(mental));
-            if (mental.capabilities().folia()) {
+            if (bootOnly) {
+                getLogger().info("mental.tester.suites=boot — running the boot suite only "
+                        + "(legacy classload/boot-safety tier).");
+            } else if (mental.capabilities().folia()) {
                 // The Paper-shaped era suites drive cross-region state from one
                 // global context, which Folia forbids; the Folia smoke instead
                 // drives a same-region pair with every action on its owning region

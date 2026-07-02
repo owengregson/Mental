@@ -4,7 +4,12 @@ import java.util.List;
 import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.feature.Feature;
+import me.vexmc.mental.v5.gui.DashboardMenu;
+import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.tester.TestCase;
+import org.bukkit.Material;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
 /** The plugin came up correctly on this exact server version. */
@@ -51,6 +56,32 @@ public final class BootSuite {
                     context.expect(!api.moduleEnabled("not-a-module"), "API invented a module");
                     context.expect(api.version() != null && !api.version().isEmpty(), "API version empty");
                     context.expect(api.apiVersion() == 2, "API generation must be 2 (got " + api.apiVersion() + ")");
+                }),
+                new TestCase("boot: dashboard GUI renders headless (Adventure + String sinks load)", context -> {
+                    // Proves the TextPort/Adventure seam and the universal String-API sinks actually
+                    // classload and execute on THIS server. On legacy servers (< 1.16.5) the Paper-native
+                    // Component sinks are absent and net.kyori ships only as Mental's relocated copy, so a
+                    // broken shade or a stray Component→Bukkit call would throw right here rather than on the
+                    // first live /mental open. Run on the global tick (createInventory + item meta are
+                    // main/region-affine on some servers); no viewer is needed — the String-title path and
+                    // the headless icon render exercise every sink.
+                    context.syncRun(() -> {
+                        MenuContext menuContext = new MenuContext(mental, mental.management());
+                        DashboardMenu dashboard = new DashboardMenu(menuContext);
+
+                        List<ItemStack> icons = dashboard.selfTestIcons();
+                        context.expect(!icons.isEmpty(), "dashboard rendered no icons");
+                        for (ItemStack icon : icons) {
+                            context.expect(icon != null && icon.getType() != Material.AIR,
+                                    "a dashboard icon rendered as null/AIR — an Icon build sink failed");
+                        }
+
+                        Inventory inventory = dashboard.selfTestInventory();
+                        context.expect(inventory.getSize() == 54,
+                                "dashboard inventory size " + inventory.getSize() + " != 54");
+                        context.expect(inventory.getHolder() == dashboard,
+                                "inventory holder is not the menu — the click-router identity test would break");
+                    });
                 }));
     }
 }
