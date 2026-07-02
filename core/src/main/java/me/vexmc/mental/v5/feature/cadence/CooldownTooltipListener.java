@@ -15,7 +15,7 @@ import me.vexmc.mental.v5.platform.WeaponTooltipAdapter;
 /**
  * The tooltip-hider half of attack-cooldown removal (mandate B5(c)): strips the
  * spoofed "Attack Speed" line from outbound SET_SLOT / WINDOW_ITEMS item copies
- * via the boot-probed {@link WeaponTooltipAdapter} on the {@code PlatformProbe}.
+ * via the boot-probed {@link WeaponTooltipAdapter} on the {@code PlatformProfile}.
  *
  * <p>Display-only and packet-local: the PE item is converted to a Bukkit COPY,
  * the copy's attribute set is rewritten, and the copy is converted back onto the

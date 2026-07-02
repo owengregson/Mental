@@ -3,7 +3,7 @@ package me.vexmc.mental.v5.feature.damage;
 import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.kernel.math.ToolDurabilityMath;
 import me.vexmc.mental.platform.Enchantments;
-import me.vexmc.mental.v5.platform.PlatformProbe;
+import me.vexmc.mental.v5.platform.PlatformProfile;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.enchantments.Enchantment;
@@ -20,7 +20,7 @@ import org.jetbrains.annotations.NotNull;
  * hit (era-unchanged for the attack case), modified by the generic tool/weapon
  * Unbreaking skip ({@code 1/(level+1)} damage chance — kernel
  * {@link ToolDurabilityMath}, NOT the armour 0.6 branch). The break threshold is
- * the item's EFFECTIVE max (the {@code max_damage} component via {@link PlatformProbe}
+ * the item's EFFECTIVE max (the {@code max_damage} component via {@link PlatformProfile}
  * when present, so a diamond-in-disguise wears like diamond, else the material max).
  *
  * <p>Must run on the attacker's owning region thread; it re-reads the main-hand
@@ -28,9 +28,9 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class ToolWear {
 
-    private final PlatformProbe platform;
+    private final PlatformProfile platform;
 
-    public ToolWear(PlatformProbe platform) {
+    public ToolWear(PlatformProfile platform) {
         this.platform = platform;
     }
 

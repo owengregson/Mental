@@ -13,7 +13,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * The boot-probed NMS adapter for the era {@code ATTACK_RANGE} item data
  * component (the retired {@code module.hitbox.AttackRangeComponents} on the v5
- * {@link PlatformProbe}). It is the second, weapon-scoped reach lever the
+ * {@link PlatformProfile}). It is the second, weapon-scoped reach lever the
  * {@code HitboxUnit} pulls on top of the {@code ENTITY_INTERACTION_RANGE}
  * attribute: where the component exists (Minecraft 1.21.5+), a held melee weapon
  * gets the era {@link EraReach} window (max_reach 3.0, hitbox_margin 0.1); where

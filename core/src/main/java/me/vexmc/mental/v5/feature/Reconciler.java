@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import me.vexmc.mental.v5.config.Snapshot;
 
@@ -25,12 +26,24 @@ public final class Reconciler {
 
     private final Registrar registrar;
     private final Consumer<String> log;
+    private final Set<Feature> platformDisabled;
     private final Map<Feature, FeatureUnit> units = new EnumMap<>(Feature.class);
     private final Map<Feature, Scope> open = new java.util.LinkedHashMap<>();
 
     public Reconciler(Registrar registrar, Consumer<String> log) {
+        this(registrar, log, Set.of());
+    }
+
+    /**
+     * As {@link #Reconciler(Registrar, Consumer)} but with a platform veto: a
+     * feature a {@link me.vexmc.mental.v5.platform.PlatformProfile} Required miss
+     * disabled stays off no matter what the config says (the loud log already
+     * fired at profile resolve). Empty on every supported version.
+     */
+    public Reconciler(Registrar registrar, Consumer<String> log, Set<Feature> platformDisabled) {
         this.registrar = registrar;
         this.log = log;
+        this.platformDisabled = Set.copyOf(platformDisabled);
     }
 
     /** Registers a unit; a second unit for the same descriptor is a bug and throws. */
@@ -46,7 +59,7 @@ public final class Reconciler {
     public void converge(Snapshot snapshot) {
         for (Map.Entry<Feature, FeatureUnit> entry : units.entrySet()) {
             Feature feature = entry.getKey();
-            boolean desired = snapshot.enabled(feature);
+            boolean desired = snapshot.enabled(feature) && !platformDisabled.contains(feature);
             boolean active = open.containsKey(feature);
             if (desired && !active) {
                 enable(entry.getValue(), snapshot);

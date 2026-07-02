@@ -15,7 +15,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * The block-component adapter for 1.7-style sword blocking (the retired
- * {@code module.block.SwordBlockComponents} on the v5 {@link PlatformProbe}),
+ * {@code module.block.SwordBlockComponents} on the v5 {@link PlatformProfile}),
  * boot-probed once. It picks the highest component tier the server can drive
  * (by class/field presence, never a version literal) and exposes
  * {@link #apply}/{@link #strip}/{@link #isBlockingSword}/{@link #startUsing} for

@@ -15,7 +15,7 @@ import org.jetbrains.annotations.Nullable;
 
 /**
  * The weapon-tooltip adapter for attack-cooldown removal (the rule-1 half of the
- * retired {@code WeaponAttributeTooltipHider} on the v5 {@link PlatformProbe}),
+ * retired {@code WeaponAttributeTooltipHider} on the v5 {@link PlatformProfile}),
  * boot-probed once. Raising the client {@code attack_speed} to full charge makes
  * a weapon's tooltip render a huge "Attack Speed" line (the client merges the
  * item's modifier with the spoofed base); 1.8 weapons showed attack damage but
@@ -133,6 +133,15 @@ public final class WeaponTooltipAdapter {
         }
         return new WeaponTooltipAdapter(
                 attrType, get, set, modsList, entryAttr, iamCtor, attackSpeedHolder, holderVal, matGetAttrs);
+    }
+
+    /** Whether either strip path (NMS component or legacy Bukkit defaults) resolved at boot. */
+    public boolean supported() {
+        boolean pathA = nmsAttributeModifiersType != null && nmsItemStackGet != null && nmsItemStackSet != null
+                && itemAttributeModifiersList != null && entryAttribute != null
+                && itemAttributeModifiersCtor != null && nmsAttackSpeedHolder != null;
+        boolean pathB = materialGetItemAttributes != null;
+        return pathA || pathB;
     }
 
     /**

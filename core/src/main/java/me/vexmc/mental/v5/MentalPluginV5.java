@@ -61,7 +61,7 @@ import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
 import me.vexmc.mental.v5.feature.loadout.HitboxUnit;
 import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
-import me.vexmc.mental.v5.platform.PlatformProbe;
+import me.vexmc.mental.v5.platform.PlatformProfile;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
 import me.vexmc.mental.v5.feature.delivery.OcmCompatUnit;
@@ -112,6 +112,7 @@ public final class MentalPluginV5 extends JavaPlugin {
 
     private Capabilities capabilities;
     private ServerEnvironment environment;
+    private PlatformProfile platformProfile;
     private Scheduling scheduling;
 
     private ConfigStore configStore;
@@ -154,6 +155,13 @@ public final class MentalPluginV5 extends JavaPlugin {
     public void onEnable() {
         this.capabilities = Capabilities.detect();
         this.environment = ServerEnvironment.parse(Bukkit.getBukkitVersion());
+        // The platform profile (R10/B10): one manifest of typed resolutions built
+        // once at boot — attribute/enchantment handles, protocol capabilities, and
+        // the item-component adapters. A Required mapping break disables only its
+        // owning feature; everything else is a typed OptionalSince fallback.
+        this.platformProfile = PlatformProfile.resolve(
+                environment, capabilities, message -> getLogger().warning(message));
+        getLogger().info(platformProfile.bootReport());
         this.scheduling = SchedulingFactory.create(this, capabilities);
 
         // Config: extract the bundled defaults (a fresh install is a v2 tree),
@@ -236,7 +244,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         // (4A2); the damage/cadence/sustain/loadout families follow in 4B–4D. A
         // feature with no registered unit is simply never converged.
         this.registrar = new BukkitRegistrar(this, ocmBinding);
-        this.reconciler = new Reconciler(registrar, message -> getLogger().warning(message));
+        this.reconciler = new Reconciler(
+                registrar, message -> getLogger().warning(message), platformProfile.disabledFeatures());
         registerUnits();
         reconciler.converge(snapshot);
 
@@ -416,17 +425,16 @@ public final class MentalPluginV5 extends JavaPlugin {
      */
     private void registerUnits() {
         boolean folia = capabilities.folia();
-        boolean modernProtocol = environment.isAtLeast(1, 19, 4);
+        boolean modernProtocol = platformProfile.modernHurtProtocol();
 
         // The single crit/tool-damage verdict source, threaded to BOTH the fast
         // path (DamageShaper) and the vanilla-path crit fallback (mandate §4.6 —
         // the forgotten-gate bug class is structurally dead).
         DamageOwnership damageOwnership = new DamageOwnership(ocmBinding::mentalOwns);
         DamageShaper damageShaper = new DamageShaper(damageOwnership);
-        PlatformProbe platformProbe = PlatformProbe.probe(environment, message -> getLogger().warning(message));
-        ToolWear toolWear = new ToolWear(platformProbe);
+        ToolWear toolWear = new ToolWear(platformProfile);
         EphemeralDecoration swordBlockDecoration =
-                new EphemeralDecoration(this, scheduling, platformProbe.swordBlock());
+                new EphemeralDecoration(this, scheduling, platformProfile.swordBlock());
 
         HitRegistrationUnit hitRegistration = new HitRegistrationUnit(
                 sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
@@ -469,7 +477,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);
         // attack-sounds and sweep are the standalone cosmetic/event suppressors.
-        reconciler.register(new AttackCooldownUnit(scheduling, platformProbe.weaponTooltip()));
+        reconciler.register(new AttackCooldownUnit(scheduling, platformProfile.weaponTooltip()));
         reconciler.register(new AttackSoundsUnit());
         reconciler.register(new SweepUnit());
 
@@ -487,11 +495,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         // blocks the 1.9 slot via the kernel OffhandPolicy (live snapshot reads).
         // Hitbox tunes whichever era-reach lever the running server exposes — the
         // ENTITY_INTERACTION_RANGE attribute (1.20.5+) and the ATTACK_RANGE weapon
-        // component (1.21.5+, boot-probed on the PlatformProbe) — a documented no-op
+        // component (1.21.5+, boot-probed on the PlatformProfile) — a documented no-op
         // where neither exists (the client picks the melee target).
         reconciler.register(new CraftingUnit(this::snapshot));
         reconciler.register(new OffhandUnit(this::snapshot, scheduling));
-        reconciler.register(new HitboxUnit(this, scheduling, platformProbe.attackRange()));
+        reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange()));
     }
 
     private Snapshot parseSnapshot() {
