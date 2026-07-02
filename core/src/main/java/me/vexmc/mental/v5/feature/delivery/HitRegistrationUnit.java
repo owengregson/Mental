@@ -32,7 +32,6 @@ import me.vexmc.mental.kernel.wire.CpsLimiter;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.kernel.wire.ReachValidator;
-import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -86,6 +85,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
     private final boolean modernProtocol;
     private final me.vexmc.mental.v5.delivery.HitIds ids;
     private final me.vexmc.mental.v5.VelocityValve valve;
+    private final me.vexmc.mental.v5.feature.damage.DamageShaper shaper;
 
     private final CpsLimiter cps = new CpsLimiter();
     private final FeedbackGate feedbackGate = new FeedbackGate();
@@ -95,6 +95,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             AnticheatPolicy anticheat, AtomicBoolean wtapConsultWire, TickClock clock,
             Supplier<Snapshot> snapshot, Scheduling scheduling,
             me.vexmc.mental.v5.VelocityValve valve, me.vexmc.mental.v5.delivery.HitIds ids,
+            me.vexmc.mental.v5.feature.damage.DamageShaper shaper,
             boolean folia, boolean modernProtocol) {
         this.sessions = sessions;
         this.domains = domains;
@@ -106,6 +107,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
         this.scheduling = scheduling;
         this.valve = valve;
         this.ids = ids;
+        this.shaper = shaper;
         this.folia = folia;
         this.modernProtocol = modernProtocol;
     }
@@ -454,7 +456,11 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 || !isStillAttackable(attacker, target) || !isInReach(attacker, target)) {
             return;
         }
-        target.damage(vanillaAmount(attacker), attacker);
+        // A non-player LivingEntity is legacy-composed like a player victim (no
+        // transaction, so ownership resolves from the attacker); a non-living
+        // Damageable takes the retired HitApplier's flat 1.0.
+        double amount = target instanceof LivingEntity ? composedAmount(attacker, null) : 1.0;
+        target.damage(amount, attacker);
     }
 
     private void damageWithSlot(Player attacker, Player victim, UUID victimUuid, HitTransaction tx) {
@@ -463,7 +469,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             session.activeInbound(tx);
         }
         try {
-            victim.damage(vanillaAmount(attacker), attacker);
+            victim.damage(composedAmount(attacker, tx), attacker);
         } finally {
             if (session != null) {
                 session.clearActiveInbound();
@@ -478,9 +484,20 @@ public final class HitRegistrationUnit implements FeatureUnit {
         }
     }
 
-    /** The vanilla-shaped base amount in 4A2 — the attacker's attack-damage attribute (legacy tables land in 4B). */
-    private static double vanillaAmount(Player attacker) {
-        return Attributes.valueOr(attacker, Attributes.attackDamage(), 1.0);
+    /**
+     * The fast-path damage amount (spec §4.6): the {@link me.vexmc.mental.v5.feature.damage.DamageShaper}
+     * legacy composition — weapon base → era Strength/Weakness → crit ×1.5 →
+     * Sharpness — off the attacker's live state, or a vanilla-shaped amount when
+     * OCM owns the shaping. {@code simulateCrits}/{@code legacyToolDamage} come
+     * from the hit-reg settings; {@code old-potion-values} from its live toggle.
+     * Owning thread only (the attacker read is region-guarded by the caller).
+     */
+    private double composedAmount(Player attacker, HitTransaction tx) {
+        HitRegSettings settings = settings();
+        return shaper.compose(
+                attacker, tx == null ? null : tx.context(),
+                settings.simulateCrits(), settings.legacyToolDamage(),
+                snapshot.get().enabled(Feature.POTION_VALUES));
     }
 
     private static Entity lookupEntity(Player attacker, int entityId) {

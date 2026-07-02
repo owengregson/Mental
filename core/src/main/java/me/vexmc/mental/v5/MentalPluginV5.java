@@ -35,6 +35,9 @@ import me.vexmc.mental.v5.delivery.MirrorListener;
 import me.vexmc.mental.v5.feature.BukkitRegistrar;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.Reconciler;
+import me.vexmc.mental.v5.feature.damage.CritFallbackUnit;
+import me.vexmc.mental.v5.feature.damage.DamageOwnership;
+import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
@@ -361,9 +364,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         boolean folia = capabilities.folia();
         boolean modernProtocol = environment.isAtLeast(1, 19, 4);
 
+        // The single crit/tool-damage verdict source, threaded to BOTH the fast
+        // path (DamageShaper) and the vanilla-path crit fallback (mandate §4.6 —
+        // the forgotten-gate bug class is structurally dead).
+        DamageOwnership damageOwnership = new DamageOwnership(ocmBinding::mentalOwns);
+        DamageShaper damageShaper = new DamageShaper(damageOwnership);
+
         HitRegistrationUnit hitRegistration = new HitRegistrationUnit(
                 sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
-                this::snapshot, scheduling, valve, hitIds, folia, modernProtocol);
+                this::snapshot, scheduling, valve, hitIds, damageShaper, folia, modernProtocol);
         LatencyCompensationUnit latencyCompensation =
                 new LatencyCompensationUnit(latency, scheduling, this::snapshot);
         sessions.addForgetHook(hitRegistration::forget);
@@ -381,6 +390,12 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new RodVelocityUnit(ocmBinding, scheduling));
         reconciler.register(new ProjectileKnockbackUnit(
                 this, sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock));
+
+        // The damage family (4B). The fast-path legacy composition (tool table,
+        // era potion values, era crit) lives in the shaper above and is read live
+        // from the snapshot; CritFallback restores the era crit on fast-path-off
+        // hits through the SAME ownership verdict.
+        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
     }
 
     private Snapshot parseSnapshot() {
