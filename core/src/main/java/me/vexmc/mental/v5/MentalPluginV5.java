@@ -44,6 +44,7 @@ import me.vexmc.mental.v5.feature.damage.PotionValuesUnit;
 import me.vexmc.mental.v5.feature.damage.SwordBlockingUnit;
 import me.vexmc.mental.v5.feature.damage.ToolDurabilityUnit;
 import me.vexmc.mental.v5.feature.damage.ToolWear;
+import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProbe;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
@@ -414,6 +415,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
         reconciler.register(new SwordBlockingUnit(domains, clock, swordBlockDecoration));
+
+        // The cadence family (4C). Attack-cooldown is the complete B5 contract in
+        // one scope (server rule + client spoof + tooltip hider + sweep re-disable).
+        reconciler.register(new AttackCooldownUnit(scheduling, platformProbe.weaponTooltip()));
     }
 
     private Snapshot parseSnapshot() {

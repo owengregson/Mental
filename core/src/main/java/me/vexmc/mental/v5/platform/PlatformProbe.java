@@ -33,18 +33,20 @@ public final class PlatformProbe {
     private final @Nullable Method hasMaxDamage;
     private final @Nullable Method getMaxDamage;
     private final @NotNull SwordBlockAdapter swordBlock;
+    private final @NotNull WeaponTooltipAdapter weaponTooltip;
 
     private PlatformProbe(
             @Nullable Method hasMaxDamage, @Nullable Method getMaxDamage,
-            @NotNull SwordBlockAdapter swordBlock) {
+            @NotNull SwordBlockAdapter swordBlock, @NotNull WeaponTooltipAdapter weaponTooltip) {
         this.hasMaxDamage = hasMaxDamage;
         this.getMaxDamage = getMaxDamage;
         this.swordBlock = swordBlock;
+        this.weaponTooltip = weaponTooltip;
     }
 
     /**
-     * Boot-probes every 4B capability against the running server, loud-logging a
-     * mapping break (a capability the version should have but does not resolve).
+     * Boot-probes every 4B/4C capability against the running server, loud-logging
+     * a mapping break (a capability the version should have but does not resolve).
      */
     public static @NotNull PlatformProbe probe(
             @NotNull ServerEnvironment environment, @NotNull Consumer<String> log) {
@@ -57,12 +59,19 @@ public final class PlatformProbe {
                     + "getMaxDamage) did not resolve on " + environment.describe()
                     + " — a mapping break; tool durability falls back to the material max.");
         }
-        return new PlatformProbe(has, get, SwordBlockAdapter.probe(environment, log));
+        return new PlatformProbe(has, get,
+                SwordBlockAdapter.probe(environment, log),
+                WeaponTooltipAdapter.probe(environment, log));
     }
 
     /** The block-component adapter (tier detection + apply/strip/block-state). */
     public @NotNull SwordBlockAdapter swordBlock() {
         return swordBlock;
+    }
+
+    /** The weapon-tooltip adapter (attack-cooldown attack-speed line strip). */
+    public @NotNull WeaponTooltipAdapter weaponTooltip() {
+        return weaponTooltip;
     }
 
     /**
