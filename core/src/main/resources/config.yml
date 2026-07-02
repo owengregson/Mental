@@ -314,6 +314,13 @@ compatibility:
   #   ignore — pretend OCM is absent; both plugins will fight. Not advised.
   old-combat-mechanics: auto
 
+# Anonymous usage statistics via bStats (https://bstats.org/plugin/bukkit, id
+# 31788). No player data is collected — only aggregate counts (server software,
+# Mental's anticheat mode, latency probe strategy, scheduling backend, and OCM
+# coordination mode). Set to false to opt out entirely.
+metrics:
+  enabled: true
+
 # Verbose logging. Enable globally, then pick categories. Admins can also
 # subscribe to live in-game output from the Debug screen of the /mental menu.
 debug:

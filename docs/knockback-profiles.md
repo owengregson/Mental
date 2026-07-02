@@ -1,10 +1,10 @@
 # Knockback profiles
 
 A **profile** is one complete knockback feel — every knob the engine
-consumes, in one file under `plugins/Mental/profiles/`. The server picks a
-default, worlds can override it, and individual players can be pinned to a
-profile at runtime (the practice-core path). Mental ships nine presets and
-loads every `profiles/*.yml` it finds, so you can keep as many as you like.
+consumes, in one file under `plugins/Mental/profiles/`. The server picks one
+default and worlds can override it; the selection is **server-wide** — there
+is no per-player pin. Mental ships ten presets and loads every `profiles/*.yml`
+it finds, so you can keep as many as you like.
 
 ## Resolution
 
@@ -12,11 +12,13 @@ The profile that governs a knock is the **victim's** — knockback is the
 victim's motion, so a duel arena assigns both fighters the same profile and
 a spectator wandering in keeps the world's. Resolution order:
 
-1. **Per-player override** — `/mental kb set <profile> [player]` or
-   `Mental.get().setKnockbackProfile(player, name)`. Survives world
-   changes, clears on quit.
-2. **Per-world map** — `knockback.per-world` in `knockback.yml`.
-3. **Default** — `knockback.profile` in `knockback.yml`.
+1. **Per-world map** — `knockback.per-world` in `knockback.yml`.
+2. **Default** — `knockback.profile` in `knockback.yml`.
+
+Selection is server-wide; the per-player override was retired when management
+moved into the in-game GUI. The netty pre-send reads the profile frozen into
+the victim's per-tick `PlayerView`, so prediction and the authoritative pass
+always resolve the same profile for one hit.
 
 Profiles only shape knocks **Mental owns**: where OldCombatMechanics'
 modules govern an interaction (see
@@ -117,33 +119,32 @@ Pasting a divisor value in unchanged inverts the feel entirely.
 
 ## Runtime control
 
-```
-/mental kb                       list profiles, default, per-world map
-/mental kb info <profile>        a profile's key values
-/mental kb set <profile> [player]   pin a player (self when omitted)
-/mental kb reset [player]        back to world/default resolution
-```
+Management is in-game. `/mental` (permission `mental.command.use`) opens the
+management menu; its **Knockback** screen lists every loaded profile and the
+server-wide default and switches it. A switch writes the machine-owned overlay
+(`state/overrides.yml`) and reloads — the human `knockback.yml` is never
+re-serialized, and the effective default is shown with the overridden key
+marked. `/mental reload` (console, permission `mental.command.reload`) re-reads
+every file; a default pointing at a profile that vanished falls back to
+`legacy-1.7` with a warning.
 
-All behind `mental.command.knockback` (default: op). `/mental reload`
-re-reads every file; overrides pointing at a profile that vanished are
-cleared with a warning.
-
-### API (practice cores)
+### API
 
 ```java
 MentalApi mental = Mental.get();
-mental.setKnockbackProfile(victim, "kohi");   // validated; null clears
-String active = mental.knockbackProfile(victim);  // resolved name
+mental.setKnockbackProfile("kohi");            // server-wide; validated, returns false if unknown
+String active = mental.knockbackProfile();      // the server-wide default
 Set<String> available = mental.knockbackProfiles();
 
-// Mirror kit/arena swaps:
+// React to a switch (fired on a global change — there is no player):
 @EventHandler
-public void onProfileChange(PlayerKnockbackProfileChangeEvent event) {
-    // event.getPreviousProfile() / getNewProfile() — null = no override
+public void onProfileChange(KnockbackProfileChangeEvent event) {
+    // event.getPreviousProfile() / event.getNewProfile()
 }
 ```
 
-Call profile mutations from the player's owning thread.
+`setKnockbackProfile` routes through the same write-back path (`Management`) as
+the GUI, so the API and the menu can never disagree.
 
 ## What profiles deliberately do not include
 

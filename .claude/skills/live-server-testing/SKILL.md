@@ -34,14 +34,53 @@ description: Use when writing or debugging integration suites in tester/ — Fak
   handshake/login/configuration traffic a real client does, so packet
   listeners that misbehave pre-Play (e.g. downcasting `getPacketType()` to a
   Play type) pass every suite and explode on real joins. Pin that contract in
-  UNIT tests against synthetic events (see `ProbeListenerStateTest`), not in
-  the live matrix.
+  UNIT tests against synthetic events (see `PacketTapStateTest`, was
+  `ProbeListenerStateTest`), not in the live matrix.
 - After `attack()`, clear the victim's HORIZONTAL motion only — the restore
   would leak one tick of pre-knock motion; zeroing motY un-grounds them
   (see legacy-motion-physics).
 - Held movement input goes through the `preTick` hook (runs before the
   physics tick, where a client integrates keys), with the oracle integrating
   the identical input model into the expectation.
+
+## FakePlayer on Folia (Phase 5 run C — the first live Folia combat coverage)
+
+FakePlayer bootstraps UNDER regionized threading, but only from the right
+thread. All three fixes are gated on `scheduling.describe() == "folia"`, so
+Paper stays byte-identical.
+
+- **Spawn on the target's OWNING REGION thread (`Scheduling.runAt`), not the
+  global `runGlobal` hop.** The Paper-shaped sync spawn threw
+  `NullPointerException: … ServerLevel.getCurrentWorldData() is null` from
+  inside `PlayerList.placeNewPlayer` — javap confirmed it does
+  `getCurrentWorldData().connections.add(connection)`, and
+  `getCurrentWorldData()` returns the region-thread-local `RegionizedWorldData`
+  (null off a region tick). Driving the whole spawn on the target location's
+  region thread clears it: `placeNewPlayer` succeeds, `PlayerJoinEvent` fires, a
+  `CombatSession` is created for both fakes, and its `repeatOn` entity-scheduler
+  task ticks.
+- **The final relocate uses `teleportAsync`.** Folia bans synchronous
+  `Entity#teleport` while region-threading
+  (`UnsupportedOperationException: Must use teleportAsync …`).
+- **`FakePlayer.remove` SKIPS its direct reflective `PlayerList.remove` on
+  Folia** (the one bug that earned a debugging round). `kickPlayer` already
+  queues a disconnect that Folia's `tickConnections` turns into a single removal
+  + `EntityScheduler` retire; a second direct remove retires the scheduler AGAIN
+  → `IllegalStateException("Already retired")`, an uncaught region-tick failure
+  that HARD-CRASHES the region a tick later — NOT catchable at the call site
+  (it throws inside `tickConnections`, which is why the first suite run died
+  mid-test with no result). javap on the crash stack pinned the double-retire.
+- **Drive combat entirely on the region threads**: `FoliaCombatSmoke` spawns via
+  `runAt`, attacks via `runOn(attacker)`, and reads the journal + tears down via
+  `runOn(player)` — asserting the desk-journal's canonical standing vector
+  (0,0.3608,0.4) against the kernel `KnockbackEngine`, plus a zero-touch case.
+- **CROSS-region melee is not fake-drivable.** `FakePlayer.attack` routes through
+  NMS `Player.attack(victim)`, which reads the victim's live state and so throws
+  Folia's `ensureTickThread` off-region BEFORE any Mental code runs — a
+  two-region melee cannot be staged. Real melee always shares a region; the
+  `KnockbackUnit`'s `isOwnedByCurrentRegion(attacker)` guard is the
+  boundary-straddle / dispatch-tick-pearl belt, and the smoke pins the
+  same-region check is consulted and returns true.
 
 ## Suite rules
 
@@ -96,9 +135,10 @@ measured era values and the harness's protocol traps.
   server's MEASURED latency (drives compensation hints), not transport.
   Numbers shifting at PING_MS>0 are the compensation module working, not
   an era-ordering signal.
-- Fake players never reach `GroundPacketTap` (no inbound packets): the
-  suites exercise the tick-sampler fallback by construction; packet-path
-  era claims live in unit pins (`VictimMotionTest`) + this harness only.
+- Fake players never reach the parse rim's `GroundFsm` (was `GroundPacketTap` —
+  no inbound packets): the suites exercise the session-side tick-sampler fallback
+  by construction; packet-path era claims live in kernel unit pins
+  (`MotionLedgerTest` / `DecayTest`, was `VictimMotionTest`) + this harness only.
 
 ## Modern-bot staging traps (each cost a debugging round)
 

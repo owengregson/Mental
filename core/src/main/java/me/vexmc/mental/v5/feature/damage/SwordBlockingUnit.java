@@ -1,0 +1,217 @@
+package me.vexmc.mental.v5.feature.damage;
+
+import java.util.UUID;
+import me.vexmc.mental.kernel.math.SwordBlockReduction;
+import me.vexmc.mental.kernel.port.TickClock;
+import me.vexmc.mental.kernel.wire.SprintWire;
+import me.vexmc.mental.v5.config.Snapshot;
+import me.vexmc.mental.v5.feature.EphemeralDecoration;
+import me.vexmc.mental.v5.feature.Feature;
+import me.vexmc.mental.v5.feature.FeatureUnit;
+import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.platform.SwordBlockAdapter;
+import me.vexmc.mental.v5.rim.ConnectionDomains;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.inventory.ClickType;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryType;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
+import org.jetbrains.annotations.NotNull;
+
+/**
+ * 1.7-style right-click sword blocking (the retired {@code module.block.SwordBlockingModule}
+ * on the v5 seams). Right-clicking a main-hand sword raises the tier-appropriate
+ * block decoration (component pose on 1.21+, off-hand shield on ≤1.20.6, via
+ * {@link EphemeralDecoration}); a blocked melee hit is reduced by the 1.8
+ * {@code (damage-1)*0.5} (kernel {@link SwordBlockReduction}) at
+ * {@link EventPriority#HIGH}, while knockback is left FULL — the event is never
+ * cancelled and velocity is never touched, so a blocked hit knocks full (era
+ * truth; Mental owns knockback). The native BLOCKS_ATTACKS tier reduces the hit
+ * itself, so software reduction is skipped there (never double-reduce).
+ *
+ * <p>The one server-side reconstruction the era needs (era-accuracy skill): the
+ * block-hit sprint reset. Starting a block dropped the attacker's sprint in
+ * 1.7/1.8 and the re-engage re-earned the sprint knockback bonus; modern clients
+ * keep the sprint flag through an item-use block, so that STOP/START never
+ * crosses the wire. {@link #resetSprintForBlock} re-arms the wire freshness on
+ * the right-click, gated on the RAW client sprint flag (the {@link SprintWire}'s
+ * view — never the server flag), so a stationary defensive block gains no phantom
+ * bonus, and never touching sprint particles (client-authoritative).</p>
+ */
+public final class SwordBlockingUnit implements FeatureUnit, Listener {
+
+    private final ConnectionDomains domains;
+    private final TickClock clock;
+    private final EphemeralDecoration decoration;
+
+    public SwordBlockingUnit(
+            ConnectionDomains domains, TickClock clock, EphemeralDecoration decoration) {
+        this.domains = domains;
+        this.clock = clock;
+        this.decoration = decoration;
+    }
+
+    @Override
+    public Feature descriptor() {
+        return Feature.SWORD_BLOCKING;
+    }
+
+    @Override
+    public void assemble(Scope scope, Snapshot snapshot) {
+        scope.listen(this);
+        // Eager component application on enable (a plain sword must already carry
+        // the block component or the client swallows the first air right-click),
+        // and guaranteed teardown of every decoration on disable (B12).
+        scope.task(() -> {
+            decoration.enableAll();
+            return decoration::disableAll;
+        });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Trigger                                                            */
+    /* ------------------------------------------------------------------ */
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInteract(@NotNull PlayerInteractEvent event) {
+        Action action = event.getAction();
+        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        if (event.getHand() != EquipmentSlot.HAND) {
+            return; // dedupe the per-hand double-fire: act only on the main-hand fire
+        }
+        Player player = event.getPlayer();
+        ItemStack mainHand = player.getInventory().getItemInMainHand();
+        if (!SwordBlockAdapter.isSword(mainHand.getType())) {
+            return;
+        }
+        resetSprintForBlock(player);
+        decoration.begin(player);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Reduction (software tiers only — native BLOCKS_ATTACKS reduces itself) */
+    /* ------------------------------------------------------------------ */
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onDamage(@NotNull EntityDamageByEntityEvent event) {
+        if (decoration.nativeReduction()) {
+            return; // native reduction — never double-reduce
+        }
+        if (!(event.getEntity() instanceof Player victim) || !decoration.blocking(victim)) {
+            return;
+        }
+        double incoming = event.getDamage();
+        double reduction = SwordBlockReduction.blockedDamage(incoming);
+        if (reduction <= 0.0) {
+            return;
+        }
+        // Reduce DAMAGE only; never cancel — a blocked hit still knocks full.
+        event.setDamage(Math.max(0.0, incoming - reduction));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Exit triggers (guaranteed revert)                                  */
+    /* ------------------------------------------------------------------ */
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHeldChange(@NotNull PlayerItemHeldEvent event) {
+        decoration.onHeldChange(event.getPlayer(), event.getPreviousSlot(), event.getNewSlot());
+    }
+
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onSwapHands(@NotNull PlayerSwapHandItemsEvent event) {
+        if (decoration.onSwapHands(event.getPlayer())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onDrop(@NotNull PlayerDropItemEvent event) {
+        ItemStack dropped = event.getItemDrop().getItemStack();
+        decoration.onDrop(event.getPlayer(), dropped,
+                () -> event.getItemDrop().setItemStack(dropped));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onInventoryClick(@NotNull InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
+        if ((isSwapOffhandClick(event) || isOffhandSlotClick(event)) && decoration.onOffhandClick(player)) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDeath(@NotNull PlayerDeathEvent event) {
+        decoration.onDeath(event.getEntity(), event.getKeepInventory(), event.getDrops());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onWorldChange(@NotNull PlayerChangedWorldEvent event) {
+        decoration.onWorldChange(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onQuit(@NotNull PlayerQuitEvent event) {
+        decoration.onQuit(event.getPlayer()); // inline revert — pre-save hook (B12)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onJoin(@NotNull PlayerJoinEvent event) {
+        decoration.onJoin(event.getPlayer());
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Helpers                                                            */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Re-arms the sprint knockback bonus a 1.7/1.8 sword block earned, gated on the
+     * RAW client sprint flag (the wire's view — the only signal that survives
+     * Mental's post-hit {@code setSprinting(false)}); a packetless player has no
+     * wire, so the reset never fires for it. Re-syncs the server flag so the
+     * snapshot read sees it when {@code wtap-registration} is off; touches no
+     * sprint particles (client-authoritative).
+     */
+    private void resetSprintForBlock(@NotNull Player player) {
+        UUID id = player.getUniqueId();
+        if (!domains.has(id)) {
+            return; // no live connection wire (a synthetic/packetless player)
+        }
+        SprintWire wire = domains.domainFor(id).sprint();
+        if (!wire.verdictAt(clock.current()).sprinting()) {
+            return; // client not sprinting — a defensive block earns no phantom bonus
+        }
+        wire.onSprintStart(); // the block-release re-engage IS the w-tap signal — re-arm freshness
+        if (!player.isSprinting()) {
+            player.setSprinting(true);
+        }
+    }
+
+    private static boolean isSwapOffhandClick(@NotNull InventoryClickEvent event) {
+        return event.getClick() == ClickType.SWAP_OFFHAND;
+    }
+
+    private static boolean isOffhandSlotClick(@NotNull InventoryClickEvent event) {
+        return event.getClickedInventory() != null
+                && event.getClickedInventory().getType() == InventoryType.PLAYER
+                && event.getSlot() == 40;
+    }
+}

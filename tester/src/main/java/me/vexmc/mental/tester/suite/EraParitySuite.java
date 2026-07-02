@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
-import me.vexmc.mental.MentalPlugin;
-import me.vexmc.mental.common.scheduling.Scheduling;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
@@ -76,7 +76,7 @@ public final class EraParitySuite {
     private EraParitySuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("era: plain hit lands where the 1.7.10 and 1.8.9 models say", context -> {
                     Outcome legacy17 = melee(mental, tester, context, "legacy-1.7", new MeleeShape());
@@ -249,11 +249,11 @@ public final class EraParitySuite {
     }
 
     private static Outcome melee(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context,
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context,
             String profile, MeleeShape shape) throws Exception {
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
-        ClientEmulator client = new ClientEmulator(victim, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ClientEmulator client = new ClientEmulator(victim, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -263,6 +263,14 @@ public final class EraParitySuite {
                 Bukkit.getPluginManager().registerEvents(client, tester);
             });
             context.awaitTicks(5); // land and settle (spawn invulnerability is cleared at spawn)
+
+            // Select the profile BEFORE any attack, then let the session view
+            // adopt the swapped snapshot: v5 freezes the active profile into the
+            // per-tick PlayerView the knockback unit reads, so a switch needs one
+            // tick to propagate.
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile(profile),
+                    "preset '" + profile + "' missing"));
+            context.awaitTicks(3);
 
             if (shape.hasInput()) {
                 // The victim charges at full speed before the trade — motion
@@ -280,8 +288,6 @@ public final class EraParitySuite {
             }
 
             Location start = context.sync(() -> {
-                context.expect(mental.management().setGlobalProfile(profile),
-                        "preset '" + profile + "' missing");
                 attacker.player().setSprinting(shape.sprintAttacker);
                 victim.player().setSprinting(shape.sprintVictim);
                 Location at = victim.player().getLocation().clone();
@@ -346,10 +352,10 @@ public final class EraParitySuite {
     /* ------------------------------------------------------------------ */
 
     private static void rod(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer rodder = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
-        ClientEmulator client = new ClientEmulator(victim, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer rodder = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ClientEmulator client = new ClientEmulator(victim, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -392,10 +398,10 @@ public final class EraParitySuite {
     }
 
     private static void snowball(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer shooter = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
-        ClientEmulator client = new ClientEmulator(victim, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer shooter = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ClientEmulator client = new ClientEmulator(victim, mental.scheduling());
 
         try {
             Location victimSpot = context.sync(() -> {

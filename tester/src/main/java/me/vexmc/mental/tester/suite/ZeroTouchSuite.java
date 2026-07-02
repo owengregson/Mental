@@ -1,7 +1,8 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
-import me.vexmc.mental.MentalPlugin;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -18,18 +19,18 @@ import org.jetbrains.annotations.NotNull;
 
 /**
  * A disabled Mental module must do <em>nothing at all</em> to the game, so
- * other combat plugins can own the mechanic. Each scenario turns one module
- * off through the real command path, performs the action on a live server,
+ * other combat plugins can own the mechanic. Each scenario turns one feature
+ * off through the real management seam, performs the action on a live server,
  * asserts pure vanilla behavior — no Mental knockback application, no damage
  * substitution, no event cancellation, no velocity rewrite — and re-enables
- * the module for whatever runs next.
+ * the feature for whatever runs next.
  */
 public final class ZeroTouchSuite {
 
     private ZeroTouchSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("zero-touch: disabled knockback module leaves the vanilla knock alone", context ->
                         runDisabledKnockback(mental, tester, context)),
@@ -42,10 +43,10 @@ public final class ZeroTouchSuite {
     }
 
     private static void runDisabledKnockback(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "knockback", false);
@@ -82,9 +83,9 @@ public final class ZeroTouchSuite {
     }
 
     private static void runDisabledFishing(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer rodder = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer caught = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer rodder = new FakePlayer(tester, mental.scheduling());
+        FakePlayer caught = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "fishing-knockback", false);
@@ -134,8 +135,8 @@ public final class ZeroTouchSuite {
     }
 
     private static void runDisabledRodVelocity(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer rodder = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer rodder = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "rod-velocity", false);
@@ -185,10 +186,10 @@ public final class ZeroTouchSuite {
     }
 
     private static void runDisabledProjectile(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer shooter = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer shooter = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "projectile-knockback", false);
@@ -234,14 +235,16 @@ public final class ZeroTouchSuite {
         }
     }
 
-    /** Toggles through the real console command path and waits for convergence. */
+    /** Toggles through the real management seam and waits for convergence. */
     private static void toggleModule(TestContext context, String id, boolean enabled) throws Exception {
-        context.syncRun(() -> ((MentalPlugin) Bukkit.getPluginManager().getPlugin("Mental"))
-                .management().setModuleEnabled(id, enabled));
+        Feature feature = Feature.byModuleId(id)
+                .orElseThrow(() -> new AssertionError("unknown module id '" + id + "'"));
+        context.syncRun(() -> ((MentalPluginV5) Bukkit.getPluginManager().getPlugin("Mental"))
+                .management().setModuleEnabled(feature, enabled));
         context.awaitTicks(1);
     }
 
-    private static boolean moduleActive(MentalPlugin mental, String id) {
-        return mental.modules().byId(id).map(module -> module.active()).orElse(false);
+    private static boolean moduleActive(MentalPluginV5 mental, String id) {
+        return Feature.byModuleId(id).map(mental::featureActive).orElse(false);
     }
 }

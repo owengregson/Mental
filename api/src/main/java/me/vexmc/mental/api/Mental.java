@@ -52,6 +52,15 @@ public final class Mental {
         @NotNull Set<String> knockbackProfiles();
 
         @NotNull String version();
+
+        /**
+         * The API generation. The pre-rewrite surface is generation 1; the v5
+         * facade returns 2. A default keeps the addition binary-compatible for
+         * any implementation compiled against the earlier interface.
+         */
+        default int apiVersion() {
+            return 1;
+        }
     }
 
     private static volatile MentalApi instance;

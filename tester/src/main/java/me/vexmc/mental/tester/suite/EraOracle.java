@@ -1,6 +1,7 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
+import me.vexmc.mental.kernel.math.Decay;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -22,10 +23,13 @@ import org.jetbrains.annotations.NotNull;
  */
 final class EraOracle {
 
-    private static final double GRAVITY = 0.08;
-    private static final double VERTICAL_DRAG = 0.98;
-    private static final double AIR_DRAG = 0.91;
-    private static final double GROUND_DRAG = 0.91 * 0.6;
+    // Derived from the kernel motion authority — the suite never re-declares a
+    // physics constant of its own (spec §12.7). GROUND_DRAG is the era default
+    // slipperiness × air drag (stone: 0.6 × 0.91 = 0.546).
+    private static final double GRAVITY = Decay.DEFAULT_GRAVITY;
+    private static final double VERTICAL_DRAG = Decay.VERTICAL_DRAG;
+    private static final double AIR_DRAG = Decay.AIR_DRAG;
+    private static final double GROUND_DRAG = Decay.DEFAULT_SLIPPERINESS * Decay.AIR_DRAG;
 
     /** Motion replaced (all axes) before the move of tick {@code tick}. */
     record VelocityEvent(int tick, double vx, double vy, double vz) {}

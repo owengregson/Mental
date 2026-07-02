@@ -1,27 +1,31 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
-import me.vexmc.mental.MentalPlugin;
-import me.vexmc.mental.gui.Menu;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.gui.Menu;
 import org.bukkit.Bukkit;
 import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * The command is now a thin launcher: a permitted player opens the management
- * GUI, the console gets the reload fallback and a hint. Rendered on whichever
- * backend this version selected (classic / Brigadier).
+ * The {@code /mental} command surface (spec §13): {@code reload} re-reads the
+ * config with the {@code mental.command.reload} permission; a bare {@code /mental}
+ * from a permitted player opens the descriptor-driven management menu (Phase 6),
+ * and from the console prints the reload hint. Both the console and a permitted
+ * player must see the command handled (the executor always returns true), and the
+ * player's menu must actually open — the holder-identity contract the click router
+ * routes on.
  */
 public final class CommandSuite {
 
     private CommandSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("command: console reload and bare hint are handled", context -> {
                     boolean reload = context.sync(() ->
@@ -32,8 +36,8 @@ public final class CommandSuite {
                             Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "mental"));
                     context.expect(bare, "bare 'mental' from the console was not handled");
                 }),
-                new TestCase("command: a permitted player opens the dashboard GUI", context -> {
-                    FakePlayer player = new FakePlayer(tester, mental.services().scheduling());
+                new TestCase("command: a permitted player opens the dashboard menu", context -> {
+                    FakePlayer player = new FakePlayer(tester, mental.scheduling());
                     try {
                         context.syncRun(() ->
                                 player.spawn(Arena.prepare(Bukkit.getWorlds().get(0))));
@@ -43,7 +47,9 @@ public final class CommandSuite {
                             return Bukkit.dispatchCommand(player.player(), "mental");
                         });
                         context.expect(handled, "bare /mental was not handled for a permitted player");
-                        // open() defers onto the player's region thread; give it a few ticks.
+                        // open() defers the inventory work onto the player's region
+                        // thread (a tick on Paper); give it a few ticks, then assert
+                        // the holder-identity contract the click router routes on.
                         context.awaitTicks(3);
                         boolean menuOpen = context.sync(() -> menuOpen(player));
                         context.expect(menuOpen, "/mental did not open a Mental management menu");

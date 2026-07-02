@@ -24,12 +24,15 @@ that revert to this day.
 
 Mental cannot un-revert vanilla, and the server's `getVelocity()` for
 players is reverted or stale on every supported version. Instead it keeps
-the legacy fields itself — the `VictimMotion` ledger:
+the legacy fields itself — the `MotionLedger`:
 
 - Every velocity actually delivered to a victim (Mental's knockback, rod
   and projectile knocks, vanilla velocities Mental left alone, other
-  plugins' velocities) is recorded at `MONITOR` on the velocity event.
-- Reads decay the recorded vector through the legacy friction model:
+  plugins' velocities) is recorded by the **delivery desk** in the one
+  velocity-event apply that ships it — the same operation, same thread, same
+  object that writes the wire value, so no second listener and no side channel
+  can disagree about what was delivered.
+- Reads decay the recorded vector through the legacy friction model (`Decay`):
   vertical `(v − 0.08) × 0.98` per tick, horizontal `× 0.91` airborne or
   `× 0.546` grounded, dead after sixty ticks.
 - The knockback engine consumes the ledger — never `getVelocity()` — for
@@ -59,15 +62,15 @@ fields. That is why W-tapping reduces *felt* knockback without reducing
 | Melee knockback | friction `v/2`, base `0.4/0.4`, vertical cap on the BASE before bonus, sprint/enchant `+0.5/+0.1` per level along yaw, additive and resistance-blind | `KnockbackEngine` |
 | Knockback resistance | probabilistic all-or-nothing (`armor-resistance: legacy`); the era item pool had no partial sources, so `none` is the default | `ResistancePolicy` |
 | Velocity packet clamp | each axis to ±3.9, the short-encoding limit | `KnockbackEngine.clamp` |
-| Projectile knockback | pushes away from where the **shooter stood**, never along flight; snowball/egg/pearl are full zero-damage hits | `ProjectileKnockbackModule` |
-| Arrow Punch | `0.6/level` along horizontal flight, `+0.1` vertical, additive, resistance-blind; level fixed at shoot time | `ProjectileKnockbackModule` |
-| Rod bobber | a real zero-damage hit: full base knock away from the **angler's position**, arms the 20-tick hurt window — so a rod hit suppresses the knockback of a melee hit inside ten ticks (the era's rod-then-sword interplay) | `FishingKnockbackModule` |
-| Rod reel-in | pull toward the angler `Δ × 0.1` per axis plus `√distance × 0.08` lift (`reel-in: legacy`) | `FishingKnockbackModule` |
-| Rod cast | speed 0.6, gaussian spread 0.0075, hook gravity restored to the legacy 0.04 | `FishingRodVelocityModule` |
-| Sharpness | `1.25 × level` (1.9 changed it to `0.5×level + 0.5`) | `DamageCalculator` |
-| Crit | ×1.5 on the **weapon damage before enchantments** (the legacy order); sprinting does not block crits — that exclusion is a 1.9 rule | `DamageCalculator` |
-| Tool damage | pre-1.9 tables: sword `4+tier` (a diamond sword deals 8), axe `3+tier`, pickaxe `2+tier`, shovel `1+tier` (`legacy-tool-damage`) | `DamageCalculator` |
-| Attack cooldown | none: Mental computes flat legacy damage itself and resets the vanilla charge meter per hit, so the 1.9 system never scales anything | `HitApplier` |
+| Projectile knockback | pushes away from where the **shooter stood**, never along flight; snowball/egg/pearl are full zero-damage hits | `ProjectileKnockbackUnit` |
+| Arrow Punch | `0.6/level` along horizontal flight, `+0.1` vertical, additive, resistance-blind; level fixed at shoot time | `ProjectileKnockbackUnit` / `PunchMath` |
+| Rod bobber | a real zero-damage hit: full base knock away from the **angler's position**, arms the 20-tick hurt window — so a rod hit suppresses the knockback of a melee hit inside ten ticks (the era's rod-then-sword interplay) | `FishingKnockbackUnit` |
+| Rod reel-in | pull toward the angler `Δ × 0.1` per axis plus `√distance × 0.08` lift (`reel-in: legacy`) | `FishingKnockbackUnit` |
+| Rod cast | speed 0.6, gaussian spread 0.0075, hook gravity restored to the legacy 0.04 | `RodVelocityUnit` |
+| Sharpness | `1.25 × level` (1.9 changed it to `0.5×level + 0.5`) | `DamageTables` |
+| Crit | ×1.5 on the **weapon damage before enchantments** (the legacy order); sprinting does not block crits — that exclusion is a 1.9 rule | `DamageTables` |
+| Tool damage | pre-1.9 tables: sword `4+tier` (a diamond sword deals 8), axe `3+tier`, pickaxe `2+tier`, shovel `1+tier` (`legacy-tool-damage`) | `DamageTables` |
+| Attack cooldown | none: the fast path cancels the vanilla attack packet so `Player#attack` never runs, and the amount is composed off the attribute base — the 1.9 charge meter is never consulted, structurally | `DamageShaper` |
 | Hurt-window gating | the 20/10 partial-hit rule runs in vanilla's own pipeline (Mental damages through it), so partial hits deal difference-only damage and never knock back | by construction |
 | Sweep attacks | never happen: the fast path cancels the vanilla attack packet, and `Player#attack` — where sweeps live — never runs | by construction |
 
@@ -102,8 +105,8 @@ config key.
 
 ## Interactions worth knowing
 
-- **One hit, one knock.** All sources submit to one pipeline; whichever
-  module submitted last for a victim in a tick wins, which is how a rod
+- **One hit, one knock.** All sources submit to one **delivery desk**;
+  arbitration is last-submitter-wins per victim per tick, which is how a rod
   hit's vector beats the melee vector its own damage call provokes.
 - **`KnockbackApplyEvent`** now fires for every Mental knockback source
   (melee, rod, projectile, arrow), on the victim's owning thread, with

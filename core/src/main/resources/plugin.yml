@@ -1,7 +1,7 @@
 name: Mental
 version: '${version}'
-main: me.vexmc.mental.MentalPlugin
-api-version: '1.17'
+main: me.vexmc.mental.v5.MentalPluginV5
+api-version: '${apiVersion}'
 folia-supported: true
 description: Latency-compensated 1.7.10 combat — async hit registration, knockback, fishing and projectile mechanics.
 authors: [owengregson]

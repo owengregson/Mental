@@ -1,0 +1,515 @@
+# Mental v5 Phase 4 — Live Features Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Wire the v5 machinery live and rebuild every feature family on it,
+family-by-family with live matrix gates, ending with the old core deleted and the v5
+plugin as the sole entry point.
+
+**Architecture — the cutover strategy (normative):**
+- Sub-phases 4A1 → 4A2 → 4B → 4C → 4D → 4E, each one executor run, each ending with
+  a fresh `scripts/integration-matrix.sh` PASS on the suites enabled at that point.
+- **The tester's committed suite list is the source of truth for coverage.** At the
+  4A2 swap it is trimmed to the suites the ported families support; each sub-phase
+  adds its suites back; 4E restores the full list. Every commit keeps the tree AND
+  the live matrix green.
+- **The swap happens at the end of 4A2**: `plugin.yml` `main:` flips to
+  `me.vexmc.mental.v5.MentalPluginV5`. Old core classes stay compiled-but-dormant
+  (harmless dead code) until 4E deletes them. From 4A2 on, the shipped jar IS v5.
+- Phase 4 uses the EXISTING `common/scheduling/Scheduling` (already region-correct,
+  already shipped); Phase 5 relocates it into `platform` and adds the TCK. v5 code
+  may import `me.vexmc.mental.common.scheduling.*`.
+- NMS-heavy features (sword-block components, tooltip hider, attack-range) build
+  against a minimal `v5/platform/PlatformProbe` created in 4B/4C/4D; Phase 5
+  completes it into the full manifest.
+
+**Tech Stack:** as Phase 3, plus live wiring: PacketEvents (shaded), Bukkit events,
+run-paper matrix.
+
+## Global Constraints
+
+- Ported pins sacred; era behavior byte-identical — the live suites are the judge.
+- New code under `core/src/{main,test}/java/me/vexmc/mental/v5/` and `kernel/`;
+  PLUS these sanctioned existing-file edits, each named in its task: `plugin.yml`
+  (main class, 4A2), tester suite files (adaptation + suite list, per sub-phase),
+  `core/build.gradle.kts` only if a task names it. 4E's deletion list is explicit.
+- Netty-realm rule: rim classes parse wrappers → kernel records → kernel logic; an
+  architecture test (4A1) pins the rim package's imports to the allow-list.
+- No wall-clock correctness. Conventional commits + trailer, one per task.
+- **The matrix-gate honesty rule**: a sub-phase is done only when
+  `run/**/plugins/MentalTester/test-results.txt` are FRESH for THIS run and read
+  PASS; paste the freshness evidence (mtimes) in the report.
+
+---
+
+## Sub-phase 4A1 — the live spine (bootable, zero features, zero-touch)
+
+### Task 4A1.0: Production Registrar + plugin bootstrap
+
+**Files:**
+- Create: `core/src/main/java/me/vexmc/mental/v5/MentalPluginV5.java`
+- Create: `core/src/main/java/me/vexmc/mental/v5/feature/BukkitRegistrar.java`
+- Test: `core/src/test/java/me/vexmc/mental/v5/feature/BukkitRegistrarTest.java` (unit-testable parts)
+
+**Contracts:**
+- `BukkitRegistrar implements Registrar`: `bukkit(listener)` registers via
+  `PluginManager.registerEvents`, closes via `HandlerList.unregisterAll(listener)`;
+  `packets(peListener)` registers via the PacketEvents API returning the handle,
+  closes via `unregisterListener(handle)`; `task(starter)` invokes the starter
+  (which wraps `Scheduling.repeat*`), closes by cancelling the `TaskHandle`;
+  `rule(token, reg)` consults the live `OcmBinding`-backed arbiter gate before
+  every handler run (the registration wraps the handler).
+- `MentalPluginV5 extends JavaPlugin`: `onLoad` builds+loads PacketEvents (same
+  settings as old). `onEnable` order: ConfigStore → Migrations.run → Overlay →
+  SnapshotParser → Capabilities/ServerEnvironment/SchedulingFactory (reuse existing
+  classes read-only) → TickClock (Paper: `PaperTickClock(Bukkit::getCurrentTick)`;
+  Folia: `CounterTickClock` driven by `repeatGlobal(1,1,…)`) → OcmBinding +
+  CoexistWarnings logged → SessionService → rim listeners → Reconciler.register(all
+  units) → converge(snapshot) → `PacketEvents.init()` LAST. `onDisable`: reverse;
+  reconciler.closeAll, sessions shutdown, PE terminate — each step isolated
+  try/catch (B8 teardown isolation). `reloadAll()`: re-read files → overlay →
+  parse → swap snapshot → converge; returns issues.
+- 4A1 registers ZERO FeatureUnits — the spine must be a no-op server (zero-touch).
+
+### Task 4A1.1: SessionService + view publication
+
+**Files:**
+- Create: `core/src/main/java/me/vexmc/mental/v5/session/SessionService.java`
+- Create: `core/src/main/java/me/vexmc/mental/v5/session/ViewBuilder.java`
+- Create: `core/src/main/java/me/vexmc/mental/v5/session/GroundDistance.java`
+- Test: `core/src/test/java/me/vexmc/mental/v5/session/ViewBuilderTest.java`
+
+**Contracts:**
+- Join/quit/world-change Bukkit listeners; per-player `CombatSession` (Phase 2
+  shell) + `Scheduling.repeatOn(player, 1, 1, tick, retired)`; a frozen
+  `ConcurrentHashMap<Integer,UUID>` entityId index maintained at join/quit; a view
+  registry `ConcurrentHashMap<UUID, AtomicReference<PlayerView>>` the rim reads.
+- Session tick (owning thread): drain inbox → `ledger.tick` → `ViewBuilder.build`
+  (owning-thread reads only: ledger, `GroundDistance`, live sprint flag, hurt
+  window, KB resistance attr, per-world profile from the snapshot, frozen OCM
+  melee verdict via the arbiter, ping, jump-boost amplifier, slipperiness under
+  feet via `GroundFriction.of(block.getType().name())`, gravity attr) → publish →
+  `desk.sweep` → valve `clearStale`.
+- `GroundDistance` — **clean-room** (the old `GroundProbe` is GPL-lineage; do NOT
+  open it): four corner rays inset 0.01 from the 0.6-wide bounding box, downward,
+  max 5.0, returning the minimum distance-to-block-top; owning-thread only.
+  Unit-test the corner/inset geometry with a stubbed ray function.
+- `ViewBuilder` unit test: given stubbed inputs, the produced `PlayerView` carries
+  them 1:1 and `at` = the clock's stamp (the freshness contract).
+
+### Task 4A1.2: The rim — packet taps, valve listener, probe, feedback sender
+
+**Files:**
+- Create: `core/src/main/java/me/vexmc/mental/v5/rim/{ConnectionDomains,PacketTap,ValveListener,ProbeRim,BurstSender}.java`
+- Test: `core/src/test/java/me/vexmc/mental/v5/rim/{PacketTapStateTest,RimArchitectureTest}.java`
+
+**Contracts:**
+- `ConnectionDomains`: per-player `SprintWire`+`GroundFsm` created at PE user
+  connect, keyed by UUID; single-writer = that connection's netty thread.
+- `PacketTap` (inbound, MONITOR-equivalent priority): movement packets →
+  `GroundFsm.onMovement` → enqueue the returned `LedgerEvent` to the session inbox;
+  entity-action START/STOP_SPRINTING → `SprintWire`; **reference-compare packet
+  types, never downcast pre-Play traffic** — port the old `ProbeListenerStateTest`
+  technique for the pre-Play pin (`PacketTapStateTest`).
+- `ValveListener` (outbound, HIGHEST): ENTITY_VELOCITY sends →
+  `VelocityValve.consume(victimId, entityId, qx, qy, qz)` → cancel on true.
+- `ProbeRim`: Play PING send / PONG receive → `LatencyModel` (exact-match ids,
+  foreign transactions pass). KEEPALIVE support: none (deleted by design).
+- `BurstSender`: executes a kernel `FeedbackPlan` through the victim's PE `User`
+  (bundle delimiters on 1.19.4+, HURT_ANIMATION with yaw / entity-status 2 below,
+  velocity-before-hurt, single flush, wrap-and-drop for reconfiguring targets);
+  `getUser == null` → returns "unsendable" so callers pin.
+- `RimArchitectureTest`: scans `core/src/main/java/me/vexmc/mental/v5/rim/` SOURCE
+  files and fails on any occurrence of the forbidden live-entity accessors
+  (`getEntityById`, `getGameMode(`, `getNearbyEntities`, `getEntities()`,
+  `Bukkit.getCurrentTick`, `.getHandle(`, `getName()` on Player) — the allow-list
+  pin from `netty-fast-path`.
+
+### Task 4A1.3: Desk wiring + API events
+
+**Files:**
+- Create: `core/src/main/java/me/vexmc/mental/v5/delivery/{DeskRouter,DamageRouter,MirrorListener}.java`
+- Test: unit tests for router decision mapping with stubbed events.
+
+**Contracts:**
+- `DeskRouter` (Bukkit listener): `PlayerVelocityEvent` HIGH → victim's desk
+  `pendingFormula()` → fire `KnockbackApplyEvent` (API shape verbatim) →
+  `resolve(api velocity)` → execute the Directive (set velocity / cancel /
+  arm valve via `VelocityValve`); MONITOR record half does NOT exist — apply and
+  record are one desk call (B4).
+- `DamageRouter` (EDBEE, priorities per old KnockbackModule): reads the session's
+  `activeInbound` slot; absent ⇒ mint `Vanilla` transaction. 4A1 routes but no
+  feature consumes yet.
+- `MirrorListener`: capability-gated (`knockbackEvent`), reflective registration as
+  the old mirror, but reads `desk.mirrorView()` — one decision object.
+- Quit/death/world-change forget hooks.
+
+### Task 4A1.4: 4A1 gate
+
+- `./gradlew build` green; new unit tests green; rim architecture test green.
+- Boot MentalPluginV5 on the floor + ceiling servers locally by TEMPORARILY
+  pointing a scratch copy of plugin.yml at it (do not commit the swap):
+  `Boot` suite passes; with all features off the server is vanilla (`ZeroTouch`
+  suite technique). Commit; report raw outputs.
+
+## Sub-phase 4A2 — delivery + knockback families, THE SWAP
+
+### Task 4A2.0: HitRegistrationUnit (the fast path) + AnticheatCompatUnit
+Port the old `HitPacketListener` flow onto the rim/kernel seam: CPS gate →
+frozen-index victim resolve (`Bukkit.getPlayer(uuid)`) → `HitIntentCheck` over two
+published views (immunity +1 allowance, creative, `world.getPVP()`, reach ring) →
+`AsyncHitRegisterEvent` (shape verbatim, structural async guard) → cancel packet →
+build `HitContext` (SprintWire verdict, `CompensationQuery`, view-frozen profile +
+OCM flag) → `FeedbackPlan` computed BEFORE the pacing gate (gate sees only the
+velocity component; `auto` = max/2−1 ticks) → `BurstSender` ship / pin →
+`desk.submitFromWire` → `Scheduling.runOn(victim, applier, retired=retract)`.
+Applier: `isOwnedByCurrentRegion(attacker)` gate (cross-region = logged skip),
+activeInbound slot around `victim.damage(amount, attacker)`, vanilla-shaped amount
+in 4A2 (legacy damage arrives in 4B). Non-player targets: Paper live path / Folia
+vanilla passthrough (port the old behavior exactly). Reach validation (P5)
+default-OFF port with the ping-rewound ring, bias-to-allow, anticheat deference.
+AnticheatCompatUnit: port detection + policy volatiles feeding the gate.
+
+### Task 4A2.1: Knockback family units
+`KnockbackUnit` (EDBEE MONITOR: read-or-mint tx via DamageRouter slot, dispatch on
+`HitSource` — a `RodPull` is not melee (B6), engine compute with
+`CompensationQuery`, `desk.submit`, `awaitVelocityEvent`; accepted sprint-bonus
+obligations: `setSprinting(false)` + attacker-session `ledger.scaleHorizontal(0.6)`
++ `SprintWire.onServerClear` signal; combos flag → desk record policy);
+`FishingKnockbackUnit` (mints `RodPull` BEFORE `victim.damage(rodder)`; rod KB from
+angler position; arms the 20-tick window at lastDamage=0 semantics);
+`RodVelocityUnit` (RodLaunchMath + `desk.ensure`); `ProjectileKnockbackUnit`
+(Thrown/Arrow sources, PunchMath, **1.21.2+ substitution no-op preserved**);
+`LatencyCompensationUnit` (RTT probe cadence via `repeatAsync` — transport only;
+per-hit answers come from `CompensationQuery`); `WtapRegistrationUnit` (enables
+`SprintWire` consult in the fast path). All are pure vector computers — the desk
+alone applies and records.
+
+> **GATE AMENDMENT (2026-07-01, after the first 4A2 run):** the 7-server concurrent
+> `scripts/integration-matrix.sh` FAILS on this host for the OLD plugin (host
+> starvation: 4 FAIL / 3 PASS concurrent, PASS in isolation). Local live gates for
+> the rest of Phase 4 therefore use the SEQUENTIAL chain
+> `./gradlew integrationTestMatrix` (one server at a time); the concurrent script
+> remains valid on beefier hosts/CI. Additionally, three small 4E seams are pulled
+> forward into 4A2.2 because every live gate needs them: the minimal `mental
+> reload` command executor, the v5 `Mental` facade registration (`apiVersion()=2`,
+> ServicesManager + static holder), and the global-profile management seam
+> (overlay `knockback.profile` write + reloadAll + `KnockbackProfileChangeEvent`,
+> API shape verbatim).
+
+### Task 4A2.2: Tester adaptation + THE SWAP + 4A2 gate
+Trim the tester suite list to `{Boot, Knockback, Profile, Fishing, Projectile,
+EraParity, Reload, ZeroTouch}` (edit `MentalTesterPlugin`'s selection; delist suites
+whose families aren't ported; fix any internal-class imports in the retained suites
+to v5 equivalents). Flip `plugin.yml` `main:` to `me.vexmc.mental.v5.MentalPluginV5`.
+Gate: `./gradlew build` + `scripts/integration-matrix.sh` with FRESH PASS evidence
+(mtimes) on all retained suites, all matrix versions. The EraParity oracle must
+derive its expectations from the kernel (`Decay`/`KnockbackEngine`) — if the old
+suite re-implements motion math, port it onto kernel calls.
+
+## Sub-phase 4B — damage family (contract level; detail at open)
+`DamageShaper` composition in fixed legacy order feeding `DamageRouter`; units:
+ArmourStrength (EntityDamageEvent-wide, DefenceMath), ArmourDurability, CritFallback
+(both paths via the SAME token query on HitContext — the forgotten-gate class dies),
+ToolDurability (max_damage component), legacy tool damage on the fast path
+(DamageTables + `EffectiveMaterial` PDC shell + charge reset per hit), SwordBlocking
+(+ ShieldReduction, `EphemeralDecoration` service with the canonical exit-trigger
+set + pre-save reconciliation, `SwordBlockComponents` adapter on `PlatformProbe`
+with boot-probe + loud-fail, block-hit sprint reset gated on the RAW client flag),
+mid-invuln difference-damage semantics (§4.6: stronger = difference/no KB/no sound;
+weaker = nothing; 0-damage accepted hits knock FULL and arm 20 ticks). Suites back:
+`Damage`, `Blocking`. Vanilla-shaped OCM handoff pin: sharpness-5 diamond = 14.25.
+
+## Sub-phase 4C — cadence + sustain (contract level)
+AttackCooldown as a COMPLETE contract (B5): charge reset on BOTH damage paths +
+attr-spoof packet mutation on packet-local copies + tooltip hider via
+`PlatformProbe` (loud-fail) + 1.9-sweep re-disable; AttackSounds + Sweep (event +
+netty halves INSIDE the unit's scope — no split-brain); GoldenApples (B13: compute
+pure, apply at confirmed consume), EnderPearlCooldown, Regen (per-player repeatOn),
+PotionDurations/Values (B13 for splash/lingering: terminal-event application).
+Suites back: `Consumable`, `CosmeticSmoke`.
+
+## Sub-phase 4D — loadout (contract level)
+Crafting, Offhand (OffhandPolicy + ephemeral decoration reuse), Hitbox
+(EraReach via attribute where available / NMS adapter where not, documented
+client-owned limit). Suites back: `Hitbox`, `Inventory`.
+
+## Sub-phase 4E — deletion + minimal command surface (contract level)
+Delete the old core: `MentalPlugin`, `engine/`, `module/`, `config/MentalConfig*`,
+`gui/`, `manage/`, old `hitreg`/`compensation`/`knockback`/`ocm` packages, command
+tree + Brigadier bridge (and `compat-brigadier` from settings.gradle.kts), pruning
+`common/` to what v5 uses (Scheduling, Capabilities, debug — Phase 5 finishes the
+split). Keep `api/` intact (shapes frozen). Add the minimal v5 command: plugin.yml
+`mental` executor — no args ⇒ placeholder message (GUI lands Phase 6), `reload` ⇒
+`reloadAll` with permission `mental.command.reload`. Adapt `CommandSuite`; restore
+the FULL suite list; full matrix gate + OCM coexistence run
+(`./gradlew integrationTestOcm` if the OCM jar is staged). `Mental.register` API
+impl moves to v5 (facade + ServicesManager registration; `apiVersion()` returns 2).
+
+---
+
+## Execution notes
+- One executor dispatch per sub-phase; the orchestrator expands 4B–4E task detail
+  at each open, carrying forward the previous sub-phase's outcomes.
+- Every sub-phase report: per-task commits, test counts, RAW gate outputs
+  (build tails, matrix output, test-results.txt freshness evidence), deviations.
+
+---
+
+## Sub-phase 4A2 outcomes (2026-07-02)
+
+**THE SWAP IS IN.** `plugin.yml main:` is `me.vexmc.mental.v5.MentalPluginV5`; the
+shipped jar is v5. Gate green: `./gradlew build` + the SEQUENTIAL
+`integrationTestMatrix` (per the gate amendment) — all 7 versions (1.17.1, 1.18.2,
+1.19.4, 1.20.6, 1.21.4, 1.21.11, 26.1.2) FRESH PASS, 26/26 suites each.
+
+Commits (in order): `4633d04` API facade + management seam + `/mental reload`
+executor (the three forward-pulled 4E seams; facade in the static holder AND
+ServicesManager, `apiVersion()`=2); `f64433a` tester re-plumb; `5c11b8a` the
+swap; `0a1a398` + `63d942d` + `bcf59d7` the three live-gate fixes below.
+
+- **Suites now derive from the kernel/v5 seams** (VALUES unchanged): expectation
+  math is the kernel `KnockbackEngine`/`Decay`, the EraOracle's constants are
+  `Decay`'s (no local re-impl), victims are captured via the production
+  `EntityStates.captureVictim` over the session `MotionLedger`; ledger queries are
+  tick-based on `sessions().sessionFor(uuid).ledger()`; profiles/toggles go through
+  the `Management` seam + `Feature`; `mental.featureActive`. Profile/EraParity wait
+  a tick after a global profile switch (v5 freezes the profile into the per-tick
+  view). Delisted suites stay compiled against the old classes (OcmCoexistence
+  carries local old-typed helper copies). tester now `compileOnly(:kernel)`.
+- **Three v5 behavior fixes** the first live run exposed (all correct per the era
+  pins; real players were affected too, not just tests): (1) the projectile/rod
+  no-natural-event ensure fallback shipped one ground-friction step short —
+  `victim.setVelocity` next-tick lets the tracker fire the velocity event AFTER a
+  physics tick; now it re-submits fresh + triggers a DeskRouter-overridden event
+  (the full TRACKER stamp), matching the melee path and the old core's
+  onPlayerVelocity override. (2) packetless players (fake players) never fed the
+  ledger liftoff/landing (v5's GroundFsm is packet-only) so combo residuals decayed
+  at ground drag instead of air — restored the old GroundStateWatcher's tick-sampler
+  in `SessionService`, gated to packetless players via `ConnectionDomains.has`. (3)
+  the fake-player direct-registration fallback (1.17.x, where placeNewPlayer misses)
+  never fired `PlayerJoinEvent`, so v5's join-driven sessions were absent and every
+  knock no-op'd — the fallback now fires it, mirroring `remove()`'s PlayerQuitEvent.
+- **Deviation noted:** `Mental.MentalApi.apiVersion()` added as a default method to
+  the frozen `api/` interface (binary-compatible; spec §11 mandates the generation
+  marker). Kernel change was additive-only (`DeliveryDesk.pendingVectorFor`); no pin
+  edits. No suite VALUE changed.
+
+## Sub-phase 4B outcomes (2026-07-02)
+
+**The damage family is live.** All five DAMAGE features are on the v5 seams and the
+`Damage` (DamageRules) + `Blocking` suites are back in the list. Gate GREEN:
+`./gradlew build` + the SEQUENTIAL `integrationTestMatrix` (gate amendment) — all 7
+versions FRESH PASS (result files rewritten 00:40–00:47 after a 00:39 clear;
+31/31 cases each, up from 4A2's 26/26 — +3 DamageRules, +2 Blocking).
+
+Commits (in order): `6c93403` fast-path legacy composition (`DamageShaper`) + shared
+`DamageOwnership` + `CritFallbackUnit`; `905c791` `ArmourStrengthUnit` +
+`ArmourDurabilityUnit`; `c3b80a5` `ToolDurabilityUnit`/`PotionValuesUnit` + `ToolWear`
+on a boot-probed `v5/platform/PlatformProbe`; `c6dc65b` `SwordBlockingUnit` +
+`EphemeralDecoration`; `ed7b82f` tester restore + re-plumb.
+
+- **Composition is kernel math** (`DamageTables`, `DefenceMath`, `ArmourDurabilityMath`,
+  `ToolDurabilityMath`, `SwordBlockReduction`); the fast-path amount moved off the bare
+  attribute onto `DamageShaper.compose` — weapon base → era Str/Weak → crit ×1.5 →
+  Sharpness 1.25·level, keyed off the `combat:effective_material` PDC shell — with the
+  vanilla-shaped handoff when OCM owns (era pin `sharpness-5 diamond = 14.25`, unit-pinned).
+- **Forgotten-gate class is dead:** ONE `DamageOwnership` is threaded to BOTH the fast
+  path and `CritFallbackUnit`; both resolve crit/tool-damage ownership through it over the
+  hit's `HitContext`. `DamageShaperTest` pins the shared source (identity) + the OR verdict.
+- **Armour** is the 1.8 flat cascade EntityDamageEvent-wide (no toughness), rewriting only
+  applicable defensive modifiers; DamageRules pins `final = base × 0.2` for full diamond on
+  a REAL attack (PASS, 1.20.6). KB resistance stays probabilistic-all-or-nothing, default
+  NONE (already in `KnockbackEngine`). **Blocking** reduces `(dmg-1)*0.5` AFTER the knock
+  ran (never cancels/never touches velocity → full knockback), skips the native
+  BLOCKS_ATTACKS tier, and re-arms the block-hit sprint reset on the RAW `SprintWire` flag;
+  Blocking PASS on Tier C (off-hand shield, 1.20.6) AND Tier A (native, 26.1.2).
+  `EphemeralDecoration` (B12) guarantees revert on every exit incl. inline quit/disable.
+- **Deviations:** (1) `PlatformProbe`/`SwordBlockAdapter` add a LOUD boot log on a
+  version-expected mapping break (mandate B10) — the retired module was silent-degrade;
+  hot-path reflective slips still degrade to a clean no-op (never corrupt an item). (2)
+  `EphemeralDecoration` sits at `v5/feature/`; the sword-block adapter mutates the REAL held
+  item (an in-place server block pose is impossible via a packet-local copy — the
+  packet-local-copies clause is a 4C tooltip/attr-spoof concern). (3) `ShieldReductionUnit`
+  folds into `SwordBlockingUnit` (one `SWORD_BLOCKING` descriptor; the modern-shield
+  full-block cancel already lives in `KnockbackUnit`). No kernel change beyond none needed;
+  no suite VALUE changed.
+
+## Sub-phase 4C outcomes (2026-07-02)
+
+**The cadence + sustain families are live.** All seven CADENCE/SUSTAIN features are on
+the v5 seams and the `Consumable` (ConsumableRules) + `CosmeticSmoke` suites are back in
+the list. Gate GREEN: `./gradlew build` + the SEQUENTIAL `integrationTestMatrix` (gate
+amendment) — all 7 versions FRESH PASS (result files rewritten 01:19:36 → 01:27:31 on
+2026-07-02, each `run/<v>/plugins/MentalTester/test-results.txt` = `PASS`, current clock
+01:27:47; 39/39 cases each, up from 4B's 31/31 — +4 ConsumableRules, +4 CosmeticSmoke).
+Matrix wall time 9m 10s.
+
+Commits (in order): `a460eb3` AttackCooldown complete contract (server rule + client
+spoof + tooltip hider + sweep re-disable, one scope) + `WeaponTooltipAdapter` on
+`PlatformProbe` + the split-brain unit test; `5bdec04` `AttackSoundsUnit` + `SweepUnit`
+(shared sweep helpers); `df17017` `GoldenApplesUnit`/`EnderPearlCooldownUnit`/`RegenUnit`/
+`PotionDurationsUnit`; `12cd166` tester restore + re-plumb.
+
+- **AttackCooldown is ONE contract in ONE scope (B5).** All four facets live in
+  `AttackCooldownUnit`'s scope, and `AttackCooldownUnitTest` (a recording-registrar
+  split-brain guard) proves every registration — crucially the three packet halves
+  (spoof, tooltip, sweep-particle) — dies on `scope.close()`; the split-brain class is
+  structurally dead. (a) server rule = `AttackChargeReset` (the `ServerAttackSpeed` port):
+  raises the `attack_speed` base so the vanilla `Player#attack` charge meter always reads
+  full-charge, sanitized capture/restore, applied on enable + join/respawn/world-change,
+  restored on quit + scope close. The fast path already defeats the meter by BYPASSING
+  `Player#attack` (verified 4B — `DamageShaper` composes off the attribute base with no
+  cooldown term); that bypass is the "fast-path already resets" seam. (b) spoof =
+  `CooldownSpoofListener` mutating only packet-local wrapper properties (B10), keyed by
+  the PacketEvents `Attributes.ATTACK_SPEED` IDENTITY (never a string — verified on 1.21.4,
+  the wire-key-rename version, PASS). (c) tooltip hider = `CooldownTooltipListener` via the
+  boot-probed `WeaponTooltipAdapter` on `PlatformProbe` (packet-local item copies, two
+  reflective paths, loud-fail once at boot when neither resolves). (d) sweep re-disable =
+  `SweepDamageListener` + `SweepParticleListener` (a full charge satisfies the `scale>0.9`
+  sweep gate on the vanilla path).
+- **B13 terminal-event application.** `GoldenApplesUnit` applies the kernel era tables to
+  the actual entity on a +1-tick `runOnLater` off the confirmed consume (napple recipe =
+  8 gold BLOCKS, registered/removed with the scope). `PotionDurationsUnit` rewrites to the
+  kernel era duration at the CONFIRMED terminal — the consumed item on drink, the ALREADY
+  thrown `ThrownPotion` entity on splash/lingering (`ProjectileLaunchEvent`, covering a
+  player throw AND a dispenser) — never a speculative hand mutation, so a cancelled
+  right-click cannot corrupt inventory. `RegenUnit` cancels the 1.9 SATIATED event and
+  drives the 1.8 cadence with a per-player `repeatOn` (kernel `RegenMath`, never a global
+  loop); `EnderPearlCooldownUnit` clears the 1.9 throw cooldown at launch. Era values come
+  from the kernel (`GoldenAppleEffects`/`PotionDurations`/`RegenMath`) — no local tables.
+  `PotionValues` (4B) verified: `fastPathDamage` HANDLED, others NONE — left unchanged.
+- **Suites re-plumbed, VALUES unchanged.** Both suites route toggles through
+  `management().setModuleEnabled(Feature, …)` and read `featureActive`; the same
+  decompile-cited asserts (notch amplifiers Regen V / Resistance I / Fire-Res I; Strength
+  drink lengthened past the modern 1800t ceiling; SATIATED cancel; the attack_speed base
+  raised to 1024 on enable + restored on disable). No measurement exception was needed —
+  keeping the attribute-raise mechanism means the CosmeticSmoke server-base assertion is
+  still the correct measurement of the v5 behavior.
+- **Deviations:** (1) B5(a) "reset the vanilla attack-charge meter" is realized as the
+  attribute-RAISE (`AttackChargeReset`, the `ServerAttackSpeed` behavior contract), not a
+  per-hit `resetAttackStrengthTicker`: resetting the ticker yields scale 0 (weakest hit),
+  the opposite of era truth, whereas raising the base makes the meter always clamp to
+  scale 1.0 — the era-faithful full-damage reconstruction that also reproduces vanilla's
+  differently-scaled enchant delta (unscaling after the fact cannot). The fast path's
+  `Player#attack` bypass is the parallel "reset" on that path. This matches the behavior
+  contract and the existing CosmeticSmoke measurement, so no suite VALUE changed.
+  (2) `PotionDurationsUnit` moved the splash/lingering rewrite off the retired module's
+  speculative `PlayerInteractEvent` onto `ProjectileLaunchEvent` on the actual thrown
+  entity (B13). Kernel change: none (additive-only honoured; no pin edits). No suite VALUE
+  changed.
+
+## Sub-phase 4D outcomes (2026-07-02)
+
+**The loadout family is live.** All three LOADOUT features are on the v5 seams and the
+`Hitbox` + `Inventory` (InventoryRules) suites are back in the list. Gate GREEN:
+`./gradlew build` + the SEQUENTIAL `integrationTestMatrix` (gate amendment) — all 7
+versions FRESH PASS (result files rewritten 01:49:09 → 01:57:11 on 2026-07-02 against a
+01:47:53 matrix start, each `run/<v>/plugins/MentalTester/test-results.txt` = `PASS`,
+verified at clock 01:57:39; 44/44 cases each, up from 4C's 39/39 — +2 Hitbox,
++3 InventoryRules). Matrix wall time 9m 18s.
+
+Commits (in order): `fec0383` `CraftingUnit`; `f7fd263` `OffhandUnit`; `434050a`
+`HitboxUnit` + `EraReachAttribute` + the boot-probed `AttackRangeAdapter` on
+`PlatformProbe`; `6c4e19c` tester restore + re-plumb.
+
+- **CraftingUnit** nulls a `PrepareItemCraftEvent` result whose material is in the live
+  `disable-crafting.blocked` set (SHIELD by default — the retired module's exact
+  mechanism, per OCM's ModuleDisableCrafting). The recipe registry is never touched:
+  blocking the RESULT is fully reversible, so the scope-level listener teardown IS the
+  zero-touch restore (the contract's "recipes removed/blocked with the scope, restored on
+  disable" — result-blocking satisfies it with zero persistent state, exactly as the old
+  DisableCraftingModule behaved). Settings read LIVE from the snapshot per event.
+- **OffhandUnit** blocks every off-hand route (F-key swap, SWAP_OFFHAND click, number-key
+  / cursor-drop on slot 40, shield shift-click, spanning drag) and strips a persisted
+  disallowed item on join / world-change / enable (returned to inventory, overflow
+  dropped). The filter decision is the kernel `OffhandPolicy` (String-keyed material set)
+  over the live `OffhandSettings`; region-safe via `Scheduling.runOn`.
+- **HitboxUnit** pulls whichever era-reach lever the running server exposes, resolved by
+  capability, never a version literal: the `ENTITY_INTERACTION_RANGE` attribute (1.20.5+;
+  `EraReachAttribute`, captured-base restore on quit/disable) and the `ATTACK_RANGE` item
+  component (1.21.5+; the new boot-probed loud-fail `AttackRangeAdapter` on
+  `PlatformProbe`, era values from kernel `EraReach`: max_reach 3.0, hitbox_margin 0.1),
+  reconciled on join/hotbar/swap/world and stripped on drop/death/world/quit/disable;
+  1.17.1–1.20.4 is a documented complete no-op. The IRRECOVERABLE-limit doc is carried in
+  the unit's javadoc: the CLIENT picks the melee target (fixed entityId, no server
+  raytrace), so the server only widens/narrows the validation window — era reach DISTANCE
+  + margin, never client parity. One reach truth: every value is a kernel `EraReach`
+  constant, the same source the fast path's reach-validation default (3.0) mirrors; the
+  unit does not touch the fast path's deliberately-wide sanity ring (different purpose),
+  so the sources cannot disagree. `HitboxUnitTest` is the B8 teardown guard (listener +
+  restore task die with the scope).
+- **Suites re-plumbed, VALUES unchanged.** Both route toggles through
+  `management().setModuleEnabled(Feature, …)` and read `featureActive`; same asserts
+  (attribute pinned at era 3.0, held sword carries ATTACK_RANGE, disallowed swap
+  cancelled, sweep event cancelled, module-active for crafting). Tier evidence is honest:
+  1.20.6/1.21.4 assert the real attribute pin and note-SKIP the component (absent below
+  1.21.5); 1.21.11/26.1.2 assert BOTH levers with real staging; ≤1.19.4 note-SKIPs both
+  (the documented no-op tier).
+- **effective_material check:** nothing in this family needs the `combat:effective_material`
+  PDC beyond what 4B ships — the hitbox component keys off the weapon-material suffix set,
+  not the damage shell. Verified no new consumer.
+- **Deviations:** (1) the old `HitboxModule`'s enable/disable apply-restore halves live in
+  the unit's `scope.task` starter/closer (the v5 shape of onEnable/onDisable) — behaviour
+  identical, teardown INLINE on the disabling thread. (2) `OffhandUnit` does NOT route
+  through `EphemeralDecoration`: the old module never injected a temp item (that web
+  belongs to sword-blocking, which already reuses the service); off-hand stripping is a
+  one-shot inventory correction with nothing to revert, so a revert web would be dead
+  machinery. (3) `CraftingUnit` blocks the crafting RESULT rather than unregistering
+  recipes — the retired module's exact behavior contract (and OCM's), preferred over
+  registry removal because it is atomic, reload-safe, and leaves zero persistent state.
+  Kernel change: none needed (EraReach/OffhandPolicy already present; no pin edits). No
+  suite VALUE changed.
+
+## Sub-phase 4E outcomes (2026-07-02)
+
+**The old core is gone; v5 is the sole entry point.** Gate GREEN: `./gradlew build`
++ SEQUENTIAL `integrationTestMatrix` — all 7 versions FRESH PASS (test-results.txt
+rewritten 02:26:19 → 02:34:33 against a 02:24:58 gate start, each = `PASS`, 46/46
+cases, +2 CommandSuite over 4D's 44) — PLUS `integrationTestOcm`: 1.17.1 +OCM and
+26.1.2 +OCM FRESH PASS (02:34:46 / 02:35:02), the coexistence suite's 5 cases each,
+with `OCM coordination (startup): BOUND` and the feel warnings logged live. Zero
+FAIL in any log. `BUILD SUCCESSFUL in 10m 1s`.
+
+Commits (in order): `b2e8e93` bStats into MentalPluginV5 (config-gated);
+`0005919` the OcmCompatUnit binding driver (the finding); `5a531b7` tester restore
++ re-plumb; `b2f1933` the coexistence main-thread read fix; `0d29e58` THE DELETION;
+this doc.
+
+- **THE DELETION**: 207 files / ~24.3k LOC removed — `MentalPlugin`/`MentalServices`/
+  `MentalApiImpl`, `engine/`, `module/` (all 16 families), `config/` (MentalConfig +
+  ConfigStore + migration + every `*Settings`), `gui/`, `manage/`, `command/`, core
+  `debug/`, `text/`, their tests, `common/command/` (main+test), and `compat-brigadier`
+  (module + `settings.gradle.kts` include/projectDir + core's shadowJar dependsOn/from).
+- **KEPT from platform/common** (checked against actual v5 imports): `platform/` IN FULL
+  — Attributes, Enchantments, EffectiveMaterial (the PDC shell DamageShaper/HitboxUnit
+  key off), SchedulingFactory + its BukkitScheduling delegate; and `common/` scheduling +
+  platform (Capabilities/ServerEnvironment) + debug (Phase 5 finishes the common split).
+  `api/` is byte-identical; plugin.yml already points at v5 and keeps the command decl.
+  The contract grep over core/src+tester/src for module/engine/MentalPlugin is EMPTY.
+- **bStats (owner KEEP)**: id 31788 relocated into MentalPluginV5, four SimplePie charts
+  on v5 sources read live via suppliers (anticheat_mode, probe_strategy, scheduling_backend,
+  ocm_coordination = new `OcmBinding.mode()`), gated on a new `metrics.enabled` knob (default
+  true). Added to the Snapshot + parser as **parse-with-default only** (absent section reads
+  true, no warn, no frozen-config break) and documented in the bundled config.yml; unit-pinned
+  in SnapshotTest.
+- **FINDING (fixed properly, not resurrected)**: the v5 `OcmBinding` was constructed but
+  never DRIVEN — no unit scanned OCM's config or bound its service API, so the arbiter
+  stayed ABSENT and Mental would have double-applied against a live OCM. 4A2 deferred this
+  driver to "the delivery family" but only AnticheatCompatUnit shipped. Ported the retired
+  `OcmCompatModule` onto the feature seam as `OcmCompatUnit` (Feature.OCM_COMPAT infra,
+  mirroring AnticheatCompatUnit): plugin-list watch, config scan via `OcmBinding.scanVerdicts/
+  scanFacts`, reflective `isModuleEnabledForPlayer` → BOUND (Bukkit.getPlayer decider) else
+  configOnly, clear on OCM disable, warnings logged after each bind. The live OCM PASS proves it.
+- **Suite re-points** (VALUES preserved where behavior carries): CommandSuite → MentalPluginV5
+  + the minimal `/mental` (reload + bare placeholder asserted handled; the GUI-open assertion
+  is a note-SKIP → Phase 6). OcmCoexistenceSuite → the ArbiterCore-backed `OcmBinding.mentalOwns`
+  (inverse of the deleted `OcmGate.handles`); binding check asserts `mode()==BOUND` + the six
+  arbitrated tokens conservatively coordinated (`mentalOwns(token,null)`); melee expectation is
+  the kernel KnockbackEngine through the production EntityStates capture (shared KnockbackSuite
+  helpers), dropping the local old-typed `restingVictim`/`delivery` copies. The one re-point
+  that changed the assertion shape: **damage-handoff** — it drove the deleted `HitApplier`
+  directly, and the v5 netty fast path is unreachable by a clientless FakePlayer, so it now
+  exercises the two seams that decide the handoff — the ArbiterCore tool-damage verdict + the
+  `DamageShaper` composition (vanilla-shape 10.0 handed to OCM, era recomposition 14.25 pinned,
+  also in DamageShaperTest). No kernel pin edits; kernel untouched this sub-phase.

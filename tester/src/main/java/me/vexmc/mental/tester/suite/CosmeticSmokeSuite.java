@@ -1,7 +1,6 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
-import me.vexmc.mental.MentalPlugin;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
@@ -9,6 +8,8 @@ import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -28,26 +29,28 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p>Why each is smoke-only, and where the real pin lives:</p>
  * <ul>
- *   <li><b>attack-cooldown</b> — has a SERVER half that IS observable: it raises
- *       the player's {@code attack_speed} base to full charge so vanilla
- *       {@code Player#attack} stops scaling spam-clicked hits (the bug a
- *       client-only spoof left on mob / fast-path-off hits). This suite asserts
- *       the base is raised on enable and restored on disable, plus a best-effort
- *       full-damage spam hit. The client charge-overlay half is unit-pinned in
- *       {@code CooldownSpoofTest}; the damage math in {@code CooldownDamageScalingTest}.</li>
+ *   <li><b>attack-cooldown</b> — has a SERVER half that IS observable: the v5
+ *       {@code AttackChargeReset} raises the player's {@code attack_speed} base to
+ *       full charge so vanilla {@code Player#attack} stops scaling spam-clicked
+ *       hits (the bug a client-only spoof left on mob / fast-path-off hits); the
+ *       fast path already defeats the meter by bypassing {@code Player#attack}.
+ *       This suite asserts the base is raised on enable and restored on disable,
+ *       plus a best-effort full-damage spam hit. The four-facet single-scope
+ *       contract (spoof + tooltip + sweep re-disable dying with the scope) is
+ *       unit-pinned in {@code AttackCooldownUnitTest}.</li>
  *   <li><b>disable-attack-sounds</b> — cancels the attack sound packet on send;
- *       a clientless player receives nothing, so the cancel is unobservable
- *       here. Unit-pinned in {@code AttackSoundsTest}.</li>
+ *       a clientless player receives nothing, so the cancel is unobservable here.
+ *       The cancel lives in {@code AttackSoundsUnit}'s scoped packet listener.</li>
  *   <li><b>old-armour-durability</b> — restores the 1.8 Unbreaking-on-armour
  *       model ({@code damageChance = 60 + 40/(level+1)}); the wear/skip decision
  *       is a per-hit random roll, so the exact magnitude is not deterministically
- *       observable in one staged hit. Unit-pinned in
+ *       observable in one staged hit. Unit-pinned in the kernel
  *       {@code ArmourDurabilityMathTest}.</li>
  *   <li><b>old-critical-hits</b> — the fast-path-off crit override (×1.5 on the
  *       1.8 precondition set) fires only when the netty fast path is inactive
  *       (mob melee / fast-path-off), an edge a staged player-vs-player hit does
- *       not exercise. Unit-pinned in {@code DamageCalculatorTest} (era-crit
- *       cases).</li>
+ *       not exercise. Unit-pinned in the kernel {@code DamageTablesTest} + the v5
+ *       {@code DamageShaper} legacy-crit posture.</li>
  * </ul>
  *
  * <p>The matrix therefore smoke-tests integration safety only — that enabling
@@ -59,7 +62,7 @@ public final class CosmeticSmokeSuite {
     private CosmeticSmokeSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("smoke: attack-cooldown enables and a hit still lands", context ->
                         runAttackCooldown(mental, tester, context)),
@@ -72,10 +75,10 @@ public final class CosmeticSmokeSuite {
     }
 
     /**
-     * The full-charge value the module writes to the SERVER attack_speed base
-     * (mirrors {@code CooldownSpoof.FULL_CHARGE_ATTACK_SPEED}; that constant lives
-     * in a PacketEvents-importing class the clientless tester must not load, so it
-     * is duplicated here and guarded against drift in {@code CooldownDamageScalingTest}).
+     * The full-charge value {@code AttackChargeReset} writes to the SERVER
+     * attack_speed base (mirrors the v5 {@code CooldownSpoof.FULL_CHARGE_ATTACK_SPEED};
+     * that constant lives in a PacketEvents-importing class the clientless tester
+     * must not load, so it is duplicated here).
      */
     private static final double FULL_CHARGE_BASE = 1024.0;
 
@@ -89,10 +92,10 @@ public final class CosmeticSmokeSuite {
      * here (best-effort, since hit-landing varies for synthetic players).
      */
     private static void runAttackCooldown(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
         Attribute attackSpeed = Attributes.attackSpeed();
 
         try {
@@ -184,10 +187,10 @@ public final class CosmeticSmokeSuite {
     }
 
     private static void runDisableAttackSounds(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "disable-attack-sounds", true);
@@ -228,10 +231,10 @@ public final class CosmeticSmokeSuite {
     }
 
     private static void runArmourDurability(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "old-armour-durability", true);
@@ -281,10 +284,10 @@ public final class CosmeticSmokeSuite {
     }
 
     private static void runOldCriticalHits(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             toggleModule(context, "old-critical-hits", true);
@@ -327,14 +330,16 @@ public final class CosmeticSmokeSuite {
         }
     }
 
-    /** Toggles through the real console command path and waits for convergence. */
+    /** Toggles through the v5 management write-back seam and waits for convergence. */
     private static void toggleModule(TestContext context, String id, boolean enabled) throws Exception {
-        context.syncRun(() -> ((MentalPlugin) Bukkit.getPluginManager().getPlugin("Mental"))
-                .management().setModuleEnabled(id, enabled));
+        Feature feature = Feature.byModuleId(id)
+                .orElseThrow(() -> new AssertionError("unknown module id '" + id + "'"));
+        context.syncRun(() -> ((MentalPluginV5) Bukkit.getPluginManager().getPlugin("Mental"))
+                .management().setModuleEnabled(feature, enabled));
         context.awaitTicks(1);
     }
 
-    private static boolean moduleActive(MentalPlugin mental, String id) {
-        return mental.modules().byId(id).map(module -> module.active()).orElse(false);
+    private static boolean moduleActive(MentalPluginV5 mental, String id) {
+        return Feature.byModuleId(id).map(mental::featureActive).orElse(false);
     }
 }

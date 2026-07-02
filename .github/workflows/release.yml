@@ -33,8 +33,10 @@ jobs:
       version: ${{ steps.facts.outputs.version }}
       tag: ${{ steps.facts.outputs.tag }}
       previous_tag: ${{ steps.facts.outputs.previous_tag }}
+      prerelease: ${{ steps.facts.outputs.prerelease }}
       should_release: ${{ steps.facts.outputs.should_release }}
       matrix: ${{ steps.facts.outputs.matrix }}
+      jdks: ${{ steps.facts.outputs.jdks }}
 
     steps:
       - name: Checkout (full history + tags)
@@ -45,12 +47,21 @@ jobs:
       - name: Read version, last release, and the test matrix
         id: facts
         run: |
-          version=$(grep -m1 -E '^\s*version = "' build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          version=$(grep -m1 -E '^version=' gradle.properties | sed -E 's/^version=//')
           tag="v$version"
 
-          # The nearest release tag by ANCESTRY, not semver sort — the
-          # legacy v4.x StrikeSync tags outsort every Mental 1.x forever.
-          previous_tag=$(git describe --tags --abbrev=0 HEAD 2>/dev/null || true)
+          # The changelog baseline: the nearest release tag in THIS commit's
+          # ancestry. Version sort would be wrong here — the legacy StrikeSync
+          # v4.x tags live in the same history and sort above Mental's 2.x
+          # line, but they were not the previous release of anything.
+          previous_tag=$(git describe --tags --abbrev=0 --exclude="$tag" HEAD 2>/dev/null || true)
+
+          # A hyphenated version (2.3.0-beta) publishes as a GitHub
+          # pre-release and never takes the "latest" marker.
+          case "$version" in
+            *-*) prerelease=true ;;
+            *)   prerelease=false ;;
+          esac
 
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             should_release=false
@@ -60,17 +71,27 @@ jobs:
             echo "Version $version is unreleased (last release: ${previous_tag:-none}) — releasing."
           fi
 
-          # The integration matrix comes from gradle.properties, the same
-          # source of truth the build uses.
-          matrix=$(grep '^integrationTestVersions=' gradle.properties \
-            | cut -d= -f2 | jq -cR 'split(",") | map(gsub("\\s+";""))')
+          # The full integration matrix (every paper entry) comes from
+          # support-matrix.json — the same single source of truth the build,
+          # the local script, and the PR workflow read.
+          matrix=$(jq -c '[.entries[] | select(.platform=="paper") | .version]' support-matrix.json)
 
           {
             echo "version=$version"
             echo "tag=$tag"
             echo "previous_tag=$previous_tag"
+            echo "prerelease=$prerelease"
             echo "should_release=$should_release"
             echo "matrix=$matrix"
+          } >> "$GITHUB_OUTPUT"
+
+          # The unique JDK set the matrix targets — support-matrix.json is the
+          # only JDK home, so every job below installs exactly these (the Gradle
+          # toolchain, the build JDK, selects the newest per entry).
+          {
+            echo 'jdks<<EOF'
+            jq -r '[.entries[].jdk] | unique | .[]' support-matrix.json
+            echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
   unit:
@@ -82,10 +103,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          # Derived from support-matrix.json (no JDK literal here); the build
+          # toolchain selects the newest.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -111,9 +134,9 @@ jobs:
       - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: |
-            17
-            25
+          # Derived from support-matrix.json (no JDK literal here); the Gradle
+          # toolchain selects the right JDK per matrix entry.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -148,8 +171,85 @@ jobs:
           name: release-integration-log-${{ matrix.version }}
           path: core/build/integration-test-logs/${{ matrix.version }}.log
 
+  # The Folia gate — release-only (ci: "release" in support-matrix.json). Boots
+  # a real Folia server (fetched from the Folia project on the PaperMC API by the
+  # RunServer's Folia downloads service) with Mental + the tester, which
+  # runtime-detects Folia and runs the boot suite + the Folia combat smoke (a
+  # same-region fake pair driven on their owning region threads, journal-asserted
+  # — the first live combat coverage Mental has on Folia; Task 5.6). Release-only
+  # on purpose: an extra real server per PR is too costly, and Folia's own runtime
+  # (26.x) requires JDK 25.
+  folia:
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDKs (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          # Derived from support-matrix.json (no JDK literal here); the build
+          # toolchain selects the newest.
+          java-version: ${{ needs.detect.outputs.jdks }}
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Run the Folia integration entries
+        run: ./gradlew integrationTestFolia
+
+      - name: Upload Folia server logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-folia-logs
+          path: core/build/integration-test-logs/folia-*.log
+
+  # The OldCombatMechanics coexistence gate — release-only. stageOcmJar
+  # downloads the OCM release PINNED in support-matrix.json (url + sha256) and
+  # verifies the hash, so the run is byte-reproducible; integrationTestOcm then
+  # boots the floor and ceiling with OCM installed and runs the coexistence
+  # suite. It is release-only on purpose: two extra real servers plus a plugin
+  # download is too costly to repeat on every PR (a local run/ocm-jar fork
+  # build would override the download, but CI has none).
+  ocm:
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDKs (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          # Derived from support-matrix.json (no JDK literal here); the Gradle
+          # toolchain selects the right JDK per matrix entry.
+          java-version: ${{ needs.detect.outputs.jdks }}
+          distribution: 'temurin'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Stage the pinned OCM release and run the coexistence gate
+        run: ./gradlew stageOcmJar integrationTestOcm
+
+      - name: Upload OCM server logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-ocm-logs
+          path: core/build/integration-test-logs/ocm-*.log
+
   release:
-    needs: [detect, unit, integration]
+    needs: [detect, unit, integration, folia, ocm]
     if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 
@@ -159,10 +259,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Set up JDKs (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          # Derived from support-matrix.json (no JDK literal here); the build
+          # toolchain selects the newest.
+          java-version: ${{ needs.detect.outputs.jdks }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -194,8 +296,11 @@ jobs:
           changelog=$(git log "$range" --no-merges --pretty='- %s (`%h`)')
           count=$(printf '%s\n' "$changelog" | grep -c '^- ' || true)
 
+          # The supported range (floor → ceiling) comes from support-matrix.json.
+          support_range=$(jq -r '[.entries[] | select(.platform=="paper") | .version] | .[0] + " → " + .[-1]' support-matrix.json)
+
           {
-            echo "**Supports** Paper 1.17.1 → 26.1.2 · Folia — **Requires** Java 17+ — no plugin dependencies."
+            echo "**Supports** Paper $support_range · Folia — **Requires** Java 17+ — no plugin dependencies."
             echo
             echo "### Install"
             echo
@@ -229,4 +334,5 @@ jobs:
           body_path: release-notes.md
           files: ${{ steps.jar.outputs.path }}
           fail_on_unmatched_files: true
-          make_latest: 'true'
+          prerelease: ${{ needs.detect.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.detect.outputs.prerelease == 'true' && 'false' || 'true' }}

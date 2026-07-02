@@ -1,12 +1,13 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
-import me.vexmc.mental.MentalPlugin;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -43,7 +44,7 @@ public final class InventoryRulesSuite {
     private InventoryRulesSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("rules: disable-sword-sweep cancels the sweep damage", context ->
                         runDisableSwordSweep(mental, tester, context)),
@@ -68,9 +69,9 @@ public final class InventoryRulesSuite {
      * module reads only the cause, not any populated modifier.
      */
     private static void runDisableSwordSweep(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -156,8 +157,8 @@ public final class InventoryRulesSuite {
      * control) it must survive.
      */
     private static void runDisableOffhand(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer player = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer player = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -239,8 +240,8 @@ public final class InventoryRulesSuite {
      * is trivially feasible, and otherwise SKIP rather than fail.
      */
     private static void runDisableCrafting(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        FakePlayer crafter = new FakePlayer(tester, mental.services().scheduling());
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer crafter = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -268,14 +269,16 @@ public final class InventoryRulesSuite {
     /*  Shared helpers                                                     */
     /* ------------------------------------------------------------------ */
 
-    /** Toggles through the real console command path and waits for convergence. */
+    /** Toggles through the v5 management write-back seam and waits for convergence. */
     private static void toggleModule(TestContext context, String id, boolean enabled) throws Exception {
-        context.syncRun(() -> ((MentalPlugin) Bukkit.getPluginManager().getPlugin("Mental"))
-                .management().setModuleEnabled(id, enabled));
+        Feature feature = Feature.byModuleId(id)
+                .orElseThrow(() -> new AssertionError("unknown module id '" + id + "'"));
+        context.syncRun(() -> ((MentalPluginV5) Bukkit.getPluginManager().getPlugin("Mental"))
+                .management().setModuleEnabled(feature, enabled));
         context.awaitTicks(1);
     }
 
-    private static boolean moduleActive(MentalPlugin mental, String id) {
-        return mental.modules().byId(id).map(module -> module.active()).orElse(false);
+    private static boolean moduleActive(MentalPluginV5 mental, String id) {
+        return Feature.byModuleId(id).map(mental::featureActive).orElse(false);
     }
 }

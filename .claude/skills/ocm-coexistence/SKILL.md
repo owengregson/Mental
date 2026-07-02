@@ -1,6 +1,6 @@
 ---
 name: ocm-coexistence
-description: Use when touching anything that overlaps OldCombatMechanics — damage shaping, knockback ownership, fishing/projectile mechanics, hit-delay/cooldown questions, or the OcmGate. Encodes the ownership split and the rules that keep the two plugins from fighting.
+description: Use when touching anything that overlaps OldCombatMechanics — damage shaping, knockback ownership, fishing/projectile mechanics, hit-delay/cooldown questions, or the OcmBinding/Arbiter. Encodes the ownership split and the rules that keep the two plugins from fighting.
 ---
 
 # OldCombatMechanics coexistence
@@ -22,12 +22,13 @@ victim's live hurt window for exactly this reason).
 | Thrown-projectile knockback | the victim |
 | Arrows | always Mental (OCM has no arrow module) |
 
-`OcmGate.handles(mechanic, decider)` answers it: BOUND mode uses OCM's
-service API per player (`isModuleEnabledForPlayer`, reflective, no compile
-dep, owning-thread only — freeze answers into snapshots for netty use);
-CONFIG mode falls back to global conservative verdicts from OCM's config
-(doubled knockback is worse than deferred). Profiles only shape knocks
-Mental owns.
+`OcmBinding.mentalOwns(token, decider)` answers it (over the kernel
+`ArbiterCore`, keyed by `MechanicToken`): BOUND mode uses OCM's service API per
+player (`isModuleEnabledForPlayer`, reflective, no compile dep, owning-thread
+only — the verdicts are frozen into the per-tick views / `HitContext` for netty
+use); CONFIG mode falls back to global conservative verdicts from OCM's config
+(doubled knockback is worse than deferred). Profiles only shape knocks Mental
+owns.
 
 ## Damage handoff
 
@@ -55,7 +56,8 @@ Mental profile is wrong" — check them FIRST on any live feel report:
   (native 1.8 = 20): 9-tick combo cadence, one less free-fall tick, every
   combo vertical runs high even when Mental owns the knock.
 
-Mental warns at startup on both (`OcmCompatModule.warnFeelOverlaps`); the
+Mental warns at startup on both (the `OcmCompatUnit` / `OcmBinding.warnings`
+boot checks over `CoexistWarnings`, was `OcmCompatModule.warnFeelOverlaps`); the
 management GUI's dashboard shows the OCM coordination mode and whether OCM is
 installed (the `/mental kb` overview that used to flag melee ownership is gone
 — management moved into the in-game menu in 2.1.0).

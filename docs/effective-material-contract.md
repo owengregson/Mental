@@ -38,8 +38,8 @@ marked material when present + valid, else the item's own type; unknown names de
 throw) and honours it **only where its own restore modules are enabled** — Mental owns the era decision;
 the marker never forces legacy values on:
 
-- **`legacy-tool-damage`** → `DamageCalculator` computes legacy weapon damage from the effective material,
-  so a gold-in-disguise diamond sword deals diamond-era damage (8), not gold's (5).
+- **`legacy-tool-damage`** → `DamageTables` (via the `DamageShaper`) computes legacy weapon damage from the
+  effective material, so a gold-in-disguise diamond sword deals diamond-era damage (8), not gold's (5).
 - **`legacy-tool-damage`** → the packet tooltip re-values the weapon's `attack_damage` to the era number
   of the effective material, so the shown value matches the damage dealt.
 - Durability needs no marker: Mental's weapon durability now breaks against the item's `max_damage`

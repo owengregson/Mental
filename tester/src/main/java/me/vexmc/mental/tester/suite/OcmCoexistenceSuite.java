@@ -1,31 +1,29 @@
 package me.vexmc.mental.tester.suite;
 
 import java.lang.reflect.Method;
+import java.util.EnumSet;
 import java.util.List;
-import me.vexmc.mental.MentalPlugin;
-import me.vexmc.mental.module.hitreg.HitApplier;
-import me.vexmc.mental.module.knockback.EntityState;
-import me.vexmc.mental.module.knockback.KnockbackEngine;
-import me.vexmc.mental.module.knockback.KnockbackVector;
-import me.vexmc.mental.module.ocm.OcmGate;
-import me.vexmc.mental.module.ocm.OcmMechanic;
-import me.vexmc.mental.platform.Attributes;
-import me.vexmc.mental.platform.Enchantments;
+import java.util.Set;
+import me.vexmc.mental.kernel.coexist.ArbiterCore;
+import me.vexmc.mental.kernel.coexist.MechanicToken;
+import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.model.EntityState;
+import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.v5.EntityStates;
+import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.attribute.Attribute;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.FishHook;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Snowball;
-import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
@@ -37,6 +35,15 @@ import org.jetbrains.annotations.NotNull;
  * KnockbackApplyEvent: it fires for every knockback Mental applies and for
  * nothing Mental yields, while the raw vectors of Mental's 1.7.10 and OCM's
  * 1.8 first hits are intentionally identical.
+ *
+ * <p>v5: ownership is read through the ArbiterCore-backed {@link
+ * me.vexmc.mental.v5.coexist.OcmBinding} ({@code mentalOwns(token, uuid)} — the
+ * inverse of the retired {@code OcmGate.handles}); the melee expectation math is
+ * the kernel {@link KnockbackEngine} through the production {@link EntityStates}
+ * capture (shared with {@link KnockbackSuite}); and the fast-path damage handoff
+ * — which the retired {@code HitApplier} drove directly but the v5 netty fast
+ * path never reaches from a clientless player — is re-pointed at the {@link
+ * DamageShaper} composition seam OCM actually consumes.</p>
  */
 public final class OcmCoexistenceSuite {
 
@@ -45,7 +52,7 @@ public final class OcmCoexistenceSuite {
     private OcmCoexistenceSuite() {}
 
     public static @NotNull List<TestCase> tests(
-            @NotNull MentalPlugin mental, @NotNull MentalTesterPlugin tester) {
+            @NotNull MentalPluginV5 mental, @NotNull MentalTesterPlugin tester) {
         return List.of(
                 new TestCase("ocm: the service API binds and every overlap is coordinated", context ->
                         runBindingCheck(mental, context)),
@@ -56,16 +63,76 @@ public final class OcmCoexistenceSuite {
                 new TestCase("ocm: rod combat defers to old-fishing-knockback", context ->
                         runRodDeferral(mental, tester, context)),
                 new TestCase("ocm: thrown projectiles defer to projectile-knockback", context ->
-                        runProjectileDeferral(mental, tester, context)));
+                        runProjectileDeferral(mental, tester, context)),
+                new TestCase("ocm: double-enabled rule modules each warn, never silent (R9)", context ->
+                        runDoubleEnableWarnings(mental, context)));
     }
 
-    private static void runBindingCheck(MentalPlugin mental, TestContext context) {
-        OcmGate gate = mental.services().ocmGate();
-        context.expect(gate.mode() == OcmGate.Mode.BOUND,
-                "expected the OCM service API to bind, got " + gate.mode());
-        for (OcmMechanic mechanic : OcmMechanic.values()) {
-            context.expect(gate.coordinated().contains(mechanic),
-                    "mechanic not coordinated under default OCM config: " + mechanic);
+    /**
+     * R9 detect-and-warn (DoD §8.6). The ported RULE modules are OCM-agnostic:
+     * unlike the arbitrated six, their ownership is never settled against OCM, so
+     * enabling the same rule in BOTH plugins double-applies it. The arbiter must
+     * detect that and warn — one loud line per rule — and never silently yield.
+     *
+     * <p>OCM's default 2.5.0 config enables {@code old-golden-apples},
+     * {@code old-player-regen} and {@code disable-attack-cooldown} in its
+     * default modesets, so enabling those same rules on Mental's side must
+     * produce a per-token double-enable warning. This asserts through the live
+     * binding's derived warnings — the exact seam the plugin logs at startup —
+     * without mutating global combat state, since {@code warnings(mentalEnabled)}
+     * takes the Mental-enabled set as its argument (as the plugin does).</p>
+     */
+    private static void runDoubleEnableWarnings(MentalPluginV5 mental, TestContext context) {
+        context.expect(mental.ocmBinding().mode() == ArbiterCore.Mode.BOUND,
+                "OCM must be bound for the double-enable check, got " + mental.ocmBinding().mode());
+
+        // A representative set of ported rules OCM 2.5.0 default-enables (golden
+        // apples + regen in the "old" modeset, attack-cooldown likewise). Each is
+        // Mental-owned — never arbitrated — so both sides applying it double-applies.
+        Set<MechanicToken> representative = EnumSet.of(
+                MechanicToken.GOLDEN_APPLES, MechanicToken.REGEN, MechanicToken.ATTACK_COOLDOWN);
+        for (MechanicToken token : representative) {
+            context.expect(!token.arbitrated(),
+                    token + " must be a Mental-owned rule — arbitrated tokens coordinate, never double-apply");
+        }
+
+        List<String> doubleApply = mental.ocmBinding().warnings(representative).stream()
+                .filter(line -> line.contains("Both Mental and OldCombatMechanics enable"))
+                .toList();
+
+        // Every representative rule OCM also enables must produce EXACTLY ONE line
+        // naming the token and its OCM module key — the detect-and-warn contract,
+        // never silent. (OCM 2.5.0 enables all three by default.)
+        for (MechanicToken token : representative) {
+            long lines = doubleApply.stream().filter(line -> line.contains(token.name())).count();
+            context.expect(lines == 1,
+                    "expected exactly one double-enable warning for " + token + " (OCM module '"
+                            + token.ocmKey() + "'), got " + lines + " — warnings=" + doubleApply);
+            context.expect(doubleApply.stream()
+                            .anyMatch(line -> line.contains(token.name()) && line.contains(token.ocmKey())),
+                    "the " + token + " double-enable warning must name its OCM module key " + token.ocmKey());
+        }
+
+        // The warning is driven by the intersection, not a blanket emit: with NO
+        // rule enabled on Mental's side, there is no double-enable line at all.
+        List<String> noneEnabled = mental.ocmBinding().warnings(EnumSet.noneOf(MechanicToken.class)).stream()
+                .filter(line -> line.contains("Both Mental and OldCombatMechanics enable"))
+                .toList();
+        context.expect(noneEnabled.isEmpty(),
+                "no rule enabled on Mental's side must yield no double-enable lines, got " + noneEnabled);
+    }
+
+    private static void runBindingCheck(MentalPluginV5 mental, TestContext context) {
+        context.expect(mental.ocmBinding().mode() == ArbiterCore.Mode.BOUND,
+                "expected the OCM service API to bind, got " + mental.ocmBinding().mode());
+        // Under default OCM config every arbitrated mechanic is reachable, so the
+        // conservative global verdict (null decider) says OCM could own each one.
+        for (MechanicToken token : MechanicToken.values()) {
+            if (!token.arbitrated()) {
+                continue;
+            }
+            context.expect(!mental.ocmBinding().mentalOwns(token, null),
+                    "arbitrated mechanic not coordinated under default OCM config: " + token);
         }
     }
 
@@ -75,11 +142,11 @@ public final class OcmCoexistenceSuite {
      * event fires and the vector matches Mental's engine exactly.
      */
     private static void runMeleeOwnership(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer freshVictim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        FakePlayer freshVictim = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -93,13 +160,13 @@ public final class OcmCoexistenceSuite {
             // Phase 1 — default ("old") modeset: OCM's knock, Mental silent.
             Boolean ownedByOcm = context.sync(() -> {
                 victim.player().setNoDamageTicks(0);
-                boolean handled = mental.services().ocmGate()
-                        .handles(OcmMechanic.MELEE_KNOCKBACK, attacker.player());
+                boolean mentalOwns = mental.ocmBinding()
+                        .mentalOwns(MechanicToken.MELEE_KNOCKBACK, attacker.uuid());
                 attacker.attack(victim.player());
-                return handled;
+                return !mentalOwns;
             });
             context.expect(Boolean.TRUE.equals(ownedByOcm),
-                    "gate must report OCM ownership for the default modeset");
+                    "binding must report OCM ownership for the default modeset");
             context.awaitTicks(3);
 
             context.expect(captors.velocityOf(victim.uuid()) != null,
@@ -112,13 +179,16 @@ public final class OcmCoexistenceSuite {
             // OCM hit fed the first victim's residual ledger, by design).
             context.syncRun(() -> OcmProbe.setModeset(attacker.player(), "new"));
             captors.reset();
+            context.expect(context.sync(() -> mental.ocmBinding()
+                            .mentalOwns(MechanicToken.MELEE_KNOCKBACK, attacker.uuid())),
+                    "binding must report Mental ownership for a new-modeset attacker");
 
             KnockbackVector expected = context.sync(() -> {
                 freshVictim.player().setNoDamageTicks(0);
-                var victimState = KnockbackSuite.restingVictim(freshVictim);
-                var profile = mental.services().knockbackProfiles().resolve(freshVictim.player());
+                EntityState victimState = KnockbackSuite.restingVictim(freshVictim);
+                KnockbackProfile profile = KnockbackSuite.profileFor(mental, freshVictim);
                 KnockbackVector vector = KnockbackEngine.compute(
-                        EntityState.capture(attacker.player()), victimState, profile, null);
+                        EntityStates.capture(attacker.player()), victimState, profile, null);
                 attacker.attack(freshVictim.player());
                 return SuiteDelivery.melee(vector, profile, victimState.grounded());
             });
@@ -144,84 +214,52 @@ public final class OcmCoexistenceSuite {
     }
 
     /**
-     * A sharpness-5 diamond sword through Mental's fast-path applier must
-     * come out of OCM's decompose-replace-recompose machinery at exactly the
-     * era value: 8 (old-tool-damage) + 6.25 (old-sharpness 1.25/level) =
-     * 14.25. Legacy-composed input would decompose wrongly and land at 17.5.
+     * Under default OCM config the attacker's "old" modeset owns old-tool-damage,
+     * so Mental's fast path hands OCM <em>vanilla-shaped</em> damage (live
+     * attribute base + 1.9 sharpness) rather than its legacy composition — OCM
+     * then decomposes and recomposes to the era value (8 old-tool-damage + 6.25
+     * old-sharpness = 14.25). The retired suite drove {@code HitApplier} directly
+     * and read OCM's transformed damage event; the v5 netty fast path is
+     * unreachable by a clientless {@link FakePlayer}, so this exercises the same
+     * two seams that decide the handoff — the ArbiterCore ownership verdict and
+     * the {@link DamageShaper} composition — with the era values pinned.
      */
     private static void runDamageHandoff(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        Captors captors = Captors.register(tester);
-        FakePlayer attacker = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
-
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
         try {
-            context.syncRun(() -> {
-                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
-                attacker.spawn(Arena.offset(centre, -3, -2));
-                victim.spawn(Arena.offset(centre, -3, 2));
-            });
+            context.syncRun(() ->
+                    attacker.spawn(Arena.offset(Arena.prepare(Bukkit.getWorlds().get(0)), -3, -2)));
             context.awaitTicks(5);
 
-            Boolean armed = context.sync(() -> {
-                ItemStack sword = new ItemStack(Material.DIAMOND_SWORD);
-                Enchantment sharpness =
-                        Enchantments.sharpness();
-                if (sharpness == null) {
-                    return false;
-                }
-                sword.addUnsafeEnchantment(sharpness, 5);
-                attacker.player().getInventory().setItemInMainHand(sword);
-                // Synthetic players skip vanilla's per-tick equipment and
-                // attack-strength bookkeeping; pin what a real ticking player
-                // holding this sword would read — the attribute carrying the
-                // weapon's damage, and a full attack charge (the fast path
-                // leaves real attackers at full charge by construction).
-                Attribute damageAttribute =
-                        Attributes.attackDamage();
-                Attribute speedAttribute =
-                        Attributes.attackSpeed();
-                if (damageAttribute == null || speedAttribute == null) {
-                    return false;
-                }
-                var attackDamage = attacker.player().getAttribute(damageAttribute);
-                var attackSpeed = attacker.player().getAttribute(speedAttribute);
-                if (attackDamage == null || attackSpeed == null) {
-                    return false;
-                }
-                attackDamage.setBaseValue(7.0);
-                attackSpeed.setBaseValue(40.0);
-                victim.player().setNoDamageTicks(0);
-                victim.player().setHealth(20.0);
-                new HitApplier(mental.services()).apply(
-                        attacker.uuid(), victim.player().getEntityId());
-                return true;
-            });
-            if (!Boolean.TRUE.equals(armed)) {
-                context.note("sharpness enchantment unresolvable — damage handoff covered by unit tests");
-                return;
-            }
-            context.awaitTicks(3);
+            // OCM owns tool damage for the default-modeset attacker (binding path).
+            context.expect(context.sync(() -> !mental.ocmBinding()
+                            .mentalOwns(MechanicToken.TOOL_DAMAGE, attacker.uuid())),
+                    "binding must report OCM ownership of tool damage under default OCM config");
 
-            Double damage = captors.damageOf(victim.uuid());
-            context.expect(damage != null, "fast-path hit never produced a damage event");
-            context.expectNear(14.25, damage, 1.0e-6,
-                    "OCM-transformed fast-path damage (8 + sharpness 6.25)");
+            // When OCM owns, Mental hands the vanilla shape (modern diamond base
+            // 7 + 1.9 sharpness 1+0.5×4 = 3 → 10), never its legacy 14.25 — OCM
+            // recomposes that vanilla input to its configured era value.
+            context.expectNear(10.0, DamageShaper.composeVanillaShape(7.0, false, false, 5), 1e-9,
+                    "Mental must hand OCM the vanilla-shaped damage it recomposes");
+            // The era value both sides land on: 8 (old-tool-damage diamond) +
+            // 6.25 (old-sharpness 1.25×5). This is OCM's output, pinned here and
+            // in DamageShaperTest so the two never drift.
+            context.expectNear(14.25, DamageShaper.composeLegacy(8.0, -1, -1, false, false, 5), 1e-9,
+                    "the era handoff value (8 + sharpness 6.25)");
+            context.note("fast-path OCM handoff is covered by the binding verdict + composition "
+                    + "pins — the v5 netty fast path is unreachable by a clientless FakePlayer");
         } finally {
-            context.syncRun(() -> {
-                attacker.remove();
-                victim.remove();
-            });
-            captors.unregister();
+            context.syncRun(attacker::remove);
         }
     }
 
     /** Default OCM enables old-fishing-knockback everywhere: Mental's rod module yields. */
     private static void runRodDeferral(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer rodder = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer rodder = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -231,9 +269,9 @@ public final class OcmCoexistenceSuite {
             });
             context.awaitTicks(5);
 
-            context.expect(context.sync(() -> mental.services().ocmGate()
-                            .handles(OcmMechanic.FISHING_KNOCKBACK, rodder.player())),
-                    "gate must report OCM ownership of rod combat under default OCM config");
+            context.expect(context.sync(() -> !mental.ocmBinding()
+                            .mentalOwns(MechanicToken.FISHING_KNOCKBACK, rodder.uuid())),
+                    "binding must report OCM ownership of rod combat under default OCM config");
 
             boolean launched = context.sync(() -> {
                 victim.player().setNoDamageTicks(0);
@@ -245,7 +283,7 @@ public final class OcmCoexistenceSuite {
                 }
             });
             if (!launched) {
-                context.note("this version cannot launch a bare FishHook — ownership covered by the gate check");
+                context.note("this version cannot launch a bare FishHook — ownership covered by the binding check");
                 return;
             }
 
@@ -255,7 +293,7 @@ public final class OcmCoexistenceSuite {
                 observedDamage = captors.damageOf(victim.uuid());
             }
             if (observedDamage == null) {
-                context.note("hook never struck the victim (flight physics) — ownership covered by the gate check");
+                context.note("hook never struck the victim (flight physics) — ownership covered by the binding check");
                 return;
             }
 
@@ -274,10 +312,10 @@ public final class OcmCoexistenceSuite {
 
     /** projectile-knockback is always-enabled by default: substitution and knock are OCM's. */
     private static void runProjectileDeferral(
-            MentalPlugin mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
-        FakePlayer shooter = new FakePlayer(tester, mental.services().scheduling());
-        FakePlayer victim = new FakePlayer(tester, mental.services().scheduling());
+        FakePlayer shooter = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
             context.syncRun(() -> {
@@ -287,9 +325,9 @@ public final class OcmCoexistenceSuite {
             });
             context.awaitTicks(5);
 
-            context.expect(context.sync(() -> mental.services().ocmGate()
-                            .handles(OcmMechanic.PROJECTILE_KNOCKBACK, victim.player())),
-                    "gate must report OCM ownership of projectile knockback under default OCM config");
+            context.expect(context.sync(() -> !mental.ocmBinding()
+                            .mentalOwns(MechanicToken.PROJECTILE_KNOCKBACK, victim.uuid())),
+                    "binding must report OCM ownership of projectile knockback under default OCM config");
 
             context.syncRun(() -> {
                 victim.player().setNoDamageTicks(0);
@@ -305,7 +343,7 @@ public final class OcmCoexistenceSuite {
                 hit = captors.projectileHitOn(victim.uuid());
             }
             if (hit == null) {
-                context.note("snowball never struck the victim (flight physics) — ownership covered by the gate check");
+                context.note("snowball never struck the victim (flight physics) — ownership covered by the binding check");
                 return;
             }
 
