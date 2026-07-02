@@ -23,6 +23,8 @@ import me.vexmc.mental.v5.config.SnapshotParser;
 import me.vexmc.mental.v5.feature.BukkitRegistrar;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.Reconciler;
+import me.vexmc.mental.v5.session.SessionService;
+import me.vexmc.mental.v5.session.ViewBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
@@ -64,6 +66,10 @@ public final class MentalPluginV5 extends JavaPlugin {
     private OcmBinding ocmBinding;
     private BukkitRegistrar registrar;
     private Reconciler reconciler;
+
+    private VelocityValve valve;
+    private ViewBuilder viewBuilder;
+    private SessionService sessions;
 
     private List<String> parseIssues = List.of();
 
@@ -118,6 +124,14 @@ public final class MentalPluginV5 extends JavaPlugin {
             getLogger().warning("coexistence — " + warning);
         }
 
+        // The D2 session domain: one CombatSession per player, ticked on its
+        // owning region thread, publishing the frozen PlayerView the rim reads.
+        // Always-on infrastructure — observation only, so zero-touch holds.
+        this.valve = new VelocityValve();
+        this.viewBuilder = new ViewBuilder(clock);
+        this.sessions = new SessionService(scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot);
+        sessions.start(this);
+
         // The feature reconciler. 4A1 registers ZERO units — the spine is a
         // no-op server. Later sub-phases register their families here before the
         // converge.
@@ -140,6 +154,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         isolate("reconciler.closeAll", () -> {
             if (reconciler != null) {
                 reconciler.closeAll();
+            }
+        });
+        isolate("sessions.shutdown", () -> {
+            if (sessions != null) {
+                sessions.shutdown();
             }
         });
         isolate("folia clock", () -> {
@@ -184,6 +203,26 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** The region-correct scheduling surface (reused from {@code common}). */
     public @NotNull Scheduling scheduling() {
         return scheduling;
+    }
+
+    /** The D2 session domain — the rim and routers read published views through it. */
+    public @NotNull SessionService sessions() {
+        return sessions;
+    }
+
+    /** The velocity valve — armed by the desk, consumed by the rim's outbound listener. */
+    public @NotNull VelocityValve valve() {
+        return valve;
+    }
+
+    /** The live OCM arbiter binding — the routers' frozen ownership source. */
+    public @NotNull OcmBinding ocmBinding() {
+        return ocmBinding;
+    }
+
+    /** Boot-time capability report (Folia, knockback event, …). */
+    public @NotNull Capabilities capabilities() {
+        return capabilities;
     }
 
     /* ------------------------------------------------------------------ */
