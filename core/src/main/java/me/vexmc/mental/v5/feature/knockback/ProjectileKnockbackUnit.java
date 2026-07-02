@@ -83,6 +83,15 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     private static final long FLIGHT_STALE_NANOS = 10_000_000_000L;
     private static final int FLIGHT_SWEEP_THRESHOLD = 64;
 
+    /**
+     * Whether the {@code AbstractArrow} API (Bukkit 1.14+) is present. This unit's arrow handlers name it
+     * in their bodies and one helper signature, and Bukkit hard-resolves a listener's method signatures
+     * when it registers it — so below 1.14 (the older backport targets, where arrows are the plain
+     * {@code Arrow} type) registering this listener would throw {@code NoClassDefFoundError}. When absent
+     * the unit stays dormant (see {@link #assemble}); restoring legacy projectile knockback is a later phase.
+     */
+    private static final boolean ARROW_API_PRESENT = classPresent("org.bukkit.entity.AbstractArrow");
+
     private record Flight(Vector velocity, long stampNanos) {}
 
     /** Pre-1.14 in-memory arrow-punch stamp (level + flight-start nanos for the staleness sweep). */
@@ -105,6 +114,8 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
 
     private final ConcurrentHashMap<UUID, PunchStamp> arrowPunch = new ConcurrentHashMap<>();
 
+    private final Plugin plugin;
+
     /**
      * True on 1.21.2+ where vanilla restored projectile-KB-vs-players (mandate
      * §10 / MC-2110). Boot-resolved from {@link
@@ -119,6 +130,7 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
             Plugin plugin, SessionService sessions, OcmBinding ocmBinding, Scheduling scheduling,
             Supplier<Snapshot> snapshot, HitIds ids, TickClock clock,
             boolean projectileKnockbackRestored) {
+        this.plugin = plugin;
         this.sessions = sessions;
         this.ocmBinding = ocmBinding;
         this.scheduling = scheduling;
@@ -155,7 +167,25 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
 
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
+        if (!ARROW_API_PRESENT) {
+            // Registering the listener would make Bukkit resolve this class's AbstractArrow-typed members
+            // (a 1.14+ API), throwing NoClassDefFoundError. Stay dormant (scope open, nothing registered)
+            // with a loud line rather than spew a boot error; legacy projectile knockback is a later phase.
+            plugin.getLogger().warning("projectile-knockback: dormant on this server — arrow handling needs "
+                    + "the AbstractArrow API (Bukkit 1.14+); projectile knockback on legacy returns in a "
+                    + "later backport phase.");
+            return;
+        }
         scope.listen(this);
+    }
+
+    private static boolean classPresent(String className) {
+        try {
+            Class.forName(className);
+            return true;
+        } catch (ClassNotFoundException absent) {
+            return false;
+        }
     }
 
     @SuppressWarnings("unchecked")
