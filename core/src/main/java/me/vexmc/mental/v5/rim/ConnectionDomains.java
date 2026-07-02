@@ -61,6 +61,16 @@ public final class ConnectionDomains {
         return byId.computeIfAbsent(id, key -> new Domain(clock));
     }
 
+    /**
+     * Whether {@code id} has a live connection domain — i.e. its ground/sprint
+     * FSMs are being fed by real inbound packets. Packetless players (synthetic
+     * test players, in-process bots) never create one, so the session's
+     * tick-sampler serves their ledger ground transitions instead of the FSM.
+     */
+    public boolean has(UUID id) {
+        return byId.containsKey(id);
+    }
+
     /** Drop a disconnected player's domain. */
     public void forget(UUID id) {
         byId.remove(id);

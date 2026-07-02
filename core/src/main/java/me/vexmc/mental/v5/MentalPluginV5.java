@@ -159,6 +159,13 @@ public final class MentalPluginV5 extends JavaPlugin {
             getLogger().warning("coexistence — " + warning);
         }
 
+        // The packet rim's connection domains (spec §6): per-player sprint + ground
+        // FSMs fed by the rim's movement taps. Created before the session service so
+        // the session's tick-sampler can gate its ledger ground feed to packetless
+        // players (a connected player's FSM feeds the ledger; the sampler serves the
+        // rest — synthetic test players, in-process bots).
+        this.domains = new ConnectionDomains(clock);
+
         // The D2 session domain: one CombatSession per player, ticked on its
         // owning region thread, publishing the frozen PlayerView the rim reads.
         // Always-on infrastructure — observation only, so zero-touch holds.
@@ -166,14 +173,13 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.viewBuilder = new ViewBuilder(clock);
         this.positions = new PositionRing();
         this.sessions = new SessionService(
-                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions);
+                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions, domains);
         sessions.start(this);
 
         // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —
         // parse wrappers into kernel records, feed the session inbox and the wire,
         // consume the outbound valve, match latency probes. Always-on, observation
         // only. Registered BEFORE PacketEvents.init(); PE teardown unregisters them.
-        this.domains = new ConnectionDomains(clock);
         this.latency = new LatencyModel();
         this.hitIds = new HitIds();
         this.anticheatPolicy = new AnticheatPolicy();

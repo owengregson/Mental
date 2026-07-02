@@ -16,11 +16,13 @@ import me.vexmc.mental.kernel.model.LedgerEvent;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.wire.GroundFsm;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.coexist.OcmBinding;
+import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.config.Snapshot;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -66,11 +68,21 @@ public final class SessionService implements Listener, SessionAccess {
     private final OcmBinding ocmBinding;
     private final Supplier<Snapshot> snapshot;
     private final PositionRing positions;
+    private final ConnectionDomains domains;
 
     private final ConcurrentHashMap<UUID, CombatSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Integer> entityIdByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, UUID> playerIdByEntityId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, TaskHandle> handles = new ConcurrentHashMap<>();
+
+    /**
+     * Per-player owning-thread ground FSM — the tick-sampler that feeds the ledger
+     * liftoff/landing for PACKETLESS players (synthetic test players, in-process
+     * bots). Real players are fed by the connection domain's packet FSM; the
+     * sampler is gated off for them via {@link ConnectionDomains#has} so their
+     * ledger is never double-fed.
+     */
+    private final ConcurrentHashMap<UUID, GroundFsm> samplers = new ConcurrentHashMap<>();
 
     /** Forget hooks other subsystems register (connection domains, latency, valve). */
     private final List<Consumer<UUID>> forgetHooks = new ArrayList<>();
@@ -78,7 +90,7 @@ public final class SessionService implements Listener, SessionAccess {
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
             VelocityValve valve, OcmBinding ocmBinding, Supplier<Snapshot> snapshot,
-            PositionRing positions) {
+            PositionRing positions, ConnectionDomains domains) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
@@ -86,6 +98,7 @@ public final class SessionService implements Listener, SessionAccess {
         this.ocmBinding = ocmBinding;
         this.snapshot = snapshot;
         this.positions = positions;
+        this.domains = domains;
     }
 
     /** The per-player position ring the fast path rewinds through (reach) and reads latest (pre-send). */
@@ -180,6 +193,7 @@ public final class SessionService implements Listener, SessionAccess {
         sessions.put(id, session);
         entityIdByPlayer.put(id, entityId);
         playerIdByEntityId.put(entityId, id);
+        samplers.put(id, new GroundFsm(clock));
         TaskHandle handle = scheduling.repeatOn(player, 1L, 1L, () -> tick(player), () -> forget(id));
         TaskHandle prior = handles.put(id, handle);
         if (prior != null) {
@@ -193,6 +207,7 @@ public final class SessionService implements Listener, SessionAccess {
             handle.cancel();
         }
         sessions.remove(id);
+        samplers.remove(id);
         Integer entityId = entityIdByPlayer.remove(id);
         if (entityId != null) {
             playerIdByEntityId.remove(entityId, id);
@@ -213,6 +228,7 @@ public final class SessionService implements Listener, SessionAccess {
         if (session == null) {
             return;
         }
+        sampleGround(player, session);
         PlayerView view = buildView(player, session);
         session.tickStep(view);
         valve.clearStale(player.getUniqueId());
@@ -222,6 +238,38 @@ public final class SessionService implements Listener, SessionAccess {
         Location location = player.getLocation();
         positions.record(player.getUniqueId(),
                 location.getX(), location.getY(), location.getZ(), System.nanoTime());
+    }
+
+    /**
+     * The tick-sampler ground feed for PACKETLESS players (spec §2; the retired
+     * per-tick GroundStateWatcher fallback). Real players' ground transitions come
+     * from the connection domain's packet FSM (fed by the rim's movement taps); a
+     * synthetic player sends no packets, so its liftoff/landing would never reach
+     * the ledger and its knock residual would decay at ground drag forever
+     * (era-wrong: a knocked victim flies, decaying horizontals at air drag). This
+     * samples the live grounded flag once per owning-thread tick and enqueues the
+     * same {@link LedgerEvent}s the FSM would, gated off for connected players so
+     * the ledger is never double-fed.
+     */
+    @SuppressWarnings("deprecation") // Player#isOnGround — the transition-relevant client flag
+    private void sampleGround(Player player, CombatSession session) {
+        UUID id = player.getUniqueId();
+        if (domains.has(id)) {
+            return; // real connection — the packet FSM feeds the ledger
+        }
+        GroundFsm sampler = samplers.get(id);
+        if (sampler == null) {
+            return;
+        }
+        Location location = player.getLocation();
+        double gravity = Attributes.valueOr(player, Attributes.gravity(), Decay.DEFAULT_GRAVITY);
+        GroundFsm.ViewSlice slice = new GroundFsm.ViewSlice(
+                Decay.JUMP_IMPULSE, jumpBoostAmplifier(player), player.isSprinting(),
+                location.getYaw(), gravity);
+        LedgerEvent event = sampler.onMovement(player.isOnGround(), true, location.getY(), slice);
+        if (event != null) {
+            session.enqueue(event);
+        }
     }
 
     /**
