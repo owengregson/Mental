@@ -35,6 +35,8 @@ import me.vexmc.mental.v5.delivery.MirrorListener;
 import me.vexmc.mental.v5.feature.BukkitRegistrar;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.Reconciler;
+import me.vexmc.mental.v5.feature.damage.ArmourDurabilityUnit;
+import me.vexmc.mental.v5.feature.damage.ArmourStrengthUnit;
 import me.vexmc.mental.v5.feature.damage.CritFallbackUnit;
 import me.vexmc.mental.v5.feature.damage.DamageOwnership;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
@@ -394,7 +396,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The damage family (4B). The fast-path legacy composition (tool table,
         // era potion values, era crit) lives in the shaper above and is read live
         // from the snapshot; CritFallback restores the era crit on fast-path-off
-        // hits through the SAME ownership verdict.
+        // hits through the SAME ownership verdict; ArmourStrength/ArmourDurability
+        // port the era flat armour reduction and Unbreaking skip.
+        reconciler.register(new ArmourStrengthUnit());
+        reconciler.register(new ArmourDurabilityUnit());
         reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
     }
 
