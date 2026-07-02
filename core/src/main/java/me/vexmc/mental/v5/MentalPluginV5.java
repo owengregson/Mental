@@ -84,8 +84,8 @@ import org.bukkit.command.PluginCommand;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * The v5 plugin entry point (spec §7; the retired {@code MentalPlugin} boot
- * ordering re-expressed on the two-realm seams). Owns lifecycle and the
+ * The v5 plugin entry point (spec §7; the retired v4 core's boot ordering
+ * re-expressed on the two-realm seams). Owns lifecycle and the
  * config-snapshot reference; substance lives in the feature units, the session
  * service, and the packet rim.
  *

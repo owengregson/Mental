@@ -11,7 +11,6 @@ plugins {
 
 rootProject.name = "Mental"
 
-include(":api", ":common", ":core", ":compat-folia", ":compat-brigadier", ":tester")
+include(":api", ":common", ":core", ":compat-folia", ":tester")
 include("kernel")
 project(":compat-folia").projectDir = file("compat/folia")
-project(":compat-brigadier").projectDir = file("compat/brigadier")

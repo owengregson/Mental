@@ -36,12 +36,11 @@ tasks.processResources {
 }
 
 tasks.shadowJar {
-    dependsOn(":compat-folia:classes", ":compat-brigadier:classes")
+    dependsOn(":compat-folia:classes")
     archiveBaseName.set("Mental")
     archiveClassifier.set("")
 
     from(project(":compat-folia").sourceSets.main.get().output)
-    from(project(":compat-brigadier").sourceSets.main.get().output)
 
     relocate("com.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.api")
     relocate("io.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.impl")
