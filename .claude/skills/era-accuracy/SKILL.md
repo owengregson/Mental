@@ -31,10 +31,11 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
   same-tick movement packets — a combo hit thrown the instant its victim
   touches down (the spam norm) reads the PRE-landing flight and ships the
   declining vertical, never a grounded 0.3608 re-stamp. Mental replicates
-  via tick-stamped packet records + `VictimMotion.currentExcludingTick`
-  (the snapshot freeze = end-of-previous-tick state), the +1 staleness
-  allowance in `Snapshot.isDamageImmune`, and the `auto` feedback window
-  at `(max/2 − 1)` ticks. "Combos feel floaty / too much vertical" =
+  via tick-stamped packet records + the `MotionLedger`'s end-of-previous-tick
+  read (was `VictimMotion.currentExcludingTick`; the published `PlayerView` IS
+  that freeze), the +1 staleness allowance in the view's immune check (was
+  `Snapshot.isDamageImmune`), and the `auto` feedback window at `(max/2 − 1)`
+  ticks. "Combos feel floaty / too much vertical" =
   boundary hits shipping grounded re-stamps = one of those three broke,
   or OCM owns the knock (see ocm-coexistence: old-player-knockback ships
   ENABLED in OCM's default modeset and playerDelay ships 18, not the
@@ -74,10 +75,11 @@ sent STOP_SPRINTING), and the re-engage on release re-armed the sprint KB bonus
 clients (1.17+) KEEP the sprint flag through an item-use block (you're slowed
 but still flagged sprinting — visible as sprint particles while blocking), so
 that STOP/START never crosses the wire and block-hitting silently stops
-resetting sprint. Mental reconstructs it: `SwordBlockingModule.resetSprintForBlock`
-re-arms the sprint ledgers on the block right-click via
-`SprintTracker.armSprintReset`, gated on the RAW client sprint flag
-(`SprintTracker.isClientSprinting` — the only signal that survives Mental's own
+resetting sprint. Mental reconstructs it: the `SwordBlockingUnit` (was
+`SwordBlockingModule.resetSprintForBlock`) re-arms the sprint ledgers on the
+block right-click via the `SprintWire` (was `SprintTracker.armSprintReset`),
+gated on the RAW client sprint flag (the wire's client-sprint read, was
+`SprintTracker.isClientSprinting` — the only signal that survives Mental's own
 post-hit `setSprinting(false)`) so a stationary defensive block never gains a
 phantom bonus. NOTE the local-player sprint-particle visual during a block is
 client-authoritative rendering and cannot be removed server-side (same family as
@@ -103,8 +105,9 @@ Vector-level: KnockbackSuite/ProfileSuite (engine expectation == applied
 velocity). Position-level: EraParitySuite (settled endpoint vs the EraOracle
 legacy integrator, ≤0.005-block tolerance; combo era gap and held-input
 effects demonstrated live). Wire-level: the legacy-lab harness against the
-live netty path (the suites never traverse HitPacketListener — FakePlayers
-attack server-side). A claim of era accuracy without a pin in one of these
+live netty path (the suites never traverse the parse rim, was
+`HitPacketListener` — FakePlayers attack server-side). A claim of era accuracy
+without a pin in one of these
 is not yet a claim.
 
 ## Era trade feel (measured 2026-06-05; corrected same day, addendum 2)

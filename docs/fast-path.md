@@ -41,10 +41,10 @@ client click
        │            └─ hurt animation ─────────────► attacker
        └─ Scheduling.runOn(victim) ──► owning thread
                                          ├─ re-resolve + re-validate
-                                         ├─ DamageCalculator (1.7.10 damage + crits)
+                                         ├─ DamageShaper + DamageTables (1.7.10 damage + crits)
                                          └─ damage(amount, attacker)
                                               └─ full vanilla event chain:
-                                                 damage events → knockback pipeline
+                                                 damage events → the delivery desk
                                                  → PlayerVelocityEvent → tracker
 ```
 
@@ -85,17 +85,19 @@ internals would cost the cross-version stability this plugin is built on.
 ## Why the snapshots
 
 The netty thread may not touch live entities (undefined on Paper, forbidden
-on Folia). Every online player therefore snapshots itself once per tick
-*from its own owning thread* — fifteen primitive fields into a lock-free
-map. The packet thread reads immutable records, never entities. On Folia
-each snapshot task rides its player's region; on Paper it is the main
-thread; the code is identical.
+on Folia). Every online player therefore **publishes** one immutable
+`PlayerView` of itself once per tick *from its own owning thread* — a plain
+value swapped by a single `AtomicReference.set`. The packet thread reads that
+record, never entities. On Folia each session tick rides its player's region;
+on Paper it is the main thread; the code is identical. Because the view is
+published at the start of the session tick, it is the state as of the *end of
+the previous tick* — the boundary read the era ordering depends on holds by
+construction.
 
-The motion fields inside each snapshot come from the victim-motion ledger —
-the decaying residual of previously applied knockback that makes hits stack
-the way 1.7.10 delivered them — so the netty pre-send and the
-owning-thread apply compute from one model. The era semantics live in
-[legacy-combat.md](legacy-combat.md).
+The motion fields inside each view come from the `MotionLedger` — the decaying
+residual of previously applied knockback that makes hits stack the way 1.7.10
+delivered them — so the netty pre-send and the owning-thread apply compute from
+one model. The era semantics live in [legacy-combat.md](legacy-combat.md).
 
 ## Sprint on the wire (w-tap registration)
 
@@ -103,29 +105,29 @@ The era server applied inbound packets in arrival order: an attack always
 read its attacker's sprint flag with every earlier STOP/START already
 applied, so a w-tap or s-tap counted no matter how little wall-clock
 separated it from the follow-up click. The fast path registers attacks
-*mid-tick* — faster than the era — but the tick-frozen snapshot it
+*mid-tick* — faster than the era — but the tick-frozen `PlayerView` it
 validates against holds sprint state from the last boundary, up to a tick
 **older** than the era contract. A w-tap whose re-press landed in the same
 tick as the attack shipped a plain knock; a release that should have denied
 the bonus didn't.
 
-The `wtap-registration` module (default on) restores the in-order read at
-packet granularity. The plugin-level ground tap already observes
-entity-action packets on each player's netty thread; it additionally feeds
-the sprint tracker's **wire view** — the flag replayed in arrival order,
-freshness armed the instant a START arrives, vanilla's in-attack sprint
-clear mirrored beside the live-flag clear the knockback module already
-issues. Because a player's packets all arrive on their own connection
-thread, the wire view an ATTACK reads is in program order with the toggles
-that preceded it: zero added latency, no races by construction. An
-owning-thread per-tick reconcile seeds first-sighted players and adopts
-server-initiated `setSprinting` (which never crosses the wire) once the
-wire has been quiet.
+The `wtap-registration` feature (default on) restores the in-order read at
+packet granularity. The parse rim already observes each player's
+entity-action packets on their own netty thread; it additionally feeds the
+`SprintWire`'s **arrival-order view** — the flag replayed in packet order,
+freshness armed the instant a START arrives, vanilla's in-attack sprint clear
+mirrored beside the post-hit clear the delivery desk already issues. Because a
+player's packets all arrive on their own connection thread, the wire view an
+ATTACK reads is in program order with the toggles that preceded it: zero added
+latency, no races by construction. An owning-thread per-tick reconcile seeds
+first-sighted players and re-adopts server-initiated `setSprinting` (which
+never crosses the wire) once the wire has been quiet.
 
-Registration stamps the verdict it used — sprint and freshness — so the
-pre-sent velocity and the authoritative damage pass can never disagree
-about one hit. Synthetic players send no packets and always fall back to
-the snapshot; so does the whole pipeline when the module is disabled.
+Registration stamps the `SprintVerdict` it used — sprint and freshness — into
+the hit's context, so the pre-sent velocity and the authoritative damage pass
+can never disagree about one hit. Synthetic players send no packets and always
+fall back to the published view; so does the whole pipeline when the feature is
+disabled.
 
 This is strictly faster than the era queue, which quantized both the
 toggle application and the attack to tick boundaries (0–50 ms each).

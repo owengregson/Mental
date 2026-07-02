@@ -28,10 +28,13 @@ description: Use when changing the knockback engine, profile schema, presets, or
   per-world map (knockback.yml) → server default. There is NO per-player
   override — the override map, `/mental kb set <player>`, and the per-player
   API/`PlayerKnockbackProfileChangeEvent` were removed when management moved
-  into the in-game GUI. The default is set through the menu, which writes
-  `knockback.profile` and reloads; `KnockbackProfileChangeEvent` (no player)
-  fires on a global change. The netty pre-send reads the profile FROZEN into
-  the victim's per-tick snapshot, so prediction and truth share one profile.
+  into the in-game GUI. The default is set through the menu's Knockback screen
+  (`Management.setGlobalProfile`), which writes the machine **overlay**
+  (`state/overrides.yml`) and reloads — the human `knockback.yml` is never
+  re-serialized; `KnockbackProfileChangeEvent` (no player) fires on a global
+  change, and the public `Mental.setKnockbackProfile(String)` shares that same
+  write-back path. The netty pre-send reads the profile FROZEN into the victim's
+  per-tick `PlayerView`, so prediction and truth share one profile.
 - Config is split by concern: config.yml (module switches + policy),
   knockback.yml (selection + rod/fishing/projectile), hit-registration.yml,
   latency-compensation.yml, profiles/. v1 single-file configs migrate
@@ -48,7 +51,7 @@ description: Use when changing the knockback engine, profile schema, presets, or
    (assigned); horizontal cap rescales; vertical cap clamps BASE only
 4. Extras along attacker yaw (sprint levels × extra-or-wtap + enchant levels
    × extra; the vertical bonus is ONE flat term — vanilla never scales it
-   per level; wtap freshness comes from SprintTracker: toggle arms,
+   per level; wtap freshness comes from the SprintWire: toggle arms,
    authoritative hit consumes, pre-send peeks)
 5. Air multipliers (airborne victims) → add offsets (sign-matched,
    axis-ratio) → vertical-min floor → SCALING resistance (horizontal) →
@@ -61,8 +64,10 @@ description: Use when changing the knockback engine, profile schema, presets, or
    with full comments + docs/knockback-profiles.md.
 3. Unit-pin the math in KnockbackEngineTest (hand-computed expectations) AND
    the no-op-at-default property.
-4. Preset era pins live in MentalConfigTest (`bundledPresetsCarryTheir
-   CanonicalValues`) — a regenerated preset can never drift.
+4. Preset era pins live in the kernel `PresetsTest` + core `ProfileParserTest`
+   (each bundled file parses to its `Presets` constant) — a regenerated preset
+   can never drift; the docs-cannot-drift `KnockbackDocsTest` pins every schema
+   knob into docs/knockback-profiles.md.
 5. Provenance: every fork preset is ported from ARCHIVED server configs
    (two independent archives, byte-identical where they overlap; kohi also
    confirmed ×3 + matches the archive). Lineage (verified round 2):

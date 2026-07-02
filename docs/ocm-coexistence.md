@@ -81,8 +81,8 @@ OCM coordination (startup): OldCombatMechanics service bound — modesets decide
   players by default). Mental's feedback gate follows each victim's live
   window (`feedback-min-interval-ms: auto`), and all of its invulnerability
   checks read live values, so no configuration is needed.
-- **Mental's modules, disabled, do nothing at all.** Turning off any Mental
-  module (config or `/mental module <name> off`) leaves zero footprint — no
+- **Mental's features, disabled, do nothing at all.** Turning off any Mental
+  feature (in the management GUI or its config) leaves zero footprint — no
   event mutation, no packet cancellation, no entity writes — verified live by
   the zero-touch integration suite. OCM (or any other plugin) can own any
   mechanic outright.

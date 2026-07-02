@@ -60,16 +60,18 @@ description: Use when reasoning about knockback, velocity, trajectories, player 
   liftoff (+0.2 facing push if sprinting) — a knocked victim's baseline one
   tick later is jump-impulse FREE-FALL (1.8.9 combo hit 2 ships vy
   0.2477–0.2862 = 0.42 eight-or-nine gravity steps later, stamp-phase
-  dependent, wire-measured). VictimMotion + GroundTransitionWatcher
-  (packet-fed via GroundPacketTap for real clients, tick sampler for
-  packetless ones) replicate exactly this; era combo verticals DECLINE,
-  which is why combo victims stayed low.
+  dependent, wire-measured). The `MotionLedger` + `GroundFsm` (was
+  `VictimMotion` + `GroundTransitionWatcher`; packet-fed via the parse rim, was
+  `GroundPacketTap`, for real clients, session tick sampler for packetless ones)
+  replicate exactly this; era combo verticals DECLINE, which is why combo
+  victims stayed low.
 - **Within a tick, the attack was judged BEFORE the victim's movement
   packets** (the attacker's connection slot ran first): a combo hit thrown
   the same tick its victim touches down — the spam-cadence norm — reads the
-  PRE-landing flight. Mental: tick-stamped packet records +
-  `VictimMotion.currentExcludingTick` give the snapshot the
-  end-of-previous-tick view. A same-tick landing smuggled into the attack
+  PRE-landing flight. Mental: tick-stamped packet records + the `MotionLedger`'s
+  end-of-previous-tick read (was `VictimMotion.currentExcludingTick`) give the
+  published `PlayerView` the end-of-previous-tick view. A same-tick landing
+  smuggled into the attack
   read ships a grounded 0.3608 re-stamp the era never sent — apexes stop
   dipping, combos read floaty (the live symptom that found this, addendum 4).
 - Reference flights (flat ground, measured): full stamp plain ≈ 1.99
