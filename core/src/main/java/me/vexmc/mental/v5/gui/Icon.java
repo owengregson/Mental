@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.platform.MenuMaterials;
+import me.vexmc.mental.v5.text.TextPort;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -52,7 +53,9 @@ public final class Icon {
 
     public @NotNull Icon name(@NotNull Component name) {
         if (meta != null) {
-            meta.displayName(clean(name));
+            // Component sink routed through TextPort → setDisplayName(String): the
+            // Paper displayName(Component) method is absent below 1.16.5.
+            TextPort.displayName(meta, clean(name));
         }
         return this;
     }
@@ -85,7 +88,9 @@ public final class Icon {
     public @NotNull ItemStack build() {
         if (meta != null) {
             if (!lore.isEmpty()) {
-                meta.lore(lore);
+                // Component sink routed through TextPort → setLore(List<String>):
+                // the Paper lore(List<Component>) method is absent below 1.16.5.
+                TextPort.lore(meta, lore);
             }
             if (glow) {
                 Enchantment glint = Enchantments.unbreaking();

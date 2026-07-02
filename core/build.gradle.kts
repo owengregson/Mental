@@ -64,6 +64,13 @@ dependencies {
     compileOnly(libs.jetbrains.annotations)
     implementation(libs.packetevents.spigot)
     implementation(libs.bstats.bukkit)
+    // Adventure shaded into the jar (relocated below) so its legacy-string
+    // serializer exists on servers older than Paper 1.16.5, where net.kyori is
+    // absent. The BOM pins every module to the floor-API version (4.9.3); the
+    // jetbrains-annotations it drags in transitively are compile-time only.
+    implementation(platform(libs.adventure.bom))
+    implementation(libs.adventure.api) { exclude(group = "org.jetbrains", module = "annotations") }
+    implementation(libs.adventure.serializer.legacy) { exclude(group = "org.jetbrains", module = "annotations") }
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -97,6 +104,12 @@ tasks.shadowJar {
     relocate("com.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.api")
     relocate("io.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.impl")
     relocate("org.bstats", "me.vexmc.mental.lib.bstats")
+    // Relocate the shaded Adventure (adventure-api + adventure-key + examination,
+    // all under net.kyori) so it never collides with — or falls back to — Paper's
+    // native Adventure. Every net.kyori reference in core resolves to this copy;
+    // no Component crosses a Bukkit boundary (TextPort is the only sink), so on
+    // modern servers this copy is inert and on legacy it is the only one present.
+    relocate("net.kyori", "me.vexmc.mental.lib.adventure")
 }
 
 tasks.build {
