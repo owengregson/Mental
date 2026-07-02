@@ -84,6 +84,11 @@ public final class Snapshot {
         return profiles.containsKey(name);
     }
 
+    /** The loaded profile by {@code name}, or {@code null} — the GUI picker's value-preview read. */
+    public KnockbackProfile profile(String name) {
+        return profiles.get(name);
+    }
+
     public AnticheatSettings anticheat() {
         return anticheat;
     }

@@ -25,6 +25,8 @@ import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.command.MentalCommand;
+import me.vexmc.mental.v5.gui.MenuContext;
+import me.vexmc.mental.v5.gui.MenuManager;
 import me.vexmc.mental.v5.manage.Management;
 import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Migrations;
@@ -138,6 +140,7 @@ public final class MentalPluginV5 extends JavaPlugin {
     private final AtomicBoolean wtapConsultWire = new AtomicBoolean(true);
 
     private Management management;
+    private MenuManager menuManager;
     private MentalFacade facade;
 
     private List<String> parseIssues = List.of();
@@ -255,17 +258,25 @@ public final class MentalPluginV5 extends JavaPlugin {
 
         // The management write-back seam + the public API facade (spec §11; the
         // 4E seams pulled forward). The facade is published both in the static
-        // Mental holder and the Bukkit ServicesManager; the /mental executor is
-        // the minimal reload surface (the GUI arrives in Phase 6).
+        // Mental holder and the Bukkit ServicesManager.
         this.management = new Management(this);
         this.facade = new MentalFacade(this, management, latency);
         Mental.register(facade);
         getServer().getServicesManager().register(Mental.MentalApi.class, facade, this, ServicePriority.Normal);
+
+        // The descriptor-driven management GUI (Phase 6). Always-on infrastructure
+        // (like the command system it fronts): the click router is registered for
+        // the plugin's lifetime and never touches the game, so zero-touch holds
+        // trivially. Menu reads flow through the live snapshot + reconciler; every
+        // write flows through Management / the machine overlay, never the human
+        // YAML. The bare /mental opens it for a permitted player.
+        this.menuManager = new MenuManager(new MenuContext(this, management));
+        getServer().getPluginManager().registerEvents(menuManager, this);
         PluginCommand command = getCommand("mental");
         if (command != null) {
-            command.setExecutor(new MentalCommand(this));
+            command.setExecutor(new MentalCommand(this, menuManager));
         } else {
-            getLogger().warning("plugin.yml is missing the 'mental' command — the reload command is unavailable.");
+            getLogger().warning("plugin.yml is missing the 'mental' command — the menu and reload are unavailable.");
         }
 
         // bStats (spec §13; owner decision: KEEP). Config-gated on metrics.enabled
@@ -304,6 +315,11 @@ public final class MentalPluginV5 extends JavaPlugin {
             Mental.register(null);
             if (facade != null) {
                 getServer().getServicesManager().unregister(Mental.MentalApi.class, facade);
+            }
+        });
+        isolate("menu manager shutdown", () -> {
+            if (menuManager != null) {
+                menuManager.shutdown();
             }
         });
         isolate("reconciler.closeAll", () -> {
