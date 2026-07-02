@@ -460,3 +460,56 @@ Commits (in order): `fec0383` `CraftingUnit`; `f7fd263` `OffhandUnit`; `434050a`
   registry removal because it is atomic, reload-safe, and leaves zero persistent state.
   Kernel change: none needed (EraReach/OffhandPolicy already present; no pin edits). No
   suite VALUE changed.
+
+## Sub-phase 4E outcomes (2026-07-02)
+
+**The old core is gone; v5 is the sole entry point.** Gate GREEN: `./gradlew build`
++ SEQUENTIAL `integrationTestMatrix` — all 7 versions FRESH PASS (test-results.txt
+rewritten 02:26:19 → 02:34:33 against a 02:24:58 gate start, each = `PASS`, 46/46
+cases, +2 CommandSuite over 4D's 44) — PLUS `integrationTestOcm`: 1.17.1 +OCM and
+26.1.2 +OCM FRESH PASS (02:34:46 / 02:35:02), the coexistence suite's 5 cases each,
+with `OCM coordination (startup): BOUND` and the feel warnings logged live. Zero
+FAIL in any log. `BUILD SUCCESSFUL in 10m 1s`.
+
+Commits (in order): `b2e8e93` bStats into MentalPluginV5 (config-gated);
+`0005919` the OcmCompatUnit binding driver (the finding); `5a531b7` tester restore
++ re-plumb; `b2f1933` the coexistence main-thread read fix; `0d29e58` THE DELETION;
+this doc.
+
+- **THE DELETION**: 207 files / ~24.3k LOC removed — `MentalPlugin`/`MentalServices`/
+  `MentalApiImpl`, `engine/`, `module/` (all 16 families), `config/` (MentalConfig +
+  ConfigStore + migration + every `*Settings`), `gui/`, `manage/`, `command/`, core
+  `debug/`, `text/`, their tests, `common/command/` (main+test), and `compat-brigadier`
+  (module + `settings.gradle.kts` include/projectDir + core's shadowJar dependsOn/from).
+- **KEPT from platform/common** (checked against actual v5 imports): `platform/` IN FULL
+  — Attributes, Enchantments, EffectiveMaterial (the PDC shell DamageShaper/HitboxUnit
+  key off), SchedulingFactory + its BukkitScheduling delegate; and `common/` scheduling +
+  platform (Capabilities/ServerEnvironment) + debug (Phase 5 finishes the common split).
+  `api/` is byte-identical; plugin.yml already points at v5 and keeps the command decl.
+  The contract grep over core/src+tester/src for module/engine/MentalPlugin is EMPTY.
+- **bStats (owner KEEP)**: id 31788 relocated into MentalPluginV5, four SimplePie charts
+  on v5 sources read live via suppliers (anticheat_mode, probe_strategy, scheduling_backend,
+  ocm_coordination = new `OcmBinding.mode()`), gated on a new `metrics.enabled` knob (default
+  true). Added to the Snapshot + parser as **parse-with-default only** (absent section reads
+  true, no warn, no frozen-config break) and documented in the bundled config.yml; unit-pinned
+  in SnapshotTest.
+- **FINDING (fixed properly, not resurrected)**: the v5 `OcmBinding` was constructed but
+  never DRIVEN — no unit scanned OCM's config or bound its service API, so the arbiter
+  stayed ABSENT and Mental would have double-applied against a live OCM. 4A2 deferred this
+  driver to "the delivery family" but only AnticheatCompatUnit shipped. Ported the retired
+  `OcmCompatModule` onto the feature seam as `OcmCompatUnit` (Feature.OCM_COMPAT infra,
+  mirroring AnticheatCompatUnit): plugin-list watch, config scan via `OcmBinding.scanVerdicts/
+  scanFacts`, reflective `isModuleEnabledForPlayer` → BOUND (Bukkit.getPlayer decider) else
+  configOnly, clear on OCM disable, warnings logged after each bind. The live OCM PASS proves it.
+- **Suite re-points** (VALUES preserved where behavior carries): CommandSuite → MentalPluginV5
+  + the minimal `/mental` (reload + bare placeholder asserted handled; the GUI-open assertion
+  is a note-SKIP → Phase 6). OcmCoexistenceSuite → the ArbiterCore-backed `OcmBinding.mentalOwns`
+  (inverse of the deleted `OcmGate.handles`); binding check asserts `mode()==BOUND` + the six
+  arbitrated tokens conservatively coordinated (`mentalOwns(token,null)`); melee expectation is
+  the kernel KnockbackEngine through the production EntityStates capture (shared KnockbackSuite
+  helpers), dropping the local old-typed `restingVictim`/`delivery` copies. The one re-point
+  that changed the assertion shape: **damage-handoff** — it drove the deleted `HitApplier`
+  directly, and the v5 netty fast path is unreachable by a clientless FakePlayer, so it now
+  exercises the two seams that decide the handoff — the ArbiterCore tool-damage verdict + the
+  `DamageShaper` composition (vanilla-shape 10.0 handed to OCM, era recomposition 14.25 pinned,
+  also in DamageShaperTest). No kernel pin edits; kernel untouched this sub-phase.
