@@ -47,4 +47,9 @@ public final class VelocityValve {
             slot.set(null);
         }
     }
+
+    /** Quit/retire: drop the victim's slot entirely so it does not leak across sessions. */
+    public void forget(UUID victim) {
+        slots.remove(victim);
+    }
 }

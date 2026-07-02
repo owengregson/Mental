@@ -49,7 +49,7 @@ import org.bukkit.potion.PotionEffect;
  * netty threads — but each {@link CombatSession}'s own fields are mutated only by
  * its owning thread (thread-safety is ownership).</p>
  */
-public final class SessionService implements Listener {
+public final class SessionService implements Listener, SessionAccess {
 
     /** Per-victim journal ring depth — kept in step with the plugin's constant. */
     private static final int JOURNAL_CAPACITY = 16;

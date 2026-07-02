@@ -13,6 +13,7 @@ import me.vexmc.mental.common.scheduling.Scheduling;
 import me.vexmc.mental.common.scheduling.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.port.TickClock;
+import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.platform.SchedulingFactory;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.ConfigStore;
@@ -23,6 +24,10 @@ import me.vexmc.mental.v5.config.SnapshotParser;
 import me.vexmc.mental.v5.feature.BukkitRegistrar;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.Reconciler;
+import me.vexmc.mental.v5.rim.ConnectionDomains;
+import me.vexmc.mental.v5.rim.PacketTap;
+import me.vexmc.mental.v5.rim.ProbeRim;
+import me.vexmc.mental.v5.rim.ValveListener;
 import me.vexmc.mental.v5.session.SessionService;
 import me.vexmc.mental.v5.session.ViewBuilder;
 import org.bukkit.Bukkit;
@@ -70,6 +75,8 @@ public final class MentalPluginV5 extends JavaPlugin {
     private VelocityValve valve;
     private ViewBuilder viewBuilder;
     private SessionService sessions;
+    private ConnectionDomains domains;
+    private LatencyModel latency;
 
     private List<String> parseIssues = List.of();
 
@@ -131,6 +138,19 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.viewBuilder = new ViewBuilder(clock);
         this.sessions = new SessionService(scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot);
         sessions.start(this);
+
+        // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —
+        // parse wrappers into kernel records, feed the session inbox and the wire,
+        // consume the outbound valve, match latency probes. Always-on, observation
+        // only. Registered BEFORE PacketEvents.init(); PE teardown unregisters them.
+        this.domains = new ConnectionDomains(clock);
+        this.latency = new LatencyModel();
+        sessions.addForgetHook(domains::forget);
+        sessions.addForgetHook(latency::forget);
+        sessions.addForgetHook(valve::forget);
+        PacketEvents.getAPI().getEventManager().registerListener(new PacketTap(domains, sessions, clock));
+        PacketEvents.getAPI().getEventManager().registerListener(new ValveListener(valve));
+        PacketEvents.getAPI().getEventManager().registerListener(new ProbeRim(latency));
 
         // The feature reconciler. 4A1 registers ZERO units — the spine is a
         // no-op server. Later sub-phases register their families here before the
