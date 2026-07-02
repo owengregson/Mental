@@ -46,6 +46,22 @@ class LatencyModelTest {
     }
 
     @Test
+    void probeIdBasesOccupyDisjointUnsignedRanges() {
+        // Both transports pack a 16-bit sub-id into the low half of their base and
+        // hand the result to onResponse as an unsigned long. The bases differ in the
+        // high 16 bits, so the full [base, base | 0xFFFF] ranges cannot overlap — a
+        // window-confirmation echo can never alias a play-ping probe and vice versa.
+        long pingLow = Integer.toUnsignedLong(LatencyModel.PING_ID_BASE);
+        long pingHigh = Integer.toUnsignedLong(LatencyModel.PING_ID_BASE | 0xFFFF);
+        long txLow = Integer.toUnsignedLong(LatencyModel.TRANSACTION_ID_BASE);
+        long txHigh = Integer.toUnsignedLong(LatencyModel.TRANSACTION_ID_BASE | 0xFFFF);
+        assertEquals(0x4D45_0000L, pingLow);
+        assertEquals(0x4D54_0000L, txLow);
+        assertTrue(pingHigh < txLow || txHigh < pingLow,
+                "PING and TRANSACTION probe id ranges overlap");
+    }
+
+    @Test
     void outstandingProbesAreBoundedByEvictingTheOldest() {
         LatencyModel.Record record = tracker.forPlayer(player);
         for (long id = 0; id < 33; id++) {

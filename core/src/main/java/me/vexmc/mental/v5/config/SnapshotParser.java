@@ -135,13 +135,12 @@ public final class SnapshotParser {
 
     private static CompensationSettings parseCompensation(ConfigReader reader) {
         CompensationSettings d = CompensationSettings.DEFAULTS;
-        // KEEPALIVE is retired — Mental measures only over the dedicated Play
-        // PING/PONG channel (F5). Selecting it falls back to PING with ONE loud
-        // config warning (surfaced through the reload issue report) rather than
-        // being silently ignored.
-        ProbeStrategy probeStrategy = ProbeStrategy.resolveEffective(
-                reader.oneOf("probe-strategy", d.probeStrategy(), ProbeStrategy.class),
-                message -> reader.issues().add("latency-compensation.yml: probe-strategy: " + message));
+        // The RAW configured transport is stored here; the parser stays version-blind.
+        // Its reconciliation to the effective wire transport (below 1.17 → TRANSACTION,
+        // at/above → PING; KEEPALIVE always retires) happens at the one boot seam that
+        // knows the server version — MentalPluginV5.parseSnapshot via
+        // ProbeStrategy.resolveEffective, where the loud info/warn line is emitted.
+        ProbeStrategy probeStrategy = reader.oneOf("probe-strategy", d.probeStrategy(), ProbeStrategy.class);
         return new CompensationSettings(
                 probeStrategy,
                 reader.intAtLeast("ping-offset-ms", d.pingOffsetMillis(), 0),

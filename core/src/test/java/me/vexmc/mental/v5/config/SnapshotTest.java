@@ -140,16 +140,28 @@ class SnapshotTest {
     }
 
     @Test
-    void keepaliveProbeStrategyIsRetiredAndFallsBackToPingLoudly() throws Exception {
+    void probeStrategyIsStoredRawSoTheParserStaysVersionBlind() throws Exception {
+        // The parser no longer resolves the transport — that is version-aware and happens
+        // at the boot seam (ProbeStrategy.resolveEffective, pinned in ProbeStrategyTest).
+        // Here KEEPALIVE is a valid enum value stored verbatim, with no parse-time issue.
         SnapshotParser.Result result = parse("", "", "", """
                 latency-compensation:
                   probe-strategy: KEEPALIVE
                 """);
         CompensationSettings comp = settings(result.snapshot(), Feature.LATENCY_COMPENSATION);
-        assertEquals(ProbeStrategy.PING, comp.probeStrategy(), "KEEPALIVE falls back to PING");
-        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
-        assertTrue(result.issues().get(0).contains("KEEPALIVE probe strategy is retired; using PING"),
-                () -> "loud warning missing the retirement notice: " + result.issues().get(0));
+        assertEquals(ProbeStrategy.KEEPALIVE, comp.probeStrategy(), "the raw configured value is stored");
+        assertTrue(result.issues().isEmpty(), () -> "the parser must stay version-blind: " + result.issues());
+    }
+
+    @Test
+    void transactionProbeStrategyParsesAsAValidValue() throws Exception {
+        SnapshotParser.Result result = parse("", "", "", """
+                latency-compensation:
+                  probe-strategy: TRANSACTION
+                """);
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+        CompensationSettings comp = settings(result.snapshot(), Feature.LATENCY_COMPENSATION);
+        assertEquals(ProbeStrategy.TRANSACTION, comp.probeStrategy());
     }
 
     @Test

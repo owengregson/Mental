@@ -3,6 +3,7 @@ package me.vexmc.mental.tester.suite;
 import java.util.List;
 import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.v5.MentalPluginV5;
+import me.vexmc.mental.v5.config.ProbeStrategy;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.gui.DashboardMenu;
 import me.vexmc.mental.v5.gui.MenuContext;
@@ -56,6 +57,24 @@ public final class BootSuite {
                     context.expect(!api.moduleEnabled("not-a-module"), "API invented a module");
                     context.expect(api.version() != null && !api.version().isEmpty(), "API version empty");
                     context.expect(api.apiVersion() == 2, "API generation must be 2 (got " + api.apiVersion() + ")");
+                }),
+                new TestCase("boot: latency probe transport matches the server version", context -> {
+                    // The transport is version-determined: below 1.17 the play PING/PONG
+                    // channel is absent on the wire, so probes ride window-confirmation
+                    // TRANSACTIONs (TransactionProbeRim); at/above 1.17 the dedicated play
+                    // channel (ProbeRim, PING). This pins BOTH the legacy selection and the
+                    // modern regression (PING stays selected on 1.17+ — byte-identical path).
+                    boolean modern = mental.environment().isAtLeast(1, 17, 0);
+                    ProbeStrategy expected = modern ? ProbeStrategy.PING : ProbeStrategy.TRANSACTION;
+                    context.expect(mental.probeTransport() == expected,
+                            "probe transport " + mental.probeTransport() + " != expected " + expected
+                                    + " for " + mental.environment().describe());
+                    // The send path (and thus the transport's server wrapper) must classload and
+                    // run without throwing on THIS server. Clientless test players carry no PE
+                    // user, so no echo returns — the wire RTT round-trip is verified out of band
+                    // (Phase 2 gate note), but a pre-1.17 wrapper break would surface right here.
+                    context.syncRun(() -> context.expect(mental.probeSelfTest(),
+                            "probe send self-test threw on " + mental.environment().describe()));
                 }),
                 new TestCase("boot: dashboard GUI renders headless (Adventure + String sinks load)", context -> {
                     // Proves the TextPort/Adventure seam and the universal String-API sinks actually
