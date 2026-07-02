@@ -41,8 +41,10 @@ import me.vexmc.mental.v5.feature.damage.CritFallbackUnit;
 import me.vexmc.mental.v5.feature.damage.DamageOwnership;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.damage.PotionValuesUnit;
+import me.vexmc.mental.v5.feature.damage.SwordBlockingUnit;
 import me.vexmc.mental.v5.feature.damage.ToolDurabilityUnit;
 import me.vexmc.mental.v5.feature.damage.ToolWear;
+import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProbe;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
@@ -377,6 +379,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         DamageShaper damageShaper = new DamageShaper(damageOwnership);
         PlatformProbe platformProbe = PlatformProbe.probe(environment, message -> getLogger().warning(message));
         ToolWear toolWear = new ToolWear(platformProbe);
+        EphemeralDecoration swordBlockDecoration =
+                new EphemeralDecoration(this, scheduling, platformProbe.swordBlock());
 
         HitRegistrationUnit hitRegistration = new HitRegistrationUnit(
                 sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
@@ -409,6 +413,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
+        reconciler.register(new SwordBlockingUnit(domains, clock, swordBlockDecoration));
     }
 
     private Snapshot parseSnapshot() {
