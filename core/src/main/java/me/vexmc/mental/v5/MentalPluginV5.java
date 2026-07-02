@@ -52,6 +52,7 @@ import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
 import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
+import me.vexmc.mental.v5.feature.loadout.HitboxUnit;
 import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProbe;
@@ -443,8 +444,13 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The loadout family (4D). Crafting + off-hand are pure Bukkit-event rules:
         // crafting nulls a blocked crafting result (SHIELD by default); off-hand
         // blocks the 1.9 slot via the kernel OffhandPolicy (live snapshot reads).
+        // Hitbox tunes whichever era-reach lever the running server exposes — the
+        // ENTITY_INTERACTION_RANGE attribute (1.20.5+) and the ATTACK_RANGE weapon
+        // component (1.21.5+, boot-probed on the PlatformProbe) — a documented no-op
+        // where neither exists (the client picks the melee target).
         reconciler.register(new CraftingUnit(this::snapshot));
         reconciler.register(new OffhandUnit(this::snapshot, scheduling));
+        reconciler.register(new HitboxUnit(this, scheduling, platformProbe.attackRange()));
     }
 
     private Snapshot parseSnapshot() {

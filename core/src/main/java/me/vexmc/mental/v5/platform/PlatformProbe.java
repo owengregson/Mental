@@ -21,7 +21,9 @@ import org.jetbrains.annotations.Nullable;
  *
  * <p>4B capabilities: the {@code max_damage} item component (the custom
  * durability ceiling, Minecraft 1.20.5+) and — added by the sword-blocking
- * slice — the block-component adapter.</p>
+ * slice — the block-component adapter. 4C added the weapon-tooltip adapter; 4D
+ * added the {@code ATTACK_RANGE} item-component adapter (the loadout era-reach
+ * weapon lever, 1.21.5+).</p>
  */
 public final class PlatformProbe {
 
@@ -34,14 +36,17 @@ public final class PlatformProbe {
     private final @Nullable Method getMaxDamage;
     private final @NotNull SwordBlockAdapter swordBlock;
     private final @NotNull WeaponTooltipAdapter weaponTooltip;
+    private final @NotNull AttackRangeAdapter attackRange;
 
     private PlatformProbe(
             @Nullable Method hasMaxDamage, @Nullable Method getMaxDamage,
-            @NotNull SwordBlockAdapter swordBlock, @NotNull WeaponTooltipAdapter weaponTooltip) {
+            @NotNull SwordBlockAdapter swordBlock, @NotNull WeaponTooltipAdapter weaponTooltip,
+            @NotNull AttackRangeAdapter attackRange) {
         this.hasMaxDamage = hasMaxDamage;
         this.getMaxDamage = getMaxDamage;
         this.swordBlock = swordBlock;
         this.weaponTooltip = weaponTooltip;
+        this.attackRange = attackRange;
     }
 
     /**
@@ -61,7 +66,8 @@ public final class PlatformProbe {
         }
         return new PlatformProbe(has, get,
                 SwordBlockAdapter.probe(environment, log),
-                WeaponTooltipAdapter.probe(environment, log));
+                WeaponTooltipAdapter.probe(environment, log),
+                AttackRangeAdapter.probe(environment, log));
     }
 
     /** The block-component adapter (tier detection + apply/strip/block-state). */
@@ -72,6 +78,11 @@ public final class PlatformProbe {
     /** The weapon-tooltip adapter (attack-cooldown attack-speed line strip). */
     public @NotNull WeaponTooltipAdapter weaponTooltip() {
         return weaponTooltip;
+    }
+
+    /** The era {@code ATTACK_RANGE} item-component adapter (the loadout hitbox weapon lever, 1.21.5+). */
+    public @NotNull AttackRangeAdapter attackRange() {
+        return attackRange;
     }
 
     /**
