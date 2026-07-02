@@ -13,6 +13,33 @@ import org.jetbrains.annotations.NotNull;
  * needs to know which platform it is running on, and is region-correct by
  * construction: entity work follows the entity, location work runs on the
  * owning region, global work runs on the global tick.</p>
+ *
+ * <h2>The retired-callback contract</h2>
+ *
+ * <p>The entity-scoped methods ({@link #runOn}, {@link #repeatOn},
+ * {@link #runOnLater}) take a {@code retired} callback that fires when the target
+ * entity is gone before the work could run. The two backends historically
+ * diverged on when and where it fires: Bukkit re-checks validity on the main
+ * thread on the next tick and runs {@code retired} there; Folia's
+ * {@code EntityScheduler} fires its retired hook <em>inline on the calling
+ * thread</em> when the entity is already retired at submission time. To stay
+ * honest across both, the contract is the common denominator — and it is exactly
+ * what the Scheduling TCK asserts:</p>
+ *
+ * <ul>
+ *   <li><b>Either thread.</b> {@code retired} may run on the owning/main thread
+ *       <em>or</em> inline on the caller thread. Callers MUST NOT assume any
+ *       thread affinity for it (in particular, do not touch live-entity or
+ *       session state from {@code retired} without re-establishing the owning
+ *       thread).</li>
+ *   <li><b>Exactly once.</b> For a single submission, exactly one of
+ *       {@code task} / {@code retired} runs, and it runs exactly once. A
+ *       repeating task that retires cancels itself and fires {@code retired} a
+ *       single time; it never fires again on later ticks.</li>
+ *   <li><b>May be immediate.</b> {@code retired} may run before the submitting
+ *       call returns (Folia inline case) or on a later tick (Bukkit case) — both
+ *       satisfy the contract.</li>
+ * </ul>
  */
 public interface Scheduling {
 
@@ -22,7 +49,9 @@ public interface Scheduling {
 
     /**
      * Runs on the thread that owns {@code entity}. If the entity is removed
-     * before execution, {@code retired} runs instead (possibly immediately).
+     * before execution, {@code retired} runs instead (possibly immediately) —
+     * see the retired-callback contract on the type javadoc (either thread,
+     * exactly once, no affinity assumption).
      */
     void runOn(@NotNull Entity entity, @NotNull Runnable task, @NotNull Runnable retired);
 
