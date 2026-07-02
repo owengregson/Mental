@@ -36,7 +36,8 @@ jobs:
   # The PR integration sample — the entries flagged ci: "pr" in
   # support-matrix.json (floor, the Folia-era midpoint, a recent release, the
   # ceiling). The full matrix (every paper entry) runs before a release via
-  # the auto-release workflow.
+  # the auto-release workflow. The OCM coexistence gate is release-only (it
+  # boots two extra servers with a downloaded plugin) — too costly per PR.
   matrix:
     needs: build
     runs-on: ubuntu-latest

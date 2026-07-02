@@ -1,4 +1,8 @@
 import groovy.json.JsonSlurper
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.UUID
 import xyz.jpenilla.runpaper.task.RunServer
 
@@ -247,24 +251,66 @@ paperEntries.forEach { entry ->
 }
 
 /* ────────────────────────────────────────────────────────────────────────
- *  OCM coexistence runs. When run/ocm-jar/OldCombatMechanics.jar exists
- *  (build it in the BukkitOldCombatMechanics repo: ./gradlew shadowJar,
- *  then copy build/libs/OldCombatMechanics.jar there), the floor and
- *  ceiling paper entries also boot with OCM installed; the tester detects
- *  it and runs the coexistence suite instead of the era suites.
+ *  OCM coexistence runs (Task 5.4: reproducible CI staging).
+ *
+ *  The OCM artifact is PINNED in support-matrix.json (an "ocm" object:
+ *  version, url, sha256). stageOcmJar guarantees
+ *  run/ocm-jar/OldCombatMechanics.jar exists before either OCM server boots:
+ *    - a locally-present jar (a fork build: ./gradlew shadowJar in the
+ *      BukkitOldCombatMechanics repo, copied there) is used AS-IS — the
+ *      developer override, hash not enforced;
+ *    - otherwise the pinned kernitus release is downloaded and its sha256
+ *      verified, so CI is byte-reproducible.
+ *  The OCM tasks are always registered but wired ONLY into integrationTestOcm
+ *  (never into build / integrationTestMatrix), so the pinned download happens
+ *  only when the coexistence gate is explicitly requested.
  * ──────────────────────────────────────────────────────────────────────── */
 val ocmJarFile = rootProject.layout.projectDirectory.file("run/ocm-jar/OldCombatMechanics.jar").asFile
-val ocmCheckTasks = mutableListOf<TaskProvider<Task>>()
 
-if (ocmJarFile.isFile) {
-    listOf(paperEntries.first(), paperEntries.last()).distinctBy { it.version }.forEach { entry ->
-        val suffix = "Ocm_" + entry.version.replace(".", "_")
-        val (runTask, checkTask) = registerIntegrationServer(
-            suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk)
-        previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
-        previousCheck = checkTask
-        ocmCheckTasks.add(checkTask)
+@Suppress("UNCHECKED_CAST")
+val ocmPin: Map<String, Any> = supportMatrix["ocm"] as Map<String, Any>
+val ocmVersion = ocmPin["version"] as String
+val ocmUrl = ocmPin["url"] as String
+val ocmSha256 = ocmPin["sha256"] as String
+
+val stageOcmJar = tasks.register("stageOcmJar") {
+    group = "mental integration"
+    description = "Ensures run/ocm-jar/OldCombatMechanics.jar exists: a local build wins " +
+            "(fork override); else downloads the pinned kernitus $ocmVersion release and " +
+            "verifies its sha256."
+    outputs.file(ocmJarFile)
+    doLast {
+        if (ocmJarFile.isFile) {
+            logger.lifecycle(
+                "[ocm] using existing ${ocmJarFile.absolutePath} — local override, hash not enforced.")
+            return@doLast
+        }
+        ocmJarFile.parentFile.mkdirs()
+        logger.lifecycle("[ocm] downloading pinned OldCombatMechanics $ocmVersion from $ocmUrl")
+        URI(ocmUrl).toURL().openStream().use { input ->
+            Files.copy(input, ocmJarFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+        val actual = MessageDigest.getInstance("SHA-256")
+            .digest(ocmJarFile.readBytes())
+            .joinToString("") { byte -> "%02x".format(byte) }
+        if (!actual.equals(ocmSha256, ignoreCase = true)) {
+            ocmJarFile.delete()
+            throw GradleException(
+                "[ocm] sha256 mismatch for $ocmUrl — expected $ocmSha256, got $actual. Refusing to stage.")
+        }
+        logger.lifecycle("[ocm] verified sha256=$actual — staged to ${ocmJarFile.absolutePath}")
     }
+}
+
+val ocmCheckTasks = mutableListOf<TaskProvider<Task>>()
+listOf(paperEntries.first(), paperEntries.last()).distinctBy { it.version }.forEach { entry ->
+    val suffix = "Ocm_" + entry.version.replace(".", "_")
+    val (runTask, checkTask) = registerIntegrationServer(
+        suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk)
+    runTask.configure { dependsOn(stageOcmJar) }
+    previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
+    previousCheck = checkTask
+    ocmCheckTasks.add(checkTask)
 }
 
 tasks.register("integrationTest") {
@@ -284,16 +330,7 @@ tasks.register("integrationTestMatrix") {
 
 tasks.register("integrationTestOcm") {
     group = "mental integration"
-    description = "Runs the OldCombatMechanics coexistence suite on floor and ceiling " +
-            "(requires run/ocm-jar/OldCombatMechanics.jar)."
-    if (ocmJarFile.isFile) {
-        dependsOn(ocmCheckTasks)
-    } else {
-        doFirst {
-            throw GradleException(
-                "run/ocm-jar/OldCombatMechanics.jar is missing. Build it in the " +
-                        "BukkitOldCombatMechanics repo (./gradlew shadowJar) and copy " +
-                        "build/libs/OldCombatMechanics.jar there.")
-        }
-    }
+    description = "Runs the OldCombatMechanics coexistence suite on floor and ceiling. " +
+            "Stages the pinned OCM release (a local run/ocm-jar override wins) then boots both."
+    dependsOn(ocmCheckTasks)
 }

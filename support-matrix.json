@@ -9,5 +9,11 @@
     { "version": "1.21.4",  "jdk": 25, "platform": "paper", "suites": "full", "ci": "release" },
     { "version": "1.21.11", "jdk": 25, "platform": "paper", "suites": "full", "ci": "pr" },
     { "version": "26.1.2",  "jdk": 25, "platform": "paper", "suites": "full", "ci": "pr" }
-  ]
+  ],
+  "ocm": {
+    "_comment": "The pinned kernitus OldCombatMechanics release the coexistence gate stages. CI (stageOcmJar) downloads url, verifies sha256, and stages to run/ocm-jar/OldCombatMechanics.jar. A locally-present jar there (e.g. a fork build) overrides the download.",
+    "version": "2.5.0",
+    "url": "https://github.com/kernitus/BukkitOldCombatMechanics/releases/download/v2.5.0/OldCombatMechanics.jar",
+    "sha256": "bdca6747db811b6d1115b3526364c7efb21b49838c42cf040fd5e288c169b89e"
+  }
 }
