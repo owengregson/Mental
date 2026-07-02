@@ -64,6 +64,7 @@ import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProbe;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
+import me.vexmc.mental.v5.feature.delivery.OcmCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
 import me.vexmc.mental.v5.feature.knockback.FishingKnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.KnockbackUnit;
@@ -437,6 +438,11 @@ public final class MentalPluginV5 extends JavaPlugin {
 
         reconciler.register(new AnticheatCompatUnit(
                 anticheatPolicy, this::snapshot, message -> getLogger().info(message)));
+        // Live OCM arbiter binding — keeps the OcmBinding current (service API
+        // per-player, else config-conservative), the driver the routers' frozen
+        // ownership reads and the coexistence warnings depend on.
+        reconciler.register(new OcmCompatUnit(
+                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message)));
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
         reconciler.register(new KnockbackUnit(
