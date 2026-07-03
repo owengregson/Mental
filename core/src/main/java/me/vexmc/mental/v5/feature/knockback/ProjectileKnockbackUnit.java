@@ -14,6 +14,7 @@ import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.model.SprintVerdict;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
@@ -445,6 +446,19 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
             if (!victim.getWorld().getPVP()) {
                 return false;
             }
+        }
+        // Gate on the frozen pre-hit view, not the live noDamageTicks. A thrown
+        // projectile's own hit sets noDamageTicks, and the ProjectileHitEvent
+        // fires AFTER that damage on some servers (measured on 1.15.2 — the
+        // opposite of 1.16.5's hit-then-damage order), so a live read would see
+        // THIS hit's just-applied invuln and wrongly skip the knock (leaving the
+        // vanilla/substitution knock to ship). The published view is the
+        // end-of-previous-tick state — pre-hit on every version — so the same
+        // era vector ships consistently regardless of the server's event order.
+        // Falls back to the live read only before any view has been published.
+        PlayerView view = sessions.viewOf(victim.getUniqueId());
+        if (view != null) {
+            return !view.damageImmune();
         }
         return victim.getNoDamageTicks() <= victim.getMaximumNoDamageTicks() / 2.0;
     }
