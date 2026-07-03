@@ -17,20 +17,23 @@ auto-releaser take the "Latest" marker).
 classfiles, which forces legacy servers onto a Java-17 JVM — a JVM that
 1.13–1.16.5 tolerate only behind `IgnoreJavaVersion` and that 1.14.4's terminal
 Paper build refuses outright (hard Java-13 cap, no bypass — proven in
-`docs/superpowers/research/2026-07-02-legacy-boot-viability.md`). Run the
-legacy servers on their **native Java 8** instead and both problems dissolve —
-provided the plugin jar can classload there. JVMDowngrader (JDG) makes it
-load there: the shipped jar becomes a **Multi-Release mega-jar** whose base
-tree is the same compilation downgraded to class v52 (Java 8) and whose
-`META-INF/versions/17` tree is the original v61 classes, so:
+`docs/superpowers/research/2026-07-02-legacy-boot-viability.md`). Run each
+legacy server on its **native-era Java — the newest its build boots flagless**
+(owner-directed: no outdated-Java advisories, maximal JVM performance) and
+both problems dissolve — provided the plugin jar can classload from Java 8
+up. JVMDowngrader (JDG) makes it load there: the shipped jar becomes a
+**Multi-Release mega-jar** whose base tree is the same compilation downgraded
+to class v52 (Java 8), with intermediate tiers where a loader would read them
+(D-7), and whose `META-INF/versions/17` tree is the original v61 classes, so:
 
-- a 1.9.4–1.16.5 server on Java 8 reads the base v52 tree (Java 8 ignores
-  `META-INF/versions/`),
+- a legacy server on its native-era JVM reads the richest tree its plugin
+  loader supports (base v52 below the MR-aware line; see D-7),
 - a 1.17.1+ server (Java 16+ mandatory) reads the original v61 tree via the
   runtime-versioned `JarFile` — **byte-identical modern behavior** to what has
   shipped and been matrix-verified since 2.3.0-beta,
-- a legacy server still run on Java 17 (the 2.3.1-beta install style) keeps
-  working either way — whichever tree its loader picks is the same code.
+- a legacy server run on ANY Java from 8 up (including the 2.3.1-beta
+  Java-17 install style) keeps working — whichever tree its loader picks is
+  the same code.
 
 The kernel, the platform seam, and every product source file are untouched:
 the fork happens at the **artifact** level. All the boot-time probing built in
@@ -120,19 +123,75 @@ need a sentinel self-check and a live tier assertion.
 
 - **D-1 MRJAR over flat downgrade** — keeps the modern path byte-identical to
   the 2.3.0/2.3.1 line the matrix has been proving for months; StarEnchants
-  proves modern Paper honors it. Fallback to flat (base-only) ONLY if Q1
+  proves modern Paper honors it, and the scout's javap sweep confirms every
+  modern loader in our matrix (1.16.5 reflective, 1.17.1 direct, 26.1.2 both
+  pipelines) opens the plugin JarFile runtime-versioned. Produced via jvmdg's
+  built-in `multiReleaseOriginal` (per-class: third-party v52 classes get no
+  duplicate), NOT a manual merge. Fallback to flat (base-only) ONLY if Q1
   evidence shows modern loaders serving base — decided then, with the tier
   facts on the table.
-- **D-2 JDG wiring: pinned CLI driven by Gradle `JavaExec`**, following the
-  proven StarEnchants recipe (including the util-shading fix), with the CLI
-  jar download sha256-pinned `stageOcmJar`-style. The official jvmdg Gradle
-  plugin is the alternative if scout evidence shows it handles the util
-  runtime correctly — executor may switch WITH proof, but the recipe below is
-  the default. Version pinned: 1.3.6.
-- **D-3 all seven-plus-one legacy entries run on `jdk: 8`** (not just the
-  three that needed the flag): the matrix must prove the configuration admins
-  actually run, and "legacy = Java 8+" is the new support claim. 1.9.4–1.12.2
-  flip too.
+- **D-2 JDG wiring: the official Gradle plugin `xyz.wagyourtail.jvmdowngrader`
+  1.3.6** (Plugin Portal; `DowngradeJar` + `ShadeJar` tasks against the
+  shadowJar output, `shadePath` = `me/vexmc/mental/lib/jvmdg/`,
+  `multiReleaseOriginal` on). Version pinned in the version catalog. The
+  StarEnchants CLI recipe (including the self-contained-api util fix) is the
+  proven fallback if the plugin path shows the util-runtime gap (H2) — switch
+  only with gate evidence.
+- **D-3 (REVISED per owner, 2026-07-03): each legacy entry runs on the NEWEST
+  Java its server boots flagless** — no outdated-Java advisories, maximal JVM
+  performance (GC/JIT improvements dominate; this is a per-version empirical
+  fact from the round-2 ladder probe, not an assumption). The jar still LOADS
+  from Java 8 up (base tree v52), so a minimum-Java admin install remains
+  supported — the matrix simply tests the recommended maximal-Java
+  configuration. Expected shape (evidence pending): 1.9.4–1.12.2 on the
+  newest of {25,21,17} that boots (no version guard exists there),
+  1.13.2 ≈ 11–16, 1.14.4 = 13 (its guard's hard cap), 1.15.2 ≈ 13–16,
+  1.16.5 = 16 (its own JvmChecker asks for 16).
+- **D-7 (owner-directed, evidence-final) tiered mega-jar bytecode**, produced
+  by jvmdg from the ONE compilation. The round-2 javap map settles the tier
+  set:
+  - **base v52** — read by 1.12.2–1.15.2 on ANY JVM (their PluginClassLoader
+    opens a plain `new JarFile(File)`, provably never runtime-versioned:
+    ctor `invokespecial JarFile.<init>(File)` at offsets 66/80, `getJarEntry`
+    reads), and by anything run on a Java 8 JVM (the JVM ignores
+    `META-INF/versions/`). A **versions/13 tier is dead weight — killed**:
+    1.14.4/1.15.2 would never read it.
+  - **versions/16 (major 60, jvmdg `multiReleaseVersions += VERSION_16`)** —
+    read by exactly 1.16.5-on-Java-16 (its loader opens reflectively
+    runtime-versioned; Java 16 caps class majors at 60 so it cannot take the
+    v61 tier).
+  - **versions/17 (major 61, the ORIGINAL bytecode, jvmdg
+    `multiReleaseOriginal`)** — read by 1.17+ (direct/pipeline MR), AND — the
+    round-2 surprise — by **1.9.4/1.10.2/1.11.2 on Java 9+**: those loaders
+    have no JarFile of their own and delegate to `URLClassLoader.findClass`,
+    whose `URLClassPath$JarLoader` opens runtime-versioned. On their maximal
+    JVMs the three oldest versions run ORIGINAL modern bytecode.
+  - **No tier above 61 exists or is needed**: the compilation targets
+    Java 17; v61 loads and JITs natively on Java 21/25 (bytecode version does
+    not throttle the JIT), so a "Java 25 tier" would require a different
+    compilation and buy nothing.
+  Each support-matrix entry declares its expected tier (`bytecodeTier`), and
+  the tester asserts the ACTUAL loaded major against it (Q1) — which tree
+  loaded is always a live fact. jvmdg retains MR copies per-class only where
+  the original major exceeded the tier target, so the already-v52 shaded
+  third-party classes (packetevents/bstats) never duplicate (H7 by
+  construction).
+- **D-8 (spike-driven) cross-plugin stub isolation.** jvmdg prunes its shaded
+  runtime to each jar's referenced arities AND rewrites Java-9+ types inside
+  method descriptors — so two downgraded plugins must never share stub-typed
+  API descriptors or a same-FQN pruned runtime (both failure modes were
+  reproduced live: `NoSuchMethodError: …J_U_List.of(7-arg)` via Bukkit's
+  shared class cache, and `NoClassDefFoundError:
+  xyz/wagyourtail/jvmdg/j17/stub/…J_U_R_RandomGenerator` baked into the
+  kernel's `KnockbackEngine.computeBase(RandomGenerator…)` descriptor as
+  called by the tester). Resolution: **distinct shade prefixes**
+  (`me/vexmc/mental/lib/jvmdg` vs `me/vexmc/mental/tester/lib/jvmdg`) plus a
+  **Java-8-native additive overload** `computeBase(…, java.util.Random)` in
+  the kernel (additive-only invariant preserved; `java.util.Random`
+  implements `RandomGenerator` on 17+ so it delegates trivially) with the
+  tester switched to it — no stub type then crosses any plugin boundary,
+  enforced by a build gate: the tester jar's constant pool must contain ZERO
+  references to Mental's `me/vexmc/mental/lib/jvmdg` prefix.
 - **D-4 the tester ships the same mega-jar pipeline** — it must load on the
   Java-8 servers, and its modern suites keep running original bytecode.
 - **D-5 version 2.3.2, hyphenless** — the releaser publishes it as a full
@@ -148,41 +207,95 @@ outcome log.
 
 ### Phase 1 — the mega-jar build pipeline (Opus)
 
-Core + tester `build.gradle.kts`: stage the pinned JDG CLI (sha256-verified
-download, cached); assemble the self-contained api jar (downgradeApi + downgraded
-`util/*`); `downgrade` + `shade` the shadow jar (prefix
-`me/vexmc/mental/lib/jvmdg`; tester: `me/vexmc/mental/tester/lib/jvmdg`);
-assemble the MRJAR (base = downgraded jar in full; overlay = first-party
-`.class` only; `Multi-Release: true`; deterministic zip); the mega jar is the
-canonical artifact (H3) consumed by `build`, the run tasks, and the matrix
-script. Boot-report tier line (H5/Q1) + tester-side tier assertion. Verify
-tasks: `verifyDowngrade` (Q2), `verifyJdk8Api` (H1, tool ported from
-StarEnchants' `Jdk8ApiGate.java`), `verifyRelocation` extended (H2, both
-trees, `net/kyori` AND `xyz/wagyourtail`). **Gate:** `./gradlew build` green
-with all verify tasks; ad-hoc boots with fresh nonces — 1.13.2 on Java 8
-flagless FULL-suite PASS (base tree), 1.17.1 + 26.1.2 FULL-suite PASS with the
-tier line captured (expected `modern`).
+1. **Kernel (D-8, additive):** `KnockbackEngine.computeBase(…,
+   java.util.Random)` overload delegating to the `RandomGenerator` variant;
+   unit pin proving identical outputs; tester call sites
+   (`ProjectileSuite`, `FishingSuite`, any other `RandomGenerator` use —
+   grep) switch to it. Audit kernel/api/platform public descriptors for any
+   OTHER Java-9+ JDK type crossing the tester boundary; fix additively if
+   found.
+2. **Core build:** jvmdg plugin 1.3.6 (version catalog); `DowngradeJar` on
+   the shadowJar output — target Java 8, `multiReleaseOriginal` on,
+   `multiReleaseVersions += VERSION_16` (D-7), downgrade classpath =
+   `compileClasspath` PLUS what the shadowJar folds in beyond it (the
+   compat-folia classes need the Folia-scheduler API supertypes — the spike
+   needed paper-api 1.20.6 for zero-warning resolution; treat downgrade-time
+   jvmdg warnings as failures); `ShadeJar` prefix
+   `me/vexmc/mental/lib/jvmdg/`, output = the canonical
+   `Mental-<version>.jar` as the ONLY `Mental-*.jar` in `core/build/libs/`
+   (H3 — shadowJar + intermediates move to a directory the globs cannot see,
+   e.g. `build/jvmdg-stage/`); `build`, the run tasks' `pluginJars`, and
+   japicmp stay coherent.
+3. **Tester build:** same pipeline, prefix `me/vexmc/mental/tester/lib/jvmdg/`
+   (D-8 distinct-prefix rule), downgrade classpath includes Mental's
+   shadowJar (kernel/api supertypes) + paper-api + netty; final
+   `MentalTester-<version>.jar` the only tester jar in `tester/build/libs/`.
+4. **Boot-report tier line (H5/Q1):** self-inspect the plugin's own class
+   bytes (`getResourceAsStream` on `MentalPluginV5.class`, bytes 6–7) —
+   prints `bytecode tier: modern (v61)` / `intermediate (v60)` /
+   `downgraded (v52)`; identical source works in every tree by construction.
+   Tester BootSuite asserts the tier: `-Dmental.tester.tier` when set
+   (Phase 2 wires it per-entry), else JVM-derived default (8 ⇒ 52, 16 ⇒ 60,
+   17+ ⇒ 61).
+5. **Verify tasks, all in `check`:**
+   - `verifyDowngrade` (Q2): `Multi-Release: true`; base tree ZERO entries
+     >52; `versions/16` ZERO >60; `versions/17` first-party classes exactly
+     61 and its class-name set equals the base first-party set (no drops);
+     sentinel `me/vexmc/mental/v5/MentalPluginV5.class` forked across
+     trees; H4 grep (`isRecord`/`RecordComponent`) scoped outside the jvmdg
+     runtime.
+   - `verifyJdk8Api` (H1): member-level closed-world scan of the mega-jar
+     BASE tree — `java.*/javax.*` refs validated against the
+     toolchain-provisioned JDK-8 `rt.jar` (+ `jre/lib` siblings), and every
+     non-JDK ref must resolve in-jar or in the documented server-provided
+     ignore set (subsumes the H2 util trap and stub-pruning gaps); ASM via a
+     detached configuration + JavaExec tool (ported from StarEnchants'
+     `scripts/tools/Jdk8ApiGate.java`); anchored-prefix allowlist file
+     starts EMPTY. Same scan for the tester jar (its ignore set also spans
+     `me/vexmc/mental/` — Mental provides those at runtime).
+   - `verifyTesterIsolation` (D-8): tester jar constant pool contains ZERO
+     `me/vexmc/mental/lib/jvmdg` references.
+   - `verifyRelocation` extended: runs on the MEGA jar (all trees),
+     `net/kyori` AND `xyz/wagyourtail` outside the relocated prefixes.
+6. **Gate:** `./gradlew build` green (unit + japicmp + kernel-Bukkit-free +
+   all verify tasks); fresh-nonce boots — 1.17.1 + 26.1.2 FULL suite via the
+   normal Gradle tasks (tier line captured, expected `modern (v61)`); ad-hoc
+   1.13.2 AND 1.14.4 on foojay Java 8, flagless, jars copied into `plugins/`
+   (no `-add-plugin` on those builds), bare `nogui`, FULL suite PASS (tier
+   `downgraded (v52)`). Quote every nonce line verbatim.
 
 ### Phase 2 — the native-JDK matrix flip (Opus)
 
-`support-matrix.json`: every 1.9.4–1.16.5 entry → `"jdk": 8`, `serverFlags`
-removed; `_comment` rewritten (the flag story is dead; the 1.14.4 hole note
-survives until Phase 3). `scripts/integration-matrix.sh`: `java_for` handles
-8 (foojay-provisioned path discovery or a helpful error naming the Gradle
-provisioning route). **Gate:** full 15-entry `integrationTestMatrix` +
-`integrationTestOcm`, fresh nonces, zero `IgnoreJavaVersion` anywhere in the
-repo outside historical docs.
+`support-matrix.json`: every 1.9.4–1.16.5 entry → the round-2 ladder's
+newest-flagless-Java `jdk` value (D-3), `serverFlags` removed, and every
+paper entry gains its declared `bytecodeTier` (D-7); `_comment` rewritten
+(the flag story is dead; the 1.14.4 hole note survives until Phase 3).
+`scripts/integration-matrix.sh`: `java_for` handles the new JDK set (the
+foojay-provisioned paths under `~/.gradle/jdks/` or a helpful error naming
+the Gradle provisioning route), and the scout-found `--nogui` trap is fixed —
+legacy joptsimple rejects the double-dash form (help-dump + exit); the bare
+`nogui` token works range-wide. Tester tier assertion switches from
+JVM-derived expectation to the entry-declared `bytecodeTier` (plumbed via a
+`-Dmental.tester.tier` system property the run tasks pass). **Gate:** full
+15-entry `integrationTestMatrix` + `integrationTestOcm`, fresh nonces, zero
+`IgnoreJavaVersion` anywhere in the repo outside historical docs, zero
+Java-advisory lines in the legacy boot logs.
 
 ### Phase 3 — 1.14.4 at full tier (Opus)
 
 `support-matrix.json` gains `{ "version": "1.14.4", "jdk": 8, "platform":
-"paper", "suites": "full", "ci": "release" }` (D-6) and loses the hole note;
-tester `FakePlayer` + friends gain the v1_14_R1 rows (scout shapes doc:
-`docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md`); any live probe
-gaps fixed at the platform seam per house rules (boot-time probing, never
-version conditionals). **Gate:** 1.14.4 full-suite PASS twice consecutively
-(fresh nonce each), 1.13.2 + 1.15.2 re-PASS, then the full 16-entry matrix +
-OCM.
+"paper", "suites": "full", "ci": "release" }` (D-6) and loses the hole note.
+Scout verdict: the FakePlayer needs ZERO code changes (every reflective scan
+resolves on v1_14_R1; the sync-join probe routes it correctly) — the code
+work is the shapes research doc
+(`docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md`), the stale
+"1.14+ async" comment fix, the tester BootSuite manifest-expectations row for
+1.14.4 (PDC present, AbstractArrow present, keyed-recipe/absorption/
+attack-cooldown/isInWater floors per the 2026-07-02 doc), and whatever the
+live gate surfaces; any probe gap is fixed at the platform seam per house
+rules (boot-time probing, never version conditionals). **Gate:** 1.14.4
+full-suite PASS twice consecutively (fresh nonce each), 1.13.2 + 1.15.2
+re-PASS, then the full 16-entry matrix + OCM.
 
 ### Phase 4 — reconciliation and release prep (Opus)
 
@@ -212,10 +325,100 @@ conventional commits with prose bodies.
 
 ## Scout evidence (2026-07-03)
 
-_To be filled from the `scout-full-range` workflow before Phase 1 dispatches:
-JDK-8 provisioning verdict, flagless native-Java boot table, JDG research
-cross-check, v1_14_R1 shapes, plugin-loader MR-awareness per version, and the
-end-to-end downgrade spike (1.13.2@Java8 full suite; first 1.14.4 contact)._
+From the `scout-full-range` workflow (three parallel recon agents + spike; all
+Opus, javap/live-verified).
+
+**JDK-8 provisioning (H8 resolved):** foojay auto-provisions headlessly on
+this arm64 Mac — it serves **Temurin 8u492 x86_64** (no arm64 Temurin 8
+exists) which runs under Rosetta 2; `launcherFor(8)` resolves with zero
+interaction to
+`~/.gradle/jdks/temurin-8-x86_64-os_x.2/jdk8u492-b09/Contents/Home`. CI
+(linux x64) gets native Temurin 8.
+
+**Flagless native-Java boots — ALL SIX legacy versions boot vanilla on Java 8
+with NO IgnoreJavaVersion flag:** 1.9.4 (Done 2.5s), 1.12.2 (2.2s), 1.13.2
+(1.5s), **1.14.4 (6.9s — the "impossible" version boots cleanly on Java 8;
+the Java-13 cap only ever excluded Java-17 classfiles)**, 1.15.2 (4.6s),
+1.16.5 (4.7s, plus a non-fatal "outdated Java" advisory — cosmetic). Trap
+found: legacy joptsimple REJECTS `--nogui` (help-dump + exit); the bare
+`nogui` token works across the whole range → `scripts/integration-matrix.sh`
+must switch (Phase 2). The Gradle run-paper path is unaffected (the canonical
+gates always passed).
+
+**JDG research (D-1/D-2 updated):** Gradle plugin `xyz.wagyourtail.jvmdowngrader`
+**1.3.6** on the Plugin Portal; `DowngradeJar` (classpath defaults to
+`compileClasspath`) + `ShadeJar` (`shadePath` closure → our
+`me/vexmc/mental/lib/jvmdg/` prefix); CLI `-all` jar on Maven Central
+(`…/jvmdowngrader/1.3.6/jvmdowngrader-1.3.6-all.jar`, ~1.5MB, self-contained,
+bundled api stubs, `allowMaven=false`). **MRJAR support is BUILT IN** —
+`multiReleaseOriginal` keeps the original bytecode under
+`META-INF/versions/<origVersion>` with the downgrade as base, per-class (a
+class already ≤ target, e.g. shaded packetevents/bstats at v52, gets no MR
+copy — H7 handled by construction). StarEnchants' manual MRJAR merge is
+therefore superseded by the flag; their util-shading recipe remains the
+fallback if the spike shows the shade missing runtime helpers. Limitations
+sweep: records/sealed/pattern-switches/string-concat-indy/nestmates all
+handled; classes at/below target pass through untouched; risks confirmed as
+(1) un-stubbed modern `java.*` APIs pass through silently → the H1
+closed-world gate stands, and (2) reflective record introspection by
+un-downgraded code → H4 grep stands. License: LGPL-2.1 (dual-licensed);
+shading the api is a "Combined Work" — fine for this public-source repo, and
+Phase 4 adds the LGPL notice for the shaded `lib/jvmdg` classes.
+
+**v1_14_R1 shapes (Phase 3 shrinks to near-zero code):** the tester FakePlayer
+is 100% reflective-scan-driven — **zero code changes needed for v1_14_R1**;
+every branch resolves (javap-verified per claim). 1.14.4 straddles the eras:
+modern NMS shapes (Vec3D `mot`/`setMot`, `PlayerInteractManager(WorldServer)`,
+PDC + AbstractArrow present, `EnumGamemode` top-level) with the **1.13-era
+synchronous join** (`PlayerList.a` inline; the async/`postChunkLoadJoin` split
+is 1.15+, NOT 1.14+ — the `legacyAsyncJoin()` probe routes it correctly; one
+stale comment to fix). `CraftMagicNumbers.SUPPORTED_API = ["1.13","1.14"]` —
+api-version `1.13` accepted. Full rows land in
+`docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md` (Phase 3).
+
+**Plugin-loader MR-awareness (D-1 confirmed):** 1.12.2 NO (plain JarFile),
+1.13.2 NO, 1.16.5 YES (reflective, Java 9+), 1.17.1 YES (direct), 26.1.2 YES
+for BOTH plugin pipelines (Paper's `FileProviderSource` opens the classloading
+JarFile with `JarFile.runtimeVersion()` for paper AND legacy plugin.yml
+plugins). Every configuration is safe: modern servers read `versions/17`
+originals; legacy-on-Java-8 reads base (the JVM ignores `versions/`); a
+legacy server still run on Java 17 reads whichever tree its loader supports —
+same code either way. Tester tier expectation derives from the running JVM:
+Java 8 ⇒ major 52 (downgraded), Java 16+ ⇒ major 61 (modern).
+
+**Spike (downgrade e2e) — the whole design proven before Phase 1:** both
+2.3.1-beta jars downgraded to clean class-v52 (zero entries >52; zero
+downgrade warnings once the classpath carried paper-api 1.17.1 + paper-api
+1.20.6-for-Folia-schedulers + guava + adventure 4.17 + netty; Mental
++2.3% size, tester +8.5%). **Paper 1.13.2 build 657 on native Temurin 8,
+flagless: FULL suite 55 RUN / 55 PASS, 0 FAIL** (`PASS
+nonce=64857764-8D56-4753-956C-1A0B99FA3700`, nonce-matched). **Paper 1.14.4
+on native Java 8, flagless: FULL suite 55 RUN / 55 PASS, 0 FAIL** (`PASS
+nonce=23A6F18E-F644-4195-8B67-F64028F273EF`) — stronger than predicted: the
+reflective FakePlayer bootstrapped v1_14_R1 clientless players unmodified,
+and the boot report shows era-correct resolver selections (PDC present so no
+B10 warning, absorption via the 1.14+ Bukkit API where 1.13.2 correctly used
+NMS, `crit-posture[climbing=FEET_BLOCK in-water=FEET_BLOCK
+attack-charge=NMS_STRENGTH]`, probe transport TRANSACTION, `currentTick=true`).
+Zero LinkageError/NoClassDefFoundError/NoSuchMethodError/VerifyError in both
+final runs. The two intermediate failures that produced D-8 are documented
+there. Also: `-add-plugin=` does NOT exist on these old Paper builds
+(joptsimple help-dump + exit) — plugin injection on legacy = copy into
+`plugins/` (Phase 2 fixes `scripts/integration-matrix.sh`, whose
+"proven from the floor up" comment is wrong; the Gradle run-paper path
+handles this itself and stays the canonical gate). Downgraded artifacts:
+`<scratchpad>/spike/Mental-java8.jar`, `MentalTester-java8.jar`; jvmdg CLI
+sha256 `dee569b7e231a47ade2281eb967b21c809d2f415820a1161acad2d1ca2237fb5`.
+
+**Loader MR map (round 2, completes D-7):** 1.9.4/1.10.2/1.11.2 HONOR MR
+tiers via URLClassLoader delegation (no own JarFile — verified zero
+`java/util/jar/JarFile` constants in the class); 1.12.2→1.15.2 provably do
+NOT (plain `new JarFile(File)`); 1.16.5+ honor (reflective/direct/pipeline).
+The non-honoring window is exactly the manual-plain-JarFile era.
+
+**Max-Java ladder:** round-2 ladder agent failed to emit its report — re-run
+dispatched alongside Phase 1; its verdicts land here and gate only Phase 2's
+`jdk`/`bytecodeTier` values.
 
 ## Outcome log
 
