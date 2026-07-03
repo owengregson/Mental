@@ -3,7 +3,7 @@
   "floorApi": "1.13",
   "entries": [
     { "version": "1.9.4",   "jdk": 17, "platform": "paper", "suites": "boot",          "ci": "release", "serverFlags": [] },
-    { "version": "1.10.2",  "jdk": 17, "platform": "paper", "suites": "boot",          "ci": "release", "serverFlags": [] },
+    { "version": "1.10.2",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "release", "serverFlags": [] },
     { "version": "1.11.2",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "release", "serverFlags": [] },
     { "version": "1.12.2",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "release", "serverFlags": [] },
     { "version": "1.13.2",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "release", "serverFlags": ["-DPaper.IgnoreJavaVersion=true"] },
