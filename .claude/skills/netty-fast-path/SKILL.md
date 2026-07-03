@@ -200,6 +200,28 @@ event fires on the victim's owning region thread.
   inside PE — wrap sends whose target may be reconfiguring in catch-all and
   drop (a missed probe/feedback beats a pipeline exception).
 
+## The legacy transport (pre-1.17 — the 2026-07-02 backport)
+
+Below Paper 1.17 the play PING/PONG channel does not exist on the wire, so the
+latency probe rides **window-confirmation TRANSACTIONs** instead — a windowId-0
+transaction the vanilla client echoes (the anticheat-ecosystem standard). One
+probe rim is registered at boot by `ServerEnvironment`: `ProbeRim` (PING) at/above
+1.17, `TransactionProbeRim` below. The receive side matches a strict triple —
+windowId 0, an action inside our disjoint `ProbeTransactions` namespace (negative
+shorts descending from −24575, kept clear of vanilla's own container ids), and the
+id actually outstanding in the player's `LatencyModel.Record` — and cancels ONLY
+on a full match, so third-party container transactions flow through untouched. The
+kernel `LatencyModel` is transport-agnostic (opaque long ids, `onProbeSent` /
+`onResponse` unchanged); `ProbeStrategy.resolveEffective` is the one seam that maps
+config→wire (PING below 1.17 resolves to TRANSACTION via a loud info line; KEEPALIVE
+stays retired). The rest of the fast path is version-graceful and needs no legacy
+variant: the `PacketTap` (parse rim), the `BurstSender`, and the duplicate-
+`ENTITY_VELOCITY` `ValveListener` all exist and run pre-1.17 — only the pre-send
+FEEDBACK degrades by version (bare back-to-back below 1.19.4, no bundle delimiter;
+entity-status 2 instead of `HURT_ANIMATION` below 1.19.4). Fake players never echo
+the transaction (no PE user), so the legacy RTT round-trip is verified out-of-band,
+not in the matrix (see `live-server-testing`).
+
 ## The vanilla-attack obligations the cancelled packet leaves behind
 
 Cancelling ATTACK means `Player.attack` never runs — anything era-relevant

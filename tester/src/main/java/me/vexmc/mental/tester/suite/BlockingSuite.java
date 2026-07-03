@@ -3,6 +3,7 @@ package me.vexmc.mental.tester.suite;
 import java.util.List;
 import me.vexmc.mental.kernel.math.SwordBlockReduction;
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.HandStates;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -196,7 +197,7 @@ public final class BlockingSuite {
             // state (no client confirms the use over the wire), so note-SKIP
             // rather than fail when it is not observable.
             boolean blocking = context.sync(() ->
-                    blocker.player().isBlocking() || blocker.player().isHandRaised());
+                    blocker.player().isBlocking() || HandStates.isHandRaised(blocker.player()));
             if (!blocking) {
                 context.note("clientless fake never reported isBlocking()/isHandRaised() — the in-place "
                         + "block pose needs a client to confirm the use; reduction is unit-pinned");
@@ -312,7 +313,7 @@ public final class BlockingSuite {
             context.awaitTicks(2);
 
             boolean blocking = context.sync(() ->
-                    blocker.player().isBlocking() || blocker.player().isHandRaised());
+                    blocker.player().isBlocking() || HandStates.isHandRaised(blocker.player()));
             if (!blocking) {
                 context.note("clientless fake never entered the blocking state on this tier — the "
                         + "(dmg-1)*0.5 reduction is unit-pinned in SwordBlockReductionTest");

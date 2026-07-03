@@ -4,8 +4,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 import me.vexmc.mental.platform.MenuMaterials;
+import me.vexmc.mental.v5.text.TextPort;
 import net.kyori.adventure.text.Component;
-import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -53,7 +53,9 @@ public abstract class Menu implements InventoryHolder {
 
     public final void open(@NotNull Player viewer) {
         ctx.scheduling().runOn(viewer, () -> {
-            inventory = Bukkit.createInventory(this, rows() * 9, title());
+            // String-title path (TextPort): createInventory(holder,int,Component)
+            // is Paper 1.16.5+; the (holder,int,String) overload exists since 1.9.
+            inventory = TextPort.createInventory(this, rows() * 9, title());
             redraw(viewer);
             viewer.openInventory(inventory);
         }, () -> {});
@@ -144,6 +146,18 @@ public abstract class Menu implements InventoryHolder {
         // for an inventory that exists); fall back to an empty stub for the
         // pathological pre-open getHolder().getInventory() call.
         Inventory current = inventory;
-        return current != null ? current : Bukkit.createInventory(this, rows() * 9, title());
+        return current != null ? current : TextPort.createInventory(this, rows() * 9, title());
+    }
+
+    /**
+     * Boot self-test seam: an empty inventory built through the universal
+     * {@code createInventory(holder,int,String)} overload + the {@link TextPort}
+     * title, with no viewer and no scheduler hop. The tester calls this on every
+     * version (including 1.9.4) so a legacy Adventure/String-API classload break
+     * surfaces at boot rather than on the first live open. Not part of the live
+     * open path.
+     */
+    public final @NotNull Inventory selfTestInventory() {
+        return TextPort.createInventory(this, rows() * 9, title());
     }
 }

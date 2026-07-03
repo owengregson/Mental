@@ -1,6 +1,17 @@
+import groovy.json.JsonSlurper
+
 plugins {
     alias(libs.plugins.shadow)
 }
+
+// The tester must load on every supported server, so its plugin.yml api-version follows the SAME floor as
+// Mental's — read from support-matrix.json (the single source), not hardcoded. On 1.13.2 the server rejects
+// any plugin whose api-version isn't exactly the floor (CraftMagicNumbers.checkSupported), so a stale "1.17"
+// here would fail the whole legacy boot.
+@Suppress("UNCHECKED_CAST")
+val floorApi: String =
+    (JsonSlurper().parse(rootProject.layout.projectDirectory.file("support-matrix.json").asFile)
+        as Map<String, Any>)["floorApi"] as String
 
 dependencies {
     compileOnly(project(":api"))
@@ -17,7 +28,10 @@ dependencies {
 }
 
 tasks.processResources {
-    val props = mapOf("version" to project.version.toString())
+    val props = mapOf(
+        "version" to project.version.toString(),
+        "apiVersion" to floorApi,
+    )
     inputs.properties(props)
     filesMatching("plugin.yml") {
         expand(props)

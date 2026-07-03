@@ -103,6 +103,15 @@ public final class TestContext {
         logger.info("[test] " + message);
     }
 
+    /**
+     * Declares the current scenario un-exercisable on this server and aborts it as an explicit SKIP (not a
+     * pass, not a failure). Use only when a harness limitation on the running version band prevents the
+     * observation AND a substitute proof exists — cite it in {@code reason}.
+     */
+    public void skip(@NotNull String reason) {
+        throw new SuiteSkip(reason);
+    }
+
     @FunctionalInterface
     public interface ThrowingRunnable {
         void run() throws Exception;

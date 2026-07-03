@@ -12,9 +12,11 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.text.TextPort;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Material;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
@@ -262,6 +264,15 @@ public final class OffhandUnit implements FeatureUnit, Listener {
             return;
         }
         Component message = LegacyComponentSerializer.legacyAmpersand().deserialize(raw);
-        player.sendMessage(message);
+        // Component sink routed through TextPort → sendMessage(String): the Paper
+        // sendMessage(Component) audience method is absent below 1.16.5. HumanEntity
+        // IS a CommandSender on the modern API but NOT on 1.9–1.15 (there it extends
+        // Permissible), so the reference is widened through Object to force a genuine
+        // runtime check — a real player is always a CommandSender at runtime, on
+        // every version; a non-sender HumanEntity just gets no cosmetic denial line.
+        Object recipient = player;
+        if (recipient instanceof CommandSender sender) {
+            TextPort.send(sender, message);
+        }
     }
 }

@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5.feature.damage;
 
 import java.util.function.Supplier;
+import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.feature.Feature;
@@ -77,8 +78,11 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
             return;
         }
         // Vanilla already applied its ×1.5 (cooldown ≥ 0.9 AND not sprinting) —
-        // do not double-crit.
-        if (attacker.getAttackCooldown() > 0.9f && !attacker.isSprinting()) {
+        // do not double-crit. CritPosture.attackCharge, not attacker.getAttackCooldown(): the Bukkit
+        // accessor floors at 1.15.2 (absent 1.9.4–1.13.2), so a direct call throws there; the resolver
+        // uses the NMS getCooledAttackStrength delegate where it resolves (1.13.2) and a fully-charged
+        // default below (defers to vanilla's crit for non-sprint hits — never double-crits).
+        if (CritPosture.attackCharge(attacker) > 0.9f && !attacker.isSprinting()) {
             return;
         }
         double base = event.getDamage(EntityDamageEvent.DamageModifier.BASE);

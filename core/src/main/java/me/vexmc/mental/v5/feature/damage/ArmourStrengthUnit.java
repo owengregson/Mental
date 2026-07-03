@@ -5,12 +5,15 @@ import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Set;
 import me.vexmc.mental.kernel.math.DefenceMath;
+import me.vexmc.mental.platform.Absorptions;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
+import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
@@ -39,6 +42,14 @@ import org.jetbrains.annotations.Nullable;
  * read or written, so the deprecated granular setter never throws (OCM's proven
  * guard). {@code EntityDamageEvent} fires on the victim's region thread, so every
  * read/write is inline; the 1.8 model needs no attacker state.
+ *
+ * <p><strong>Toughness is never read.</strong> The reduction is a function of the
+ * {@code ARMOR} points alone ({@link #armourPoints}); the {@code ARMOR_TOUGHNESS}
+ * attribute is neither read nor written anywhere in this unit, so the feature
+ * composes byte-identically on servers where that attribute does not exist
+ * (absent below 1.11.2 — 1.9.4/1.10.2). Its manifest entry is therefore an
+ * {@code OptionalSince(1.11.2)}, not a {@code Required} handle whose absence would
+ * disable the feature (see {@code PlatformProfile}).</p>
  */
 public final class ArmourStrengthUnit implements FeatureUnit, Listener {
 
@@ -71,8 +82,9 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
         Method m = null;
         try {
             m = PotionEffectType.class.getMethod("getByKey", NamespacedKey.class);
-        } catch (NoSuchMethodException ignored) {
-            // Pre-1.20.5 — getByName fallback.
+        } catch (NoSuchMethodException | LinkageError ignored) {
+            // Pre-1.20.5 — getByName fallback. LinkageError also catches the NamespacedKey.class literal
+            // being absent below 1.12 (the backport's oldest targets), so this static init is safe.
         }
         GET_BY_KEY = m;
         RESISTANCE = resolveResistance();
@@ -119,7 +131,11 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
                 ? 0
                 : resistanceLevel(victim);
         int epf = enchantEpf(victim, cause);
-        double absorption = victim.getAbsorptionAmount();
+        // Absorptions.of, not victim.getAbsorptionAmount(): the Bukkit accessor floors at 1.15 (absent on
+        // 1.9.4–1.13.2 — javap-verified), so a direct call throws NoSuchMethodError there when the feature
+        // is enabled. The resolver uses the modern method where present and the universal NMS
+        // getAbsorptionHearts() below it (byte-identical value), so the era cascade works on every version.
+        double absorption = Absorptions.of(victim);
 
         double afterArmour = DefenceMath.armourReduced(preArmour, armourPoints);
         setIfChanged(event, DamageModifier.ARMOR, afterArmour - preArmour);
@@ -153,7 +169,10 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
         if (RESISTANCE == null) {
             return 0;
         }
-        PotionEffect effect = victim.getPotionEffect(RESISTANCE);
+        // PotionEffects.of, not victim.getPotionEffect(RESISTANCE): the single-effect accessor floors at
+        // 1.10.2 (absent on 1.9.4 — javap-verified), so a direct call throws there. The resolver scans
+        // getActivePotionEffects() below the accessor's floor — same result, no modern API.
+        PotionEffect effect = PotionEffects.of(victim, RESISTANCE);
         return effect == null ? 0 : effect.getAmplifier() + 1;
     }
 
@@ -164,7 +183,11 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
         }
         int total = 0;
         for (ItemStack piece : equipment.getArmorContents()) {
-            if (piece == null || piece.getType().isAir()) {
+            // Material#isAir() is 1.13+, and pre-1.13 empty armour slots come
+            // back as an AIR ItemStack (not null) on some revisions — compare to
+            // AIR directly (armour is only ever AIR or a real item, never the
+            // 1.13+ CAVE_AIR/VOID_AIR), which is version-neutral and identical.
+            if (piece == null || piece.getType() == Material.AIR) {
                 continue;
             }
             for (ArmourEnchant enchant : ArmourEnchant.values()) {

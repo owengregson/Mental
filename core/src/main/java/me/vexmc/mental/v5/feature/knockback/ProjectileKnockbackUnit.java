@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
+import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -13,6 +14,7 @@ import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.model.SprintVerdict;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
@@ -33,14 +35,13 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
-import org.bukkit.entity.AbstractArrow;
 import org.bukkit.entity.Egg;
 import org.bukkit.entity.EnderPearl;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.entity.Snowball;
-import org.bukkit.entity.Trident;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -84,13 +85,27 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
 
     private record Flight(Vector velocity, long stampNanos) {}
 
+    /** Pre-1.14 in-memory arrow-punch stamp (level + flight-start nanos for the staleness sweep). */
+    private record PunchStamp(int level, long stampNanos) {}
+
     private final SessionService sessions;
     private final OcmBinding ocmBinding;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
     private final HitIds ids;
     private final TickClock clock;
-    private final NamespacedKey punchKey;
+
+    /**
+     * The PDC key the bow's Punch level is stamped onto the arrow with — {@code null} below Bukkit 1.14
+     * (no PersistentDataContainer, and {@link NamespacedKey} itself is absent below 1.12). Without it the
+     * level rides in {@link #arrowPunch}: stamped on the shot, read+evicted on the hit, swept by staleness
+     * exactly as {@link #arrowFlight} is (the boot log in the plugin announces the fallback).
+     */
+    private final @Nullable NamespacedKey punchKey;
+
+    private final ConcurrentHashMap<UUID, PunchStamp> arrowPunch = new ConcurrentHashMap<>();
+
+    private final Plugin plugin;
 
     /**
      * True on 1.21.2+ where vanilla restored projectile-KB-vs-players (mandate
@@ -102,18 +117,47 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
 
     private final ConcurrentHashMap<UUID, Flight> arrowFlight = new ConcurrentHashMap<>();
 
+    /**
+     * The version-neutral arrow classifier (an arrow, not a trident), resolved from the running API's
+     * shape at construction. It is the ONLY way this unit distinguishes arrows: no field or method
+     * signature names an arrow type, because Bukkit resolves a listener's declared method parameter
+     * types when it registers it — an {@code AbstractArrow} (1.14+) parameter would throw {@code
+     * NoClassDefFoundError} at registration below 1.14. See {@link ArrowShape}.
+     */
+    private final ArrowShape arrowShape;
+
+    /**
+     * Whether {@code ProjectileHitEvent.getHitEntity()} exists on this server (javap: absent on 1.9.4,
+     * present 1.10.2+). The thrown-projectile (snowball/egg/pearl) knock and the arrow flight-velocity
+     * capture both resolve their target through that accessor, so on 1.9.4 {@link #onProjectileHit}
+     * early-returns; arrow (and Punch) knockback is unaffected there — it delivers at damage time via
+     * {@link #onArrowDamage}, falling back to the arrow's live velocity for the Punch direction.
+     */
+    private final boolean projectileHitEntitySupported;
+
     public ProjectileKnockbackUnit(
             Plugin plugin, SessionService sessions, OcmBinding ocmBinding, Scheduling scheduling,
             Supplier<Snapshot> snapshot, HitIds ids, TickClock clock,
             boolean projectileKnockbackRestored) {
+        this.plugin = plugin;
         this.sessions = sessions;
         this.ocmBinding = ocmBinding;
         this.scheduling = scheduling;
         this.snapshot = snapshot;
         this.ids = ids;
         this.clock = clock;
-        this.punchKey = new NamespacedKey(plugin, "punch-level");
+        // NamespacedKey is a 1.12 API and PDC a 1.14 one; construct the stamp key only where PDC is
+        // present, else the level rides the in-memory arrowPunch map (see punchKey doc). This unit is
+        // ALWAYS-ON, so an unconditional NamespacedKey here would break the boot outright below 1.12.
+        this.punchKey = PersistentData.supported() ? new NamespacedKey(plugin, "punch-level") : null;
         this.projectileKnockbackRestored = projectileKnockbackRestored;
+        this.arrowShape = ArrowShape.resolve();
+        this.projectileHitEntitySupported = hasProjectileHitEntity();
+        if (!projectileHitEntitySupported) {
+            plugin.getLogger().info("projectile-knockback: thrown-projectile (snowball/egg/pearl) knockback "
+                    + "is unavailable on this server — ProjectileHitEvent.getHitEntity() is absent below "
+                    + "1.10.2; arrow and Punch knockback remain active (delivered at damage time).");
+        }
     }
 
     /**
@@ -139,7 +183,59 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
 
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
+        // Active on every supported version: no field or listener signature names an arrow type
+        // (the classifier is the reflective ArrowShape), so registration resolves cleanly below 1.14.
         scope.listen(this);
+    }
+
+    private static boolean hasProjectileHitEntity() {
+        try {
+            ProjectileHitEvent.class.getMethod("getHitEntity");
+            return true;
+        } catch (NoSuchMethodException absent) {
+            return false;
+        }
+    }
+
+    /**
+     * The version-neutral arrow classifier. The base type is {@code AbstractArrow} where it exists
+     * (Bukkit 1.14+, where {@code Arrow} no longer covers spectral arrows) else {@code Arrow} (1.9–1.13,
+     * where every arrow variant IS an {@code Arrow}); a trident is excluded where the {@code Trident}
+     * type exists (1.13+; on 1.13.2 {@code Trident extends Arrow}, so the exclusion is required there).
+     * Resolved by {@code Class.forName} so no arrow type is ever named in a field, method signature, or
+     * constant-pool {@code instanceof} — the reason the unit registers cleanly below 1.14.
+     */
+    private static final class ArrowShape {
+
+        private final @Nullable Class<?> arrowBase;
+        private final @Nullable Class<?> tridentType;
+
+        private ArrowShape(@Nullable Class<?> arrowBase, @Nullable Class<?> tridentType) {
+            this.arrowBase = arrowBase;
+            this.tridentType = tridentType;
+        }
+
+        static ArrowShape resolve() {
+            Class<?> base = classOrNull("org.bukkit.entity.AbstractArrow");
+            if (base == null) {
+                base = classOrNull("org.bukkit.entity.Arrow");
+            }
+            return new ArrowShape(base, classOrNull("org.bukkit.entity.Trident"));
+        }
+
+        /** True when {@code entity} is an arrow that should carry era knockback — an arrow, not a trident. */
+        boolean isKnockbackArrow(@Nullable Object entity) {
+            return arrowBase != null && arrowBase.isInstance(entity)
+                    && (tridentType == null || !tridentType.isInstance(entity));
+        }
+
+        private static @Nullable Class<?> classOrNull(String className) {
+            try {
+                return Class.forName(className);
+            } catch (ClassNotFoundException absent) {
+                return null;
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -152,32 +248,46 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onShootBow(EntityShootBowEvent event) {
         ProjectileKnockbackSettings settings = settings();
-        if (!settings.arrows()
-                || !(event.getProjectile() instanceof AbstractArrow arrow) || arrow instanceof Trident) {
+        Entity projectile = event.getProjectile();
+        if (!settings.arrows() || !arrowShape.isKnockbackArrow(projectile)) {
             return;
         }
         ItemStack bow = event.getBow();
         Enchantment punch = Enchantments.punch();
         int level = bow == null || punch == null ? 0 : bow.getEnchantmentLevel(punch);
-        if (level > 0) {
-            arrow.getPersistentDataContainer().set(punchKey, PersistentDataType.INTEGER, level);
+        if (level <= 0) {
+            return;
+        }
+        if (punchKey != null) {
+            // PDC is a 1.14+ API; Entity is a PersistentDataHolder there, so this resolves only when
+            // punchKey was constructed (PersistentData.supported()). Below 1.14 the level rides arrowPunch.
+            projectile.getPersistentDataContainer().set(punchKey, PersistentDataType.INTEGER, level);
+        } else {
+            long now = System.nanoTime();
+            if (arrowPunch.size() > FLIGHT_SWEEP_THRESHOLD) {
+                arrowPunch.values().removeIf(stamp -> now - stamp.stampNanos() > FLIGHT_STALE_NANOS);
+            }
+            arrowPunch.put(projectile.getUniqueId(), new PunchStamp(level, now));
         }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onProjectileHit(ProjectileHitEvent event) {
+        if (!projectileHitEntitySupported) {
+            return; // getHitEntity() is absent on 1.9.4 — no target resolution here (see the field doc)
+        }
         ProjectileKnockbackSettings settings = settings();
-        if (event.getEntity() instanceof AbstractArrow arrow && !(arrow instanceof Trident)) {
+        Projectile projectile = event.getEntity();
+        if (arrowShape.isKnockbackArrow(projectile)) {
             if (settings.arrows() && event.getHitEntity() instanceof Player) {
                 long now = System.nanoTime();
                 if (arrowFlight.size() > FLIGHT_SWEEP_THRESHOLD) {
                     arrowFlight.values().removeIf(flight -> now - flight.stampNanos() > FLIGHT_STALE_NANOS);
                 }
-                arrowFlight.put(arrow.getUniqueId(), new Flight(arrow.getVelocity(), now));
+                arrowFlight.put(projectile.getUniqueId(), new Flight(projectile.getVelocity(), now));
             }
             return;
         }
-        Projectile projectile = event.getEntity();
         if (!isThrown(projectile) || !(event.getHitEntity() instanceof Player victim)) {
             return;
         }
@@ -240,11 +350,11 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     public void onArrowDamage(EntityDamageByEntityEvent event) {
         ProjectileKnockbackSettings settings = settings();
         if (!settings.arrows()
-                || !(event.getDamager() instanceof AbstractArrow arrow)
-                || arrow instanceof Trident
+                || !arrowShape.isKnockbackArrow(event.getDamager())
                 || !(event.getEntity() instanceof Player victim)) {
             return;
         }
+        Projectile arrow = (Projectile) event.getDamager();
         Flight flight = arrowFlight.remove(arrow.getUniqueId());
         if (!isKnockable(victim, arrow.getShooter())) {
             return;
@@ -274,12 +384,14 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         if (!event.isCancelled() || !(event.getEntity() instanceof Player victim)) {
             return;
         }
-        boolean projectile = event.getDamager() instanceof AbstractArrow || isThrown(event.getDamager());
-        if (!projectile) {
+        Entity damager = event.getDamager();
+        boolean arrow = arrowShape.isKnockbackArrow(damager);
+        if (!arrow && !isThrown(damager)) {
             return;
         }
-        if (event.getDamager() instanceof AbstractArrow arrow) {
-            arrowFlight.remove(arrow.getUniqueId());
+        if (arrow) {
+            arrowFlight.remove(damager.getUniqueId());
+            arrowPunch.remove(damager.getUniqueId());
         }
         CombatSession session = sessions.sessionFor(victim.getUniqueId());
         if (session != null) {
@@ -335,12 +447,29 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
                 return false;
             }
         }
+        // Gate on the frozen pre-hit view, not the live noDamageTicks. A thrown
+        // projectile's own hit sets noDamageTicks, and the ProjectileHitEvent
+        // fires AFTER that damage on some servers (measured on 1.15.2 — the
+        // opposite of 1.16.5's hit-then-damage order), so a live read would see
+        // THIS hit's just-applied invuln and wrongly skip the knock (leaving the
+        // vanilla/substitution knock to ship). The published view is the
+        // end-of-previous-tick state — pre-hit on every version — so the same
+        // era vector ships consistently regardless of the server's event order.
+        // Falls back to the live read only before any view has been published.
+        PlayerView view = sessions.viewOf(victim.getUniqueId());
+        if (view != null) {
+            return !view.damageImmune();
+        }
         return victim.getNoDamageTicks() <= victim.getMaximumNoDamageTicks() / 2.0;
     }
 
-    private int punchLevel(AbstractArrow arrow) {
-        Integer stamped = arrow.getPersistentDataContainer().get(punchKey, PersistentDataType.INTEGER);
-        return stamped != null ? stamped : 0;
+    private int punchLevel(Projectile arrow) {
+        if (punchKey != null) {
+            Integer stamped = arrow.getPersistentDataContainer().get(punchKey, PersistentDataType.INTEGER);
+            return stamped != null ? stamped : 0;
+        }
+        PunchStamp stamp = arrowPunch.remove(arrow.getUniqueId());
+        return stamp != null ? stamp.level() : 0;
     }
 
     private static boolean isThrown(Object entity) {

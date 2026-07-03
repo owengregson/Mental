@@ -4,8 +4,11 @@ import java.lang.reflect.Method;
 import me.vexmc.mental.kernel.math.DamageTables;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.EffectiveMaterial;
 import me.vexmc.mental.platform.Enchantments;
+import me.vexmc.mental.platform.LegacyMaterialNames;
+import me.vexmc.mental.platform.PotionEffects;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
@@ -33,8 +36,6 @@ import org.bukkit.potion.PotionEffectType;
  * values losslessly (era pin: sharpness-5 diamond = 14.25, never 17.5).</p>
  */
 public final class DamageShaper {
-
-    private static final NamespacedKey RESISTANCE_KEY = NamespacedKey.minecraft("resistance");
 
     /** Strength/Weakness effect types, resolved once (registry key on 1.20.5+, legacy name below). */
     private static final PotionEffectType STRENGTH = resolveEffect("strength", "INCREASE_DAMAGE");
@@ -93,10 +94,15 @@ public final class DamageShaper {
      * post-era). Bukkit-reading; owning-thread only.
      */
     public static boolean isLegacyCritical(Player attacker) {
+        // CritPosture.climbing / .inWater, not Player#isClimbing()/isInWater(): those Bukkit accessors floor
+        // at 1.17 and 1.16 respectively (isClimbing absent on EVERY legacy revision), so a direct call
+        // throws NoSuchMethodError there when a crit feature is enabled. The resolver uses the modern
+        // methods where present (byte-identical on 1.17+) and a feet-block read below. hasPotionEffect is
+        // present across the whole range (1.9.4+), so it stays a direct call.
         return attacker.getFallDistance() > 0.0f
                 && !attacker.isOnGround()
-                && !attacker.isClimbing()
-                && !attacker.isInWater()
+                && !CritPosture.climbing(attacker)
+                && !CritPosture.inWater(attacker)
                 && !attacker.hasPotionEffect(PotionEffectType.BLINDNESS)
                 && attacker.getVehicle() == null;
     }
@@ -131,7 +137,7 @@ public final class DamageShaper {
 
         int strengthAmp = oldPotionValues ? amplifier(attacker, STRENGTH) : -1;
         int weaknessAmp = oldPotionValues ? amplifier(attacker, WEAKNESS) : -1;
-        double weaponBase = legacyToolDamage ? legacyToolBase(weapon) : Double.NaN;
+        double weaponBase = legacyToolDamage ? eraToolBase(weapon) : Double.NaN;
         if (Double.isNaN(weaponBase)) {
             // No legacy tool value (hands, hoes, non-tool) or legacy tables off:
             // recover the pure weapon base from the live attribute so the era
@@ -144,10 +150,23 @@ public final class DamageShaper {
         return composeLegacy(weaponBase, strengthAmp, weaknessAmp, oldPotionValues, critical, sharpness);
     }
 
-    /** The legacy tool base for the weapon's effective material, or NaN when the table has none. */
-    private static double legacyToolBase(ItemStack weapon) {
+    /**
+     * The era weapon base for the weapon's effective material, or {@code NaN} when
+     * the legacy tool table has no entry (hands, hoes, non-tools). The effective
+     * material name is normalized through {@link LegacyMaterialNames#modernize}
+     * before it keys the kernel table: on a pre-flattening server {@code
+     * Material.name()} returns the OLD constant ({@code WOOD_SWORD}, {@code
+     * GOLD_SPADE}, …), which the kernel's modern-named {@code weaponDamage} would
+     * otherwise miss (returning null → era damage silently off, the Q1 defect).
+     * The kernel stays version-blind; this platform-seam call is the only
+     * translation point.
+     *
+     * <p>Public so the legacy-boot rules-smoke can assert this exact seam headlessly
+     * (a {@code WOOD_SWORD} stack must resolve to the {@code WOODEN_SWORD} pin).</p>
+     */
+    public static double eraToolBase(ItemStack weapon) {
         Material effective = EffectiveMaterial.of(weapon);
-        Double base = DamageTables.weaponDamage(effective.name());
+        Double base = DamageTables.weaponDamage(LegacyMaterialNames.modernize(effective.name()));
         return base == null ? Double.NaN : base;
     }
 
@@ -164,7 +183,9 @@ public final class DamageShaper {
         if (type == null) {
             return -1;
         }
-        PotionEffect effect = attacker.getPotionEffect(type);
+        // PotionEffects.of, not attacker.getPotionEffect(type): the single-effect accessor is absent on
+        // 1.9.4 (floors at 1.10.2), where a direct call throws; the resolver scans the active set below it.
+        PotionEffect effect = PotionEffects.of(attacker, type);
         return effect == null ? -1 : effect.getAmplifier();
     }
 
@@ -182,24 +203,21 @@ public final class DamageShaper {
             if (resolved instanceof PotionEffectType type) {
                 return type;
             }
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // Fall through to the legacy name accessor below.
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            // Fall through to the legacy name accessor below. LinkageError also catches NamespacedKey (the
+            // class, and #minecraft) being absent below 1.12 — this resolver runs at class-init (STRENGTH /
+            // WEAKNESS), so it must never let a missing modern symbol poison the whole damage path.
         }
         return PotionEffectType.getByName(legacyName);
     }
 
-    /** The resistance effect type (registry key on 1.20.5+, legacy name below) — used by the armour unit. */
-    @SuppressWarnings("deprecation") // getByName is the pre-1.20.5 spelling
+    /**
+     * The resistance effect type (registry key on 1.20.5+, legacy name below) — used by the armour unit.
+     * Delegates to {@link #resolveEffect} so the modern registry key is built inside the same
+     * LinkageError-guarded path (no static {@code NamespacedKey} field, which would break class-init below
+     * 1.12 where the type is absent).
+     */
     public static PotionEffectType resistanceType() {
-        try {
-            Method byKey = PotionEffectType.class.getMethod("getByKey", NamespacedKey.class);
-            Object resolved = byKey.invoke(null, RESISTANCE_KEY);
-            if (resolved instanceof PotionEffectType type) {
-                return type;
-            }
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // Fall through to the legacy name accessor below.
-        }
-        return PotionEffectType.getByName("DAMAGE_RESISTANCE");
+        return resolveEffect("resistance", "DAMAGE_RESISTANCE");
     }
 }

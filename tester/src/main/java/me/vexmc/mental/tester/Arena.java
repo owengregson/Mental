@@ -1,6 +1,5 @@
 package me.vexmc.mental.tester;
 
-import org.bukkit.GameRule;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -63,7 +62,7 @@ public final class Arena {
         // full-strength 0.4 knock at an arbitrary bearing read exactly like
         // phantom velocity events in the captors. Spawning stays off and
         // anything hostile already nearby is purged each prepare.
-        world.setGameRule(GameRule.DO_MOB_SPAWNING, false);
+        disableMobSpawning(world);
         for (Entity entity : world.getEntities()) {
             if (entity instanceof Monster
                     && Math.abs(entity.getLocation().getX() - BASE_X) < 64
@@ -86,5 +85,29 @@ public final class Arena {
 
     public static @NotNull Location offset(@NotNull Location centre, double dx, double dz) {
         return centre.clone().add(dx, 0, dz);
+    }
+
+    /**
+     * Turns mob spawning off in a version-neutral way. The typed
+     * {@code World#setGameRule(GameRule, T)} is Bukkit 1.13+; referencing
+     * {@code org.bukkit.GameRule} directly throws {@link NoClassDefFoundError} on
+     * 1.9–1.12, so the typed call is reached only reflectively (never linked on a
+     * pre-1.13 server), with the deprecated String gamerule API as the pre-1.13
+     * fallback. Modern behaviour is unchanged — the typed rule is still applied.
+     */
+    private static void disableMobSpawning(World world) {
+        try {
+            Class<?> gameRuleClass = Class.forName("org.bukkit.GameRule");
+            Object rule = gameRuleClass.getField("DO_MOB_SPAWNING").get(null);
+            World.class.getMethod("setGameRule", gameRuleClass, Object.class)
+                    .invoke(world, rule, Boolean.FALSE);
+        } catch (ReflectiveOperationException pre1_13) {
+            setGameRuleValueLegacy(world);
+        }
+    }
+
+    @SuppressWarnings("deprecation") // the String gamerule API is the only one 1.9–1.12 has
+    private static void setGameRuleValueLegacy(World world) {
+        world.setGameRuleValue("doMobSpawning", "false");
     }
 }

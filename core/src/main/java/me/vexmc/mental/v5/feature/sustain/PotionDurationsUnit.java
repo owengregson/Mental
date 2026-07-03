@@ -69,8 +69,9 @@ public final class PotionDurationsUnit implements FeatureUnit, Listener {
         Method getByKey = null;
         try {
             getByKey = PotionEffectType.class.getMethod("getByKey", NamespacedKey.class);
-        } catch (NoSuchMethodException ignored) {
-            // Pre-1.20.5 Paper — getByName fallback.
+        } catch (NoSuchMethodException | LinkageError ignored) {
+            // Pre-1.20.5 Paper — getByName fallback. LinkageError also catches the NamespacedKey.class
+            // literal being absent below 1.12 (the backport's oldest targets), so this static init is safe.
         }
         GET_BY_KEY = getByKey;
 

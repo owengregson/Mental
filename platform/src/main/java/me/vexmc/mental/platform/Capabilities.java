@@ -15,7 +15,8 @@ public record Capabilities(
         boolean modernSchedulers,
         boolean brigadierCommands,
         boolean registryAttributes,
-        boolean knockbackEvent) {
+        boolean knockbackEvent,
+        boolean currentTick) {
 
     public static @NotNull Capabilities detect() {
         boolean folia = classPresent("io.papermc.paper.threadedregions.RegionizedServer");
@@ -26,7 +27,11 @@ public record Capabilities(
         // Paper's modern knockback event (1.20.6+), the one mid-pass observers
         // (anticheats, SimpleBoxer) read; absent below it, where the mirror is a no-op.
         boolean knockbackEvent = classPresent("io.papermc.paper.event.entity.EntityKnockbackEvent");
-        return new Capabilities(folia, modernSchedulers, brigadier, registryAttributes, knockbackEvent);
+        // Bukkit.getCurrentTick() — Paper's authoritative, netty-safe tick counter. Absent on the legacy
+        // backport's older targets (it predates neither 1.9 nor early Paper), where the tick clock falls
+        // back to a global-task-advanced counter (the same mechanism Folia uses).
+        boolean currentTick = methodPresent(org.bukkit.Bukkit.class, "getCurrentTick");
+        return new Capabilities(folia, modernSchedulers, brigadier, registryAttributes, knockbackEvent, currentTick);
     }
 
     public @NotNull String describe() {
@@ -34,7 +39,8 @@ public record Capabilities(
                 + " modernSchedulers=" + modernSchedulers
                 + " brigadierCommands=" + brigadierCommands
                 + " registryAttributes=" + registryAttributes
-                + " knockbackEvent=" + knockbackEvent;
+                + " knockbackEvent=" + knockbackEvent
+                + " currentTick=" + currentTick;
     }
 
     private static boolean classPresent(@NotNull String className) {
@@ -42,6 +48,15 @@ public record Capabilities(
             Class.forName(className);
             return true;
         } catch (ClassNotFoundException absent) {
+            return false;
+        }
+    }
+
+    private static boolean methodPresent(@NotNull Class<?> owner, @NotNull String name) {
+        try {
+            owner.getMethod(name);
+            return true;
+        } catch (NoSuchMethodException absent) {
             return false;
         }
     }

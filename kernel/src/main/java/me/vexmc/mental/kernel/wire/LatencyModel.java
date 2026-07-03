@@ -18,6 +18,16 @@ public final class LatencyModel {
     /** Outbound play-ping probe id base ('ME' in the high half of a positive int). */
     public static final int PING_ID_BASE = 0x4D45_0000;
 
+    /**
+     * Outbound window-confirmation probe id base ('MT' in the high half of a
+     * positive int) — the pre-1.17 transport's id space. It differs from
+     * {@link #PING_ID_BASE} in the high 16 bits, so the two probe id spaces are
+     * disjoint as unsigned longs no matter what the low 16 bits carry. The model
+     * itself stays mechanism-blind: a base is just a private slice of the opaque
+     * id range so vanilla/third-party echoes cannot alias a probe.
+     */
+    public static final int TRANSACTION_ID_BASE = 0x4D54_0000;
+
     private static final int MAX_OUTSTANDING = 32;
 
     private final ConcurrentHashMap<UUID, Record> records = new ConcurrentHashMap<>();

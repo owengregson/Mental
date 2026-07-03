@@ -52,6 +52,10 @@ final class TestHarness {
                     test.body().run(context);
                     plugin.getLogger().info("[test] PASS " + test.name()
                             + " (" + (System.nanoTime() - started) / 1_000_000 + "ms)");
+                } catch (SuiteSkip skip) {
+                    // Explicit, reasoned skip — not a failure. Loud in the log, excluded from the failure set
+                    // so the nonce/PASS gate still holds; the substitute proof is cited in the reason.
+                    plugin.getLogger().info("[test] SKIP " + test.name() + ": " + skip.getMessage());
                 } catch (Throwable failure) {
                     String detail = test.name() + ": " + failure;
                     failures.add(detail);

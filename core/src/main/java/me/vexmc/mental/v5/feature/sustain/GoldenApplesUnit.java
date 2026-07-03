@@ -1,9 +1,11 @@
 package me.vexmc.mental.v5.feature.sustain;
 
 import java.lang.reflect.Method;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects.EffectSpec;
@@ -20,6 +22,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.ShapedRecipe;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.potion.PotionEffect;
@@ -51,24 +54,68 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
     /** {@code PotionEffectType.getByKey(NamespacedKey)} (Paper 1.20.5+); null on older builds. */
     private static final @Nullable Method GET_BY_KEY;
 
+    /**
+     * The enchanted-golden-apple material, resolved by NAME so the reference never hard-links to the
+     * {@code Material.ENCHANTED_GOLDEN_APPLE} enum constant — that constant is absent below 1.13 (the
+     * flattening), where a direct reference is a {@code NoSuchFieldError} at execution. {@code null}
+     * pre-1.13, where the enchanted gapple is instead the data-value item {@code GOLDEN_APPLE:1} and the
+     * recipe rides the pre-keyed recipe API (both handled by the legacy branch below).
+     */
+    private static final @Nullable Material ENCHANTED_GOLDEN_APPLE = Material.getMaterial("ENCHANTED_GOLDEN_APPLE");
+
+    /**
+     * True on a pre-flattening server (&lt; 1.13), resolved once by the enchanted-gapple constant's
+     * absence — never a version parse. It selects the enchanted apple's REPRESENTATION: pre-flattening it
+     * is {@code GOLDEN_APPLE} carrying data value 1 (detected by durability, the recipe result is the
+     * {@code GOLDEN_APPLE:1} data-value stack); flattened it is its own material. This is independent of
+     * the recipe LIFECYCLE probes below — 1.13.2/1.15.2 are flattened yet still lack the keyed
+     * get/remove APIs.
+     */
+    private static final boolean LEGACY_GAPPLE = ENCHANTED_GOLDEN_APPLE == null;
+
+    /**
+     * Whether the keyed ShapedRecipe ctor is usable — i.e. {@code org.bukkit.NamespacedKey} exists (1.12+).
+     * Below it (1.9–1.11) only the deprecated non-keyed ctor is available. Probed by class NAME so no
+     * {@code NamespacedKey} class literal is resolved at init on a server that lacks it.
+     */
+    private static final boolean KEYED_RECIPE_CTOR = classPresent("org.bukkit.NamespacedKey");
+
+    /**
+     * Whether Bukkit can manage a recipe by key for its whole lifecycle — BOTH {@code getRecipe} and
+     * {@code removeRecipe(NamespacedKey)}. They land at different versions ({@code removeRecipe} 1.15,
+     * {@code getRecipe} 1.16.5), so only 1.16.5+ (every modern target) qualifies; there the recipe path is
+     * byte-identical to the pre-backport code. Below it — 1.9.4 through 1.15.2 — the recipe is managed
+     * through the universal {@link Bukkit#recipeIterator()} instead (present on every version). Probed by
+     * parameter class NAME so the {@code NamespacedKey} literal is never resolved on a server without it.
+     */
+    private static final boolean KEYED_RECIPE_LIFECYCLE =
+            methodPresent(Bukkit.class, "getRecipe", "org.bukkit.NamespacedKey")
+                    && methodPresent(Bukkit.class, "removeRecipe", "org.bukkit.NamespacedKey");
+
     static {
         Method m = null;
         try {
             m = PotionEffectType.class.getMethod("getByKey", NamespacedKey.class);
-        } catch (NoSuchMethodException ignored) {
-            // Pre-1.20.5 Paper — getByName fallback.
+        } catch (NoSuchMethodException | LinkageError ignored) {
+            // Pre-1.20.5 Paper — getByName fallback. LinkageError also catches the NamespacedKey.class
+            // literal being absent below 1.12 (the backport's oldest targets), so this static init is safe.
         }
         GET_BY_KEY = m;
     }
 
     private final Plugin plugin;
     private final Scheduling scheduling;
-    private final NamespacedKey nappleKey;
+
+    /**
+     * The notch-apple recipe key — built lazily via {@link #nappleKey()} only where {@code NamespacedKey}
+     * exists ({@link #KEYED_RECIPE_CTOR}, 1.12+). Below that the field stays null and the recipe uses the
+     * non-keyed ctor; wherever the keyed get/remove APIs are absent, removal falls back to an iterator scan.
+     */
+    private @Nullable NamespacedKey nappleKey;
 
     public GoldenApplesUnit(@NotNull Plugin plugin, @NotNull Scheduling scheduling) {
         this.plugin = plugin;
         this.scheduling = scheduling;
-        this.nappleKey = new NamespacedKey(plugin, "enchanted_golden_apple");
     }
 
     @Override
@@ -81,42 +128,147 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
         scope.listen(this);
         scope.task(() -> {
             registerNappleRecipe();
-            return () -> Bukkit.removeRecipe(nappleKey);
+            return this::removeNappleRecipe;
         });
+        if (!KEYED_RECIPE_LIFECYCLE) {
+            plugin.getLogger().info("golden-apples: legacy recipe path — "
+                    + (LEGACY_GAPPLE ? "the enchanted gapple is GOLDEN_APPLE:1 (data value); " : "")
+                    + "the notch-apple recipe is managed via recipeIterator (Bukkit#getRecipe/"
+                    + "removeRecipe by key land at 1.16.5, absent on this version).");
+        }
     }
 
     /* ------------------------------- recipe ------------------------------- */
+    /*
+     * The recipe lifecycle splits on TWO independent capabilities: the enchanted-gapple RESULT
+     * representation (LEGACY_GAPPLE — data-value item vs its own material) and whether the key-addressable
+     * get/remove APIs exist (KEYED_RECIPE_LIFECYCLE — 1.16.5+). Registration and the universal
+     * recipeIterator work on every version, so the pre-1.16.5 band (1.9.4–1.15.2) is managed by scanning;
+     * 1.16.5+ (every modern target) keeps the byte-identical keyed path.
+     */
 
     private void registerNappleRecipe() {
-        if (Bukkit.getRecipe(nappleKey) != null) {
+        if (nappleRecipeRegistered()) {
             return; // already registered (rapid reload) — leave it
         }
         try {
-            ShapedRecipe recipe = new ShapedRecipe(nappleKey, new ItemStack(Material.ENCHANTED_GOLDEN_APPLE));
-            recipe.shape("ggg", "gag", "ggg");
-            recipe.setIngredient('g', Material.GOLD_BLOCK);
-            recipe.setIngredient('a', Material.APPLE);
-            Bukkit.addRecipe(recipe);
+            Bukkit.addRecipe(buildNappleRecipe());
         } catch (IllegalStateException duplicate) {
             // Another plugin (or a pre-crash enable) holds the key — harmless.
         }
+    }
+
+    private void removeNappleRecipe() {
+        if (KEYED_RECIPE_LIFECYCLE) {
+            if (nappleKey != null) {
+                Bukkit.removeRecipe(nappleKey);
+            }
+            return;
+        }
+        Iterator<Recipe> recipes = Bukkit.recipeIterator();
+        while (recipes.hasNext()) {
+            if (isOurNappleRecipe(recipes.next())) {
+                recipes.remove();
+            }
+        }
+    }
+
+    /** Whether our notch-apple recipe is already registered — keyed lookup where possible, else a scan. */
+    private boolean nappleRecipeRegistered() {
+        if (KEYED_RECIPE_LIFECYCLE) {
+            return Bukkit.getRecipe(nappleKey()) != null;
+        }
+        Iterator<Recipe> recipes = Bukkit.recipeIterator();
+        while (recipes.hasNext()) {
+            if (isOurNappleRecipe(recipes.next())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ShapedRecipe buildNappleRecipe() {
+        ShapedRecipe recipe = KEYED_RECIPE_CTOR
+                ? new ShapedRecipe(nappleKey(), nappleResult())
+                : legacyShapedRecipe(nappleResult());
+        shapeNotchApple(recipe);
+        return recipe;
+    }
+
+    /** The non-keyed ctor — the only one below 1.12 (deprecated on modern, unused there). */
+    @SuppressWarnings("deprecation")
+    private static ShapedRecipe legacyShapedRecipe(ItemStack result) {
+        return new ShapedRecipe(result);
+    }
+
+    /** The notch-apple result: its own material where flattened, else the {@code GOLDEN_APPLE:1} data item. */
+    @SuppressWarnings("deprecation") // the (Material,amount,data) ctor is the pre-1.13 enchanted-gapple form
+    private ItemStack nappleResult() {
+        return LEGACY_GAPPLE
+                ? new ItemStack(Material.GOLDEN_APPLE, 1, (short) 1)
+                : new ItemStack(ENCHANTED_GOLDEN_APPLE);
+    }
+
+    /** The recipe key, built lazily; only reachable where {@code NamespacedKey} exists (1.12+). */
+    private NamespacedKey nappleKey() {
+        if (nappleKey == null) {
+            nappleKey = new NamespacedKey(plugin, "enchanted_golden_apple");
+        }
+        return nappleKey;
+    }
+
+    /** Whether a recipe is our notch apple, matched by result (ENCHANTED_GOLDEN_APPLE or GOLDEN_APPLE:1). */
+    @SuppressWarnings("deprecation") // getDurability() reads the pre-1.13 data value distinguishing the gapples
+    private boolean isOurNappleRecipe(Recipe recipe) {
+        if (!(recipe instanceof ShapedRecipe shaped)) {
+            return false;
+        }
+        ItemStack result = shaped.getResult();
+        return LEGACY_GAPPLE
+                ? result.getType() == Material.GOLDEN_APPLE && result.getDurability() == 1
+                : result.getType() == ENCHANTED_GOLDEN_APPLE;
+    }
+
+    /** The era notch-apple shape: 8 gold BLOCKS around a single apple (removed from vanilla in 1.9). */
+    private static void shapeNotchApple(ShapedRecipe recipe) {
+        recipe.shape("ggg", "gag", "ggg");
+        recipe.setIngredient('g', Material.GOLD_BLOCK);
+        recipe.setIngredient('a', Material.APPLE);
     }
 
     /* ------------------------------- consume ------------------------------ */
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onConsume(@NotNull PlayerItemConsumeEvent event) {
-        Material type = event.getItem().getType();
-        if (type != Material.GOLDEN_APPLE && type != Material.ENCHANTED_GOLDEN_APPLE) {
-            return;
+        Boolean enchanted = classifyGapple(event.getItem());
+        if (enchanted == null) {
+            return; // not any golden apple
         }
         Player player = event.getPlayer();
-        List<EffectSpec> specs = (type == Material.ENCHANTED_GOLDEN_APPLE)
+        List<EffectSpec> specs = enchanted
                 ? GoldenAppleEffects.notchApple()
                 : GoldenAppleEffects.normalApple();
         // +1 tick: vanilla applies the modern component-food effects AFTER the
         // consume returns; the era table wins on the confirmed terminal (B13).
         scheduling.runOnLater(player, 1, () -> applyEra(player, specs), () -> {});
+    }
+
+    /**
+     * Classifies a consumed item: {@code TRUE} = enchanted (notch) apple, {@code FALSE} = normal golden
+     * apple, {@code null} = neither. Modern servers (1.13+) split the two into distinct materials;
+     * pre-flattening they are the single material {@code GOLDEN_APPLE} distinguished by the item's data
+     * value (1 = enchanted, 0 = normal).
+     */
+    @SuppressWarnings("deprecation") // getDurability() is the pre-1.13 data-value accessor
+    private @Nullable Boolean classifyGapple(@NotNull ItemStack item) {
+        Material type = item.getType();
+        if (LEGACY_GAPPLE) {
+            return type == Material.GOLDEN_APPLE ? item.getDurability() == 1 : null;
+        }
+        if (type == ENCHANTED_GOLDEN_APPLE) {
+            return Boolean.TRUE;
+        }
+        return type == Material.GOLDEN_APPLE ? Boolean.FALSE : null;
     }
 
     /**
@@ -132,7 +284,9 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
             }
             player.removePotionEffect(effectType); // wipe the modern vanilla effect first
             PotionEffect era = new PotionEffect(effectType, spec.durationTicks(), spec.amplifier());
-            PotionEffect existing = player.getPotionEffect(effectType);
+            // PotionEffects.of, not player.getPotionEffect(effectType): the single-effect accessor is absent
+            // on 1.9.4 (floors at 1.10.2), where a direct call throws; the resolver scans the active set.
+            PotionEffect existing = PotionEffects.of(player, effectType);
             if (existing == null) {
                 player.addPotionEffect(era);
             } else if (era.getAmplifier() > existing.getAmplifier()
@@ -158,5 +312,32 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
         }
         String bukkitName = BUKKIT_NAME_BY_KEY.getOrDefault(key, key.toUpperCase(Locale.ROOT));
         return PotionEffectType.getByName(bukkitName);
+    }
+
+    /* --------------------------- capability probes ------------------------- */
+
+    private static boolean classPresent(@NotNull String className) {
+        try {
+            Class.forName(className);
+            return true;
+        } catch (ClassNotFoundException | LinkageError absent) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether {@code owner} declares {@code name(paramClassName)}. The parameter type is resolved by NAME
+     * (via {@link Class#forName}) rather than a class literal, so probing a method whose parameter type is
+     * itself absent on this server (e.g. {@code NamespacedKey} below 1.12) simply reports absent instead of
+     * failing class-init.
+     */
+    private static boolean methodPresent(
+            @NotNull Class<?> owner, @NotNull String name, @NotNull String paramClassName) {
+        try {
+            owner.getMethod(name, Class.forName(paramClassName));
+            return true;
+        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError absent) {
+            return false;
+        }
     }
 }

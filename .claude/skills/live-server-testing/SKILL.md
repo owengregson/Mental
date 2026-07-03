@@ -82,6 +82,51 @@ Paper stays byte-identical.
   boundary-straddle / dispatch-tick-pearl belt, and the smoke pins the
   same-region check is consulted and returns true.
 
+## FakePlayer on legacy (1.9.4–1.16.5 — the 2026-07-02 backport)
+
+The FakePlayer NMS bootstrap has a legacy branch, boot-selected by versioned
+packages (`net.minecraft.server.<rev>` / `org.bukkit.craftbukkit.<rev>`,
+`ReflectionRemapper.noop()` — spigot names ARE the runtime names pre-1.17). All
+per-revision NMS shapes are javap-pinned in
+`docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md` — read it,
+don't guess. The whole legacy backport is documented in
+`docs/superpowers/plans/2026-07-02-mental-legacy-backport.md`.
+
+- **Synchronous join below the chunk-gated async path.** On 1.15.2+ join is
+  async/chunk-gated (`onPlayerJoinFinish(EntityPlayer, WorldServer, String)`);
+  1.9.4–1.13.2 register synchronously (`onPlayerJoin(EntityPlayer, String)`,
+  `PlayerInteractManager(World)` not `(WorldServer)`). Spawn/join is driven
+  synchronously and the suite waits ~5 ticks, same as modern.
+- **NMS `EntityHuman.attack(Entity)` for melee — NOT `LivingEntity#attack`.**
+  Bukkit `HumanEntity.attack` is absent on all 7; `LivingEntity#attack` exists
+  only 1.15.2+. Below that the fake attacks via the NMS `attack` method (spigot
+  name is literally `attack` every revision). The generic Bukkit
+  `LivingEntity#attack` routes the generic hurt path and silently deals NO damage
+  for a clientless player — a vacuous pass trap.
+- **No motion integration pre-1.11 (the boot-tier wedge, now the 8 skips).**
+  Clientless victims read `isOnGround() == false` on 1.9/1.10 NMS even while
+  Mental delivered the correct grounded value — the server does not integrate a
+  connectionless player's motion before 1.11, so trajectory/flight tests cannot
+  fly the victim. Those 8 assertions are **loud first-class skips** on 1.9.4/1.10.2
+  (`context.note`, visible in the log), never silent passes. The knock VALUES are
+  fully pinned there — the skip is a harness limit, not a gameplay one.
+- **Position-derived ground truth, not the `isOnGround()` flag.** The suite's
+  grounded expectation is keyed on physical truth — the block under the feet plus a
+  settled velocity, the SAME read production uses (`GroundDistance` block-geometry
+  fallback; bottom-slab over-estimate is documented) — because the flag proved to
+  LIE on 1.9/1.10. The flag is kept only as a divergence diagnostic (zero
+  divergence on modern → no pin changes).
+- **No PacketEvents user, no echo (the wire blind spot).** Fake players inject no
+  PE user and void all outbound traffic, so they never round-trip the
+  transaction/PING probe and never carry a wire burst — the fast path's WIRE layer
+  is unverifiable in the matrix (event-level behaviour and the send-path encode are
+  live-pinned; wire proof is legacy-lab + real clients, out-of-band).
+- **Per-version server-behaviour bugs live here (era-accuracy bar).** e.g. 1.15.2
+  fires `ProjectileHitEvent` AFTER the projectile's own damage (opposite of
+  1.16.5), so an invuln gate reading live `noDamageTicks` misfired — fixed by
+  reading the frozen `PlayerView` (pre-hit by construction on every version).
+  Decompile-cite, don't guess.
+
 ## Suite rules
 
 - Wait in GAME ticks (`context.awaitTicks`), never wall time; stamp event

@@ -5,12 +5,12 @@
 Mental brings back the way PvP used to feel — 1.7/1.8 knockback, real combos, fishing-rod hits and snowball trades — while registering hits *faster* than vanilla and levelling the field for players on higher ping.
 
 [![Release](https://img.shields.io/github/v/release/owengregson/Mental?style=flat-square&label=release&color=brightgreen)](../../releases)
-[![Paper](https://img.shields.io/badge/Paper-1.17.1%20→%2026.x-blue?style=flat-square)](https://papermc.io/)
+[![Paper](https://img.shields.io/badge/Paper-1.9.4%20→%2026.x-blue?style=flat-square)](https://papermc.io/)
 [![Folia](https://img.shields.io/badge/Folia-supported-purple?style=flat-square)](https://github.com/PaperMC/Folia)
 [![Java](https://img.shields.io/badge/Java-17+-orange?style=flat-square)](https://adoptium.net/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-> **Stable release.** Mental is out of beta — verified across the full Paper 1.17.1 → 26.x range and on Folia, with a live integration matrix on every commit. Drop it in and play.
+> **Stable release.** Mental is out of beta — verified across the full Paper 1.9.4 → 26.x range and on Folia, with a live integration matrix on every commit. Drop it in and play.
 
 ---
 
@@ -43,11 +43,27 @@ Pick one in-game under **`/mental` → Knockback**, or set `knockback.profile` i
 
 | | |
 | --- | --- |
-| **Server** | Paper 1.17.1 → 26.x · Folia 1.19.4+ |
-| **Java** | 17 or newer |
+| **Server** | Paper 1.9.4 → 26.x · Folia 1.19.4+ |
+| **Java** | 17 or newer — **required**, including on legacy servers (see below) |
 | **Dependencies** | None — Mental is a self-contained 1.8 combat suite. OldCombatMechanics is optional. |
 
 One universal jar runs the whole version range.
+
+**Running a legacy server (1.9.4–1.16.5)?** Mental ships Java 17 classfiles, so the server itself must run on **Java 17 or newer** — the same JVM that loads the plugin, not just your own machine. Paper 1.9.4–1.12.2 boot on Java 17 with no extra flags; **Paper 1.13.2, 1.15.2 and 1.16.5** need `-DPaper.IgnoreJavaVersion=true` added to the server's own JVM arguments (those builds carry a soft Java-version guard that this flag bypasses). **Paper 1.14.4 is the one gap in the range** — its terminal build hard-caps at Java 13 with no bypass, so a Java-17 plugin cannot load on any 1.14.4 server on a modern JVM; every other 1.9–1.16 version is covered.
+
+### Per-version coverage
+
+Every supported version runs a live suite on a real Paper server in the release gate, fresh-nonce verified on each build:
+
+| Version | Coverage |
+| --- | --- |
+| **1.11.2 – 1.16.5** | Full era suite |
+| **1.17.1 → 26.x** | Full era suite |
+| **1.9.4, 1.10.2** | Full era suite ¹ |
+| **Folia 1.19.4+** | Boot suite + same-region combat smoke |
+| ~~1.14.4~~ | Not supported (Java-13 hard cap) |
+
+¹ On 1.9.4 and 1.10.2 the suite runs in full but explicitly **skips eight trajectory/flight assertions** (loud in the log, never silent): a clientless test player's motion is not server-integrated before 1.11, so the harness cannot fly a connectionless victim to measure its arc. The knockback **values** are fully pinned on both versions — the skips are a test-harness limit, not a gameplay one, and real clients are unaffected. Additionally, **1.9.4 alone** has no thrown-projectile knockback (snowball, egg, ender-pearl): the `ProjectileHitEvent#getHitEntity` API used to attribute the hit to its victim is absent there. Arrow and Punch-enchant knockback work on every legacy version.
 
 ## Installation
 
@@ -159,7 +175,7 @@ Mental is a multi-module Gradle build:
 | `compat-brigadier` | Native command registration, loaded only on 1.20.6+ |
 | `tester` | The in-server integration test harness |
 
-`core` compiles against the oldest supported API (1.17), so the common path is binary-safe everywhere; anything newer lives in a `compat-*` module behind runtime feature detection. The two binary breaks in the range (the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames) are absorbed by small boot-time resolvers.
+`core` compiles against the Paper 1.17.1 API floor, so the common path is binary-safe across the modern range; anything newer lives in a `compat-*` module behind runtime feature detection. Support reaches down to Paper 1.9.4 at *runtime* — every API absent below the 1.17.1 compile floor is reached through a boot-time resolver that picks the era-correct fallback and prints its choice in the boot report (the same pattern that absorbs the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames). Legacy material and text names are normalised once at the platform seam, so the kernel's vocabulary stays modern and version-blind.
 
 Deeper reading: [docs/fast-path.md](docs/fast-path.md) (packet → knockback pipeline), [docs/legacy-combat.md](docs/legacy-combat.md) (what "1.7.10 combat" means precisely), [docs/knockback-profiles.md](docs/knockback-profiles.md) (presets, provenance, the divisor↔multiplier porting hazard), [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
 

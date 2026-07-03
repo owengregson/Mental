@@ -13,6 +13,7 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -20,6 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import org.bukkit.Bukkit;
@@ -36,19 +39,52 @@ import xyz.jpenilla.reflectionremapper.ReflectionRemapper;
 
 /**
  * A synthetic player built straight onto the server internals — ported from
- * BukkitOldCombatMechanics' battle-tested FakePlayer and trimmed to the
- * 1.17+ window (no legacy 1.9/1.12 paths). Reflection names are routed
- * through reflection-remapper: identity on Mojang-mapped runtimes (1.20.5+),
- * mapped via the Paper jar's reobf data below that.
+ * BukkitOldCombatMechanics' battle-tested FakePlayer. Two bootstrap branches
+ * share one class:
+ *
+ * <ul>
+ *   <li><b>Modern (1.17+):</b> NMS lives in Mojang packages
+ *       ({@code net.minecraft.server.level.ServerPlayer}); reflection names
+ *       route through reflection-remapper — identity on Mojang-mapped runtimes
+ *       (1.20.5+), mapped via the Paper jar's reobf data on 1.17–1.20.4.</li>
+ *   <li><b>Legacy (pre-1.17):</b> NMS lives in the versioned package
+ *       {@code net.minecraft.server.v1_16_R3.*} and the spigot names ARE the
+ *       runtime names — the remapper is {@link ReflectionRemapper#noop()} and
+ *       every class/field/method is resolved by its versioned name straight
+ *       off the shape pack ({@code docs/superpowers/research/2026-07-02-legacy-
+ *       fakeplayer-nms-shapes.md}). Selected by
+ *       {@link #detectLegacyPackage()}: a versioned CraftBukkit package whose
+ *       matching versioned NMS {@code MinecraftServer} class actually loads
+ *       (which excludes 1.17–1.20.4, versioned CB but Mojang-package NMS).</li>
+ * </ul>
  *
  * <p>Per-instance NMS lookups are fine here: fake players are created a
  * handful of times per suite, not on any hot path.</p>
  */
 public final class FakePlayer {
 
+    /** {@code org.bukkit.craftbukkit.v1_16_R3.CraftServer} → {@code v1_16_R3}. */
+    private static final Pattern CRAFTBUKKIT_VERSION =
+            Pattern.compile("org\\.bukkit\\.craftbukkit\\.(v\\d+_\\d+_R\\d+)\\.");
+
+    /** {@code ChannelPromise.isVoid()} is newer Netty — absent on 1.9.4/1.10.2's bundled Netty. */
+    private static final boolean NETTY_HAS_IS_VOID = probeNettyIsVoid();
+
+    private static boolean probeNettyIsVoid() {
+        try {
+            ChannelPromise.class.getMethod("isVoid");
+            return true;
+        } catch (NoSuchMethodException oldNetty) {
+            return false;
+        }
+    }
+
     private final JavaPlugin plugin;
     private final Scheduling scheduling;
     private final ReflectionRemapper remapper;
+    /** The versioned NMS package on a pre-1.17 server, else {@code null}. */
+    private final String legacyPackage;
+    private final boolean legacy;
     private final UUID uuid = UUID.randomUUID();
     private final String name = uuid.toString().substring(0, 16);
 
@@ -63,7 +99,14 @@ public final class FakePlayer {
     public FakePlayer(@NotNull JavaPlugin plugin, @NotNull Scheduling scheduling) {
         this.plugin = plugin;
         this.scheduling = scheduling;
-        this.remapper = createRemapper(plugin);
+        this.legacyPackage = detectLegacyPackage();
+        this.legacy = legacyPackage != null;
+        // Pre-1.17 spigot names are the runtime names; skip the (doomed, noisy)
+        // reobf-mapping parse entirely. Modern keeps its remapper resolution.
+        this.remapper = legacy ? ReflectionRemapper.noop() : createRemapper(plugin);
+        if (legacy) {
+            plugin.getLogger().info("[fake] legacy NMS bootstrap on " + legacyPackage);
+        }
     }
 
     public @NotNull UUID uuid() {
@@ -82,6 +125,19 @@ public final class FakePlayer {
     }
 
     public void attack(@NotNull Entity target) {
+        // On legacy, Bukkit LivingEntity#attack routes through
+        // CraftLivingEntity.attack → EntityLiving.attackEntity (the GENERIC hurt
+        // path), NOT EntityHuman.attack — so a fake PLAYER attacker never runs
+        // the player melee (base knockback + the inline send-then-restore that
+        // fires the PlayerVelocityEvent the delivery desk awaits), and the hit
+        // silently no-ops. Call the NMS player melee EntityHuman.attack(Entity)
+        // directly on every legacy revision (the shape pack's documented path).
+        // The modern path keeps the Bukkit call — 1.17+ routes it to the player
+        // attack, and the modern full suites prove it.
+        if (legacy) {
+            attackLegacyNms(target);
+            return;
+        }
         player().attack(target);
     }
 
@@ -103,6 +159,10 @@ public final class FakePlayer {
      * Owning thread only.
      */
     public void setMotion(double x, double y, double z) {
+        if (legacy) {
+            setMotionLegacy(x, y, z);
+            return;
+        }
         try {
             Class<?> entityClass = nmsClass("net.minecraft.world.entity.Entity");
             Method setter = Reflect.methodAssignable(entityClass,
@@ -124,6 +184,10 @@ public final class FakePlayer {
 
     /** Must run on the global/main thread. */
     public void spawn(@NotNull Location location) throws ReflectiveOperationException {
+        if (legacy) {
+            spawnLegacy(location);
+            return;
+        }
         Object worldServer = handleOf(location.getWorld());
         Object minecraftServer = minecraftServer();
         Object gameProfile = createGameProfile();
@@ -216,7 +280,9 @@ public final class FakePlayer {
         // which is an uncaught region-tick failure that HARD-CRASHES the region
         // (not catchable here — it throws on a later tick). So on Folia we let the
         // kick's disconnect be the single removal path.
-        if (!"folia".equals(scheduling.describe())) {
+        if (legacy) {
+            removeLegacyDirect();
+        } else if (!"folia".equals(scheduling.describe())) {
             try {
                 Object playerList = playerList(minecraftServer());
                 Method remove = Reflect.methodAssignable(playerList.getClass(),
@@ -359,32 +425,7 @@ public final class FakePlayer {
                 remapper.remapFieldName(packetFlowClass, "SERVERBOUND"), "SERVERBOUND");
         this.connection = connectionClass.getConstructor(packetFlowClass).newInstance(packetFlow);
 
-        EmbeddedChannel channel = new EmbeddedChannel(new ChannelInboundHandlerAdapter());
-        // Swallow ALL outbound traffic before it reaches the embedded
-        // channel's internal buffer. EmbeddedChannel is a single-threaded
-        // test construct; the live server writes to player connections from
-        // several threads (1.19/1.20's PlayerChunkLoader streams chunks
-        // mid-tick), which corrupts that buffer (null-promise NPEs) and can
-        // wedge the main thread inside the send loop. Packets to a player
-        // with no client go nowhere by definition — complete them instantly.
-        channel.pipeline().addFirst("mental-void-outbound", new ChannelOutboundHandlerAdapter() {
-            @Override
-            public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) {
-                ReferenceCountUtil.release(message);
-                if (promise != null && !promise.isVoid()) {
-                    promise.trySuccess();
-                }
-            }
-
-            @Override
-            public void flush(ChannelHandlerContext context) {}
-        });
-        if (channel.pipeline().get("decoder") == null) {
-            channel.pipeline().addLast("decoder", new ChannelInboundHandlerAdapter());
-        }
-        if (channel.pipeline().get("encoder") == null) {
-            channel.pipeline().addLast("encoder", new ChannelOutboundHandlerAdapter());
-        }
+        EmbeddedChannel channel = newVoidOutboundChannel();
 
         setField(connectionClass, connection, "channel", channel);
         setField(connectionClass, connection, "address", new InetSocketAddress("127.0.0.1", 9999));
@@ -610,6 +651,14 @@ public final class FakePlayer {
      * one this bootstrap created.</p>
      */
     private void clearSpawnInvulnerability() {
+        if (legacy) {
+            // Pre-1.17 spawn protection is EntityPlayer.invulnerableTicks (60
+            // ticks), consulted in damageEntity — a fake victim would be
+            // damage-immune for three seconds otherwise, and no staged hit
+            // would land. (noDamageTicks is cleared per-hit by the suites.)
+            setField(serverPlayer, "invulnerableTicks", 0);
+            return;
+        }
         // Through 1.21.1: a plain timer on ServerPlayer.
         setField(serverPlayer, "spawnInvulnerableTime", 0);
         // 1.21.2 through 1.21.x: client-loaded state on the Player entity.
@@ -656,7 +705,9 @@ public final class FakePlayer {
             }
         }
         try {
-            Method tick = resolveTickMethod(serverPlayer.getClass());
+            Method tick = legacy
+                    ? resolveTickMethodLegacy(serverPlayer.getClass())
+                    : resolveTickMethod(serverPlayer.getClass());
             if (tick != null) {
                 tick.invoke(serverPlayer);
             }
@@ -666,6 +717,30 @@ public final class FakePlayer {
     }
 
     private Method cachedTick;
+
+    /**
+     * The per-tick player update whose physics the era suites depend on. The
+     * modern path calls {@code doTick} (the player tick, ex-{@code playerTick}).
+     * Pre-1.17 the same method is spigot {@code playerTick()} from 1.11.2 up;
+     * on 1.9.4/1.10.2 there is no separate {@code playerTick}, and the Entity
+     * per-tick override {@code m()} on EntityPlayer IS the player tick (its
+     * prologue — invulnerableTicks/noDamageTicks decrement, interact-manager
+     * tick — is byte-for-byte 1.11.2's {@code playerTick}, javap-verified).
+     */
+    private Method resolveTickMethodLegacy(Class<?> serverPlayerClass) {
+        if (cachedTick != null) {
+            return cachedTick;
+        }
+        for (String candidate : new String[] {"playerTick", "m", "A_", "B_", "tick"}) {
+            Method method = Reflect.method(serverPlayerClass, candidate);
+            if (method != null && method.getParameterCount() == 0) {
+                cachedTick = method;
+                plugin.getLogger().info("[fake] legacy tick via " + candidate + "()");
+                return method;
+            }
+        }
+        return null;
+    }
 
     private Method resolveTickMethod(Class<?> serverPlayerClass) {
         if (cachedTick != null) {
@@ -683,6 +758,465 @@ public final class FakePlayer {
             }
         }
         return null;
+    }
+
+    /**
+     * The single-threaded {@link EmbeddedChannel} that voids all outbound
+     * traffic (release + complete promise). Shared by both bootstrap branches:
+     * a clientless player's packets go nowhere by definition, and the live
+     * server writes to connections from several threads (1.19/1.20's
+     * PlayerChunkLoader streams chunks mid-tick), which would corrupt the
+     * embedded buffer (null-promise NPEs) and wedge the main thread inside the
+     * send loop without this.
+     */
+    private EmbeddedChannel newVoidOutboundChannel() {
+        EmbeddedChannel channel = new EmbeddedChannel(new ChannelInboundHandlerAdapter());
+        channel.pipeline().addFirst("mental-void-outbound", new ChannelOutboundHandlerAdapter() {
+            @Override
+            public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) {
+                ReferenceCountUtil.release(message);
+                if (promise == null) {
+                    return;
+                }
+                if (NETTY_HAS_IS_VOID) {
+                    if (!promise.isVoid()) {
+                        promise.trySuccess();
+                    }
+                } else {
+                    // The Netty shipped with 1.9.4/1.10.2 predates
+                    // ChannelPromise.isVoid(); a void promise simply rejects
+                    // trySuccess (the send is already discarded — nothing to
+                    // signal), so complete inside a guard instead of pre-checking.
+                    try {
+                        promise.trySuccess();
+                    } catch (Throwable voidPromise) {
+                        // A void/unsettable promise — no completion to deliver.
+                    }
+                }
+            }
+
+            @Override
+            public void flush(ChannelHandlerContext context) {}
+        });
+        if (channel.pipeline().get("decoder") == null) {
+            channel.pipeline().addLast("decoder", new ChannelInboundHandlerAdapter());
+        }
+        if (channel.pipeline().get("encoder") == null) {
+            channel.pipeline().addLast("encoder", new ChannelOutboundHandlerAdapter());
+        }
+        return channel;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Legacy (pre-1.17) NMS bootstrap — versioned packages, noop remapper */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Resolves the versioned NMS package on a pre-1.17 server, or {@code null}
+     * on a modern one. A versioned CraftBukkit package ({@code v1_16_R3}) is
+     * necessary but not sufficient — 1.17–1.20.4 keep it while NMS moved to
+     * Mojang packages — so the matching versioned NMS {@code MinecraftServer}
+     * must actually load. Pre-1.17: yes (versioned NMS). 1.17–1.20.4: no
+     * (Mojang-package NMS) ⇒ modern path. 1.20.5+: no version token at all.
+     */
+    private static String detectLegacyPackage() {
+        Matcher matcher = CRAFTBUKKIT_VERSION.matcher(Bukkit.getServer().getClass().getName());
+        if (!matcher.find()) {
+            return null;
+        }
+        String token = matcher.group(1);
+        String versioned = "net.minecraft.server." + token;
+        try {
+            Class.forName(versioned + ".MinecraftServer", false,
+                    Bukkit.getServer().getClass().getClassLoader());
+            return versioned;
+        } catch (ClassNotFoundException notLegacy) {
+            return null;
+        }
+    }
+
+    private Class<?> legacyClass(@NotNull String simpleName) throws ClassNotFoundException {
+        return Class.forName(legacyPackage + "." + simpleName, false,
+                Bukkit.getServer().getClass().getClassLoader());
+    }
+
+    private Class<?> legacyClassOrNull(@NotNull String simpleName) {
+        try {
+            return legacyClass(simpleName);
+        } catch (ClassNotFoundException absent) {
+            return null;
+        }
+    }
+
+    /** Must run on the global/main thread. */
+    private void spawnLegacy(@NotNull Location location) throws ReflectiveOperationException {
+        Object worldServer = handleOf(location.getWorld());
+        Object minecraftServer = minecraftServer();
+        Object gameProfile = createGameProfile();
+
+        this.serverPlayer = createServerPlayerLegacy(minecraftServer, worldServer, gameProfile);
+        setupConnectionLegacy(minecraftServer);
+        setGameModeSurvivalLegacy();
+        setPositionLegacy(location);
+        fireAsyncPreLogin();
+
+        Object playerList = playerListLegacy(minecraftServer);
+        if (legacyAsyncJoin()) {
+            // Paper 1.14+ (here 1.15.2/1.16.5) split player login across an async
+            // chunk load: PlayerList.a chunk-gates the join on
+            // getChunkAtAsynchronously(...).thenAccept(postChunkLoadJoin), which
+            // NEVER completes for a ticketless, clientless fake player (the join
+            // chunk has no loader), so a() would hang the player in limbo forever
+            // (javap-verified on v1_15_R1/v1_16_R3.PlayerList). Join SYNCHRONOUSLY
+            // instead — the player is already positioned in the loaded arena
+            // chunk: add it to the world as a live entity (WorldServer.addPlayerJoin,
+            // the player-specific add — the generic addEntity refuses players) and
+            // register it directly into the Bukkit player list.
+            plugin.getLogger().info("[fake] legacy async-login revision — joining synchronously");
+            addPlayerToWorldLegacy(worldServer);
+            registerChunkLoaderLegacy(worldServer);
+            registerInPlayerListLegacy(minecraftServer);
+            this.placedViaPlayerList = false;
+        } else {
+            // 1.9.4–1.13.2: PlayerList.a(NetworkManager, EntityPlayer) is a
+            // synchronous login — it fires PlayerJoinEvent (where Mental creates
+            // the combat session) and adds the player to the world.
+            Class<?> networkManagerClass = legacyClass("NetworkManager");
+            Class<?> entityPlayerClass = legacyClass("EntityPlayer");
+            Method register = playerList.getClass().getMethod("a", networkManagerClass, entityPlayerClass);
+            plugin.getLogger().info("[fake] legacy sync join via PlayerList.a(NetworkManager, EntityPlayer)");
+            register.invoke(playerList, connection, serverPlayer);
+            this.placedViaPlayerList = Bukkit.getPlayer(uuid) != null;
+            if (!placedViaPlayerList) {
+                plugin.getLogger().info("[fake] PlayerList.a did not register — registering directly");
+                addPlayerToWorldLegacy(worldServer);
+                registerInPlayerListLegacy(minecraftServer);
+            }
+        }
+
+        this.bukkitPlayer = Bukkit.getPlayer(uuid);
+        if (bukkitPlayer == null) {
+            throw new IllegalStateException("Bukkit player " + uuid + " not found after legacy placement");
+        }
+        // Relocate to the arena, then clear the 60-tick invulnerableTicks spawn
+        // shield LAST so no join step leaves it re-armed (it gates damageEntity —
+        // a shielded victim takes no staged hit).
+        if ("folia".equals(scheduling.describe())) {
+            bukkitPlayer.teleportAsync(location);
+        } else {
+            bukkitPlayer.teleport(location);
+        }
+        clearSpawnInvulnerability();
+
+        // The synchronous PlayerList.a fires PlayerJoinEvent itself; the manual
+        // (async-revision + fallback) path does not — announce it there, mirroring
+        // the modern direct-registration fallback.
+        if (!placedViaPlayerList) {
+            try {
+                Bukkit.getPluginManager().callEvent(
+                        new PlayerJoinEvent(bukkitPlayer, name + " joined the game"));
+            } catch (Throwable ignored) {
+                // Direct join listeners still ran on the versions that accept this ctor.
+            }
+        }
+
+        this.tickTask = scheduling.repeatOn(bukkitPlayer, 1L, 1L, this::tickServerPlayer, () -> {});
+    }
+
+    /**
+     * Paper split login across an async chunk load from 1.14 up: the private
+     * {@code postChunkLoadJoin} on the PlayerList class is its marker. Probed on
+     * PlayerList itself (not the DedicatedPlayerList subclass the server returns,
+     * nor via getMethods() — the method is private and declared on the base).
+     */
+    private boolean legacyAsyncJoin() {
+        try {
+            for (Method method : legacyClass("PlayerList").getDeclaredMethods()) {
+                if (method.getName().equals("postChunkLoadJoin")) {
+                    return true;
+                }
+            }
+        } catch (ClassNotFoundException impossible) {
+            // PlayerList always resolves on a legacy server.
+        }
+        return false;
+    }
+
+    private Object createServerPlayerLegacy(Object minecraftServer, Object worldServer, Object gameProfile)
+            throws ReflectiveOperationException {
+        Class<?> entityPlayerClass = legacyClass("EntityPlayer");
+        Class<?> minecraftServerClass = legacyClass("MinecraftServer");
+        Class<?> worldServerClass = legacyClass("WorldServer");
+        Class<?> interactManagerClass = legacyClass("PlayerInteractManager");
+        Class<?> profileClass = Class.forName("com.mojang.authlib.GameProfile");
+
+        Object interactManager = newInteractManagerLegacy(interactManagerClass, worldServer);
+        // Uniform 4-arg ctor on every revision:
+        //   EntityPlayer(MinecraftServer, WorldServer, GameProfile, PlayerInteractManager)
+        Constructor<?> constructor = entityPlayerClass.getConstructor(
+                minecraftServerClass, worldServerClass, profileClass, interactManagerClass);
+        return constructor.newInstance(minecraftServer, worldServer, gameProfile, interactManager);
+    }
+
+    /** PlayerInteractManager(World) ≤1.13.2 vs (WorldServer) 1.15.2+; a WorldServer satisfies both. */
+    private Object newInteractManagerLegacy(Class<?> interactManagerClass, Object worldServer)
+            throws ReflectiveOperationException {
+        for (Constructor<?> constructor : interactManagerClass.getConstructors()) {
+            Class<?>[] parameters = constructor.getParameterTypes();
+            if (parameters.length == 1 && parameters[0].isAssignableFrom(worldServer.getClass())) {
+                return constructor.newInstance(worldServer);
+            }
+        }
+        throw new NoSuchMethodException("No 1-arg PlayerInteractManager ctor on " + interactManagerClass);
+    }
+
+    private void setupConnectionLegacy(Object minecraftServer) throws ReflectiveOperationException {
+        Class<?> networkManagerClass = legacyClass("NetworkManager");
+        Class<?> directionClass = legacyClass("EnumProtocolDirection");
+        Object serverbound = Reflect.enumConstant(directionClass, "SERVERBOUND");
+        this.connection = networkManagerClass.getConstructor(directionClass).newInstance(serverbound);
+
+        EmbeddedChannel channel = newVoidOutboundChannel();
+        setField(networkManagerClass, connection, "channel", channel);
+        setSocketAddressLegacy(networkManagerClass);
+
+        Class<?> connectionClass = legacyClass("PlayerConnection");
+        Class<?> minecraftServerClass = legacyClass("MinecraftServer");
+        Class<?> entityPlayerClass = legacyClass("EntityPlayer");
+        // PlayerConnection(MinecraftServer, NetworkManager, EntityPlayer) — uniform.
+        Object listener = connectionClass.getConstructor(
+                        minecraftServerClass, networkManagerClass, entityPlayerClass)
+                .newInstance(minecraftServer, connection, serverPlayer);
+        this.gameListener = listener;
+
+        setField(entityPlayerClass, serverPlayer, "playerConnection", listener);
+
+        Class<?> packetListenerClass = legacyClass("PacketListener");
+        Method setPacketListener = networkManagerClass.getMethod("setPacketListener", packetListenerClass);
+        setPacketListener.invoke(connection, listener);
+    }
+
+    /** The SocketAddress field: {@code socketAddress} (1.13.2+) or {@code l} (≤1.12.2). */
+    private void setSocketAddressLegacy(Class<?> networkManagerClass) {
+        SocketAddress address = new InetSocketAddress("127.0.0.1", 9999);
+        for (String candidate : new String[] {"socketAddress", "l"}) {
+            Field field = Reflect.field(networkManagerClass, candidate);
+            if (field != null && SocketAddress.class.isAssignableFrom(field.getType())) {
+                try {
+                    field.set(connection, address);
+                    return;
+                } catch (Throwable next) {
+                    // Try the next candidate / the type scan below.
+                }
+            }
+        }
+        for (Field field : networkManagerClass.getDeclaredFields()) {
+            // Exact type match excludes the InetSocketAddress virtualHost field.
+            if (field.getType() == SocketAddress.class) {
+                field.setAccessible(true);
+                try {
+                    field.set(connection, address);
+                    return;
+                } catch (Throwable ignored) {
+                    // Best effort — a() logs the address but tolerates null.
+                }
+            }
+        }
+    }
+
+    private void setGameModeSurvivalLegacy() {
+        try {
+            // EnumGamemode from 1.11.2; WorldSettings$EnumGamemode on 1.9.4/1.10.2.
+            Class<?> gamemodeClass = legacyClassOrNull("EnumGamemode");
+            if (gamemodeClass == null) {
+                gamemodeClass = legacyClass("WorldSettings$EnumGamemode");
+            }
+            Object survival = Reflect.enumConstant(gamemodeClass, "SURVIVAL");
+            // EntityPlayer.a(EnumGamemode) sets the interact-manager gamemode.
+            Method setGameMode = Reflect.methodAssignable(serverPlayer.getClass(), "a", gamemodeClass);
+            if (setGameMode != null) {
+                setGameMode.invoke(serverPlayer, survival);
+            }
+        } catch (Throwable ignored) {
+            // Best effort — PlayerList.a sets the server default gamemode (survival) anyway.
+        }
+    }
+
+    private void setPositionLegacy(Location location) throws ReflectiveOperationException {
+        Method setPosition = legacyClass("Entity")
+                .getMethod("setPosition", double.class, double.class, double.class);
+        setPosition.invoke(serverPlayer, location.getX(), location.getY(), location.getZ());
+    }
+
+    private Object playerListLegacy(Object minecraftServer) throws ReflectiveOperationException {
+        Method getter = Reflect.method(legacyClass("MinecraftServer"), "getPlayerList");
+        if (getter == null) {
+            throw new NoSuchMethodException("getPlayerList not resolvable on legacy MinecraftServer");
+        }
+        return getter.invoke(minecraftServer);
+    }
+
+    /** Direct registration fallback: the stable legacy PlayerList field/method names. */
+    @SuppressWarnings("unchecked")
+    private void registerInPlayerListLegacy(Object minecraftServer) throws ReflectiveOperationException {
+        Object playerList = playerListLegacy(minecraftServer);
+        Class<?> playerListClass = legacyClass("PlayerList");
+
+        Field playersField = Reflect.field(playerListClass, "players");
+        if (playersField != null) {
+            List<Object> players = (List<Object>) playersField.get(playerList);
+            if (!players.contains(serverPlayer)) {
+                players.add(serverPlayer);
+            }
+        }
+        Map<UUID, Object> uuidMap = legacyUuidMap(playerListClass, playerList);
+        if (uuidMap != null) {
+            uuidMap.put(uuid, serverPlayer);
+        }
+        Field byName = Reflect.field(playerListClass, "playersByName");
+        if (byName != null) {
+            Map<String, Object> map = (Map<String, Object>) byName.get(playerList);
+            map.put(name.toLowerCase(Locale.ROOT), serverPlayer);
+        }
+    }
+
+    /** The UUID→EntityPlayer map: getUUIDMap() where present, else the stable field {@code j}. */
+    @SuppressWarnings("unchecked")
+    private Map<UUID, Object> legacyUuidMap(Class<?> playerListClass, Object playerList) {
+        Method getUuidMap = Reflect.method(playerListClass, "getUUIDMap");
+        if (getUuidMap != null) {
+            try {
+                return (Map<UUID, Object>) getUuidMap.invoke(playerList);
+            } catch (ReflectiveOperationException ignored) {
+                // Fall through to the field.
+            }
+        }
+        Field field = Reflect.field(playerListClass, "j");
+        if (field != null && Map.class.isAssignableFrom(field.getType())) {
+            try {
+                return (Map<UUID, Object>) field.get(playerList);
+            } catch (ReflectiveOperationException ignored) {
+                // No map available.
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Adds the player to the world as a live, tickable, damageable entity.
+     * {@code addPlayerJoin(EntityPlayer)} is the player-specific add on 1.15.2/
+     * 1.16.5 (the generic {@code addEntity} refuses EntityHuman subclasses, so a
+     * player added that way is never a live combat entity — the trap the first
+     * legacy pass fell into). On 1.9.4–1.13.2 the synchronous PlayerList.a
+     * already added the player; this only runs on that fallback, where the
+     * generic {@code addEntity} is the entry point.
+     */
+    /**
+     * Makes the fake player a CHUNK LOADER on 1.15.2/1.16.5, so its chunk stays
+     * entity-ticking. {@code addPlayerJoin} registers only the entity tracker
+     * ({@code registerEntity}), not the distance-map player ticket the real
+     * (async) login adds — and the melee delivery desk AWAITS the
+     * {@code PlayerVelocityEvent} the tracker fires only for a tracked entity in
+     * a ticking chunk. Without this the event fires sporadically and melee knocks
+     * are dropped (projectile/fishing knocks use a direct setVelocity and were
+     * unaffected). Path:
+     * {@code WorldServer.getChunkProvider().playerChunkMap.addPlayerToDistanceMaps}.
+     */
+    private void registerChunkLoaderLegacy(Object worldServer) {
+        try {
+            Object chunkProvider = null;
+            for (Method method : worldServer.getClass().getMethods()) {
+                if (!method.getName().equals("getChunkProvider") || method.getParameterCount() != 0) {
+                    continue;
+                }
+                Object candidate = method.invoke(worldServer);
+                if (candidate != null && Reflect.field(candidate.getClass(), "playerChunkMap") != null) {
+                    chunkProvider = candidate;
+                    break;
+                }
+            }
+            if (chunkProvider == null) {
+                return;
+            }
+            Object playerChunkMap = Reflect.field(chunkProvider.getClass(), "playerChunkMap").get(chunkProvider);
+            Method addToDistanceMaps = Reflect.methodAssignable(
+                    playerChunkMap.getClass(), "addPlayerToDistanceMaps", serverPlayer.getClass());
+            if (addToDistanceMaps != null) {
+                addToDistanceMaps.invoke(playerChunkMap, serverPlayer);
+                plugin.getLogger().info("[fake] legacy chunk-loader registered (distance maps)");
+            }
+        } catch (Throwable failure) {
+            plugin.getLogger().warning("[fake] legacy chunk-loader registration failed: " + failure);
+        }
+    }
+
+    private void addPlayerToWorldLegacy(Object worldServer) {
+        for (String candidate : new String[] {"addPlayerJoin", "addEntity", "addFreshEntity"}) {
+            Method method = Reflect.methodAssignable(
+                    worldServer.getClass(), candidate, serverPlayer.getClass());
+            if (method != null) {
+                try {
+                    method.invoke(worldServer, serverPlayer);
+                    plugin.getLogger().info("[fake] legacy world-add via " + candidate);
+                    return;
+                } catch (Throwable next) {
+                    // Try the next candidate.
+                }
+            }
+        }
+        plugin.getLogger().warning("[fake] could not add legacy fake player to the world directly");
+    }
+
+    private void setMotionLegacy(double x, double y, double z) {
+        try {
+            Class<?> entityClass = legacyClass("Entity");
+            // 1.15.2+: setMot(double,double,double); ≤1.13.2: public motX/motY/motZ.
+            Method setMot = Reflect.methodAssignable(
+                    entityClass, "setMot", double.class, double.class, double.class);
+            if (setMot != null) {
+                setMot.invoke(serverPlayer, x, y, z);
+                return;
+            }
+            Field motX = Reflect.field(entityClass, "motX");
+            Field motY = Reflect.field(entityClass, "motY");
+            Field motZ = Reflect.field(entityClass, "motZ");
+            if (motX != null && motY != null && motZ != null) {
+                motX.setDouble(serverPlayer, x);
+                motY.setDouble(serverPlayer, y);
+                motZ.setDouble(serverPlayer, z);
+                return;
+            }
+            throw new NoSuchMethodException("no legacy motion accessor (setMot / motX)");
+        } catch (ReflectiveOperationException failure) {
+            plugin.getLogger().warning("[fake] legacy setMotion failed: " + failure);
+        }
+    }
+
+    /** Pre-1.15.2 melee: NMS EntityHuman.attack(Entity) on the victim's handle. */
+    private void attackLegacyNms(@NotNull Entity target) {
+        try {
+            Object targetHandle = handleOf(target);
+            Class<?> humanClass = legacyClass("EntityHuman");
+            Class<?> entityClass = legacyClass("Entity");
+            Method attack = humanClass.getMethod("attack", entityClass);
+            attack.invoke(serverPlayer, targetHandle);
+        } catch (ReflectiveOperationException failure) {
+            plugin.getLogger().warning("[fake] legacy NMS attack failed: " + failure);
+        }
+    }
+
+    /** Legacy removal: PlayerList.disconnect(EntityPlayer) — the full clean deregister. */
+    private void removeLegacyDirect() {
+        try {
+            Object playerList = playerListLegacy(minecraftServer());
+            Method disconnect = Reflect.methodAssignable(
+                    legacyClass("PlayerList"), "disconnect", serverPlayer.getClass());
+            if (disconnect != null) {
+                disconnect.invoke(playerList, serverPlayer);
+            }
+        } catch (Throwable ignored) {
+            // Already removed by the kick path, or the player never fully registered.
+        }
     }
 
     /* ------------------------------------------------------------------ */

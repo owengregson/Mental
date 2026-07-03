@@ -19,6 +19,7 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.GroundFsm;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.coexist.OcmBinding;
@@ -297,10 +298,17 @@ public final class SessionService implements Listener, SessionAccess {
                 gravity, Decay.JUMP_IMPULSE, jumpBoostAmplifier(player),
                 player.isSprinting(), player.getGameMode() == GameMode.CREATIVE, player.getWorld().getPVP(),
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
-                knockbackResistance, ocmOwnsMelee, profile, player.getPing(), kinematics);
+                knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics);
     }
 
     private static String blockUnderFeet(Player player, Location location) {
+        // Fed straight into GroundFriction.of without LegacyMaterialNames.modernize on
+        // purpose: the only blocks the friction table names — ICE, PACKED_ICE,
+        // FROSTED_ICE, SLIME_BLOCK — carry the SAME enum-constant name on every
+        // supported version (verified on 1.9.4/1.12.2), and BLUE_ICE simply does not
+        // exist pre-1.13 (it falls through the table's default there, correctly). So
+        // this feed is an exact identity across the flattening — normalizing it would
+        // only imply block names need translation, which they do not.
         return player.getWorld().getBlockAt(
                 location.getBlockX(), location.getBlockY() - 1, location.getBlockZ())
                 .getType().name();

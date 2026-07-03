@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.zip.ZipFile
 import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.service.DownloadsAPIService
 
@@ -27,6 +28,8 @@ class SupportEntry(
     val jdk: Int,
     val platform: String,
     val ci: String,
+    val suites: String,
+    val serverFlags: List<String>,
 )
 
 val supportMatrixFile = rootProject.layout.projectDirectory.file("support-matrix.json").asFile
@@ -46,6 +49,11 @@ val supportEntries: List<SupportEntry> =
             jdk = (entry["jdk"] as Number).toInt(),
             platform = entry["platform"] as String,
             ci = entry["ci"] as String,
+            // The suite tier the tester runs on this version (full | boot | combat-smoke); the boot tier
+            // is the legacy-backport classload/boot-safety suite. serverFlags are extra JVM args the legacy
+            // Paper builds need (e.g. -DPaper.IgnoreJavaVersion=true); absent ⇒ none.
+            suites = entry["suites"] as String,
+            serverFlags = (entry["serverFlags"] as? List<String>) ?: emptyList(),
         )
     }
 
@@ -64,6 +72,13 @@ dependencies {
     compileOnly(libs.jetbrains.annotations)
     implementation(libs.packetevents.spigot)
     implementation(libs.bstats.bukkit)
+    // Adventure shaded into the jar (relocated below) so its legacy-string
+    // serializer exists on servers older than Paper 1.16.5, where net.kyori is
+    // absent. The BOM pins every module to the floor-API version (4.9.3); the
+    // jetbrains-annotations it drags in transitively are compile-time only.
+    implementation(platform(libs.adventure.bom))
+    implementation(libs.adventure.api) { exclude(group = "org.jetbrains", module = "annotations") }
+    implementation(libs.adventure.serializer.legacy) { exclude(group = "org.jetbrains", module = "annotations") }
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -97,10 +112,101 @@ tasks.shadowJar {
     relocate("com.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.api")
     relocate("io.github.retrooper.packetevents", "me.vexmc.mental.lib.packetevents.impl")
     relocate("org.bstats", "me.vexmc.mental.lib.bstats")
+    // Relocate the shaded Adventure (adventure-api + adventure-key + examination,
+    // all under net.kyori) so it never collides with — or falls back to — Paper's
+    // native Adventure. Every net.kyori reference in core resolves to this copy;
+    // no Component crosses a Bukkit boundary (TextPort is the only sink), so on
+    // modern servers this copy is inert and on legacy it is the only one present.
+    relocate("net.kyori", "me.vexmc.mental.lib.adventure")
 }
 
 tasks.build {
     dependsOn(tasks.shadowJar)
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ *  Relocation-rot gate (review item F-BP3).
+ *
+ *  The legacy backport shades Adventure (net.kyori.*) into the jar RELOCATED to
+ *  me.vexmc.mental.lib.adventure, so its legacy-string serializer exists on
+ *  servers below Paper 1.16.5 (where net.kyori is absent) while never colliding
+ *  with — or falling back to — Paper's native Adventure on modern servers. That
+ *  whole safety property rests on the relocation holding: an un-relocated
+ *  net.kyori reference would bind to Paper's own Adventure on modern servers
+ *  (silent behaviour drift) and NoClassDefFoundError on legacy (a hard crash on
+ *  the versions the shade exists to serve). The "no Component crosses a Bukkit
+ *  boundary; every net.kyori is the relocated copy" invariant is grep-proven at
+ *  authoring time; this task makes it a build gate so it cannot rot unnoticed.
+ *
+ *  Two scans over the produced shadowJar (both, per F-BP3):
+ *   1. ENTRY NAMES (mandatory) — no jar entry may live under net/kyori/: an
+ *      un-relocated Adventure class or resource file. Cheap; catches a whole
+ *      package slipping the relocator.
+ *   2. CLASS REFERENCES (the stronger, constant-pool form) — no .class entry
+ *      OUTSIDE the relocated prefix (me/vexmc/mental/lib/) may contain the token
+ *      "net/kyori" (a type reference) or "net.kyori" (a reflection/service
+ *      string). Class bytes are read as ISO-8859-1 (a lossless byte↔char map), so
+ *      a substring match is exactly a constant-pool byte-sequence match. This
+ *      catches a single stray reference the entry-name scan would miss.
+ *
+ *  A clean shade has ZERO of either (Mental references Adventure only through the
+ *  relocated copy — TextPort is the sole sink and every reference is rewritten to
+ *  me.vexmc.mental.lib.adventure). Any hit fails the build.
+ * ──────────────────────────────────────────────────────────────────────── */
+val verifyRelocation = tasks.register("verifyRelocation") {
+    group = "verification"
+    description = "Fails if any un-relocated net/kyori entry or class reference survives the shade " +
+            "(the shaded Adventure must stay under me.vexmc.mental.lib — review F-BP3)."
+    dependsOn(tasks.shadowJar)
+    val jarFile = tasks.shadowJar.flatMap { it.archiveFile }
+    inputs.file(jarFile)
+    doLast {
+        val relocatedPrefix = "me/vexmc/mental/lib/"
+        val entryViolations = mutableListOf<String>()
+        val refViolations = mutableListOf<String>()
+        ZipFile(jarFile.get().asFile).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                val name = entry.name
+                // Scan 1: no entry may live under the un-relocated net/kyori/ path.
+                if (name.startsWith("net/kyori/")) {
+                    entryViolations.add(name)
+                }
+                // Scan 2: class bytes outside the relocated prefix must not name net.kyori.
+                if (name.endsWith(".class") && !name.startsWith(relocatedPrefix)) {
+                    val text = zip.getInputStream(entry).use { input ->
+                        String(input.readBytes(), Charsets.ISO_8859_1)
+                    }
+                    if (text.contains("net/kyori") || text.contains("net.kyori")) {
+                        refViolations.add(name)
+                    }
+                }
+            }
+        }
+        if (entryViolations.isNotEmpty() || refViolations.isNotEmpty()) {
+            val message = buildString {
+                append("Relocation rot: un-relocated net.kyori survived the shade.\n")
+                if (entryViolations.isNotEmpty()) {
+                    append("  ${entryViolations.size} entry name(s) under net/kyori/:\n")
+                    entryViolations.take(20).forEach { append("    - $it\n") }
+                }
+                if (refViolations.isNotEmpty()) {
+                    append("  ${refViolations.size} class(es) outside $relocatedPrefix referencing net.kyori:\n")
+                    refViolations.take(20).forEach { append("    - $it\n") }
+                }
+                append("The shaded Adventure MUST relocate to me.vexmc.mental.lib.adventure; check the ")
+                append("relocate(\"net.kyori\", …) rule and any net.kyori use that crosses a Bukkit boundary.")
+            }
+            throw GradleException(message)
+        }
+        logger.lifecycle(
+            "[relocation] clean — no un-relocated net.kyori in ${jarFile.get().asFile.name}.")
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyRelocation)
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -138,6 +244,8 @@ fun registerIntegrationServer(
     flavour: String,
     jdk: Int,
     platform: String = "paper",
+    suites: String = "full",
+    serverFlags: List<String> = emptyList(),
 ): Pair<TaskProvider<RunServer>, TaskProvider<Task>> {
     val runDir = rootProject.layout.projectDirectory.dir("run/$runDirName").asFile
     val resultFile = runDir.resolve("plugins/MentalTester/test-results.txt")
@@ -167,8 +275,13 @@ fun registerIntegrationServer(
         // disable.watchdog matters on slow CI runners: a >60s tick stall
         // trips the legacy watchdog, whose forced shutdown can deadlock old
         // servers into a hung process that never writes a test result.
+        // serverFlags carries per-version boot flags from support-matrix.json (the
+        // legacy Paper builds ≥1.13 need -DPaper.IgnoreJavaVersion=true to run on
+        // Java 17); mental.tester.suites selects the tester's suite tier for this
+        // entry (boot ⇒ classload/boot-safety suite only).
         jvmArgs("-Dcom.mojang.eula.agree=true", "-Ddisable.watchdog=true", "-Xmx2G",
-                "-Dmental.tester.nonce=$nonce")
+                "-Dmental.tester.nonce=$nonce", "-Dmental.tester.suites=$suites")
+        jvmArgs(serverFlags)
         javaLauncher.set(javaToolchains.launcherFor {
             languageVersion.set(JavaLanguageVersion.of(jdk))
         })
@@ -185,6 +298,14 @@ fun registerIntegrationServer(
             // Companion plugins must start pristine too — their defaults are
             // part of what the coexistence suite asserts against.
             runDir.resolve("plugins/OldCombatMechanics").deleteRecursively()
+            // Belt-and-suspenders EULA acceptance: modern Paper honours the
+            // -Dcom.mojang.eula.agree property, but the legacy builds are more
+            // reliably satisfied by the eula.txt on disk. Idempotent everywhere.
+            runDir.mkdirs()
+            val eula = runDir.resolve("eula.txt")
+            if (!eula.exists()) {
+                eula.writeText("eula=true\n")
+            }
             val properties = runDir.resolve("server.properties")
             if (!properties.exists()) {
                 runDir.mkdirs()
@@ -252,7 +373,9 @@ fun registerIntegrationServer(
 paperEntries.forEach { entry ->
     val suffix = "_" + entry.version.replace(".", "_")
     val (runTask, checkTask) =
-        registerIntegrationServer(suffix, entry.version, entry.version, emptyList(), "", entry.jdk)
+        registerIntegrationServer(
+            suffix, entry.version, entry.version, emptyList(), "", entry.jdk,
+            suites = entry.suites, serverFlags = entry.serverFlags)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     checkTasks.add(checkTask)
@@ -276,7 +399,8 @@ val foliaCheckTasks = mutableListOf<TaskProvider<Task>>()
 foliaEntries.forEach { entry ->
     val suffix = "Folia_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
-        suffix, entry.version, "folia/${entry.version}", emptyList(), " Folia", entry.jdk, "folia")
+        suffix, entry.version, "folia/${entry.version}", emptyList(), " Folia", entry.jdk, "folia",
+        suites = entry.suites, serverFlags = entry.serverFlags)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     foliaCheckTasks.add(checkTask)
@@ -335,10 +459,16 @@ val stageOcmJar = tasks.register("stageOcmJar") {
 }
 
 val ocmCheckTasks = mutableListOf<TaskProvider<Task>>()
-listOf(paperEntries.first(), paperEntries.last()).distinctBy { it.version }.forEach { entry ->
+// The OCM coexistence gate runs on the FIXED 1.17.1 + 26.1.2 pair — its scope (the OCM ownership split)
+// is unchanged by the legacy backport, so it is pinned by version rather than positionally (the legacy
+// entries re-sorted 1.9.4 to entries[0], which would otherwise pull the floor of this pair down to a
+// boot-tier legacy version OCM does not target).
+val ocmVersions = listOf("1.17.1", "26.1.2")
+paperEntries.filter { it.version in ocmVersions }.distinctBy { it.version }.forEach { entry ->
     val suffix = "Ocm_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
-        suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk)
+        suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk,
+        suites = entry.suites, serverFlags = entry.serverFlags)
     runTask.configure { dependsOn(stageOcmJar) }
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
@@ -347,8 +477,13 @@ listOf(paperEntries.first(), paperEntries.last()).distinctBy { it.version }.forE
 
 tasks.register("integrationTest") {
     group = "mental integration"
-    description = "Runs the suite on the floor and newest supported versions."
-    val floorAndCeiling = setOf(paperEntries.first().version, paperEntries.last().version)
+    description = "Runs the suite on the modern floor and newest supported versions (PR smoke)."
+    // The floor+ceiling PR smoke stays on the FULL-tier range: the modern floor (first non-boot entry,
+    // 1.17.1) + the ceiling (last paper entry). The re-sort put a boot-tier legacy version at
+    // paperEntries.first(), which this smoke deliberately does not select — the legacy boot tier is
+    // covered by integrationTestMatrix, and whether a legacy floor joins the PR lane is a Phase 6 decision.
+    val modernFloor = paperEntries.first { it.suites != "boot" }.version
+    val floorAndCeiling = setOf(modernFloor, paperEntries.last().version)
     dependsOn(checkTasks.filter { provider ->
         floorAndCeiling.any { provider.name.endsWith("_" + it.replace(".", "_")) }
     })

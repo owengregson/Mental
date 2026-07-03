@@ -1,7 +1,7 @@
 name: MentalTester
 version: '${version}'
 main: me.vexmc.mental.tester.MentalTesterPlugin
-api-version: '1.17'
+api-version: '${apiVersion}'
 folia-supported: true
 description: In-server integration test driver for Mental.
 authors: [owengregson]

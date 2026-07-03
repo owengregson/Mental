@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -11,7 +12,14 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
+import me.vexmc.mental.platform.Absorptions;
 import me.vexmc.mental.platform.Capabilities;
+import me.vexmc.mental.platform.Cooldowns;
+import me.vexmc.mental.platform.CritPosture;
+import me.vexmc.mental.platform.HandStates;
+import me.vexmc.mental.platform.PersistentData;
+import me.vexmc.mental.platform.Pings;
+import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
@@ -78,6 +86,7 @@ import me.vexmc.mental.v5.feature.knockback.RodVelocityUnit;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.rim.PacketTap;
 import me.vexmc.mental.v5.rim.ProbeRim;
+import me.vexmc.mental.v5.rim.TransactionProbeRim;
 import me.vexmc.mental.v5.rim.ValveListener;
 import me.vexmc.mental.v5.session.SessionService;
 import me.vexmc.mental.v5.session.ViewBuilder;
@@ -127,8 +136,8 @@ public final class MentalPluginV5 extends JavaPlugin {
     private final DebugLog debug = new DebugLog();
 
     private TickClock clock;
-    private CounterTickClock foliaClock;
-    private TaskHandle foliaClockTask;
+    private CounterTickClock counterClock;
+    private TaskHandle counterClockTask;
 
     private OcmBinding ocmBinding;
     private BukkitRegistrar registrar;
@@ -139,6 +148,9 @@ public final class MentalPluginV5 extends JavaPlugin {
     private SessionService sessions;
     private ConnectionDomains domains;
     private LatencyModel latency;
+    private LatencyCompensationUnit latencyCompensation;
+    /** The effective latency-probe transport for this server version, resolved at parse. */
+    private ProbeStrategy probeTransport = ProbeStrategy.PING;
     private PositionRing positions;
     private HitIds hitIds;
     private AnticheatPolicy anticheatPolicy;
@@ -170,6 +182,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.platformProfile = PlatformProfile.resolve(
                 environment, capabilities, message -> getLogger().warning(message));
         getLogger().info(platformProfile.bootReport());
+        // No silent degradation (mandate B10): one loud line covers every PDC consumer at once when the
+        // PersistentDataContainer API is absent (< 1.14). The effective-material marker becomes unreadable
+        // (items resolve to their own type) and the temporary-shield tag + arrow-punch stamp ride in-memory
+        // state instead of item NBT — documented, lifecycle-equivalent fallbacks, never a crash.
+        if (!PersistentData.supported()) {
+            getLogger().warning("persistent-data-container ABSENT (server < 1.14) — combat:effective_material "
+                    + "reads degrade to the item's own type; the temporary-shield marker and arrow-punch "
+                    + "stamp use in-memory fallbacks (no item NBT). See docs/effective-material-contract.md.");
+        }
         this.scheduling = SchedulingFactory.create(this, capabilities);
 
         // Config: extract the bundled defaults (a fresh install is a v2 tree),
@@ -196,14 +217,17 @@ public final class MentalPluginV5 extends JavaPlugin {
                 getLogger().info("[debug/" + category.key() + "] " + message));
         applyDebug(snapshot.debug());
 
-        // The tick clock — the only clock currency in the delivery core. Paper
-        // reads getCurrentTick() (netty-safe there); Folia advances a global
-        // counter any thread may read, starting at NO_TICK so a stalled counter
-        // degrades to no-exclusion rather than a false universal match.
-        if (capabilities.folia()) {
-            this.foliaClock = new CounterTickClock();
-            this.foliaClockTask = scheduling.repeatGlobal(1L, 1L, foliaClock::advance);
-            this.clock = foliaClock;
+        // The tick clock — the only clock currency in the delivery core. Modern
+        // Paper reads getCurrentTick() (netty-safe there). Folia AND the legacy
+        // backport targets below Bukkit.getCurrentTick() advance a global counter
+        // any thread may read, starting at NO_TICK so a stalled counter degrades to
+        // no-exclusion rather than a false universal match. The getCurrentTick
+        // method reference lives only in the else branch, so it never links on a
+        // server that lacks the method (invokedynamic bootstraps per taken branch).
+        if (capabilities.folia() || !capabilities.currentTick()) {
+            this.counterClock = new CounterTickClock();
+            this.counterClockTask = scheduling.repeatGlobal(1L, 1L, counterClock::advance);
+            this.clock = counterClock;
         } else {
             this.clock = new PaperTickClock(Bukkit::getCurrentTick);
         }
@@ -245,7 +269,17 @@ public final class MentalPluginV5 extends JavaPlugin {
         sessions.addForgetHook(valve::forget);
         PacketEvents.getAPI().getEventManager().registerListener(new PacketTap(domains, sessions, clock));
         PacketEvents.getAPI().getEventManager().registerListener(new ValveListener(valve));
-        PacketEvents.getAPI().getEventManager().registerListener(new ProbeRim(latency));
+        // Exactly ONE latency-probe receive rim, chosen by the effective transport
+        // (version-determined at parse): below 1.17 the play PING/PONG channel is absent
+        // on the wire, so probes ride window-confirmation transactions (TransactionProbeRim);
+        // at/above 1.17 the dedicated play channel (ProbeRim). Both read only their own
+        // inbound packets + the per-player LatencyModel record (netty discipline).
+        PacketListenerAbstract probeRim = probeTransport == ProbeStrategy.TRANSACTION
+                ? new TransactionProbeRim(latency)
+                : new ProbeRim(latency);
+        PacketEvents.getAPI().getEventManager().registerListener(probeRim);
+        getLogger().info("latency probe transport: " + probeTransport + " (rim="
+                + probeRim.getClass().getSimpleName() + ")");
 
         // The delivery routers (spec §3.4–§3.6): the desk's sole PlayerVelocityEvent
         // writer, the damage-pass router, and the capability-gated knockback-event
@@ -301,7 +335,7 @@ public final class MentalPluginV5 extends JavaPlugin {
             metrics.addCustomChart(new SimplePie("anticheat_mode",
                     () -> snapshot().anticheat().mode().name().toLowerCase(Locale.ROOT)));
             metrics.addCustomChart(new SimplePie("probe_strategy",
-                    () -> probeStrategy().name().toLowerCase(Locale.ROOT)));
+                    () -> probeTransport().name().toLowerCase(Locale.ROOT)));
             metrics.addCustomChart(new SimplePie("scheduling_backend",
                     () -> scheduling.describe()));
             metrics.addCustomChart(new SimplePie("ocm_coordination",
@@ -311,7 +345,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         }
 
         getLogger().info(() -> "Mental v5 enabled — server " + environment.describe()
-                + ", scheduling=" + scheduling.describe() + ", " + capabilities.describe());
+                + ", scheduling=" + scheduling.describe() + ", ping=" + Pings.describe()
+                + ", " + capabilities.describe());
+        // The cross-version rule-feature resolvers (absorption/potion-effect/item-cooldown/crit-posture):
+        // their boot-selected accessors, so a legacy fallback is visible in the log, never silent (B10).
+        getLogger().info(() -> "rule-feature accessors — absorption=" + Absorptions.describe()
+                + ", potion-effect=" + PotionEffects.describe()
+                + ", " + Cooldowns.describe()
+                + ", crit-posture[" + CritPosture.describe() + "]"
+                + ", hand-raised=" + HandStates.describe());
     }
 
     @Override
@@ -345,10 +387,10 @@ public final class MentalPluginV5 extends JavaPlugin {
                 sessions.shutdown();
             }
         });
-        isolate("folia clock", () -> {
-            if (foliaClockTask != null) {
-                foliaClockTask.cancel();
-                foliaClockTask = null;
+        isolate("counter clock", () -> {
+            if (counterClockTask != null) {
+                counterClockTask.cancel();
+                counterClockTask = null;
             }
         });
         isolate("PacketEvents.terminate", () -> {
@@ -489,8 +531,8 @@ public final class MentalPluginV5 extends JavaPlugin {
                 sessions, domains, latency, anticheatPolicy, wtapConsultWire, clock,
                 this::snapshot, scheduling, valve, hitIds, damageShaper, toolWear, folia, modernProtocol,
                 debug.scoped(DebugCategory.HITREG));
-        LatencyCompensationUnit latencyCompensation =
-                new LatencyCompensationUnit(latency, scheduling, this::snapshot);
+        this.latencyCompensation =
+                new LatencyCompensationUnit(latency, scheduling, this::snapshot, probeTransport);
         sessions.addForgetHook(hitRegistration::forget);
         sessions.addForgetHook(latencyCompensation::forget);
 
@@ -538,7 +580,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // (B13); regen drives per-player 80-tick heal tasks; the ender-pearl unit
         // clears the 1.9 throw cooldown. All pure Bukkit + Scheduling.
         reconciler.register(new GoldenApplesUnit(this, scheduling));
-        reconciler.register(new EnderPearlCooldownUnit(scheduling));
+        reconciler.register(new EnderPearlCooldownUnit(this, scheduling));
         reconciler.register(new RegenUnit(scheduling));
         reconciler.register(new PotionDurationsUnit());
 
@@ -559,19 +601,52 @@ public final class MentalPluginV5 extends JavaPlugin {
         overlay.apply(sources.main(), sources.knockback(), sources.hitReg(), sources.latency());
         SnapshotParser.Result result = SnapshotParser.parse(
                 sources.main(), sources.knockback(), sources.hitReg(), sources.latency(), sources.profiles());
-        for (String issue : result.issues()) {
+        List<String> issues = new ArrayList<>(result.issues());
+        // Reconcile the raw configured probe strategy to the effective wire transport for
+        // THIS server version — the parser is deliberately version-blind, so the mapping
+        // lives here where the ServerEnvironment is known. Below 1.17 the play PING/PONG
+        // channel is absent, so PING resolves to window-confirmation TRANSACTION probes
+        // (an info line — the expected legacy path, not a config problem); a legacy-only
+        // TRANSACTION on 1.17+ or the retired KEEPALIVE is a loud warn that ALSO joins the
+        // reload issue report so /mental reload surfaces it to the admin.
+        this.probeTransport = ProbeStrategy.resolveEffective(
+                configuredProbeStrategy(result.snapshot()),
+                !environment.isAtLeast(1, 17, 0),
+                info -> getLogger().info("latency probe — " + info),
+                warn -> issues.add("latency-compensation.yml: probe-strategy: " + warn));
+        for (String issue : issues) {
             getLogger().warning("config — " + issue);
         }
-        this.parseIssues = result.issues();
+        this.parseIssues = issues;
         return result.snapshot();
     }
 
-    /** The active latency-probe strategy — the {@code probe_strategy} bStats chart source. */
+    /** The RAW configured probe strategy (pre-resolution) read from a snapshot. */
     @SuppressWarnings("unchecked")
-    private ProbeStrategy probeStrategy() {
+    private ProbeStrategy configuredProbeStrategy(Snapshot snap) {
         SettingsKey<CompensationSettings> key =
                 (SettingsKey<CompensationSettings>) Feature.LATENCY_COMPENSATION.settingsKey();
-        return snapshot().settings(key).probeStrategy();
+        return snap.settings(key).probeStrategy();
+    }
+
+    /**
+     * The effective latency-probe transport this server uses — the {@code probe_strategy}
+     * bStats chart source and the tester's regression pin (TRANSACTION below 1.17, PING
+     * at/above). Version-determined and resolved once per parse, so it is stable across
+     * a reload (the version never changes) even if the configured value does.
+     */
+    public @NotNull ProbeStrategy probeTransport() {
+        return probeTransport;
+    }
+
+    /**
+     * Boot self-test seam (tester): drives the active transport's probe send path once
+     * so a pre-1.17 wrapper classload/encoding break surfaces at boot. Returns true on a
+     * clean pass (see {@link LatencyCompensationUnit#probeSelfTest()} for why clientless
+     * test players cannot observe the wire round-trip here).
+     */
+    public boolean probeSelfTest() {
+        return latencyCompensation != null && latencyCompensation.probeSelfTest();
     }
 
     /** The tokens every enabled feature restores — the input to the coexistence warnings. */

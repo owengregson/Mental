@@ -3,6 +3,8 @@ package me.vexmc.mental.v5.feature;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.platform.HandStates;
+import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.v5.platform.SwordBlockAdapter;
@@ -52,7 +54,15 @@ public final class EphemeralDecoration {
     private final Plugin plugin;
     private final Scheduling scheduling;
     private final SwordBlockAdapter adapter;
-    private final NamespacedKey markerKey;
+
+    /**
+     * The PDC marker distinguishing Mental's injected shield from a real one — {@code null} below Bukkit
+     * 1.14 (no PersistentDataContainer, so {@link NamespacedKey} would also not construct). Without it the
+     * temp shield is identified in-memory: {@link #offhandStates} tracks whom Mental injected into, and the
+     * injection guard refuses to overwrite an existing shield, so any off-hand SHIELD held by a tracked
+     * player is ours. Same lifecycle, no item NBT (the marker is ephemeral by definition anyway).
+     */
+    private final @Nullable NamespacedKey markerKey;
 
     /** Off-hand tier per-player state: the stored off-hand item and its release poll. */
     private final ConcurrentHashMap<UUID, BlockState> offhandStates = new ConcurrentHashMap<>();
@@ -62,7 +72,11 @@ public final class EphemeralDecoration {
         this.plugin = plugin;
         this.scheduling = scheduling;
         this.adapter = adapter;
-        this.markerKey = new NamespacedKey(plugin, "temporary_legacy_shield");
+        // NamespacedKey is a 1.12 API and PDC a 1.14 one; construct the marker only where PDC is present,
+        // else the in-memory shield identity above carries the never-stuck guarantee (boot log in the plugin).
+        this.markerKey = PersistentData.supported()
+                ? new NamespacedKey(plugin, "temporary_legacy_shield")
+                : null;
     }
 
     /** Whether this server runs the off-hand-shield fallback (no component model). */
@@ -335,7 +349,11 @@ public final class EphemeralDecoration {
     }
 
     private boolean isHandRaised(@NotNull Player player) {
-        return player.isBlocking() || player.isHandRaised();
+        // HandStates.isHandRaised, not player.isHandRaised(): the Bukkit accessor floors at 1.10.2 (absent
+        // on 1.9.4), where a direct call throws when sword-blocking is enabled. isBlocking() is present on
+        // 1.9.4, so the condition collapses to the shield-block state there (loses only the sub-block-delay
+        // raise window). The resolver uses the native method verbatim on 1.10.2+.
+        return player.isBlocking() || HandStates.isHandRaised(player);
     }
 
     /** Restores the original off-hand item and cancels the poll. INLINE — the caller is on the region thread. */
@@ -396,6 +414,9 @@ public final class EphemeralDecoration {
 
     private @NotNull ItemStack createTemporaryShield() {
         ItemStack shield = new ItemStack(Material.SHIELD);
+        if (markerKey == null) {
+            return shield; // no PDC (pre-1.14) — identity is carried in-memory (see markerKey doc)
+        }
         ItemMeta meta = shield.getItemMeta();
         if (meta != null) {
             PersistentDataContainer container = meta.getPersistentDataContainer();
@@ -408,6 +429,13 @@ public final class EphemeralDecoration {
     private boolean isTemporaryShield(@Nullable ItemStack item) {
         if (item == null || item.getType() != Material.SHIELD) {
             return false;
+        }
+        if (markerKey == null) {
+            // Pre-1.14 in-memory identity: a SHIELD in a tracked player's off-hand is Mental's, because
+            // injectShield refuses to overwrite an existing shield. Callers pair this with an offhandStates
+            // membership check (isBlockingWithTempShield); the death/disable paths only reach here for a
+            // player we injected into, so treating a bare SHIELD as ours is correct there too.
+            return true;
         }
         ItemMeta meta = item.getItemMeta();
         return meta != null && meta.getPersistentDataContainer().has(markerKey, PersistentDataType.BYTE);

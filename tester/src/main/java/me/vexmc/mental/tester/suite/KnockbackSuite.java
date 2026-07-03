@@ -2,6 +2,7 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
 import me.vexmc.mental.kernel.ledger.MotionLedger;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
@@ -19,6 +20,7 @@ import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
@@ -36,6 +38,13 @@ import org.jetbrains.annotations.NotNull;
 public final class KnockbackSuite {
 
     private static final double EPSILON = 1.0e-3;
+
+    /** How far below the victim's feet to probe for the supporting block (just inside it for a rester). */
+    private static final double GROUND_PROBE_DEPTH = 0.05;
+    /** Settle threshold for |velY| — generous enough to admit the −0.0784 grounded equilibrium. */
+    private static final double SETTLE_VELOCITY_EPSILON = 0.1;
+
+    private static final Logger LOG = Logger.getLogger(KnockbackSuite.class.getName());
 
     private KnockbackSuite() {}
 
@@ -233,12 +242,42 @@ public final class KnockbackSuite {
     /** The victim's engine input with a fresh ledger: grounded equilibrium motion. */
     static EntityState restingVictim(FakePlayer victim) {
         EntityState live = EntityStates.capture(victim.player());
-        double vy = live.grounded()
+        // Key the grounded-vs-airborne selector on physical position truth, NOT the Bukkit isOnGround()
+        // flag: a clientless fake victim reads isOnGround()=false on the 1.9/1.10 NMS after settling even
+        // while resting on the floor, which wrongly chose the airborne 0.0 baseline (→ expected 0.4) while
+        // Mental delivered the grounded −0.0784 equilibrium (→ 0.3608). The physical check is an INDEPENDENT
+        // source (not Mental's view, not the flaky flag); on every version where the flag was already
+        // correct it agrees with it, so no pinned VALUE changes — only the selector becomes reliable.
+        boolean grounded = physicallyGrounded(victim, live.grounded());
+        double vy = grounded
                 ? Decay.groundedEquilibrium(Decay.DEFAULT_GRAVITY)
                 : 0.0;
         return new EntityState(
                 live.x(), live.y(), live.z(), live.yaw(), 0.0, vy, 0.0,
-                live.grounded(), live.sprinting(),
+                grounded, live.sprinting(),
                 live.knockbackEnchantLevel(), live.knockbackResistance());
+    }
+
+    /**
+     * Position-derived physical ground truth for a settled victim: a solid block sits directly beneath its
+     * feet (what it is standing on) and its vertical velocity has settled. Reads only the victim's own
+     * position and the block under it — the same region-thread read {@code SessionService} does in
+     * production — so it is floor-plane-independent (the Paper arenas rest at y≈151, the Folia smoke at
+     * y=100) and never trusts the Bukkit {@code isOnGround()} flag, which a clientless fake reads as false
+     * after settling on the 1.9/1.10 NMS. The flag is kept as a logged diagnostic (only when it disagrees)
+     * so its behaviour on each server version stays visible in the suite log.
+     */
+    static boolean physicallyGrounded(FakePlayer victim, boolean isOnGroundFlag) {
+        Location feet = victim.player().getLocation();
+        Material support = feet.clone().subtract(0.0, GROUND_PROBE_DEPTH, 0.0).getBlock().getType();
+        double velY = victim.player().getVelocity().getY();
+        boolean grounded = support.isSolid() && Math.abs(velY) < SETTLE_VELOCITY_EPSILON;
+        if (grounded != isOnGroundFlag) {
+            LOG.info("[ground-diagnostic] victim " + victim.uuid() + " footY=" + feet.getY()
+                    + " support=" + support + " velY=" + velY
+                    + " -> physical grounded=" + grounded
+                    + ", but Bukkit isOnGround()=" + isOnGroundFlag + " (using physical truth)");
+        }
+        return grounded;
     }
 }

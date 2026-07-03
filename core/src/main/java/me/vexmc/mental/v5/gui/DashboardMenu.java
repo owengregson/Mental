@@ -66,6 +66,18 @@ public final class DashboardMenu extends Menu {
         set(50, closeButton(), click -> viewer.closeInventory());
     }
 
+    /**
+     * Boot self-test seam: the dashboard's load-bearing icons rendered to
+     * {@link ItemStack}s with no viewer and no scheduler hop. Every one runs the
+     * {@link Icon} → {@code TextPort} → {@code setDisplayName}/{@code setLore(String)}
+     * sink path, so the tester (which cannot itself reference the relocated
+     * Adventure types) can prove that path classloads on legacy servers by calling
+     * a method whose signature is pure Bukkit. Returns only Bukkit types.
+     */
+    public @NotNull List<ItemStack> selfTestIcons() {
+        return List.of(statusPlate(), reloadButton(), closeButton());
+    }
+
     private @NotNull ItemStack statusPlate() {
         int total = 0;
         int enabled = 0;
