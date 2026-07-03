@@ -85,7 +85,16 @@ public final class PlatformProfile {
                 "attribute:knockback_resistance", Feature.KNOCKBACK, Attributes::knockbackResistance));
         entries.add(Required.owned("attribute:max_health", Feature.REGEN, Attributes::maxHealth));
         entries.add(Required.owned("attribute:armor", Feature.ARMOUR_STRENGTH, Attributes::armor));
-        entries.add(Required.owned("attribute:armor_toughness", Feature.ARMOUR_STRENGTH, Attributes::armorToughness));
+        // Toughness is OptionalSince, NOT Required: the era 1.8 flat model has no toughness term
+        // (kernel DefenceMath ignores it) and ArmourStrengthUnit never reads the attribute — it
+        // reduces off ARMOR points alone. GENERIC_ARMOR_TOUGHNESS is absent below 1.11.2
+        // (javap-verified on the 1.9.4/1.10.2 server jars), so a Required entry wrongly disabled
+        // ARMOUR_STRENGTH on those two versions. As an OptionalSince(1.11.2) its absence there is a
+        // typed, quiet outcome and the feature composes the SAME era armour values (from the kernel
+        // pins, not this handle) on 1.9.4/1.10.2.
+        entries.add(OptionalSince.resolve("attribute:armor_toughness", "1.11.2", null,
+                "the era 1.8 flat model ignores toughness (no kernel toughness term)",
+                Attributes::armorToughness));
         // --- Attribute handles gated at 1.20.5 ⇒ OptionalSince (caller uses a vanilla numeric below) ---
         entries.add(OptionalSince.resolve("attribute:gravity", "1.20.5", null,
                 "vanilla gravity " + Decay.DEFAULT_GRAVITY, Attributes::gravity));

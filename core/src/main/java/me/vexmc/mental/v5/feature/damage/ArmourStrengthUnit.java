@@ -39,6 +39,14 @@ import org.jetbrains.annotations.Nullable;
  * read or written, so the deprecated granular setter never throws (OCM's proven
  * guard). {@code EntityDamageEvent} fires on the victim's region thread, so every
  * read/write is inline; the 1.8 model needs no attacker state.
+ *
+ * <p><strong>Toughness is never read.</strong> The reduction is a function of the
+ * {@code ARMOR} points alone ({@link #armourPoints}); the {@code ARMOR_TOUGHNESS}
+ * attribute is neither read nor written anywhere in this unit, so the feature
+ * composes byte-identically on servers where that attribute does not exist
+ * (absent below 1.11.2 — 1.9.4/1.10.2). Its manifest entry is therefore an
+ * {@code OptionalSince(1.11.2)}, not a {@code Required} handle whose absence would
+ * disable the feature (see {@code PlatformProfile}).</p>
  */
 public final class ArmourStrengthUnit implements FeatureUnit, Listener {
 

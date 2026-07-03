@@ -38,6 +38,43 @@ class PlatformProfileTest {
     }
 
     @Test
+    void anAbsentArmorToughnessDoesNotDisableArmourStrength() {
+        // Item 1 (Phase 4): the era 1.8 flat model has no toughness term, so the
+        // GENERIC_ARMOR_TOUGHNESS attribute (absent below 1.11.2) is an OptionalSince, not a
+        // Required handle. Its absence must be a quiet typed outcome — never a feature-disable —
+        // so ARMOUR_STRENGTH keeps composing the era armour values on 1.9.4/1.10.2.
+        List<String> logged = new CopyOnWriteArrayList<>();
+        List<ManifestEntry> manifest = List.of(
+                Required.owned("attribute:armor", Feature.ARMOUR_STRENGTH, () -> "present"),
+                OptionalSince.resolve("attribute:armor_toughness", "1.11.2", null,
+                        "the era 1.8 flat model ignores toughness", () -> null));
+
+        Set<Feature> disabled = PlatformProfile.resolveDisabled(manifest, logged::add);
+
+        assertFalse(disabled.contains(Feature.ARMOUR_STRENGTH),
+                "an absent toughness attribute must not disable ARMOUR_STRENGTH — the era model ignores it");
+        assertTrue(disabled.isEmpty(), "an OptionalSince miss disables nothing");
+        assertTrue(logged.isEmpty(), "an OptionalSince miss is quiet — no loud mapping-break log");
+    }
+
+    @Test
+    void armorToughnessResolvesAsOptionalSinceOnTheFloorApi() {
+        // On the modern floor (1.17.1) the attribute IS present, so the entry resolves; the point
+        // pinned here is that it is modelled as OptionalSince (a version-gated handle), so that a
+        // legacy server missing it degrades quietly rather than disabling the feature.
+        PlatformProfile profile = PlatformProfile.resolve(
+                ServerEnvironment.parse("1.17.1-R0.1-SNAPSHOT"), Capabilities.detect(), message -> {});
+        ManifestEntry toughness = profile.entries().stream()
+                .filter(e -> e.name().equals("attribute:armor_toughness"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("armor_toughness entry missing from the manifest"));
+        assertTrue(toughness instanceof OptionalSince<?>,
+                "armor_toughness must be OptionalSince (version-gated), not a Required feature-disabler");
+        assertFalse(profile.disabledFeatures().contains(Feature.ARMOUR_STRENGTH),
+                "ARMOUR_STRENGTH must never be platform-disabled where the attribute is present either");
+    }
+
+    @Test
     void anEngineCriticalMissFailsTheBoot() {
         List<ManifestEntry> manifest = List.of(Required.engineCritical("engine:core_handle", () -> null));
         assertThrows(
