@@ -6,7 +6,7 @@
     { "version": "1.10.2",  "jdk": 17, "platform": "paper", "suites": "boot",          "ci": "release", "serverFlags": [] },
     { "version": "1.11.2",  "jdk": 17, "platform": "paper", "suites": "boot",          "ci": "release", "serverFlags": [] },
     { "version": "1.12.2",  "jdk": 17, "platform": "paper", "suites": "boot",          "ci": "release", "serverFlags": [] },
-    { "version": "1.13.2",  "jdk": 17, "platform": "paper", "suites": "boot",          "ci": "release", "serverFlags": ["-DPaper.IgnoreJavaVersion=true"] },
+    { "version": "1.13.2",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "release", "serverFlags": ["-DPaper.IgnoreJavaVersion=true"] },
     { "version": "1.15.2",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "release", "serverFlags": ["-DPaper.IgnoreJavaVersion=true"] },
     { "version": "1.16.5",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "release", "serverFlags": ["-DPaper.IgnoreJavaVersion=true"] },
     { "version": "1.17.1",  "jdk": 17, "platform": "paper", "suites": "full",          "ci": "pr" },
