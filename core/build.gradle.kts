@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.zip.ZipFile
 import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.service.DownloadsAPIService
 
@@ -121,6 +122,91 @@ tasks.shadowJar {
 
 tasks.build {
     dependsOn(tasks.shadowJar)
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ *  Relocation-rot gate (review item F-BP3).
+ *
+ *  The legacy backport shades Adventure (net.kyori.*) into the jar RELOCATED to
+ *  me.vexmc.mental.lib.adventure, so its legacy-string serializer exists on
+ *  servers below Paper 1.16.5 (where net.kyori is absent) while never colliding
+ *  with — or falling back to — Paper's native Adventure on modern servers. That
+ *  whole safety property rests on the relocation holding: an un-relocated
+ *  net.kyori reference would bind to Paper's own Adventure on modern servers
+ *  (silent behaviour drift) and NoClassDefFoundError on legacy (a hard crash on
+ *  the versions the shade exists to serve). The "no Component crosses a Bukkit
+ *  boundary; every net.kyori is the relocated copy" invariant is grep-proven at
+ *  authoring time; this task makes it a build gate so it cannot rot unnoticed.
+ *
+ *  Two scans over the produced shadowJar (both, per F-BP3):
+ *   1. ENTRY NAMES (mandatory) — no jar entry may live under net/kyori/: an
+ *      un-relocated Adventure class or resource file. Cheap; catches a whole
+ *      package slipping the relocator.
+ *   2. CLASS REFERENCES (the stronger, constant-pool form) — no .class entry
+ *      OUTSIDE the relocated prefix (me/vexmc/mental/lib/) may contain the token
+ *      "net/kyori" (a type reference) or "net.kyori" (a reflection/service
+ *      string). Class bytes are read as ISO-8859-1 (a lossless byte↔char map), so
+ *      a substring match is exactly a constant-pool byte-sequence match. This
+ *      catches a single stray reference the entry-name scan would miss.
+ *
+ *  A clean shade has ZERO of either (Mental references Adventure only through the
+ *  relocated copy — TextPort is the sole sink and every reference is rewritten to
+ *  me.vexmc.mental.lib.adventure). Any hit fails the build.
+ * ──────────────────────────────────────────────────────────────────────── */
+val verifyRelocation = tasks.register("verifyRelocation") {
+    group = "verification"
+    description = "Fails if any un-relocated net/kyori entry or class reference survives the shade " +
+            "(the shaded Adventure must stay under me.vexmc.mental.lib — review F-BP3)."
+    dependsOn(tasks.shadowJar)
+    val jarFile = tasks.shadowJar.flatMap { it.archiveFile }
+    inputs.file(jarFile)
+    doLast {
+        val relocatedPrefix = "me/vexmc/mental/lib/"
+        val entryViolations = mutableListOf<String>()
+        val refViolations = mutableListOf<String>()
+        ZipFile(jarFile.get().asFile).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                val name = entry.name
+                // Scan 1: no entry may live under the un-relocated net/kyori/ path.
+                if (name.startsWith("net/kyori/")) {
+                    entryViolations.add(name)
+                }
+                // Scan 2: class bytes outside the relocated prefix must not name net.kyori.
+                if (name.endsWith(".class") && !name.startsWith(relocatedPrefix)) {
+                    val text = zip.getInputStream(entry).use { input ->
+                        String(input.readBytes(), Charsets.ISO_8859_1)
+                    }
+                    if (text.contains("net/kyori") || text.contains("net.kyori")) {
+                        refViolations.add(name)
+                    }
+                }
+            }
+        }
+        if (entryViolations.isNotEmpty() || refViolations.isNotEmpty()) {
+            val message = buildString {
+                append("Relocation rot: un-relocated net.kyori survived the shade.\n")
+                if (entryViolations.isNotEmpty()) {
+                    append("  ${entryViolations.size} entry name(s) under net/kyori/:\n")
+                    entryViolations.take(20).forEach { append("    - $it\n") }
+                }
+                if (refViolations.isNotEmpty()) {
+                    append("  ${refViolations.size} class(es) outside $relocatedPrefix referencing net.kyori:\n")
+                    refViolations.take(20).forEach { append("    - $it\n") }
+                }
+                append("The shaded Adventure MUST relocate to me.vexmc.mental.lib.adventure; check the ")
+                append("relocate(\"net.kyori\", …) rule and any net.kyori use that crosses a Bukkit boundary.")
+            }
+            throw GradleException(message)
+        }
+        logger.lifecycle(
+            "[relocation] clean — no un-relocated net.kyori in ${jarFile.get().asFile.name}.")
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyRelocation)
 }
 
 /* ────────────────────────────────────────────────────────────────────────
