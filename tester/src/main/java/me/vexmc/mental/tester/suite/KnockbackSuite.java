@@ -20,6 +20,7 @@ import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
@@ -38,8 +39,8 @@ public final class KnockbackSuite {
 
     private static final double EPSILON = 1.0e-3;
 
-    /** How close the victim's foot Y must sit to the arena floor plane to read grounded. */
-    private static final double FOOT_ON_FLOOR_EPSILON = 0.05;
+    /** How far below the victim's feet to probe for the supporting block (just inside it for a rester). */
+    private static final double GROUND_PROBE_DEPTH = 0.05;
     /** Settle threshold for |velY| — generous enough to admit the −0.0784 grounded equilibrium. */
     private static final double SETTLE_VELOCITY_EPSILON = 0.1;
 
@@ -258,20 +259,22 @@ public final class KnockbackSuite {
     }
 
     /**
-     * Position-derived physical ground truth for a settled victim on the known-flat arena floor: the foot
-     * Y sits on the floor plane ({@link Arena#floorY}) and the vertical velocity has settled. Independent of
-     * both Mental's published view and the Bukkit {@code isOnGround()} flag. The flag is kept as a logged
-     * diagnostic (only when it disagrees) so its behaviour on each server version stays visible in the suite
-     * log — the flag itself is never trusted for the selector.
+     * Position-derived physical ground truth for a settled victim: a solid block sits directly beneath its
+     * feet (what it is standing on) and its vertical velocity has settled. Reads only the victim's own
+     * position and the block under it — the same region-thread read {@code SessionService} does in
+     * production — so it is floor-plane-independent (the Paper arenas rest at y≈151, the Folia smoke at
+     * y=100) and never trusts the Bukkit {@code isOnGround()} flag, which a clientless fake reads as false
+     * after settling on the 1.9/1.10 NMS. The flag is kept as a logged diagnostic (only when it disagrees)
+     * so its behaviour on each server version stays visible in the suite log.
      */
     static boolean physicallyGrounded(FakePlayer victim, boolean isOnGroundFlag) {
-        Location location = victim.player().getLocation();
-        double footToFloor = Math.abs(location.getY() - Arena.floorY());
+        Location feet = victim.player().getLocation();
+        Material support = feet.clone().subtract(0.0, GROUND_PROBE_DEPTH, 0.0).getBlock().getType();
         double velY = victim.player().getVelocity().getY();
-        boolean grounded = footToFloor < FOOT_ON_FLOOR_EPSILON && Math.abs(velY) < SETTLE_VELOCITY_EPSILON;
+        boolean grounded = support.isSolid() && Math.abs(velY) < SETTLE_VELOCITY_EPSILON;
         if (grounded != isOnGroundFlag) {
-            LOG.info("[ground-diagnostic] victim " + victim.uuid() + " footY=" + location.getY()
-                    + " floorY=" + Arena.floorY() + " velY=" + velY
+            LOG.info("[ground-diagnostic] victim " + victim.uuid() + " footY=" + feet.getY()
+                    + " support=" + support + " velY=" + velY
                     + " -> physical grounded=" + grounded
                     + ", but Bukkit isOnGround()=" + isOnGroundFlag + " (using physical truth)");
         }
