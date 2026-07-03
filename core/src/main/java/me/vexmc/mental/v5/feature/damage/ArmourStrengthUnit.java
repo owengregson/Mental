@@ -11,6 +11,7 @@ import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.LivingEntity;
@@ -173,7 +174,11 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
         }
         int total = 0;
         for (ItemStack piece : equipment.getArmorContents()) {
-            if (piece == null || piece.getType().isAir()) {
+            // Material#isAir() is 1.13+, and pre-1.13 empty armour slots come
+            // back as an AIR ItemStack (not null) on some revisions — compare to
+            // AIR directly (armour is only ever AIR or a real item, never the
+            // 1.13+ CAVE_AIR/VOID_AIR), which is version-neutral and identical.
+            if (piece == null || piece.getType() == Material.AIR) {
                 continue;
             }
             for (ArmourEnchant enchant : ArmourEnchant.values()) {

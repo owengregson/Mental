@@ -67,6 +67,18 @@ public final class FakePlayer {
     private static final Pattern CRAFTBUKKIT_VERSION =
             Pattern.compile("org\\.bukkit\\.craftbukkit\\.(v\\d+_\\d+_R\\d+)\\.");
 
+    /** {@code ChannelPromise.isVoid()} is newer Netty — absent on 1.9.4/1.10.2's bundled Netty. */
+    private static final boolean NETTY_HAS_IS_VOID = probeNettyIsVoid();
+
+    private static boolean probeNettyIsVoid() {
+        try {
+            ChannelPromise.class.getMethod("isVoid");
+            return true;
+        } catch (NoSuchMethodException oldNetty) {
+            return false;
+        }
+    }
+
     private final JavaPlugin plugin;
     private final Scheduling scheduling;
     private final ReflectionRemapper remapper;
@@ -763,8 +775,23 @@ public final class FakePlayer {
             @Override
             public void write(ChannelHandlerContext context, Object message, ChannelPromise promise) {
                 ReferenceCountUtil.release(message);
-                if (promise != null && !promise.isVoid()) {
-                    promise.trySuccess();
+                if (promise == null) {
+                    return;
+                }
+                if (NETTY_HAS_IS_VOID) {
+                    if (!promise.isVoid()) {
+                        promise.trySuccess();
+                    }
+                } else {
+                    // The Netty shipped with 1.9.4/1.10.2 predates
+                    // ChannelPromise.isVoid(); a void promise simply rejects
+                    // trySuccess (the send is already discarded — nothing to
+                    // signal), so complete inside a guard instead of pre-checking.
+                    try {
+                        promise.trySuccess();
+                    } catch (Throwable voidPromise) {
+                        // A void/unsettable promise — no completion to deliver.
+                    }
                 }
             }
 
