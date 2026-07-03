@@ -1,12 +1,21 @@
 package me.vexmc.mental.v5.platform;
 
+import com.google.common.collect.Multimap;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import me.vexmc.mental.platform.ServerEnvironment;
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.Server;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -30,15 +39,34 @@ import org.jetbrains.annotations.Nullable;
  *       resolving getter, which materialises the item-type defaults), rebuild
  *       without the {@code attack_speed} entry, {@code set(...)} it back on the
  *       copy's handle.</li>
- *   <li><b>(B) legacy Bukkit defaults</b> (≤1.20.x): {@code Material.getItemAttributes(HAND)}
+ *   <li><b>(B) legacy Bukkit defaults</b> (1.16.5–1.20.x): {@code Material.getItemAttributes(HAND)}
  *       gives the default modifier multimap; rebuild without the attack_speed key
- *       and {@code ItemMeta.setAttributeModifiers} the explicit result.</li>
+ *       and {@code ItemMeta.setAttributeModifiers} the explicit result. (javap on
+ *       the matrix jars corrected the assumed 1.13.2 floor: {@code getItemAttributes}
+ *       is absent on 1.13.2 and 1.15.2, present on 1.16.5 — so path C, not B, covers
+ *       1.13.2/1.15.2.)</li>
+ *   <li><b>(C) versioned NMS NBT</b> (1.9.4–1.15.2): the {@code ItemMeta}
+ *       attribute-modifier API floors above this band, so below it the strip is a
+ *       per-revision NMS NBT edit. Legacy vanilla renders an item's attribute
+ *       modifiers ("When in Main Hand: +X Attack Speed") from the item defaults
+ *       UNLESS the stack carries an explicit {@code AttributeModifiers} NBT list,
+ *       in which case ONLY those are shown. So the strip copies the effective
+ *       main-hand modifiers ({@code ItemStack.a(EnumItemSlot.MAINHAND)}) into an
+ *       explicit list minus the {@code attack_speed} entry, serialising each with
+ *       vanilla's own {@code GenericAttributes.a(AttributeModifier)}. All handles
+ *       are resolved once at boot through the versioned {@code
+ *       net.minecraft.server.v1_x_Rn} / {@code org.bukkit.craftbukkit.v1_x_Rn}
+ *       packages (spigot names ARE the runtime names below 1.17 — no remapper).
+ *       Verified by javap: the shapes ({@code ItemStack.a(EnumItemSlot)},
+ *       {@code GenericAttributes.a(AttributeModifier)}) are uniform across
+ *       v1_9_R2…v1_15_R1, then removed on v1_16_R3 (where path B takes over).</li>
  * </ol>
  *
  * <h2>Loud-fail (B10)</h2>
- * <p>Every supported version resolves at least one path (A on 1.20.5+, B below
- * 1.21). If NEITHER resolves at boot it is a mapping break, logged loudly once —
- * never silent — before the adapter degrades to leaving the line in place.</p>
+ * <p>Every supported version resolves at least one path (A on 1.20.5+, B on
+ * 1.16.5–1.20.x, C on 1.9.4–1.15.2). If NONE resolves at boot it is a mapping
+ * break, logged loudly once — never silent — before the adapter degrades to
+ * leaving the line in place.</p>
  */
 public final class WeaponTooltipAdapter {
 
@@ -56,12 +84,15 @@ public final class WeaponTooltipAdapter {
     /* ---- Path (B): legacy Bukkit defaults, resolved once; null when absent ---- */
     private final @Nullable Method materialGetItemAttributes;
 
+    /* ---- Path (C): pre-1.13 versioned-NMS NBT strip, resolved once; null when absent ---- */
+    private final @Nullable LegacyNbtStrip legacyNbt;
+
     private WeaponTooltipAdapter(
             @Nullable Object nmsAttributeModifiersType, @Nullable Method nmsItemStackGet,
             @Nullable Method nmsItemStackSet, @Nullable Method itemAttributeModifiersList,
             @Nullable Method entryAttribute, @Nullable java.lang.reflect.Constructor<?> itemAttributeModifiersCtor,
             @Nullable Object nmsAttackSpeedHolder, @Nullable Method holderValue,
-            @Nullable Method materialGetItemAttributes) {
+            @Nullable Method materialGetItemAttributes, @Nullable LegacyNbtStrip legacyNbt) {
         this.nmsAttributeModifiersType = nmsAttributeModifiersType;
         this.nmsItemStackGet = nmsItemStackGet;
         this.nmsItemStackSet = nmsItemStackSet;
@@ -71,6 +102,7 @@ public final class WeaponTooltipAdapter {
         this.nmsAttackSpeedHolder = nmsAttackSpeedHolder;
         this.holderValue = holderValue;
         this.materialGetItemAttributes = materialGetItemAttributes;
+        this.legacyNbt = legacyNbt;
     }
 
     /** Boot-probes the two paths and loud-logs a mapping break (neither resolves). */
@@ -122,26 +154,33 @@ public final class WeaponTooltipAdapter {
             matGetAttrs = null;
         }
 
+        // Path (C): the pre-1.13 versioned-NMS NBT strip — self-contained resolution (null if any
+        // handle is absent, e.g. on modern/unversioned CraftBukkit or in a serverless unit test).
+        LegacyNbtStrip legacyNbt = LegacyNbtStrip.probe();
+
         boolean pathA = attrType != null && get != null && set != null && modsList != null
                 && entryAttr != null && iamCtor != null && attackSpeedHolder != null;
         boolean pathB = matGetAttrs != null;
-        if (!pathA && !pathB) {
-            log.accept("platform-probe: neither attack-speed tooltip path resolved on "
+        boolean pathC = legacyNbt != null;
+        if (!pathA && !pathB && !pathC) {
+            log.accept("platform-probe: no attack-speed tooltip path resolved on "
                     + environment.describe() + " (NMS ATTRIBUTE_MODIFIERS component, legacy "
-                    + "Material.getItemAttributes) — a mapping break; the cooldown-spoof "
-                    + "attack-speed tooltip line stays visible on this version.");
+                    + "Material.getItemAttributes, pre-1.13 versioned-NMS NBT) — a mapping break; "
+                    + "the cooldown-spoof attack-speed tooltip line stays visible on this version.");
         }
         return new WeaponTooltipAdapter(
-                attrType, get, set, modsList, entryAttr, iamCtor, attackSpeedHolder, holderVal, matGetAttrs);
+                attrType, get, set, modsList, entryAttr, iamCtor, attackSpeedHolder, holderVal,
+                matGetAttrs, legacyNbt);
     }
 
-    /** Whether either strip path (NMS component or legacy Bukkit defaults) resolved at boot. */
+    /** Whether any strip path (NMS component, legacy Bukkit defaults, or pre-1.13 NMS NBT) resolved at boot. */
     public boolean supported() {
         boolean pathA = nmsAttributeModifiersType != null && nmsItemStackGet != null && nmsItemStackSet != null
                 && itemAttributeModifiersList != null && entryAttribute != null
                 && itemAttributeModifiersCtor != null && nmsAttackSpeedHolder != null;
         boolean pathB = materialGetItemAttributes != null;
-        return pathA || pathB;
+        boolean pathC = legacyNbt != null;
+        return pathA || pathB || pathC;
     }
 
     /**
@@ -158,7 +197,25 @@ public final class WeaponTooltipAdapter {
         if (viaComponent != null) {
             return viaComponent;
         }
-        return stripViaBukkitMeta(bukkit);
+        ItemStack viaBukkitMeta = stripViaBukkitMeta(bukkit);
+        if (viaBukkitMeta != null) {
+            return viaBukkitMeta;
+        }
+        return legacyNbt == null ? null : legacyNbt.strip(bukkit);
+    }
+
+    /**
+     * The effective main-hand attribute-modifier names on {@code bukkit}, lowercased (e.g. {@code
+     * generic.attackdamage}), read through the pre-1.13 NMS path — or {@code null} where that path
+     * is unavailable (1.13+, modern, or a serverless test). Exposed for the boot-suite tooltip-strip
+     * verification (item 7): after a strip the returned set must contain the attack-damage name and
+     * NOT the attack-speed name. Reads a copy; never touches a live stack.
+     */
+    public @Nullable Set<String> mainHandAttributeNames(@Nullable ItemStack bukkit) {
+        if (bukkit == null || legacyNbt == null) {
+            return null;
+        }
+        return legacyNbt.mainHandNames(bukkit);
     }
 
     /* ------------------------------------------------------------------ */
@@ -333,5 +390,193 @@ public final class WeaponTooltipAdapter {
         return name.endsWith("_SWORD") || name.endsWith("_AXE") || name.endsWith("_PICKAXE")
                 || name.endsWith("_SHOVEL") || name.endsWith("_HOE")
                 || name.equals("TRIDENT") || name.equals("MACE");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Path (C): pre-1.13 versioned-NMS NBT strip                         */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Path C's self-contained handle set (v1_9_R2 … v1_12_R1). Resolves the
+     * versioned CraftBukkit/NMS members once at boot; {@link #probe()} returns
+     * {@code null} unless every handle is present, so the outer adapter treats an
+     * unresolved path C as simply absent (never a half-resolved surface). Every
+     * hot-path reflective slip degrades to a clean {@code null} — the display item
+     * is never corrupted.
+     */
+    private static final class LegacyNbtStrip {
+
+        /** The versioned CraftBukkit package token, e.g. {@code v1_9_R2} — the pre-1.17 spigot revision. */
+        private static final Pattern REVISION = Pattern.compile("v\\d+_\\d+_R\\d+");
+
+        private final Method asNmsCopy;         // CraftItemStack.asNMSCopy(org.bukkit.inventory.ItemStack)
+        private final Method asBukkitCopy;      // CraftItemStack.asBukkitCopy(nms ItemStack)
+        private final Method itemStackModifiers; // nms ItemStack.a(EnumItemSlot) -> Multimap<String, AttributeModifier>
+        private final Method serializeModifier; // GenericAttributes.a(AttributeModifier) -> NBTTagCompound
+        private final Method itemStackHasTag;
+        private final Method itemStackGetTag;
+        private final Method itemStackSetTag;
+        private final Method nbtSet;            // NBTTagCompound.set(String, NBTBase)
+        private final Method nbtSetString;      // NBTTagCompound.setString(String, String)
+        private final Method nbtListAdd;        // NBTTagList.add(NBTBase)
+        private final Constructor<?> nbtCompoundCtor;
+        private final Constructor<?> nbtListCtor;
+        private final Object mainHandSlot;      // EnumItemSlot.MAINHAND
+
+        private LegacyNbtStrip(
+                Method asNmsCopy, Method asBukkitCopy, Method itemStackModifiers, Method serializeModifier,
+                Method itemStackHasTag, Method itemStackGetTag, Method itemStackSetTag, Method nbtSet,
+                Method nbtSetString, Method nbtListAdd, Constructor<?> nbtCompoundCtor,
+                Constructor<?> nbtListCtor, Object mainHandSlot) {
+            this.asNmsCopy = asNmsCopy;
+            this.asBukkitCopy = asBukkitCopy;
+            this.itemStackModifiers = itemStackModifiers;
+            this.serializeModifier = serializeModifier;
+            this.itemStackHasTag = itemStackHasTag;
+            this.itemStackGetTag = itemStackGetTag;
+            this.itemStackSetTag = itemStackSetTag;
+            this.nbtSet = nbtSet;
+            this.nbtSetString = nbtSetString;
+            this.nbtListAdd = nbtListAdd;
+            this.nbtCompoundCtor = nbtCompoundCtor;
+            this.nbtListCtor = nbtListCtor;
+            this.mainHandSlot = mainHandSlot;
+        }
+
+        static @Nullable LegacyNbtStrip probe() {
+            String revision = versionedRevision();
+            if (revision == null) {
+                return null; // modern/unversioned CraftBukkit, or no live server (a unit test)
+            }
+            try {
+                String nms = "net.minecraft.server." + revision + ".";
+                Class<?> craftItemStack =
+                        Class.forName("org.bukkit.craftbukkit." + revision + ".inventory.CraftItemStack");
+                Class<?> nmsItemStack = Class.forName(nms + "ItemStack");
+                Class<?> enumItemSlot = Class.forName(nms + "EnumItemSlot");
+                Class<?> genericAttributes = Class.forName(nms + "GenericAttributes");
+                Class<?> attributeModifier = Class.forName(nms + "AttributeModifier");
+                Class<?> nbtBase = Class.forName(nms + "NBTBase");
+                Class<?> nbtTagCompound = Class.forName(nms + "NBTTagCompound");
+                Class<?> nbtTagList = Class.forName(nms + "NBTTagList");
+
+                return new LegacyNbtStrip(
+                        craftItemStack.getMethod("asNMSCopy", ItemStack.class),
+                        craftItemStack.getMethod("asBukkitCopy", nmsItemStack),
+                        nmsItemStack.getMethod("a", enumItemSlot),
+                        genericAttributes.getMethod("a", attributeModifier),
+                        nmsItemStack.getMethod("hasTag"),
+                        nmsItemStack.getMethod("getTag"),
+                        nmsItemStack.getMethod("setTag", nbtTagCompound),
+                        nbtTagCompound.getMethod("set", String.class, nbtBase),
+                        nbtTagCompound.getMethod("setString", String.class, String.class),
+                        nbtTagList.getMethod("add", nbtBase),
+                        nbtTagCompound.getConstructor(),
+                        nbtTagList.getConstructor(),
+                        enumItemSlot.getField("MAINHAND").get(null));
+            } catch (Throwable absent) {
+                return null; // any handle missing ⇒ path C simply does not apply on this server
+            }
+        }
+
+        /**
+         * A display copy of {@code bukkit} with an explicit main-hand {@code AttributeModifiers} NBT
+         * list minus the {@code attack_speed} entry (so vanilla renders attack-damage but not
+         * attack-speed), or {@code null} when the item carries no attack-speed modifier / any slip.
+         */
+        @Nullable ItemStack strip(@NotNull ItemStack bukkit) {
+            try {
+                Object nms = asNmsCopy.invoke(null, bukkit);
+                if (nms == null) {
+                    return null;
+                }
+                Object raw = itemStackModifiers.invoke(nms, mainHandSlot);
+                if (!(raw instanceof Multimap<?, ?> modifiers) || !containsAttackSpeed(modifiers)) {
+                    return null; // no attack-speed line to strip — leave the copy untouched
+                }
+                Object list = nbtListCtor.newInstance();
+                for (Map.Entry<?, ?> entry : modifiers.entries()) {
+                    Object attributeName = entry.getKey();
+                    if (isAttackSpeedName(attributeName)) {
+                        continue; // drop only the attack_speed modifier
+                    }
+                    Object nbt = serializeModifier.invoke(null, entry.getValue());
+                    nbtSetString.invoke(nbt, "AttributeName", String.valueOf(attributeName));
+                    nbtSetString.invoke(nbt, "Slot", "mainhand");
+                    nbtListAdd.invoke(list, nbt);
+                }
+                Object tag = Boolean.TRUE.equals(itemStackHasTag.invoke(nms))
+                        ? itemStackGetTag.invoke(nms)
+                        : nbtCompoundCtor.newInstance();
+                nbtSet.invoke(tag, "AttributeModifiers", list);
+                itemStackSetTag.invoke(nms, tag);
+                Object result = asBukkitCopy.invoke(null, nms);
+                return result instanceof ItemStack stripped ? stripped : null;
+            } catch (Throwable ignored) {
+                return null; // clean no-op on any reflective failure
+            }
+        }
+
+        /** The lowercased effective main-hand modifier names on {@code bukkit}, or {@code null} on a slip. */
+        @Nullable Set<String> mainHandNames(@NotNull ItemStack bukkit) {
+            try {
+                Object nms = asNmsCopy.invoke(null, bukkit);
+                if (nms == null) {
+                    return null;
+                }
+                Object raw = itemStackModifiers.invoke(nms, mainHandSlot);
+                if (!(raw instanceof Multimap<?, ?> modifiers)) {
+                    return null;
+                }
+                Set<String> names = new LinkedHashSet<>();
+                for (Object key : modifiers.keySet()) {
+                    names.add(String.valueOf(key).toLowerCase(Locale.ROOT));
+                }
+                return names;
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+
+        private static boolean containsAttackSpeed(@NotNull Multimap<?, ?> modifiers) {
+            for (Object key : modifiers.keySet()) {
+                if (isAttackSpeedName(key)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * The attribute name is {@code generic.attackSpeed} (1.9–1.12) or the underscored
+         * {@code generic.attack_speed} (1.13+); underscores are stripped so both normalise to a
+         * {@code attackspeed} substring — attack_damage never matches.
+         */
+        private static boolean isAttackSpeedName(@Nullable Object attributeName) {
+            if (attributeName == null) {
+                return false;
+            }
+            String normalised = attributeName.toString().toLowerCase(Locale.ROOT).replace("_", "");
+            return normalised.contains("attackspeed");
+        }
+
+        private static @Nullable String versionedRevision() {
+            try {
+                Server server = Bukkit.getServer();
+                if (server == null) {
+                    return null;
+                }
+                Package pkg = server.getClass().getPackage();
+                if (pkg == null) {
+                    return null;
+                }
+                String name = pkg.getName();
+                int dot = name.lastIndexOf('.');
+                String token = dot < 0 ? name : name.substring(dot + 1);
+                return REVISION.matcher(token).matches() ? token : null;
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
     }
 }
