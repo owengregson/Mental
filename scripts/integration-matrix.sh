@@ -40,8 +40,11 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required (reads support-matrix.js
 # calm machine instead of reaching its longest suites mid-ignition. The
 # descriptor lists oldest -> newest, so reverse it.
 VERSIONS_DEFAULT="$(jq -r '[.entries[] | select(.platform=="paper") | .version] | reverse | join(" ")' "$MATRIX")"
-# OCM runs on the floor and ceiling paper entries.
-OCM_VERSIONS="$(jq -r '[.entries[] | select(.platform=="paper") | .version] | .[0] + " " + .[-1]' "$MATRIX")"
+# OCM runs on the FIXED 1.17.1 + 26.1.2 pair — the same version-pin the Gradle
+# integrationTestOcm gate uses. Positional floor+ceiling broke when the legacy
+# backport re-sorted 1.9.4 to entries[0]: OCM does not target Mental's legacy
+# floor, so the pair is pinned by version, not position.
+OCM_VERSIONS="1.17.1 26.1.2"
 JAR_CACHE="$HOME/.gradle/caches/run-task-jars/paper/jars"
 OCM_JAR="$PWD/run/ocm-jar/OldCombatMechanics.jar"
 LIVE="$PWD/run/matrix-live.log"
