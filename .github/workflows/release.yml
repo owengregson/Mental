@@ -302,6 +302,10 @@ jobs:
           {
             echo "**Supports** Paper $support_range · Folia — **Requires** Java 17+ — no plugin dependencies."
             echo
+            echo "> **Legacy servers (Paper 1.9.4–1.16.5) must run on Java 17+** — Mental ships Java 17 classfiles; Paper 1.13–1.16.5 additionally needs \`-DPaper.IgnoreJavaVersion=true\` on the server JVM."
+            echo ">"
+            echo "> **Paper 1.14.4 is not supported** — its terminal build hard-caps at Java 13, so a Java-17 plugin cannot load on it (every other 1.9–1.16 version is covered)."
+            echo
             echo "### Install"
             echo
             echo "1. Download \`$JAR_NAME\` below and drop it into your server's \`plugins/\` folder."
