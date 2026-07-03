@@ -266,20 +266,28 @@ outcome log.
 
 ### Phase 2 — the native-JDK matrix flip (Opus)
 
-`support-matrix.json`: every 1.9.4–1.16.5 entry → the round-2 ladder's
-newest-flagless-Java `jdk` value (D-3), `serverFlags` removed, and every
-paper entry gains its declared `bytecodeTier` (D-7); `_comment` rewritten
-(the flag story is dead; the 1.14.4 hole note survives until Phase 3).
-`scripts/integration-matrix.sh`: `java_for` handles the new JDK set (the
-foojay-provisioned paths under `~/.gradle/jdks/` or a helpful error naming
-the Gradle provisioning route), and the scout-found `--nogui` trap is fixed —
-legacy joptsimple rejects the double-dash form (help-dump + exit); the bare
-`nogui` token works range-wide. Tester tier assertion switches from
-JVM-derived expectation to the entry-declared `bytecodeTier` (plumbed via a
-`-Dmental.tester.tier` system property the run tasks pass). **Gate:** full
-15-entry `integrationTestMatrix` + `integrationTestOcm`, fresh nonces, zero
-`IgnoreJavaVersion` anywhere in the repo outside historical docs, zero
-Java-advisory lines in the legacy boot logs.
+Pre-step (two boots, ~5 min): probe 1.13.2 on Java 15 then 14, and 1.15.2 on
+Java 14 (foojay `launcherFor`; same flagless recipe as the ladder) — take the
+newest CLEAN rung per version. Then `support-matrix.json`: legacy `jdk`
+values per the ladder map (1.9.4–1.12.2 → 21; 1.13.2 → probed; 1.14.4 → 13;
+1.15.2 → probed; 1.16.5 → 16), `serverFlags` removed everywhere, every paper
+entry gains its declared `bytecodeTier` (D-7 map: 1.9.4–1.11.2 → 61,
+1.12.2–1.15.2 → 52, 1.16.5 → 60, modern → 61); `_comment` rewritten (the
+flag story is dead — record the 25-boots-but-JEP-472-warns fact and why 21;
+the 1.14.4 hole note survives until Phase 3). Run tasks pass
+`-Dmental.tester.tier=<bytecodeTier>` (mandatory — the JVM-derived default
+is WRONG for plain-loader entries like 1.12.2@21) and the tester asserts it.
+`scripts/integration-matrix.sh`: `java_for` maps the full JDK set to the
+foojay-provisioned homes under `~/.gradle/jdks/` (helpful error naming the
+Gradle provisioning route when absent); fix the scout-found `--nogui` trap
+(bare `nogui` token range-wide); fix plugin injection — `-add-plugin=` does
+not exist on the legacy builds (spike evidence; the "proven from the floor
+up" comment is wrong): copy the jars into `plugins/` for legacy entries (or
+universally) with the same pristine-reset discipline; pass the tier property.
+**Gate:** full 15-entry `integrationTestMatrix` + `integrationTestOcm`,
+fresh nonces, tier lines quoted per entry matching `bytecodeTier`, zero
+`IgnoreJavaVersion` anywhere outside historical docs, zero Java-advisory
+lines in the legacy boot logs.
 
 ### Phase 3 — 1.14.4 at full tier (Opus)
 
@@ -299,13 +307,20 @@ re-PASS, then the full 16-entry matrix + OCM.
 
 ### Phase 4 — reconciliation and release prep (Opus)
 
-`release.yml` notes template: the one-jar story ("Supports Paper 1.9.4 →
-26.1.2 · Folia — Java 8+ on legacy, Java 17+ on 1.17+"), the
-IgnoreJavaVersion line and the 1.14.4 hole line DELETED; README / CLAUDE.md /
-skills (`paper-cross-version`, `matrix-gate`, `live-server-testing`) support
-story updated; `gradle.properties` → `2.3.2` with the comment updated (first
-non-beta of the 2.3 line). **Gate:** the release-candidate run — full matrix +
-Folia + OCM fresh-nonce — plus workflow YAML lint.
+`release.yml` + `build.yml`: notes template rewritten to the one-jar story
+("Supports Paper 1.9.4 → 26.1.2 · Folia — one jar, Java 8+ on legacy,
+Java 17+ on 1.17+; each version tested on its maximal clean JVM"), the
+IgnoreJavaVersion line and the 1.14.4 hole line DELETED; the `setup-java`
+steps stop installing the full matrix JDK set (Temurin has no 13/14/16) —
+install only the build JDK(s) and let the Gradle foojay toolchain
+auto-provision server JDKs, exactly as locally; cache `~/.gradle/jdks` in the
+runner caches. README / CLAUDE.md / skills (`paper-cross-version`,
+`matrix-gate`, `live-server-testing`) support story updated (including the
+bytecode-tier table and the per-version recommended JVM). LGPL-2.1 notice for
+the shaded jvmdg runtime (scout license evidence) added where the repo keeps
+third-party notices. `gradle.properties` → `2.3.2` with the comment updated
+(first non-beta of the 2.3 line). **Gate:** the release-candidate run — full
+16-entry matrix + Folia + OCM fresh-nonce — plus workflow YAML lint.
 
 ### Release (Fable)
 
@@ -416,9 +431,30 @@ tiers via URLClassLoader delegation (no own JarFile — verified zero
 NOT (plain `new JarFile(File)`); 1.16.5+ honor (reflective/direct/pipeline).
 The non-honoring window is exactly the manual-plain-JarFile era.
 
-**Max-Java ladder:** round-2 ladder agent failed to emit its report — re-run
-dispatched alongside Phase 1; its verdicts land here and gate only Phase 2's
-`jdk`/`bytecodeTier` values.
+**Max-Java ladder (re-run, complete):** two gating regimes exist. 1.9.4–1.12.2
+have NO paperclip Java cap — they boot on Java 25, but Java 24+ prints the
+JEP-472 native-access / `sun.misc.Unsafe`-deprecation warning walls (hawtjni
+`System::loadLibrary` on 1.9.4–1.11.2; + log4j-disruptor `Unsafe` and JNA on
+1.12.2); **Java 21 is their newest warning-free rung (verified clean on all
+four)**. 1.13.2–1.16.5 hard-refuse too-new Java flagless: 1.13.2 boots 13
+clean (its refusal message "Only up to Java 12" is stale — real cap 13–15,
+14/15 unprobed), 1.14.4 = 13 clean (cap confirmed), 1.15.2 boots 13 clean and
+its own refusal names Java 14 as the real cap (14 unprobed — a rung is on
+the table), 1.16.5 = exactly 16, clean, no PaperJvmChecker banner (8 prints
+the outdated-Java wall, 17 is refused). JDK availability: foojay resolves
+8/11/13/16/17/21/25 headlessly on this arm64 mac (13/16 as x64-Rosetta —
+AdoptOpenJDK 13.0.2 / Temurin 16.0.2; 11/21 native aarch64 Temurin; CI linux
+has native builds of all). Owner's intent is warning-free maximal-Java ⇒
+**jdk map: 1.9.4–1.12.2 → 21; 1.13.2 → 13 (Phase 2 probes 15/14 first and
+takes the newest clean rung); 1.14.4 → 13; 1.15.2 → 14 if it boots clean
+else 13; 1.16.5 → 16; modern entries unchanged**. Resulting `bytecodeTier`
+map (jdk × loader-MR): 1.9.4/1.10.2/1.11.2 → **61** (URLClassLoader MR on
+Java 21 serves the ORIGINAL bytecode); 1.12.2 → 52 (plain loader);
+1.13.2/1.14.4/1.15.2 → 52 (plain loaders); 1.16.5 → **60** (MR-aware on
+Java 16); 1.17.1+/Folia/OCM → 61. CI note for Phase 4: Temurin has no
+13/14/16 for `setup-java` — the workflows must install only the build JDK(s)
+via setup-java and let the Gradle foojay toolchain auto-provision the server
+JDKs (exactly as it does locally).
 
 ## Outcome log
 
