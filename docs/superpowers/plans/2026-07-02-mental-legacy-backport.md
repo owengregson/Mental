@@ -352,6 +352,31 @@ identifies the notch recipe by result shape, so a third-party notch recipe
 de-dupes with ours (and feature-disable could remove theirs) — default-OFF
 feature, benign direction.
 
+## Phase 5 outcomes (2026-07-02, commits 09de46c..384d937 — reviewed, accepted)
+
+Legacy FakePlayer branch landed (versioned-package detection, synchronous
+join below the chunk-gated async path, NMS EntityHuman.attack melee —
+LivingEntity#attack routes the generic hurt path and silently deals no
+damage for clientless players). **Promoted to FULL: 1.11.2, 1.12.2, 1.13.2,
+1.15.2, 1.16.5** (era suites live: 55 pass each; skips loud and enumerated).
+Real per-version bug found and fixed: 1.15.2 fires ProjectileHitEvent AFTER
+the projectile's own damage (opposite of 1.16.5), so the thrown-knock invuln
+gate misfired on live noDamageTicks — now reads the frozen PlayerView
+(pre-hit on every version by construction). Pre-1.13 fixes: GroundDistance
+block-geometry fallback (probed; bottom-slab over-estimate documented),
+tester GameRule/ClientEmulator hazards, isAir → ==AIR, old-Netty
+isVoid probe. **1.9.4/1.10.2 HELD AT BOOT (STOP-and-report honored):**
+clientless victims read isOnGround()=false on 1.9/1.10 NMS while Mental
+delivered the correct grounded 0.3608 — a harness-side expectation-chooser
+problem — plus two real pre-1.11 API gaps behind feature enables
+(getAbsorptionAmount in ArmourStrengthUnit, getCooldown in ender-pearl).
+**Phase 5.5 (orchestrator decision): budget-capped closure round** — fix
+both API gaps unconditionally (they are product defects regardless of
+promotion), re-key the suite's grounded-expectation on position-derived
+physical truth (independent of the flaky flag; no pin changes), then
+attempt 1.10.2/1.9.4 promotion; if the wedge persists, land the fixes and
+document the boot-tier hole precisely.
+
 ## Phase 4 outcomes (2026-07-02, commits f4570aa..135d1b8 — reviewed, accepted)
 
 Both amendments closed (ARMOUR_STRENGTH enables on 1.9.4/1.10.2 — the unit
