@@ -1,12 +1,22 @@
 # Mental — agent guide
 
-Latency-compensated 1.7.10 combat for Paper 1.17.1 → 26.x (+ Folia).
+Latency-compensated 1.7.10 combat for Paper 1.9.4 → 26.x (+ Folia).
 Multi-module Gradle: `api` / `kernel` / `platform` / `core` / `compat-folia` /
 `tester`. `kernel` is **pure JDK** (no Bukkit, no PacketEvents — asserted at
 build); `platform` is the Bukkit-facing seam (scheduling, capabilities, NMS
 resolvers) over the kernel; `core` is the plugin (shades PacketEvents + bStats,
 folds in `compat-folia` by name behind `Capabilities.folia()`); `tester` is the
 in-server integration harness. Version lives once in `gradle.properties`.
+
+**Legacy tier (1.9.4–1.16.5, Java 17+ required; 1.14.4 is an impossible hole —
+Java-13 hard cap).** `core` compiles against the 1.17.1 API floor but runs down
+to 1.9.4: every sub-floor absence is handled by boot-time probing at the platform
+seam (never scattered version conditionals), so absent APIs resolve to
+era-correct fallbacks printed in the boot report (material/enchantment names, the
+six Phase-5.5 resolvers, PDC), text sinks route through `TextPort` (relocated
+Adventure → legacy strings; no `Component` crosses a Bukkit boundary), and the
+latency probe rides window-confirmation TRANSACTIONs below 1.17 where the play
+PING/PONG channel is absent. The kernel stays modern-vocabulary and version-blind.
 
 ## Use the skills
 
