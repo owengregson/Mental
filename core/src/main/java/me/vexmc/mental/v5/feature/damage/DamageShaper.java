@@ -4,9 +4,11 @@ import java.lang.reflect.Method;
 import me.vexmc.mental.kernel.math.DamageTables;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.EffectiveMaterial;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.platform.LegacyMaterialNames;
+import me.vexmc.mental.platform.PotionEffects;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
@@ -92,10 +94,15 @@ public final class DamageShaper {
      * post-era). Bukkit-reading; owning-thread only.
      */
     public static boolean isLegacyCritical(Player attacker) {
+        // CritPosture.climbing / .inWater, not Player#isClimbing()/isInWater(): those Bukkit accessors floor
+        // at 1.17 and 1.16 respectively (isClimbing absent on EVERY legacy revision), so a direct call
+        // throws NoSuchMethodError there when a crit feature is enabled. The resolver uses the modern
+        // methods where present (byte-identical on 1.17+) and a feet-block read below. hasPotionEffect is
+        // present across the whole range (1.9.4+), so it stays a direct call.
         return attacker.getFallDistance() > 0.0f
                 && !attacker.isOnGround()
-                && !attacker.isClimbing()
-                && !attacker.isInWater()
+                && !CritPosture.climbing(attacker)
+                && !CritPosture.inWater(attacker)
                 && !attacker.hasPotionEffect(PotionEffectType.BLINDNESS)
                 && attacker.getVehicle() == null;
     }
@@ -176,7 +183,9 @@ public final class DamageShaper {
         if (type == null) {
             return -1;
         }
-        PotionEffect effect = attacker.getPotionEffect(type);
+        // PotionEffects.of, not attacker.getPotionEffect(type): the single-effect accessor is absent on
+        // 1.9.4 (floors at 1.10.2), where a direct call throws; the resolver scans the active set below it.
+        PotionEffect effect = PotionEffects.of(attacker, type);
         return effect == null ? -1 : effect.getAmplifier();
     }
 

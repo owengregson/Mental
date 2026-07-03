@@ -2,6 +2,7 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
 import me.vexmc.mental.kernel.ledger.MotionLedger;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
@@ -36,6 +37,13 @@ import org.jetbrains.annotations.NotNull;
 public final class KnockbackSuite {
 
     private static final double EPSILON = 1.0e-3;
+
+    /** How close the victim's foot Y must sit to the arena floor plane to read grounded. */
+    private static final double FOOT_ON_FLOOR_EPSILON = 0.05;
+    /** Settle threshold for |velY| — generous enough to admit the −0.0784 grounded equilibrium. */
+    private static final double SETTLE_VELOCITY_EPSILON = 0.1;
+
+    private static final Logger LOG = Logger.getLogger(KnockbackSuite.class.getName());
 
     private KnockbackSuite() {}
 
@@ -233,12 +241,40 @@ public final class KnockbackSuite {
     /** The victim's engine input with a fresh ledger: grounded equilibrium motion. */
     static EntityState restingVictim(FakePlayer victim) {
         EntityState live = EntityStates.capture(victim.player());
-        double vy = live.grounded()
+        // Key the grounded-vs-airborne selector on physical position truth, NOT the Bukkit isOnGround()
+        // flag: a clientless fake victim reads isOnGround()=false on the 1.9/1.10 NMS after settling even
+        // while resting on the floor, which wrongly chose the airborne 0.0 baseline (→ expected 0.4) while
+        // Mental delivered the grounded −0.0784 equilibrium (→ 0.3608). The physical check is an INDEPENDENT
+        // source (not Mental's view, not the flaky flag); on every version where the flag was already
+        // correct it agrees with it, so no pinned VALUE changes — only the selector becomes reliable.
+        boolean grounded = physicallyGrounded(victim, live.grounded());
+        double vy = grounded
                 ? Decay.groundedEquilibrium(Decay.DEFAULT_GRAVITY)
                 : 0.0;
         return new EntityState(
                 live.x(), live.y(), live.z(), live.yaw(), 0.0, vy, 0.0,
-                live.grounded(), live.sprinting(),
+                grounded, live.sprinting(),
                 live.knockbackEnchantLevel(), live.knockbackResistance());
+    }
+
+    /**
+     * Position-derived physical ground truth for a settled victim on the known-flat arena floor: the foot
+     * Y sits on the floor plane ({@link Arena#floorY}) and the vertical velocity has settled. Independent of
+     * both Mental's published view and the Bukkit {@code isOnGround()} flag. The flag is kept as a logged
+     * diagnostic (only when it disagrees) so its behaviour on each server version stays visible in the suite
+     * log — the flag itself is never trusted for the selector.
+     */
+    static boolean physicallyGrounded(FakePlayer victim, boolean isOnGroundFlag) {
+        Location location = victim.player().getLocation();
+        double footToFloor = Math.abs(location.getY() - Arena.floorY());
+        double velY = victim.player().getVelocity().getY();
+        boolean grounded = footToFloor < FOOT_ON_FLOOR_EPSILON && Math.abs(velY) < SETTLE_VELOCITY_EPSILON;
+        if (grounded != isOnGroundFlag) {
+            LOG.info("[ground-diagnostic] victim " + victim.uuid() + " footY=" + location.getY()
+                    + " floorY=" + Arena.floorY() + " velY=" + velY
+                    + " -> physical grounded=" + grounded
+                    + ", but Bukkit isOnGround()=" + isOnGroundFlag + " (using physical truth)");
+        }
+        return grounded;
     }
 }

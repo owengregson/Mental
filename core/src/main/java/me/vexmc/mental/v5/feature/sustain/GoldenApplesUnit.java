@@ -5,6 +5,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects.EffectSpec;
@@ -283,7 +284,9 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
             }
             player.removePotionEffect(effectType); // wipe the modern vanilla effect first
             PotionEffect era = new PotionEffect(effectType, spec.durationTicks(), spec.amplifier());
-            PotionEffect existing = player.getPotionEffect(effectType);
+            // PotionEffects.of, not player.getPotionEffect(effectType): the single-effect accessor is absent
+            // on 1.9.4 (floors at 1.10.2), where a direct call throws; the resolver scans the active set.
+            PotionEffect existing = PotionEffects.of(player, effectType);
             if (existing == null) {
                 player.addPotionEffect(era);
             } else if (era.getAmplifier() > existing.getAmplifier()

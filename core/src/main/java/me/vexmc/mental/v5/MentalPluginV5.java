@@ -12,9 +12,13 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
+import me.vexmc.mental.platform.Absorptions;
 import me.vexmc.mental.platform.Capabilities;
+import me.vexmc.mental.platform.Cooldowns;
+import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Pings;
+import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
@@ -342,6 +346,12 @@ public final class MentalPluginV5 extends JavaPlugin {
         getLogger().info(() -> "Mental v5 enabled — server " + environment.describe()
                 + ", scheduling=" + scheduling.describe() + ", ping=" + Pings.describe()
                 + ", " + capabilities.describe());
+        // The cross-version rule-feature resolvers (absorption/potion-effect/item-cooldown/crit-posture):
+        // their boot-selected accessors, so a legacy fallback is visible in the log, never silent (B10).
+        getLogger().info(() -> "rule-feature accessors — absorption=" + Absorptions.describe()
+                + ", potion-effect=" + PotionEffects.describe()
+                + ", " + Cooldowns.describe()
+                + ", crit-posture[" + CritPosture.describe() + "]");
     }
 
     @Override
@@ -568,7 +578,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // (B13); regen drives per-player 80-tick heal tasks; the ender-pearl unit
         // clears the 1.9 throw cooldown. All pure Bukkit + Scheduling.
         reconciler.register(new GoldenApplesUnit(this, scheduling));
-        reconciler.register(new EnderPearlCooldownUnit(scheduling));
+        reconciler.register(new EnderPearlCooldownUnit(this, scheduling));
         reconciler.register(new RegenUnit(scheduling));
         reconciler.register(new PotionDurationsUnit());
 

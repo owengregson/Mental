@@ -5,8 +5,10 @@ import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Set;
 import me.vexmc.mental.kernel.math.DefenceMath;
+import me.vexmc.mental.platform.Absorptions;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
+import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -129,7 +131,11 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
                 ? 0
                 : resistanceLevel(victim);
         int epf = enchantEpf(victim, cause);
-        double absorption = victim.getAbsorptionAmount();
+        // Absorptions.of, not victim.getAbsorptionAmount(): the Bukkit accessor floors at 1.15 (absent on
+        // 1.9.4–1.13.2 — javap-verified), so a direct call throws NoSuchMethodError there when the feature
+        // is enabled. The resolver uses the modern method where present and the universal NMS
+        // getAbsorptionHearts() below it (byte-identical value), so the era cascade works on every version.
+        double absorption = Absorptions.of(victim);
 
         double afterArmour = DefenceMath.armourReduced(preArmour, armourPoints);
         setIfChanged(event, DamageModifier.ARMOR, afterArmour - preArmour);
@@ -163,7 +169,10 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
         if (RESISTANCE == null) {
             return 0;
         }
-        PotionEffect effect = victim.getPotionEffect(RESISTANCE);
+        // PotionEffects.of, not victim.getPotionEffect(RESISTANCE): the single-effect accessor floors at
+        // 1.10.2 (absent on 1.9.4 — javap-verified), so a direct call throws there. The resolver scans
+        // getActivePotionEffects() below the accessor's floor — same result, no modern API.
+        PotionEffect effect = PotionEffects.of(victim, RESISTANCE);
         return effect == null ? 0 : effect.getAmplifier() + 1;
     }
 

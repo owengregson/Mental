@@ -1,6 +1,8 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
+import me.vexmc.mental.platform.Cooldowns;
+import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
@@ -154,6 +156,16 @@ public final class ConsumableRulesSuite {
 
     private static void runEnderPearlCooldown(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        // The item-cooldown API (getCooldown/setCooldown) floors at 1.11.2: vanilla <=1.10 has no
+        // ender-pearl throw cooldown at all, so there is nothing for the module to clear and the era state
+        // it restores is already native. Skip loudly rather than call an absent accessor (the module itself
+        // is a documented no-op on these versions — see EnderPearlCooldownUnit).
+        if (!Cooldowns.itemCooldownSupported()) {
+            context.note("no item-cooldown API on this version (pre-1.11) — vanilla <=1.10 has no ender-pearl "
+                    + "cooldown, so disable-enderpearl-cooldown is a native no-op here; skipping the behaviour check");
+            return;
+        }
+
         FakePlayer thrower = new FakePlayer(tester, mental.scheduling());
 
         try {
@@ -452,7 +464,9 @@ public final class ConsumableRulesSuite {
      * if the player does not currently have that effect.
      */
     private static @Nullable Integer activeAmplifier(Player player, PotionEffectType type) {
-        PotionEffect effect = player.getPotionEffect(type);
+        // PotionEffects.of, not player.getPotionEffect(type): the single-effect accessor is absent on 1.9.4
+        // (floors at 1.10.2), where a direct call throws — the resolver scans the active set below it.
+        PotionEffect effect = PotionEffects.of(player, type);
         return effect == null ? null : effect.getAmplifier();
     }
 
