@@ -50,10 +50,13 @@ import org.jetbrains.annotations.NotNull;
  *
  * <h2>Per-version levers</h2>
  * <ul>
- *   <li><b>1.17.1–1.20.4</b> — no interaction-range attribute and no
- *       {@code ATTACK_RANGE} component; the vanilla gate is a hardcoded ~6 blocks
- *       with no safe per-player lever. A complete <b>no-op</b> (both drivers report
- *       unsupported — nothing is written).</li>
+ *   <li><b>1.9.4–1.16.5</b> (legacy backport) and <b>1.17.1–1.20.4</b> — neither
+ *       the interaction-range attribute nor the {@code ATTACK_RANGE} component
+ *       exists, so both drivers report unsupported and the unit is a complete
+ *       <b>no-op</b>. This is era-benign: on 1.9–1.16 the vanilla survival reach is
+ *       already the era-adjacent ~3.0, so there is nothing to pull back down. The
+ *       unit still ENABLES cleanly (it is pure Bukkit — see below), it simply
+ *       writes nothing.</li>
  *   <li><b>1.20.5+</b> — the {@code ENTITY_INTERACTION_RANGE} attribute (era base
  *       3.0), pinned per player and restored on quit / disable.</li>
  *   <li><b>1.21.5+</b> — additionally the {@code ATTACK_RANGE} item component (era
@@ -61,6 +64,16 @@ import org.jetbrains.annotations.NotNull;
  *       reconciled on join / hotbar / swap / world change and stripped on
  *       drop / death / world / quit / disable.</li>
  * </ul>
+ *
+ * <h2>No NMS surface (version-safe by construction)</h2>
+ * <p>This unit touches <b>no NMS directly</b>: both levers are capability-gated
+ * Bukkit surfaces — {@link EraReachAttribute} over the {@code Attributes} handle
+ * (present-probed) and {@link AttackRangeAdapter} over its own boot-probed NMS
+ * component. Every event it listens on ({@code PlayerJoin}, {@code PlayerItemHeld},
+ * {@code PlayerSwapHandItems}, {@code PlayerDropItem}, {@code PlayerDeath},
+ * {@code PlayerChangedWorld}, {@code PlayerQuit}) exists across the whole 1.9.4→
+ * modern range, so the feature enables on every legacy revision with no per-revision
+ * work; below 1.20.5 it is simply an era-benign no-op.</p>
  *
  * <p>Zero-touch: disabled (the default) or on an unsupported tier the unit writes
  * nothing; enabled it restores every captured base and strips every applied
