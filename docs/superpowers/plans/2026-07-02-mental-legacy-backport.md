@@ -377,6 +377,29 @@ physical truth (independent of the flaky flag; no pin changes), then
 attempt 1.10.2/1.9.4 promotion; if the wedge persists, land the fixes and
 document the boot-tier hole precisely.
 
+## Phase 5.5 outcomes (2026-07-02, commits 3e72b96..c83f781 — reviewed, accepted)
+
+**1.9.4 and 1.10.2 promoted to FULL — the matrix is 15/15 at full tier.**
+The API sweep found SIX pre-1.11 gaps (not two), several latent on
+already-promoted versions because the crit path rides the fast path
+clientless players never traverse (root cause: core compiles against the
+1.17.1 floor API, so everything compiles and NoSuchMethodErrors at runtime).
+Six boot-selected platform resolvers landed (Absorptions, PotionEffects,
+CritPosture ×3, Cooldowns, HandStates) — modern accessor verbatim on 1.17+
+(unit-pinned), era-intent fallbacks below, selections printed in the boot
+report. Ender-pearl cooldown is a documented loud no-op below 1.11.2 (the
+era state is native there). Harness re-key: grounded expectation now
+position-derived (block-under-feet + settled velocity — the same read
+production does), the flaky flag kept as a divergence diagnostic (proven
+lying on 1.9/1.10, zero divergence on modern → no pin changes). 1.9.4/1.10.2
+carry 8 loud first-class skips (clientless motion is not server-integrated
+pre-1.11 — trajectory/flight tests cannot fly a connectionless victim; the
+knock VALUES are fully pinned, which is the product claim). Coverage table
+for the docs lives in the Phase 5.5 report. Accepted residuals (Phase 6
+compat notes): CritPosture.inWater feet-block approximation pre-1.16
+(crit-fallback path only); the fast-path suites' clientless blind spot
+(real-client verification = SimpleBoxer/owner's setup).
+
 ## Phase 4 outcomes (2026-07-02, commits f4570aa..135d1b8 — reviewed, accepted)
 
 Both amendments closed (ARMOUR_STRENGTH enables on 1.9.4/1.10.2 — the unit
