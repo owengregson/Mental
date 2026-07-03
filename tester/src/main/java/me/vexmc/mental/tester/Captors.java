@@ -19,6 +19,23 @@ import org.jetbrains.annotations.Nullable;
 /** MONITOR-priority observers for the values modules actually produced. */
 public final class Captors implements Listener {
 
+    /**
+     * {@code ProjectileHitEvent#getHitEntity()} is absent below 1.10.2 (javap-verified). Probing it once
+     * keeps the captor from throwing a {@code NoSuchMethodError} into every ProjectileHitEvent on 1.9.4 —
+     * the tester must not throw where the feature it observes cannot resolve the target either (the
+     * thrown-projectile suites skip on that version by design).
+     */
+    private static final boolean HIT_ENTITY_SUPPORTED = probeHitEntity();
+
+    private static boolean probeHitEntity() {
+        try {
+            ProjectileHitEvent.class.getMethod("getHitEntity");
+            return true;
+        } catch (NoSuchMethodException absent) {
+            return false;
+        }
+    }
+
     private final Map<UUID, Vector> velocities = new ConcurrentHashMap<>();
     private final Map<UUID, Double> damages = new ConcurrentHashMap<>();
     private final Map<UUID, Double> finalDamages = new ConcurrentHashMap<>();
@@ -51,6 +68,11 @@ public final class Captors implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onProjectileHit(@NotNull ProjectileHitEvent event) {
+        // getHitEntity() is absent below 1.10.2 — no target resolution there, so the captor records nothing
+        // (the thrown-projectile suites skip on that version, matching Mental's own getHitEntity degrade).
+        if (!HIT_ENTITY_SUPPORTED) {
+            return;
+        }
         if (event.getHitEntity() != null) {
             projectileHits.put(event.getHitEntity().getUniqueId(), event.getEntity().getType().name());
         }

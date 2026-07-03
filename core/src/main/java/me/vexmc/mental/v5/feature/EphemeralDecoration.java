@@ -3,6 +3,7 @@ package me.vexmc.mental.v5.feature;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.platform.HandStates;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
@@ -348,7 +349,11 @@ public final class EphemeralDecoration {
     }
 
     private boolean isHandRaised(@NotNull Player player) {
-        return player.isBlocking() || player.isHandRaised();
+        // HandStates.isHandRaised, not player.isHandRaised(): the Bukkit accessor floors at 1.10.2 (absent
+        // on 1.9.4), where a direct call throws when sword-blocking is enabled. isBlocking() is present on
+        // 1.9.4, so the condition collapses to the shield-block state there (loses only the sub-block-delay
+        // raise window). The resolver uses the native method verbatim on 1.10.2+.
+        return player.isBlocking() || HandStates.isHandRaised(player);
     }
 
     /** Restores the original off-hand item and cancels the poll. INLINE — the caller is on the region thread. */

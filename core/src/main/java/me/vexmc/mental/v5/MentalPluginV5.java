@@ -16,6 +16,7 @@ import me.vexmc.mental.platform.Absorptions;
 import me.vexmc.mental.platform.Capabilities;
 import me.vexmc.mental.platform.Cooldowns;
 import me.vexmc.mental.platform.CritPosture;
+import me.vexmc.mental.platform.HandStates;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.platform.PotionEffects;
@@ -351,7 +352,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         getLogger().info(() -> "rule-feature accessors — absorption=" + Absorptions.describe()
                 + ", potion-effect=" + PotionEffects.describe()
                 + ", " + Cooldowns.describe()
-                + ", crit-posture[" + CritPosture.describe() + "]");
+                + ", crit-posture[" + CritPosture.describe() + "]"
+                + ", hand-raised=" + HandStates.describe());
     }
 
     @Override
