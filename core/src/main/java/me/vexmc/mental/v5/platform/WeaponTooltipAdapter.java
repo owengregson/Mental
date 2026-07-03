@@ -397,7 +397,7 @@ public final class WeaponTooltipAdapter {
     /* ------------------------------------------------------------------ */
 
     /**
-     * Path C's self-contained handle set (v1_9_R2 … v1_12_R1). Resolves the
+     * Path C's self-contained handle set (v1_9_R2 … v1_15_R1). Resolves the
      * versioned CraftBukkit/NMS members once at boot; {@link #probe()} returns
      * {@code null} unless every handle is present, so the outer adapter treats an
      * unresolved path C as simply absent (never a half-resolved surface). Every
@@ -418,7 +418,8 @@ public final class WeaponTooltipAdapter {
         private final Method itemStackSetTag;
         private final Method nbtSet;            // NBTTagCompound.set(String, NBTBase)
         private final Method nbtSetString;      // NBTTagCompound.setString(String, String)
-        private final Method nbtListAdd;        // NBTTagList.add(NBTBase)
+        private final Method nbtListAdd;        // NBTTagList.add(NBTBase) (≤1.13) or add(int, NBTBase) (1.14+)
+        private final boolean indexedListAdd;   // true when nbtListAdd is the 1.14+ add(int, NBTBase) shape
         private final Constructor<?> nbtCompoundCtor;
         private final Constructor<?> nbtListCtor;
         private final Object mainHandSlot;      // EnumItemSlot.MAINHAND
@@ -426,7 +427,7 @@ public final class WeaponTooltipAdapter {
         private LegacyNbtStrip(
                 Method asNmsCopy, Method asBukkitCopy, Method itemStackModifiers, Method serializeModifier,
                 Method itemStackHasTag, Method itemStackGetTag, Method itemStackSetTag, Method nbtSet,
-                Method nbtSetString, Method nbtListAdd, Constructor<?> nbtCompoundCtor,
+                Method nbtSetString, Method nbtListAdd, boolean indexedListAdd, Constructor<?> nbtCompoundCtor,
                 Constructor<?> nbtListCtor, Object mainHandSlot) {
             this.asNmsCopy = asNmsCopy;
             this.asBukkitCopy = asBukkitCopy;
@@ -438,6 +439,7 @@ public final class WeaponTooltipAdapter {
             this.nbtSet = nbtSet;
             this.nbtSetString = nbtSetString;
             this.nbtListAdd = nbtListAdd;
+            this.indexedListAdd = indexedListAdd;
             this.nbtCompoundCtor = nbtCompoundCtor;
             this.nbtListCtor = nbtListCtor;
             this.mainHandSlot = mainHandSlot;
@@ -460,6 +462,18 @@ public final class WeaponTooltipAdapter {
                 Class<?> nbtTagCompound = Class.forName(nms + "NBTTagCompound");
                 Class<?> nbtTagList = Class.forName(nms + "NBTTagList");
 
+                // NBTTagList.add changed at 1.14: add(NBTBase) (≤1.13, v1_9_R2…v1_13_R2) became
+                // add(int, NBTBase) (1.14+, v1_15_R1) — javap-verified on the real jars.
+                Method listAdd;
+                boolean indexed;
+                try {
+                    listAdd = nbtTagList.getMethod("add", nbtBase);
+                    indexed = false;
+                } catch (NoSuchMethodException legacyShapeAbsent) {
+                    listAdd = nbtTagList.getMethod("add", int.class, nbtBase);
+                    indexed = true;
+                }
+
                 return new LegacyNbtStrip(
                         craftItemStack.getMethod("asNMSCopy", ItemStack.class),
                         craftItemStack.getMethod("asBukkitCopy", nmsItemStack),
@@ -470,7 +484,8 @@ public final class WeaponTooltipAdapter {
                         nmsItemStack.getMethod("setTag", nbtTagCompound),
                         nbtTagCompound.getMethod("set", String.class, nbtBase),
                         nbtTagCompound.getMethod("setString", String.class, String.class),
-                        nbtTagList.getMethod("add", nbtBase),
+                        listAdd,
+                        indexed,
                         nbtTagCompound.getConstructor(),
                         nbtTagList.getConstructor(),
                         enumItemSlot.getField("MAINHAND").get(null));
@@ -495,6 +510,7 @@ public final class WeaponTooltipAdapter {
                     return null; // no attack-speed line to strip — leave the copy untouched
                 }
                 Object list = nbtListCtor.newInstance();
+                int index = 0;
                 for (Map.Entry<?, ?> entry : modifiers.entries()) {
                     Object attributeName = entry.getKey();
                     if (isAttackSpeedName(attributeName)) {
@@ -503,7 +519,11 @@ public final class WeaponTooltipAdapter {
                     Object nbt = serializeModifier.invoke(null, entry.getValue());
                     nbtSetString.invoke(nbt, "AttributeName", String.valueOf(attributeName));
                     nbtSetString.invoke(nbt, "Slot", "mainhand");
-                    nbtListAdd.invoke(list, nbt);
+                    if (indexedListAdd) {
+                        nbtListAdd.invoke(list, index++, nbt); // 1.14+ add(int, NBTBase) — append at the end
+                    } else {
+                        nbtListAdd.invoke(list, nbt); // ≤1.13 add(NBTBase)
+                    }
                 }
                 Object tag = Boolean.TRUE.equals(itemStackHasTag.invoke(nms))
                         ? itemStackGetTag.invoke(nms)
