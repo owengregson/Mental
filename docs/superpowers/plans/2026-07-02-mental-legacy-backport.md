@@ -352,6 +352,25 @@ identifies the notch recipe by result shape, so a third-party notch recipe
 de-dupes with ours (and feature-disable could remove theirs) — default-OFF
 feature, benign direction.
 
+## Phase 4 outcomes (2026-07-02, commits f4570aa..135d1b8 — reviewed, accepted)
+
+Both amendments closed (ARMOUR_STRENGTH enables on 1.9.4/1.10.2 — the unit
+never touched toughness, so tolerance held by construction; projectile KB
+ACTIVE on all 7 via the reflective ArrowShape classifier — no arrow type in
+any field/signature/instanceof, with the 1.13.2 Trident-extends-Arrow
+exclusion). Tooltip strip now covers the whole range; HitboxUnit proven
+Bukkit-only (no NMS work). 15/15 + OCM fresh-nonce green. Plan corrections
+from javap (trust these over older prose): **path B floors at 1.16.5, not
+1.13.2** (Material.getItemAttributes absent on 1.13.2/1.15.2 — path C covers
+1.9.4–1.15.2); **FishHook exists on all 7** (pre-1.13 Fish extends FishHook —
+rod units needed nothing); **ProjectileHitEvent.getHitEntity is absent on
+1.9.4 only** → thrown-projectile (snowball/egg/pearl) knock unavailable there,
+arrows/Punch unaffected (loud, documented). The manifest expectations table
+caught a real probe miss on its first run (NBTTagList.add became add(int,
+NBTBase) at 1.14 → path C self-disabled on 1.15.2) — the anti-silent-
+degradation design working as intended. Phase 5's FakePlayer shape pack:
+docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md.
+
 ## Orchestrator review — Phases 1–2 (2026-07-02)
 
 Full line-level review of the landed diff (ca3e934..5dcdcf1, 38 files):

@@ -18,9 +18,10 @@ package token; all NMS classes live in `net.minecraft.server.<v>`.
   `public void a(NetworkManager, EntityPlayer)`
 - **EntityHuman NMS melee**: `public void attack(net.minecraft.server.<v>.Entity)`
   — the spigot name is literally `attack` on every revision.
-- **Bukkit `HumanEntity.attack(Entity)` is ABSENT on ALL 7** (1.15.2/1.16.5
-  add only `float getAttackCooldown()`). Tester melee MUST go through the NMS
-  `attack` above on every legacy version.
+- **Bukkit `HumanEntity.attack(Entity)` is ABSENT on ALL 7** — but the Phase 4
+  executor's javap found `attack(Entity)` on `org.bukkit.entity.LivingEntity`
+  on 1.15.2/1.16.5 (absent below). So: `LivingEntity#attack` where present
+  (1.15.2+), else the NMS `EntityHuman.attack` above (1.9.4–1.13.2).
 
 ## Divergence axes
 
