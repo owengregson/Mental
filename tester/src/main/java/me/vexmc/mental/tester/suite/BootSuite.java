@@ -1,16 +1,23 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import me.vexmc.mental.api.Mental;
+import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.ProbeStrategy;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.gui.DashboardMenu;
 import me.vexmc.mental.v5.gui.MenuContext;
+import me.vexmc.mental.v5.platform.ManifestEntry;
+import me.vexmc.mental.v5.platform.SwordBlockAdapter;
+import me.vexmc.mental.v5.platform.WeaponTooltipAdapter;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import org.bukkit.Bukkit;
@@ -113,7 +120,197 @@ public final class BootSuite {
                 new TestCase("legacy: era weapon damage resolves through the flattening name seam", context ->
                         legacyEraDamageSmoke(mental, context)),
                 new TestCase("legacy: golden-apples enables cleanly (no pre-1.13 refusal)", context ->
-                        legacyGoldenApplesSmoke(mental, context)));
+                        legacyGoldenApplesSmoke(mental, context)),
+                new TestCase("platform: the manifest degrades to the expected per-version resolution set",
+                        context -> manifestDegradesPerVersion(mental, context)),
+                new TestCase("legacy: era-hitbox reach enables (Bukkit-only, a no-op below 1.20.5)", context ->
+                        legacyHitboxEnables(mental, context)),
+                new TestCase("legacy: sword-blocking selects the off-hand-shield decoration (tier NONE)",
+                        context -> legacySwordBlockDecoration(mental, context)),
+                new TestCase("legacy: cooldown tooltip strip drops attack_speed, keeps attack_damage (path C)",
+                        context -> legacyTooltipStrip(mental, context)));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Gate 4 — the per-version manifest expectations table (item 6)       */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Turns "the manifest degraded correctly" into a per-version pinned fact. For EVERY manifest
+     * entry the expected presence is a function of one declared first-present version (the Required
+     * handles present on all supported versions; each OptionalSince present at/above its own since),
+     * asserted against {@code entry.present()} on the running server. Runs on every entry — modern
+     * (everything resolves per its since) and legacy alike — so a mapping break or a mis-degraded
+     * probe on any single version fails structurally here. The table must stay complete in both
+     * directions: an unknown entry name or a stale table key is itself a failure.
+     */
+    private static void manifestDegradesPerVersion(MentalPluginV5 mental, TestContext context) {
+        ServerEnvironment env = mental.environment();
+        Map<String, int[]> presentSince = manifestPresentSince();
+        Set<String> seen = new HashSet<>();
+        for (ManifestEntry entry : mental.platformProfile().entries()) {
+            seen.add(entry.name());
+            int[] since = presentSince.get(entry.name());
+            context.expect(since != null,
+                    "manifest entry '" + entry.name() + "' is absent from the expectations table — add it "
+                            + "(a new probe must declare its per-version band)");
+            if (since == null) {
+                continue;
+            }
+            boolean expected = env.isAtLeast(since[0], since[1], since[2]);
+            context.expect(entry.present() == expected,
+                    "manifest '" + entry.name() + "' present=" + entry.present() + " but expected " + expected
+                            + " on " + env.describe() + " (present-since " + since[0] + "." + since[1] + "."
+                            + since[2] + ")");
+        }
+        for (String name : presentSince.keySet()) {
+            context.expect(seen.contains(name),
+                    "expectations table names '" + name + "' but the live manifest has no such entry (stale?)");
+        }
+        // Item 1's payoff: with armor_toughness now OptionalSince, NO feature is platform-disabled on
+        // any supported version — the mapping-break disable set is empty on 1.9.4/1.10.2 too.
+        context.expect(mental.platformProfile().disabledFeatures().isEmpty(),
+                "features platform-disabled on " + env.describe() + ": "
+                        + mental.platformProfile().disabledFeatures());
+    }
+
+    /**
+     * The first version each manifest entry resolves on — the pinned expectations table (item 6).
+     * Required handles are present on every supported version ({@code {1,0,0}}); each OptionalSince
+     * entry declares the version it first appears. {@code component:weapon_tooltip} is present on the
+     * whole range after item 3 (path C on 1.9.4–1.15.2, path B on 1.16.5–1.20.x, path A on 1.20.5+).
+     */
+    private static Map<String, int[]> manifestPresentSince() {
+        int[] always = {1, 0, 0};
+        Map<String, int[]> table = new LinkedHashMap<>();
+        for (String required : List.of(
+                "attribute:attack_damage", "attribute:attack_speed", "attribute:knockback_resistance",
+                "attribute:max_health", "attribute:armor",
+                "enchant:sharpness", "enchant:punch", "enchant:knockback", "enchant:protection",
+                "enchant:fire_protection", "enchant:feather_falling", "enchant:blast_protection",
+                "enchant:projectile_protection", "enchant:unbreaking")) {
+            table.put(required, always);
+        }
+        table.put("attribute:armor_toughness", new int[] {1, 11, 2}); // item 1 — OptionalSince(1.11.2)
+        table.put("attribute:gravity", new int[] {1, 20, 5});
+        table.put("attribute:entity_interaction_range", new int[] {1, 20, 5});
+        table.put("capability:hurt_animation_bundle", new int[] {1, 19, 4});
+        table.put("capability:knockback_event", new int[] {1, 20, 6});
+        table.put("flag:projectile_kb_restored", new int[] {1, 21, 2});
+        table.put("marker:join_protection_layout", new int[] {1, 21, 2});
+        table.put("component:max_damage", new int[] {1, 20, 5});
+        table.put("component:sword_block", new int[] {1, 21, 0});
+        table.put("component:weapon_tooltip", always); // item 3 — resolvable on the whole range
+        table.put("component:attack_range", new int[] {1, 21, 5});
+        return table;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Loadout / block / cadence on legacy (items 4, 5, 7)                */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Item 4: HITBOX owns no Required manifest handle and its two reach levers are capability-gated
+     * Bukkit surfaces (no NMS), so it must ENABLE cleanly on every legacy revision and be a complete
+     * no-op below 1.20.5 (no interaction-range attribute, no ATTACK_RANGE component) — era-benign,
+     * since 1.9–1.16 survival reach is already ~3.0. Pins enable-converges + zero-touch teardown.
+     * Skips (with a reason) at/above 1.20.5 where the levers become live (covered by HitboxSuite).
+     */
+    private static void legacyHitboxEnables(MentalPluginV5 mental, TestContext context) throws Exception {
+        if (mental.environment().isAtLeast(1, 20, 5)) {
+            context.note("skipped: the hitbox-reach levers are live at/above 1.20.5 ("
+                    + mental.environment().describe() + ") — this case pins the legacy no-op band.");
+            return;
+        }
+        context.expect(!mental.platformProfile().disabledFeatures().contains(Feature.HITBOX),
+                "HITBOX must never be platform-disabled — it owns no Required manifest handle");
+        try {
+            setFeature(mental, context, Feature.HITBOX, true);
+            context.expect(mental.featureActive(Feature.HITBOX),
+                    "HITBOX did not converge active on a legacy server (it is pure Bukkit — must enable)");
+        } finally {
+            setFeature(mental, context, Feature.HITBOX, false);
+        }
+        context.expect(!mental.featureActive(Feature.HITBOX),
+                "HITBOX did not disable — zero-touch not restored");
+    }
+
+    /**
+     * Item 5: below 1.21 the era sword-block mechanic is the off-hand-shield decoration
+     * (EphemeralDecoration off-hand tier), selected exactly when {@code SwordBlockAdapter.tier() ==
+     * NONE}. SHIELD exists 1.9+; Phase 1 added the pre-1.14 in-memory temp-shield identity. A
+     * clientless boot has no real player to drive inject/revert through, so this pins the WIRING:
+     * enable converges active, the adapter reports tier NONE (the off-hand path is the one selected),
+     * SHIELD resolves, and disable restores zero-touch. The live inject/revert leak-check needs a real
+     * player (Phase 5 FakePlayer) — stated here, never silently skipped.
+     */
+    private static void legacySwordBlockDecoration(MentalPluginV5 mental, TestContext context)
+            throws Exception {
+        if (mental.environment().isAtLeast(1, 21, 0)) {
+            context.note("skipped: 1.21+ drives the in-place component sword-block pose ("
+                    + mental.environment().describe() + ") — this case pins the pre-1.21 off-hand path.");
+            return;
+        }
+        context.expect(mental.platformProfile().swordBlock().tier() == SwordBlockAdapter.Tier.NONE,
+                "pre-1.21 sword-block adapter tier must be NONE — the off-hand-shield decoration path");
+        context.expect(Material.getMaterial("SHIELD") != null,
+                "SHIELD material must resolve (it exists 1.9+) for the off-hand decoration");
+        try {
+            setFeature(mental, context, Feature.SWORD_BLOCKING, true);
+            context.expect(mental.featureActive(Feature.SWORD_BLOCKING),
+                    "SWORD_BLOCKING did not converge active on a legacy server");
+        } finally {
+            setFeature(mental, context, Feature.SWORD_BLOCKING, false);
+        }
+        context.expect(!mental.featureActive(Feature.SWORD_BLOCKING),
+                "SWORD_BLOCKING did not disable — zero-touch decoration teardown not restored");
+        context.note("sword-block off-hand-shield inject/revert leak-check requires a real player "
+                + "(a clientless boot cannot drive it) — deferred to Phase 5 FakePlayer.");
+    }
+
+    /**
+     * Item 7: the pre-1.13-through-1.15 cooldown tooltip strip is the versioned-NMS NBT path (path C),
+     * whose read-back seam ({@link WeaponTooltipAdapter#mainHandAttributeNames}) is available exactly
+     * where path C resolves (1.9.4–1.15.2). Build a DIAMOND_SWORD, confirm it carries BOTH attack
+     * modifiers, run the strip, and assert the result's effective main-hand set has attack_damage but
+     * NOT attack_speed. Skips (with a reason) where path C is unavailable (1.16.5+, where path B/A own
+     * the strip and the existing AttackCooldownUnit unit test covers it).
+     */
+    private static void legacyTooltipStrip(MentalPluginV5 mental, TestContext context) throws Exception {
+        WeaponTooltipAdapter tooltip = mental.platformProfile().weaponTooltip();
+        Material diamondSword = Material.getMaterial("DIAMOND_SWORD");
+        context.expect(diamondSword != null, "DIAMOND_SWORD did not resolve — environment misread?");
+        context.syncRun(() -> {
+            ItemStack sword = new ItemStack(diamondSword);
+            Set<String> before = tooltip.mainHandAttributeNames(sword);
+            if (before == null) {
+                context.note("skipped: the versioned-NMS NBT read-back (path C) is unavailable on "
+                        + mental.environment().describe() + " — path B/A own the strip there "
+                        + "(covered by AttackCooldownUnitTest).");
+                return;
+            }
+            context.expect(containsAttack(before, "attackdamage") && containsAttack(before, "attackspeed"),
+                    "a vanilla diamond sword must carry BOTH attack_damage and attack_speed before the strip "
+                            + "(saw " + before + ")");
+            ItemStack stripped = tooltip.stripAttackSpeed(sword);
+            context.expect(stripped != null, "the strip returned no change on a sword that has attack_speed");
+            Set<String> after = tooltip.mainHandAttributeNames(stripped);
+            context.expect(after != null, "read-back of the stripped item failed");
+            context.expect(containsAttack(after, "attackdamage"),
+                    "attack_damage must survive the strip (saw " + after + ")");
+            context.expect(!containsAttack(after, "attackspeed"),
+                    "attack_speed must be gone after the strip (saw " + after + ")");
+        });
+    }
+
+    /** Underscore-insensitive membership: matches {@code generic.attackSpeed} and {@code attack_speed}. */
+    private static boolean containsAttack(@NotNull Set<String> names, @NotNull String needle) {
+        for (String name : names) {
+            if (name.replace("_", "").contains(needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /* ------------------------------------------------------------------ */
@@ -143,12 +340,13 @@ public final class BootSuite {
                 "WOODEN_SWORD resolved on a supposedly pre-flattening server — not actually pre-1.13?");
 
         // Enable exactly the DAMAGE-family modules this version's PlatformProfile did NOT
-        // disable: ARMOUR_STRENGTH needs the armor_toughness attribute handle, which is a
-        // mapping break on 1.9.4/1.10.2 (its per-revision NMS resolution is Phase 4's
-        // concern, not the flattening's) — so it is legitimately platform-disabled there and
-        // skipped. The rest are pure-listener members; sword-blocking's shield flow stays out
-        // (Phase 4's dedicated live check). This proves the enable-able family assembles on
-        // legacy without asserting a version-gated feature into existence.
+        // disable. As of Phase 4 item 1 that is ALL of them on every legacy version:
+        // ARMOUR_STRENGTH's armor_toughness handle became OptionalSince (the era 1.8 flat model
+        // ignores toughness), so it is no longer platform-disabled on 1.9.4/1.10.2 and enables
+        // here too. The platformDisabled filter stays as a guard against any future mapping break.
+        // The rest are pure-listener members; sword-blocking's shield flow stays out (its own
+        // dedicated legacy check). This proves the enable-able family assembles on legacy without
+        // asserting a version-gated feature into existence.
         Set<Feature> platformDisabled = mental.platformProfile().disabledFeatures();
         List<Feature> toEnable = new ArrayList<>();
         for (Feature feature : List.of(Feature.ARMOUR_STRENGTH, Feature.ARMOUR_DURABILITY,
