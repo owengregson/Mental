@@ -23,6 +23,25 @@ public final class GroundDistance {
     /** No ground is looked for beyond this many blocks below the feet. */
     public static final double MAX_DISTANCE = 5.0;
 
+    /**
+     * {@code Block#isPassable()} and {@code Block#getBoundingBox()} are Bukkit
+     * 1.13+; below that the scan falls back to material solidity and a full-block
+     * top surface (a bottom-slab surface is over-estimated, negligible for the
+     * compensation query). Probed once; both calls are reached only when true, so
+     * neither method is ever linked on a pre-1.13 server.
+     */
+    private static final boolean HAS_MODERN_BLOCK_GEOMETRY = probeModernBlockGeometry();
+
+    private static boolean probeModernBlockGeometry() {
+        try {
+            Block.class.getMethod("isPassable");
+            Block.class.getMethod("getBoundingBox");
+            return true;
+        } catch (NoSuchMethodException pre1_13) {
+            return false;
+        }
+    }
+
     /** Half the 0.6-wide collision box. */
     static final double BOX_HALF_WIDTH = 0.3;
 
@@ -73,11 +92,19 @@ public final class GroundDistance {
         int bottom = floor(footY - MAX_DISTANCE);
         for (int blockY = top; blockY >= bottom; blockY--) {
             Block block = world.getBlockAt(blockX, blockY, blockZ);
-            if (block.isPassable()) {
+            if (HAS_MODERN_BLOCK_GEOMETRY) {
+                if (block.isPassable()) {
+                    continue;
+                }
+                double surface = block.getBoundingBox().getMaxY();
+                double distance = footY - surface;
+                return distance < 0.0 ? 0.0 : distance;
+            }
+            // Pre-1.13: a solid material collides; its top surface is a full block.
+            if (!block.getType().isSolid()) {
                 continue;
             }
-            double surface = block.getBoundingBox().getMaxY();
-            double distance = footY - surface;
+            double distance = footY - (blockY + 1.0);
             return distance < 0.0 ? 0.0 : distance;
         }
         return MAX_DISTANCE;

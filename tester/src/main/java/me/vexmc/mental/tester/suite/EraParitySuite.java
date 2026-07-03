@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.tester.Arena;
@@ -253,7 +254,7 @@ public final class EraParitySuite {
             String profile, MeleeShape shape) throws Exception {
         FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
         FakePlayer victim = new FakePlayer(tester, mental.scheduling());
-        ClientEmulator client = new ClientEmulator(victim, mental.scheduling());
+        ClientEmulator client = new ClientEmulator(victim, mental.scheduling(), mental.clock());
 
         try {
             context.syncRun(() -> {
@@ -355,7 +356,7 @@ public final class EraParitySuite {
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         FakePlayer rodder = new FakePlayer(tester, mental.scheduling());
         FakePlayer victim = new FakePlayer(tester, mental.scheduling());
-        ClientEmulator client = new ClientEmulator(victim, mental.scheduling());
+        ClientEmulator client = new ClientEmulator(victim, mental.scheduling(), mental.clock());
 
         try {
             context.syncRun(() -> {
@@ -401,7 +402,7 @@ public final class EraParitySuite {
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         FakePlayer shooter = new FakePlayer(tester, mental.scheduling());
         FakePlayer victim = new FakePlayer(tester, mental.scheduling());
-        ClientEmulator client = new ClientEmulator(victim, mental.scheduling());
+        ClientEmulator client = new ClientEmulator(victim, mental.scheduling(), mental.clock());
 
         try {
             Location victimSpot = context.sync(() -> {
@@ -669,11 +670,13 @@ public final class EraParitySuite {
 
         private final FakePlayer victim;
         private final Scheduling scheduling;
+        private final TickClock clock;
         private final List<Stamp> stamps = new CopyOnWriteArrayList<>();
 
-        ClientEmulator(@NotNull FakePlayer victim, @NotNull Scheduling scheduling) {
+        ClientEmulator(@NotNull FakePlayer victim, @NotNull Scheduling scheduling, @NotNull TickClock clock) {
             this.victim = victim;
             this.scheduling = scheduling;
+            this.clock = clock;
         }
 
         @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -682,7 +685,7 @@ public final class EraParitySuite {
                 return;
             }
             Vector packet = event.getVelocity().clone();
-            int stampTick = Bukkit.getCurrentTick();
+            int stampTick = clock.current().value();
             stamps.add(new Stamp(stampTick, packet));
             // Nothing the server computed mid-tick may leak into the
             // trajectory; the packet is the only truth a client sees.
@@ -695,7 +698,7 @@ public final class EraParitySuite {
 
         /** Stamps motion applied directly (walk/jump setup) — no event fires for it. */
         void stampManual(@NotNull Vector motion) {
-            stamps.add(new Stamp(Bukkit.getCurrentTick(), motion.clone()));
+            stamps.add(new Stamp(clock.current().value(), motion.clone()));
         }
 
         @NotNull List<Stamp> stamps() {
@@ -717,7 +720,7 @@ public final class EraParitySuite {
          * inflate the trajectory, so a late check is a no-op instead.
          */
         private void applyIfLost(Vector packet, int stampTick) {
-            if (Bukkit.getCurrentTick() - stampTick > 2) {
+            if (clock.current().value() - stampTick > 2) {
                 return;
             }
             Vector current = victim.player().getVelocity();
