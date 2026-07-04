@@ -66,8 +66,11 @@ class AttackCooldownUnitTest {
         WeaponTooltipAdapter tooltip =
                 WeaponTooltipAdapter.probe(ServerEnvironment.parse("1.21.1-R0.1-SNAPSHOT"), message -> {});
         // Scheduling is only reached from the task starter, which the recording
-        // registrar deliberately never invokes — so null is never dereferenced.
-        AttackCooldownUnit unit = new AttackCooldownUnit(null, tooltip);
+        // registrar deliberately never invokes — and the plugin logger only from the
+        // sub-1.11 sweep degrade line, which cannot fire here (the unit-test classpath
+        // is the modern API, where SweepCauses resolves present) — so neither null is
+        // ever dereferenced.
+        AttackCooldownUnit unit = new AttackCooldownUnit(null, null, tooltip);
 
         try {
             unit.assemble(scope, null);

@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.feature.cadence;
 
+import me.vexmc.mental.platform.SweepCauses;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -20,12 +21,22 @@ import org.jetbrains.annotations.NotNull;
  * both are enabled is idempotent. Priority LOW leaves protection/damage-indicator
  * plugins room to react first. Folia-safe: the event fires on the victim's region
  * thread, so the inline cancel needs no scheduling hop.</p>
+ *
+ * <p>The cause is compared against the boot-cached {@link SweepCauses} constant,
+ * NEVER a direct {@code ENTITY_SWEEP_ATTACK} reference: that getstatic is a
+ * STICKY {@code NoSuchFieldError} below 1.11, rethrown on every damage event and
+ * swallowed per-event by the bus (the 2.4.1 GAP-2 finding). The owning units only
+ * register this listener where {@link SweepCauses#present()} — below 1.11 the
+ * feature is a documented no-op decided once at assemble.</p>
  */
 public final class SweepDamageListener implements Listener {
 
+    /** The boot-resolved sweep cause — non-null wherever the owning unit registered this listener. */
+    private final EntityDamageEvent.DamageCause sweepCause = SweepCauses.sweepCause();
+
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onSweep(@NotNull EntityDamageEvent event) {
-        if (event.getCause() == EntityDamageEvent.DamageCause.ENTITY_SWEEP_ATTACK) {
+        if (event.getCause() == sweepCause) {
             event.setCancelled(true);
         }
     }

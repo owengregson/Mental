@@ -24,6 +24,7 @@ import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.platform.PotionEffects;
 import me.vexmc.mental.platform.Recipes;
 import me.vexmc.mental.platform.ServerEnvironment;
+import me.vexmc.mental.platform.SweepCauses;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
@@ -364,7 +365,8 @@ public final class MentalPluginV5 extends JavaPlugin {
                 + ", " + Cooldowns.describe()
                 + ", crit-posture[" + CritPosture.describe() + "]"
                 + ", hand-raised=" + HandStates.describe()
-                + ", recipe-keys=" + Recipes.describe());
+                + ", recipe-keys=" + Recipes.describe()
+                + ", sweep-cause=" + SweepCauses.describe());
     }
 
     @Override
@@ -632,9 +634,9 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);
         // attack-sounds and sweep are the standalone cosmetic/event suppressors.
-        reconciler.register(new AttackCooldownUnit(scheduling, platformProfile.weaponTooltip()));
+        reconciler.register(new AttackCooldownUnit(this, scheduling, platformProfile.weaponTooltip()));
         reconciler.register(new AttackSoundsUnit());
-        reconciler.register(new SweepUnit());
+        reconciler.register(new SweepUnit(this));
 
         // The sustain family (4C). Golden apples + potion durations compute era
         // values from the kernel and apply them at the confirmed terminal event

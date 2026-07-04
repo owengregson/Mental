@@ -12,6 +12,7 @@ import me.vexmc.mental.platform.Capabilities;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.platform.Recipes;
 import me.vexmc.mental.platform.ServerEnvironment;
+import me.vexmc.mental.platform.SweepCauses;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
@@ -134,6 +135,11 @@ public final class PlatformProfile {
         entries.add(OptionalSince.resolve("capability:recipe_key", "1.12.0", Boolean.FALSE,
                 "pre-keyed recipe ctor, lifecycle via recipeIterator",
                 () -> Recipes.keyedRecipeCtor() ? Boolean.TRUE : null));
+        // DamageCause.ENTITY_SWEEP_ATTACK lands at 1.11; below it sweep splash arrives as plain
+        // ENTITY_ATTACK, so the sweep-suppression halves skip registration at assemble (SweepCauses).
+        entries.add(OptionalSince.resolve("capability:sweep_cause", "1.11.0", Boolean.FALSE,
+                "sweep arrives as plain ENTITY_ATTACK — suppression is a documented no-op",
+                () -> SweepCauses.present() ? Boolean.TRUE : null));
 
         // --- Item-component adapters (probed once) ⇒ OptionalSince, the components as manifest consumers ---
         SwordBlockAdapter swordBlock = SwordBlockAdapter.probe(env, log);
