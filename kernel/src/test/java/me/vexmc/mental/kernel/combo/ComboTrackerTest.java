@@ -1,0 +1,217 @@
+package me.vexmc.mental.kernel.combo;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.UUID;
+import me.vexmc.mental.kernel.model.TickStamp;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Hand-computed pins for the combo detector state machine (combo-hold §3.1).
+ * Defaults: minHits 3, maxGapTicks 20, groundedRunTicks 10, blowoutBlocks 6.0.
+ * Every boundary (activation on the third hit, gap expiry at exactly gap+1,
+ * attacker-switch restart, retaliation, grounded-run, blowout, NaN separation)
+ * is asserted so the machine can never drift silently.
+ */
+class ComboTrackerTest {
+
+    private static final UUID A = new UUID(0, 1);
+    private static final UUID B = new UUID(0, 2);
+    private static final ComboRules RULES = ComboRules.DEFAULTS;
+
+    private static TickStamp t(int value) {
+        return new TickStamp(value);
+    }
+
+    private static ComboTracker tracker() {
+        return new ComboTracker(RULES);
+    }
+
+    /** Drive three same-attacker hits at a 10-tick cadence to an active combo. */
+    private static ComboTracker active() {
+        ComboTracker tracker = tracker();
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(10));
+        tracker.onKnockShipped(A, t(20));
+        return tracker;
+    }
+
+    @Test
+    void activatesExactlyOnTheThirdHit() {
+        ComboTracker tracker = tracker();
+
+        ComboTransition first = tracker.onKnockShipped(A, t(0));
+        assertEquals(ComboTransition.Kind.NONE, first.kind(), "hit 1 does not activate");
+        assertFalse(tracker.active());
+        assertNull(tracker.snapshot().attackerId(), "developing chain publishes no attacker");
+
+        ComboTransition second = tracker.onKnockShipped(A, t(10));
+        assertEquals(ComboTransition.Kind.NONE, second.kind(), "hit 2 does not activate");
+        assertFalse(tracker.active());
+
+        ComboTransition third = tracker.onKnockShipped(A, t(20));
+        assertTrue(third.started(), "hit 3 activates the combo");
+        assertEquals(A, third.attacker());
+        assertEquals(3, third.hits());
+        assertTrue(tracker.active());
+        assertEquals(A, tracker.snapshot().attackerId());
+        assertEquals(t(20), tracker.snapshot().activeSince());
+    }
+
+    @Test
+    void gapExpiresAtExactlyMaxGapPlusOne() {
+        // Two hits at 0 and 20 (gap 20 == maxGap) keep the developing chain alive;
+        // a hit at 40 (gap 20) then a hit at 61 (gap 21 > maxGap) restarts it.
+        ComboTracker tracker = tracker();
+        tracker.onKnockShipped(A, t(0));
+        assertEquals(ComboTransition.Kind.NONE, tracker.onKnockShipped(A, t(20)).kind());
+        // The chain now has two hits (gaps all == 20, none expired). A third at 40
+        // (gap 20) activates it.
+        assertTrue(tracker.onKnockShipped(A, t(40)).started());
+        assertTrue(tracker.active());
+
+        // onTick at gap == maxGap (tick 60, lastHit 40) does NOT expire.
+        assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(60), false, Double.NaN).kind());
+        assertTrue(tracker.active());
+        // onTick at gap == maxGap + 1 (tick 61) expires exactly here.
+        ComboTransition expired = tracker.onTick(t(61), false, Double.NaN);
+        assertTrue(expired.ended());
+        assertEquals(ComboEndReason.EXPIRED, expired.reason());
+        assertEquals(A, expired.attacker());
+        assertFalse(tracker.active());
+    }
+
+    @Test
+    void aHitAfterMaxGapPlusOneRestartsTheChain() {
+        ComboTracker tracker = active(); // active, lastHit at tick 20
+        // A same-attacker hit at 41 (gap 21 > 20) abandons the old active combo
+        // (END EXPIRED) and begins a fresh chain at one hit.
+        ComboTransition restart = tracker.onKnockShipped(A, t(41));
+        assertTrue(restart.ended());
+        assertEquals(ComboEndReason.EXPIRED, restart.reason());
+        assertFalse(tracker.active(), "the fresh chain is developing, not active");
+        // Two more within the window re-activate.
+        assertEquals(ComboTransition.Kind.NONE, tracker.onKnockShipped(A, t(51)).kind());
+        assertTrue(tracker.onKnockShipped(A, t(61)).started());
+    }
+
+    @Test
+    void aDifferentAttackerRestartsTheChainOnThatAttacker() {
+        ComboTracker tracker = active(); // A holds an active combo
+        ComboTransition switched = tracker.onKnockShipped(B, t(25));
+        assertTrue(switched.ended(), "A's combo ends when B takes over");
+        assertEquals(A, switched.attacker());
+        assertFalse(tracker.active());
+        // B now develops its own chain.
+        tracker.onKnockShipped(B, t(30));
+        ComboTransition bActive = tracker.onKnockShipped(B, t(35));
+        assertTrue(bActive.started());
+        assertEquals(B, bActive.attacker());
+        assertEquals(B, tracker.snapshot().attackerId());
+    }
+
+    @Test
+    void retaliationEndsAnActiveCombo() {
+        ComboTracker tracker = active();
+        ComboTransition retaliated = tracker.onOwnHitLanded(t(24));
+        assertTrue(retaliated.ended());
+        assertEquals(ComboEndReason.RETALIATION, retaliated.reason());
+        assertEquals(A, retaliated.attacker());
+        assertFalse(tracker.active());
+        assertNull(tracker.snapshot().attackerId());
+    }
+
+    @Test
+    void ownHitOnADevelopingChainResetsSilently() {
+        ComboTracker tracker = tracker();
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(10)); // two hits, not yet active
+        ComboTransition reset = tracker.onOwnHitLanded(t(12));
+        assertEquals(ComboTransition.Kind.NONE, reset.kind(), "no START had fired — no END to balance");
+        assertFalse(tracker.active());
+        assertEquals(0, tracker.snapshot().hits());
+    }
+
+    @Test
+    void groundedRunEndsExactlyOnTheTenthGroundedTick() {
+        ComboTracker tracker = active(); // active, lastHit tick 20
+        // Nine grounded ticks (21..29, gaps 1..9 <= maxGap) do NOT end the combo.
+        for (int tick = 21; tick <= 29; tick++) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind(),
+                    "grounded tick " + tick + " is a survivable skim");
+            assertTrue(tracker.active());
+        }
+        // The tenth consecutive grounded tick (30, gap 10) ends it.
+        ComboTransition grounded = tracker.onTick(t(30), true, Double.NaN);
+        assertTrue(grounded.ended());
+        assertEquals(ComboEndReason.GROUNDED, grounded.reason());
+        assertFalse(tracker.active());
+    }
+
+    @Test
+    void aFreshKnockResetsTheGroundedRun() {
+        ComboTracker tracker = active();
+        for (int tick = 21; tick <= 29; tick++) {
+            tracker.onTick(t(tick), true, Double.NaN); // 9 grounded ticks, still active
+        }
+        // A fresh knock at tick 30 re-launches: grounded run resets to zero, so the
+        // next nine grounded ticks again survive.
+        tracker.onKnockShipped(A, t(30));
+        assertTrue(tracker.active());
+        for (int tick = 31; tick <= 39; tick++) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind());
+        }
+        assertTrue(tracker.active(), "the grounded run restarted after the fresh knock");
+    }
+
+    @Test
+    void separationPastBlowoutEndsButAtTheThresholdSurvives() {
+        ComboTracker atEdge = active();
+        // Exactly at the threshold (6.0, not > 6.0) survives.
+        assertEquals(ComboTransition.Kind.NONE, atEdge.onTick(t(21), false, 6.0).kind());
+        assertTrue(atEdge.active());
+
+        ComboTracker blown = active();
+        ComboTransition blowout = blown.onTick(t(21), false, 6.0001);
+        assertTrue(blowout.ended());
+        assertEquals(ComboEndReason.BLOWOUT, blowout.reason());
+        assertFalse(blown.active());
+    }
+
+    @Test
+    void nanSeparationNeverEndsTheCombo() {
+        ComboTracker tracker = active();
+        // Many airborne ticks with unknown separation, all inside the gap window,
+        // never end the combo (blowout is skipped for NaN).
+        for (int tick = 21; tick <= 30; tick += 3) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), false, Double.NaN).kind());
+        }
+        assertTrue(tracker.active());
+    }
+
+    @Test
+    void explicitResetEndsWithTheGivenReason() {
+        ComboTracker retired = active();
+        ComboTransition retiredEnd = retired.reset(ComboEndReason.RETIRED);
+        assertTrue(retiredEnd.ended());
+        assertEquals(ComboEndReason.RETIRED, retiredEnd.reason());
+        assertFalse(retired.active());
+
+        ComboTracker disabled = active();
+        assertEquals(ComboEndReason.DISABLED, disabled.reset(ComboEndReason.DISABLED).reason());
+
+        // Resetting an idle tracker is a silent no-op.
+        assertEquals(ComboTransition.Kind.NONE, tracker().reset(ComboEndReason.DISABLED).kind());
+    }
+
+    @Test
+    void inactiveSnapshotHidesTheAttacker() {
+        assertNull(ComboSnapshot.INACTIVE.attackerId());
+        assertFalse(ComboSnapshot.INACTIVE.active());
+        assertSame(TickStamp.NO_TICK, ComboSnapshot.INACTIVE.activeSince());
+    }
+}
