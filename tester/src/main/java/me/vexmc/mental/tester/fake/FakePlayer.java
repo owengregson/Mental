@@ -862,8 +862,11 @@ public final class FakePlayer {
 
         Object playerList = playerListLegacy(minecraftServer);
         if (legacyAsyncJoin()) {
-            // Paper 1.14+ (here 1.15.2/1.16.5) split player login across an async
-            // chunk load: PlayerList.a chunk-gates the join on
+            // Paper split player login across an async chunk load from 1.15 up (here
+            // 1.15.2/1.16.5), NOT 1.14: v1_14_R1 PlayerList.a is still fully
+            // synchronous (no postChunkLoadJoin — javap-verified), so 1.14.4 falls
+            // to the else branch below despite its modern NMS shapes. Where the split
+            // IS present, PlayerList.a chunk-gates the join on
             // getChunkAtAsynchronously(...).thenAccept(postChunkLoadJoin), which
             // NEVER completes for a ticketless, clientless fake player (the join
             // chunk has no loader), so a() would hang the player in limbo forever
@@ -924,7 +927,8 @@ public final class FakePlayer {
     }
 
     /**
-     * Paper split login across an async chunk load from 1.14 up: the private
+     * Paper split login across an async chunk load from 1.15 up (NOT 1.14 —
+     * v1_14_R1 PlayerList.a is fully synchronous): the private
      * {@code postChunkLoadJoin} on the PlayerList class is its marker. Probed on
      * PlayerList itself (not the DedicatedPlayerList subclass the server returns,
      * nor via getMethods() — the method is private and declared on the base).

@@ -661,6 +661,18 @@ fun registerIntegrationServer(
             // Companion plugins must start pristine too — their defaults are
             // part of what the coexistence suite asserts against.
             runDir.resolve("plugins/OldCombatMechanics").deleteRecursively()
+            // Stale versioned plugin JARs must go too. scripts/integration-matrix.sh copies
+            // this run's jars verbatim into the SHARED run/<v>/plugins dir; run-paper's own
+            // deleteOldPlugins only prunes its "_RunServer_plugin.jar"-suffixed copies, so a
+            // script-left Mental-*.jar / MentalTester-*.jar (or an OCM jar) — from a prior
+            // version or a non-OCM run — would double-load as an ambiguous plugin. run-paper's
+            // setupPlugins re-copies THIS run's pluginJars (OCM extra included) in exec(), after
+            // this doFirst, so clearing all three patterns unconditionally is the correct reset.
+            runDir.resolve("plugins").listFiles()?.forEach { jar ->
+                val n = jar.name
+                if (n.endsWith(".jar") && (n.startsWith("Mental-") || n.startsWith("MentalTester-")
+                        || n.startsWith("OldCombatMechanics"))) jar.delete()
+            }
             // Belt-and-suspenders EULA acceptance: modern Paper honours the
             // -Dcom.mojang.eula.agree property, but the legacy builds are more
             // reliably satisfied by the eula.txt on disk. Idempotent everywhere.
