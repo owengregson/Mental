@@ -34,7 +34,7 @@ class SupportEntry(
     val platform: String,
     val ci: String,
     val suites: String,
-    val serverFlags: List<String>,
+    val bytecodeTier: Int,
 )
 
 val supportMatrixFile = rootProject.layout.projectDirectory.file("support-matrix.json").asFile
@@ -55,10 +55,11 @@ val supportEntries: List<SupportEntry> =
             platform = entry["platform"] as String,
             ci = entry["ci"] as String,
             // The suite tier the tester runs on this version (full | boot | combat-smoke); the boot tier
-            // is the legacy-backport classload/boot-safety suite. serverFlags are extra JVM args the legacy
-            // Paper builds need (e.g. -DPaper.IgnoreJavaVersion=true); absent ⇒ none.
+            // is the legacy-backport classload/boot-safety suite. bytecodeTier is the Multi-Release class
+            // major this entry's plugin loader × JVM actually reads from the mega jar (52 base / 61
+            // versions/17) — passed as -Dmental.tester.tier so the loaded tree is asserted live per-entry.
             suites = entry["suites"] as String,
-            serverFlags = (entry["serverFlags"] as? List<String>) ?: emptyList(),
+            bytecodeTier = (entry["bytecodeTier"] as Number).toInt(),
         )
     }
 
@@ -601,7 +602,7 @@ fun registerIntegrationServer(
     jdk: Int,
     platform: String = "paper",
     suites: String = "full",
-    serverFlags: List<String> = emptyList(),
+    bytecodeTier: Int = 61,
 ): Pair<TaskProvider<RunServer>, TaskProvider<Task>> {
     val runDir = rootProject.layout.projectDirectory.dir("run/$runDirName").asFile
     val resultFile = runDir.resolve("plugins/MentalTester/test-results.txt")
@@ -631,13 +632,16 @@ fun registerIntegrationServer(
         // disable.watchdog matters on slow CI runners: a >60s tick stall
         // trips the legacy watchdog, whose forced shutdown can deadlock old
         // servers into a hung process that never writes a test result.
-        // serverFlags carries per-version boot flags from support-matrix.json (the
-        // legacy Paper builds ≥1.13 need -DPaper.IgnoreJavaVersion=true to run on
-        // Java 17); mental.tester.suites selects the tester's suite tier for this
-        // entry (boot ⇒ classload/boot-safety suite only).
+        // mental.tester.suites selects the tester's suite tier for this entry
+        // (boot ⇒ classload/boot-safety suite only); mental.tester.tier is the
+        // entry's declared Multi-Release bytecodeTier (the class major its loader ×
+        // JVM reads from the mega jar) — the tester asserts the loaded tree against
+        // it, so which Multi-Release tree loaded is a live per-version fact. No
+        // Java-version-guard bypass flag is passed: every legacy build runs its
+        // newest clean flagless JVM, and the v52 base tree loads there natively.
         jvmArgs("-Dcom.mojang.eula.agree=true", "-Ddisable.watchdog=true", "-Xmx2G",
-                "-Dmental.tester.nonce=$nonce", "-Dmental.tester.suites=$suites")
-        jvmArgs(serverFlags)
+                "-Dmental.tester.nonce=$nonce", "-Dmental.tester.suites=$suites",
+                "-Dmental.tester.tier=$bytecodeTier")
         javaLauncher.set(javaToolchains.launcherFor {
             languageVersion.set(JavaLanguageVersion.of(jdk))
         })
@@ -734,7 +738,7 @@ paperEntries.forEach { entry ->
     val (runTask, checkTask) =
         registerIntegrationServer(
             suffix, entry.version, entry.version, emptyList(), "", entry.jdk,
-            suites = entry.suites, serverFlags = entry.serverFlags)
+            suites = entry.suites, bytecodeTier = entry.bytecodeTier)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     checkTasks.add(checkTask)
@@ -759,7 +763,7 @@ foliaEntries.forEach { entry ->
     val suffix = "Folia_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
         suffix, entry.version, "folia/${entry.version}", emptyList(), " Folia", entry.jdk, "folia",
-        suites = entry.suites, serverFlags = entry.serverFlags)
+        suites = entry.suites, bytecodeTier = entry.bytecodeTier)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     foliaCheckTasks.add(checkTask)
@@ -827,7 +831,7 @@ paperEntries.filter { it.version in ocmVersions }.distinctBy { it.version }.forE
     val suffix = "Ocm_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
         suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk,
-        suites = entry.suites, serverFlags = entry.serverFlags)
+        suites = entry.suites, bytecodeTier = entry.bytecodeTier)
     runTask.configure { dependsOn(stageOcmJar) }
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask

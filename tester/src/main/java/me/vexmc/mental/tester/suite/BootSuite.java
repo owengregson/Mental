@@ -70,7 +70,7 @@ public final class BootSuite {
                     // an assumption. The plugin self-inspects its own class bytes (the SAME value the boot
                     // report prints); the tester asserts it against the expected tier — the entry-declared
                     // -Dmental.tester.tier when Phase 2 wires it per-entry, else the JVM-derived default
-                    // (Java 8 ⇒ base v52; Java 16 ⇒ versions/16 v60; Java 17+ ⇒ original versions/17 v61).
+                    // (Java 17+ ⇒ original versions/17 v61; Java 8–16 ⇒ base v52 — no versions/16 tier exists).
                     // A modern loader that surprised us by serving the downgraded base fails HERE, loudly.
                     int actual = mental.loadedBytecodeMajor();
                     int expected = expectedBytecodeMajor();
@@ -152,9 +152,12 @@ public final class BootSuite {
      * The class-file major the plugin's bytecode is expected to load at on this server.
      * The entry-declared {@code -Dmental.tester.tier} (an integer major) wins when present —
      * Phase 2 sets it per matrix entry from the support-matrix {@code bytecodeTier}. Absent,
-     * it derives from the running JVM's feature version: Java 8 reads the mega-jar base
-     * (v52); Java 16 the versions/16 tier (v60); Java 17+ the original versions/17 tree
-     * (v61). The gap 9–15 has no versioned tier ≤ its feature, so it reads base (52) too.
+     * it derives from the running JVM's feature version: Java 17+ reads the original
+     * versions/17 tree (v61); everything below (Java 8–16) reads the mega-jar base (v52).
+     * There is NO versions/16 tier — jvmdg 1.3.6 cannot co-produce it alongside versions/17
+     * (Phase 1 escalation 1) — so even a Java-16 MR-aware loader finds no versioned tier
+     * ≤ 16 and reads base. (The per-entry -Dmental.tester.tier is the authority in the
+     * matrix; this default only backs ad-hoc boots that do not set it.)
      */
     private static int expectedBytecodeMajor() {
         String declared = System.getProperty("mental.tester.tier");
@@ -174,9 +177,8 @@ public final class BootSuite {
         if (feature >= 17) {
             return 61;
         }
-        if (feature == 16) {
-            return 60;
-        }
+        // Java 8–16 all read the base tree: there is no versioned tier ≤ 16 in the jar
+        // (versions/17 sits above even a Java-16 loader; the versions/16 tier was dropped).
         return 52;
     }
 
