@@ -103,6 +103,46 @@ knockback:
     shield-blocking-cancels: true
 ```
 
+### Blocked hits still knock (the `BLOCKS_ATTACKS` silent-knock trap)
+
+Era truth (combat compendium): sword blocking halves damage **after** `knockBack`
+already ran, so a **partial** block knocks the victim **FULL** — only a would-be
+non-positive result is a "full block", cancelled iff `shield-blocking-cancels:
+true`. Mental owns the knock, so the `KnockbackUnit` shapes both:
+`isApplicable(BLOCKING) && getDamage(BLOCKING) < 0` distinguishes a block, and
+`getFinalDamage()` splits full (`≤ 0` → withdraw) from partial (`> 0` → knock).
+
+The delivery trap this fix closes (live-reproduced on Folia 1.21.11, javap-traced
+against the real jar): on the **`BLOCKS_ATTACKS` component tier (1.21.5+)** vanilla
+reduces a blocked hit **natively** but **skips `markHurt`**, so it broadcasts no
+`ENTITY_VELOCITY` and fires no `PlayerVelocityEvent`. Mental's desk `await` then
+had nothing to resolve and the tick sweep dropped the pending as
+`no-velocity-event` — the blocked hit landed at halved damage with **no knockback
+and no flinch**, contradicting the era. (The software tiers — `CONSUMABLE`
+1.21.0–1.21.4 and the ≤1.20.6 off-hand shield — reduce the *base* damage with no
+native `BLOCKING` modifier, so vanilla fires its velocity event normally; and a
+frontal shield full-block is `finalDamage ≤ 0`, handled by the cancel. The bug is
+`BLOCKS_ATTACKS`-specific.)
+
+The fix (`KnockbackUnit.deliverBlockedKnock`): a **fresh** partial block (negative
+`BLOCKING`, `finalDamage > 0`, and the victim **not** mid-invulnerability) delivers
+the era vector **directly** through the desk's no-velocity-event path (the same
+machinery the thrown-projectile ensure uses) — the original pending is withdrawn so
+the sweep records no false drop, a fresh transaction is submitted next tick and
+`setVelocity` triggers the velocity event the desk resolves to the **full stamp**
+(undecayed) and journals a `SHIP`. Presentation mirrors the fast path: a client
+with no wire pre-send gets a `VELOCITY + HURT` burst (era: a blocked hit flinches
+and plays the **vanilla hurt sound**; the component's `blockSound` is `Optional.
+empty()`, so `onBlocked`'s `ifPresent` plays **no** anachronistic shield clang —
+javap-verified), and the **quantized valve** is armed whenever a wire copy already
+carries the value so the authoritative tracker re-emission (or a late vanilla
+velocity for the same hit) is consumed once, never doubled. A **mid-invulnerability**
+blocked hit stays **era-silent** — the vanilla difference branch carries no knock,
+no flinch, on every version, and Mental does not "fix" it. Regression:
+`BlockingSuite` (the `BLOCKS_ATTACKS` fresh-ship + in-window-silence cases, forcing
+the native block state with `startUsingItem` since a clientless fake never raises it
+over the wire).
+
 ### ⚠ The #1 porting hazard
 
 `friction` here is the **surviving fraction** of the victim's motion
