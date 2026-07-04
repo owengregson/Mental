@@ -460,3 +460,88 @@ JDKs (exactly as it does locally).
 
 _Per-phase outcomes, review findings, and gate evidence land here as the
 campaign executes._
+
+### Phase 1 outcome (2026-07-03, Opus) — mega-jar pipeline shipped, all gates green
+
+Commit `42ee688`. The one-jar mega-jar pipeline, kernel D-8 overload, boot-report
+tier line + tester assertion, and the four verify gates are in and green end to
+end. Build-script mechanics all resolved through the jvmdg gradle plugin
+(`defaultTask`/`defaultShadeTask`); the CLI-recipe fallback (H2) was NOT needed —
+the plugin shades its own runtime.
+
+**Gate evidence (verbatim, fresh nonces):**
+- `./gradlew build` — GREEN: unit tests (+ the new D-8 overload equivalence pin),
+  japicmp (`:api:apiCompat` UP-TO-DATE — the kernel overload + ValvePayload
+  toString are additive), kernel-Bukkit-free, and all four verify tasks.
+- `[1.17.1] integration tests passed (nonce=bb20e63d-3e93-453c-b4e2-4e5928d1d271)`
+  — boot log: `[Mental] bytecode tier: modern (v61)`; 0 linkage errors.
+- `[26.1.2] integration tests passed (nonce=5415edc5-a788-4415-a29f-ac1e5fad9a0c)`
+  — boot log: `[Mental] bytecode tier: modern (v61)`; 0 linkage errors.
+- Ad-hoc 1.13.2 on foojay Temurin 8u492, flagless, mega jars copied into
+  `plugins/`, bare `nogui --port 25704`, full suite: `PASS
+  nonce=C0EA33C7-B722-4357-9E0C-A2E231A82A07`; `[Mental] bytecode tier:
+  downgraded (v52)`; 0 linkage errors.
+- Ad-hoc 1.14.4 (probe jar + copied `cache/`) on Temurin 8, flagless, full suite:
+  `PASS nonce=79BE2CB4-DAAC-4ED6-843D-4DFB02B42E72`; `[Mental] bytecode tier:
+  downgraded (v52)`; 0 linkage errors.
+- Each verify task proven to FAIL on a broken invariant (verifyRelocation/
+  verifyDowngrade/verifyJdk8Api organically during dev; verifyTesterIsolation by
+  temporarily scanning the core mega jar; the jvmdg-warning gate by removing the
+  compat-folia classpath → 45 captured ERROR lines → build failed).
+
+**Decisions / escalations (none blocked delivery; Phases 2–4 must absorb these):**
+
+1. **jvmdg `-mro` and `-mr` are MUTUALLY EXCLUSIVE (D-7 revised).** CLI-verified:
+   `-mro` alone gives base v52 + versions/17 v61; `-mro -mr 60` DROPS the original
+   and yields only versions/16. jvmdg 1.3.6 cannot co-produce versions/16 AND
+   versions/17. versions/17 (the original v61) is the D-1-critical tier, so the
+   pipeline ships **base v52 + versions/17 v61, NO versions/16**. Consequence for
+   Phase 2: **1.16.5-on-Java-16 reads the base v52 tier, not v60** — fully
+   functional (v52 is the tested legacy base, and Mental uses `sealed` types so v60
+   would be a real downgrade, not a no-op). Phase 2 must declare 1.16.5's
+   `bytecodeTier` as **52**, not 60. If a true v60 tier is ever required, it needs a
+   two-pass merge (jvmdg `-mro` for base+v17, a second `-mr 60` pass, merge the
+   versions/16 tree, then shade) — deferred with this evidence.
+
+2. **jvmdg overlays only classes that use SHIMMED Java-9+ APIs (D-1 nuance).**
+   `-mro` keeps the original v61 only for classes whose downgrade could behave
+   differently on modern (the ones calling jvmdg's API stubs). Classes needing only
+   behaviour-PRESERVING language downgrades (string-concat→StringBuilder, record/
+   sealed/nestmate metadata annotations) get NO versions/17 overlay and load as v52
+   on modern — 180 first-party classes forked to v61, **88 behaviour-preserving
+   base-only** (all proven shim-free by verifyDowngrade). So D-1 is **behaviour
+   identity, not literal byte identity** for those 88; the live 1.17.1/26.1.2 gate
+   proves the behaviour, and the tier-line sentinel (`MentalPluginV5`) IS forked so
+   the modern tier report stays truthful. The original "class-set == base" assertion
+   was too strict and was relaxed to "versions/17 ⊆ base, all v61, sentinel forked,
+   base-only carry no jvmdg-shim ref".
+
+3. **jvmdg 1.3.6 record-`toString` bug — caught by verifyJdk8Api (H1 worked).**
+   `ValvePayload` (a record with `short` components) downgraded to a call to the
+   non-existent `StringBuilder.append(short)` — a `NoSuchMethodError` reproduced on
+   real Java 8. Fixed with an explicit `toString` widening each short to int
+   (behaviour/API unchanged; the only such class in the tree). This is exactly the
+   fast-path blind spot H1 exists for — the clientless suite never drove that
+   `toString`.
+
+4. **verifyJdk8Api ignore set grew (all documented in `core/build.gradle.kts`):**
+   server-provided (org/bukkit, net/minecraft, com/destroystokyo, io/papermc,
+   org/spigotmc, io/netty, com/mojang) + Paper-provided libs (com/google/gson,
+   com/google/common) + the optional ViaVersion plugin (com/viaversion, packetevents
+   guards it) + compile-only CLASS-retention annotation packages (org/jetbrains,
+   org/intellij, org/jspecify, org/checkerframework, com/google/auto,
+   com/google/errorprone) + jvmdg's own bare marker annotations (xyz/wagyourtail —
+   @NestMembers/@RecordComponents/@PermittedSubClasses, never resolved at runtime).
+   The anchored `--allow` file stays EMPTY.
+
+5. **Gradle Kotlin DSL script-size fragility (build-hygiene warning for Phases
+   2–4).** `core/build.gradle.kts` sits near the compiler's synthesized-method size
+   limit: past it, the DSL SILENTLY drops every later top-level statement (task
+   registration) with no compile error. Two concrete traps hit and fixed here: a
+   **local `fun` inside a task-action lambda** truncates the body (all mega-jar
+   scan helpers are TOP-LEVEL funs), and `project.javaexec` is **gone in Gradle 9**
+   (use the injected `ExecOperations` via `serviceOf`). Also, `getByType<T>()` for a
+   plugin's extension does NOT work cross-project (per-project plugin classloader —
+   the tester mega jar is looked up by task NAME). Keep additions to this file lean;
+   if it must grow, move the verify logic into an `apply(from = …)` script (a
+   separate script class with its own budget).
