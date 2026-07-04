@@ -213,6 +213,13 @@ downgradeMegaJar.configure {
     destinationDirectory.set(layout.buildDirectory.dir("jvmdg-stage"))
     archiveBaseName.set("Mental")
     archiveClassifier.set("downgraded")
+    // The warning capture listens on Gradle's GLOBAL console stream (a task
+    // LoggingManager listener is not task-scoped), so a parallel task's output
+    // can land in the window — the 2.4.1 release job failed on japicmp's
+    // --ignore-missing-classes banner exactly this way. apiCompat no longer
+    // prints it (real classpath), and this ordering keeps the one demonstrated
+    // contaminator out of the window regardless.
+    mustRunAfter(":api:apiCompat")
     failOnJvmdgWarnings(this)
 }
 
@@ -229,6 +236,7 @@ megaJar.configure {
     destinationDirectory.set(layout.buildDirectory.dir("libs"))
     archiveBaseName.set("Mental")
     archiveClassifier.set("")
+    mustRunAfter(":api:apiCompat") // same global-capture caveat as downgradeJar above
     failOnJvmdgWarnings(this)
 }
 
