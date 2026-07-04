@@ -8,6 +8,7 @@ import me.vexmc.mental.tester.suite.BlockingSuite;
 import me.vexmc.mental.tester.suite.BootSuite;
 import me.vexmc.mental.tester.suite.CommandSuite;
 import me.vexmc.mental.tester.suite.ConsumableRulesSuite;
+import me.vexmc.mental.tester.suite.ComboSuite;
 import me.vexmc.mental.tester.suite.CosmeticSmokeSuite;
 import me.vexmc.mental.tester.suite.DamageRulesSuite;
 import me.vexmc.mental.tester.suite.EraParitySuite;
@@ -102,6 +103,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(HitboxSuite.tests(mental, this));
                 suite.addAll(InventoryRulesSuite.tests(mental, this));
                 suite.addAll(CommandSuite.tests(mental, this));
+                suite.addAll(ComboSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
             }
