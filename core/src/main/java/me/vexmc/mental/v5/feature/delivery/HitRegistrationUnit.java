@@ -19,7 +19,9 @@ import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
+import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -35,6 +37,7 @@ import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.kernel.wire.ReachValidator;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
+import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -304,15 +307,31 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 // — the SAME truth the region path reads, so the adopted pre-send and a
                 // recompute would agree). INACTIVE ⇒ σ = 1.0 (byte-identical).
                 PocketServoConfig servo = comboServoFor(victimView, attackerId);
+                // The precision predictor inputs (combo-hold §3.2b) — frozen views +
+                // ring + latency, built only when the servo is active (zero cost off).
+                PredictorInputs inputs = servo.active()
+                        ? ComboPredictor.build(attackerId, victimId,
+                                positionX(attackerId), positionZ(attackerId),
+                                positionX(victimId), positionZ(victimId),
+                                victimView, attackerView, sessions.positions(), latency)
+                        : PredictorInputs.degraded(
+                                victimView.grounded(), victimView.slipperiness(), victimView.moveSpeedAttr());
+                EntityState preAttacker = preAttackerState(attackerId, attackerView, verdict);
+                EntityState preVictim = preVictimState(victimId, victimView);
+                boolean freshSprint = verdict.fresh() != null && verdict.fresh() && verdict.sprinting();
                 KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
-                        preAttackerState(attackerId, attackerView, verdict),
-                        preVictimState(victimId, victimView),
-                        profile, compensationY, ThreadLocalRandom.current(),
-                        verdict.fresh() != null && verdict.fresh() && verdict.sprinting(),
-                        servo);
+                        preAttacker, preVictim, profile, compensationY, ThreadLocalRandom.current(),
+                        freshSprint, servo, inputs);
                 vector = paced.vector();
                 tx.paceFactor(paced.paceFactor()); // journal the factors the pre-send applied (D-6)
                 tx.comboFactor(paced.comboFactor());
+                // The dynamic target and the full solve go to the DEBUG sink (not the
+                // journal) so the lab round can calibrate before the default flips.
+                if (servo.active() && debug.active()) {
+                    PocketServo.Solution solution = KnockbackEngine.explainServo(
+                            preAttacker, preVictim, profile, compensationY, freshSprint, servo, inputs);
+                    debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
+                }
             }
 
             // B4: the pacing gate paces the VELOCITY component ONLY. A hurt-only

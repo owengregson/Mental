@@ -8,15 +8,18 @@ import me.vexmc.mental.api.event.ComboEndEvent;
 import me.vexmc.mental.api.event.ComboStartEvent;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
+import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.tester.Arena;
@@ -107,8 +110,11 @@ public final class ComboSuite {
             context.expectNear(1.0, factors.get(1), SIGMA_EPSILON, "opener hit 2 must ship at comboFactor 1.0");
 
             // The combo is active and published now — the next hit is servo-valued.
-            // Derive the expected σ from the SAME engine solve, over the exact
-            // production inputs (captured in the same tick as the attack).
+            // Derive the expected σ from the SAME engine solve over the SAME precision
+            // inputs the region path builds (combo-hold §3.2b) — captured in the same
+            // sync tick as the attack, so the ring/view state is identical. The
+            // stationary clientless fakes carry ~0 measured drift/chase and no probed
+            // RTT, so a fresh LatencyModel matches the production model for them.
             double[] expected = new double[1];
             int shipsBefore = context.sync(() -> {
                 CombatSession session = mental.sessions().sessionFor(victim.uuid());
@@ -119,8 +125,14 @@ public final class ComboSuite {
                 EntityState attackerState = EntityStates.capture(attacker.player());
                 EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
                 PocketServoConfig servo = comboSettings(mental).servo();
+                PredictorInputs inputs = ComboPredictor.build(
+                        attacker.uuid(), victim.uuid(),
+                        attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
+                        view, mental.sessions().viewOf(attacker.uuid()),
+                        mental.sessions().positions(), new LatencyModel());
                 expected[0] = KnockbackEngine.computePaced(
-                        attackerState, victimState, profile, null, new Random(0L), false, servo).comboFactor();
+                        attackerState, victimState, profile, null, new Random(0L), false, servo, inputs)
+                        .comboFactor();
                 victim.player().setNoDamageTicks(0);
                 int before = countShips(mental, victim);
                 attacker.attack(victim.player());

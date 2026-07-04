@@ -12,9 +12,12 @@ import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.delivery.ValvePayload;
+import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
+import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -41,6 +44,7 @@ import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.feature.combo.ComboEvents;
+import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.rim.BurstSender;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
@@ -213,12 +217,30 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // the victim's active combo, read from the victim's frozen view — one truth
         // shared with the netty pre-send. INACTIVE ⇒ σ = 1.0 (byte-identical).
         PocketServoConfig servo = comboServoFor(session.view(), attacker.getUniqueId());
+        // The precision predictor inputs (combo-hold §3.2b) — built from the frozen
+        // views + ring + latency, with the live capture positions as the axis source.
+        PlayerView victimView = session.view();
+        PlayerView attackerView = sessions.viewOf(attacker.getUniqueId());
+        PredictorInputs inputs = servo.active() && victimView != null
+                ? ComboPredictor.build(attacker.getUniqueId(), victim.getUniqueId(),
+                        attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
+                        victimView, attackerView, sessions.positions(), latency)
+                : PredictorInputs.degraded(victimState.grounded(),
+                        victimView != null ? victimView.slipperiness() : Decay.DEFAULT_SLIPPERINESS,
+                        victimState.moveSpeedAttr());
         KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                 attackerState, victimState, profile, compensationY,
-                ThreadLocalRandom.current(), freshSprint, servo);
+                ThreadLocalRandom.current(), freshSprint, servo, inputs);
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
+        // The dynamic target and full solve to the DEBUG sink (not the journal).
+        if (servo.active() && debug.active()) {
+            PocketServo.Solution solution = KnockbackEngine.explainServo(
+                    attackerState, victimState, profile, compensationY, freshSprint, servo, inputs);
+            debug.log(() -> ComboPredictor.debugLine(
+                    victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
+        }
 
         if (freshPartialBlock) {
             deliverBlockedKnock(session, victim, attacker, source, tx, vector, false, sprinting,
