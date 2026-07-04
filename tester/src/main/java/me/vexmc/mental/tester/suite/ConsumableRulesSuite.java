@@ -93,11 +93,15 @@ public final class ConsumableRulesSuite {
             // Fire the consume event the module listens to with a notch apple in
             // hand. The module schedules the era effect table +1 tick later (it
             // must beat the modern component-food effects that land after the
-            // event), so we wait a few ticks for the deferred application.
+            // event), so we wait a few ticks for the deferred application. The
+            // notch apple is staged in this server's own representation (2.4.1
+            // T3c): a direct Material.ENCHANTED_GOLDEN_APPLE reference threw
+            // below 1.13 and turned this whole case into a silent skip — the
+            // era pins now RUN on 1.9.4–1.12.2 too.
             Boolean staged = context.sync(() -> {
                 try {
                     Player player = eater.player();
-                    ItemStack notch = new ItemStack(Material.ENCHANTED_GOLDEN_APPLE);
+                    ItemStack notch = notchAppleStack();
                     player.getInventory().setItemInMainHand(notch);
                     PlayerItemConsumeEvent event = newConsumeEvent(player, notch);
                     if (event == null) {
@@ -148,6 +152,21 @@ public final class ConsumableRulesSuite {
             toggleModule(context, "old-golden-apples", false);
             context.syncRun(eater::remove);
         }
+    }
+
+    /**
+     * The notch apple in THIS server's representation: its own material where flattened (1.13+),
+     * else the {@code GOLDEN_APPLE:1} data-value stack — the same split {@code GoldenApplesUnit}
+     * classifies on. Resolved by NAME so no {@code Material.ENCHANTED_GOLDEN_APPLE} getstatic is
+     * ever executed pre-flattening (it is a {@code NoSuchFieldError} there, and before 2.4.1 it
+     * silently skip-noted the whole era-effects case below 1.13).
+     */
+    @SuppressWarnings("deprecation") // the (Material,amount,data) ctor is the pre-1.13 enchanted-gapple form
+    private static @NotNull ItemStack notchAppleStack() {
+        Material modern = Material.getMaterial("ENCHANTED_GOLDEN_APPLE");
+        return modern == null
+                ? new ItemStack(Material.GOLDEN_APPLE, 1, (short) 1)
+                : new ItemStack(modern);
     }
 
     /* ------------------------------------------------------------------ */
