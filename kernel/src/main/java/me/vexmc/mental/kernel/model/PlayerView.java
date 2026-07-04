@@ -18,19 +18,73 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                          int noDamageTicks, int maxNoDamageTicks,
                          double knockbackResistance, boolean ocmOwnsMeleeKnockback,
                          KnockbackProfile profile, int pingMillis,
-                         KinematicState kinematics, double moveSpeedAttr) {
+                         KinematicState kinematics, double moveSpeedAttr,
+                         UUID comboAttackerId,
+                         double measuredVx, double measuredVz, float yaw,
+                         double eyeHeight, int groundedTicks) {
+
+    /** The standing eye height above feet — the pocket-servo precision default (ReachValidator.EYE_HEIGHT). */
+    private static final double DEFAULT_EYE_HEIGHT = 1.62;
+
+    /**
+     * The pre-precision-round arity (combo-hold §3.2): carries the {@code
+     * comboAttackerId} but none of the §3.2b precision predictor inputs. The five
+     * new components — the victim's measured per-tick velocity (the drift signal),
+     * the published yaw and pose-aware eye height (dynamic target + packetless-safe
+     * facing), and the consecutive grounded-tick count — default to their era-exact
+     * no-ops (zero velocity, zero yaw, the standing eye, zero grounded run), so the
+     * precision solve degrades to the base solve for any view built without them.
+     */
+    public PlayerView(UUID id, int entityId, TickStamp at,
+                      Decay.Motion motion, boolean grounded, double slipperiness,
+                      double gravity, double jumpImpulse, int jumpBoostAmplifier,
+                      boolean sprinting, boolean creative, boolean pvpAllowed,
+                      int noDamageTicks, int maxNoDamageTicks,
+                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      KnockbackProfile profile, int pingMillis,
+                      KinematicState kinematics, double moveSpeedAttr,
+                      UUID comboAttackerId) {
+        this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
+                0.0, 0.0, 0.0f, DEFAULT_EYE_HEIGHT, 0);
+    }
+
+    /**
+     * The attacker holding an ACTIVE combo against this player, or null when none
+     * is (combo-hold §3.1) — the frozen truth the pocket-servo application gate
+     * reads. The netty pre-send and the region compute both compare THIS hit's
+     * attacker to this field: they scale the fresh knock only when they match, so
+     * both realms read one frozen decision (the {@code moveSpeedAttr} additive
+     * precedent). Null in every construction that predates the servo (the 20-arg
+     * constructor), i.e. the module off / no active combo ⇒ σ = 1.0.
+     */
+    public PlayerView(UUID id, int entityId, TickStamp at,
+                      Decay.Motion motion, boolean grounded, double slipperiness,
+                      double gravity, double jumpImpulse, int jumpBoostAmplifier,
+                      boolean sprinting, boolean creative, boolean pvpAllowed,
+                      int noDamageTicks, int maxNoDamageTicks,
+                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      KnockbackProfile profile, int pingMillis,
+                      KinematicState kinematics, double moveSpeedAttr) {
+        this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                pingMillis, kinematics, moveSpeedAttr, null);
+    }
 
     /**
      * The attacker's WALK-STANCE-NORMALIZED movement-speed attribute (the ×1.3
      * sprint modifier stripped at capture) for speed-conformal knockback.
      *
      * <p>Additive growth: the 19-arg constructor defaults {@code moveSpeedAttr} to
-     * {@link EntityState#MOVE_SPEED_UNAVAILABLE}. The netty fast path pre-sends
-     * an attacker knock from the attacker's published view, so this field rides
-     * the per-tick publish (single-writer) — the ONLY way a pre-sent knock can
-     * see the attacker's movement speed and scale identically to the tick path
-     * (one stamp, one truth). Views constructed without it (tests) resolve to
-     * the walk baseline ⇒ pace factor 1.0.</p>
+     * {@link EntityState#MOVE_SPEED_UNAVAILABLE} and {@code comboAttackerId} to
+     * null. The netty fast path pre-sends an attacker knock from the attacker's
+     * published view, so this field rides the per-tick publish (single-writer) —
+     * the ONLY way a pre-sent knock can see the attacker's movement speed and
+     * scale identically to the tick path (one stamp, one truth). Views constructed
+     * without it (tests) resolve to the walk baseline ⇒ pace factor 1.0.</p>
      */
     public PlayerView(UUID id, int entityId, TickStamp at,
                       Decay.Motion motion, boolean grounded, double slipperiness,
@@ -43,7 +97,7 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
         this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
                 jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
                 maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
-                pingMillis, kinematics, EntityState.MOVE_SPEED_UNAVAILABLE);
+                pingMillis, kinematics, EntityState.MOVE_SPEED_UNAVAILABLE, null);
     }
 
     /**

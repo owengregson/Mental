@@ -2,6 +2,7 @@ package me.vexmc.mental.v5.feature;
 
 import java.util.Set;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
+import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
@@ -278,7 +279,19 @@ public enum Feature {
                     Facets.none("no client-visible change"),
                     Facets.none("no damage contribution"),
                     Facets.none("no damage contribution")),
-            new SettingsKey<>("old-hitboxes", NoSettings.class));
+            new SettingsKey<>("old-hitboxes", NoSettings.class)),
+
+    /* -------------------------------- COMBO --------------------------------- */
+
+    COMBO_HOLD("combo-hold", Family.COMBO, "Combo Hold",
+            "The pocket servo — shapes the fresh melee knock to hold a sweet-spot combo.",
+            "TRIPWIRE_HOOK", false, Set.of(),
+            new Facets(
+                    Facets.none("scales the fresh melee knock through the velocity pipeline, not a Bukkit rule"),
+                    Facets.none("emits no packets of its own — the shaped knock rides the existing pipeline"),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("combo-hold", ComboSettings.class));
 
     private final String yamlKey;
     private final Family family;

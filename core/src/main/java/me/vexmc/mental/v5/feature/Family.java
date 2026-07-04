@@ -24,7 +24,9 @@ public enum Family {
     SUSTAIN("Sustain", "GOLDEN_APPLE",
             "Era potions and golden apples, ender-pearl spam, and natural regen."),
     LOADOUT("Loadout", "SHIELD",
-            "Off-hand blocking, crafting restrictions, and era melee reach.");
+            "Off-hand blocking, crafting restrictions, and era melee reach."),
+    COMBO("Combo Hold", "TRIPWIRE_HOOK",
+            "The pocket servo — hold a sweet-spot combo by shaping the fresh knock.");
 
     private final String displayName;
     private final String iconName;

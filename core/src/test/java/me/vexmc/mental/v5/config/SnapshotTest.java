@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Map;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
@@ -67,6 +68,7 @@ class SnapshotTest {
         assertEquals(ProjectileKnockbackSettings.DEFAULTS, settings(snapshot, Feature.PROJECTILE_KNOCKBACK));
         assertEquals(CraftingSettings.DEFAULTS, settings(snapshot, Feature.CRAFTING));
         assertEquals(OffhandSettings.DEFAULTS, settings(snapshot, Feature.OFFHAND));
+        assertEquals(ComboSettings.DEFAULTS, settings(snapshot, Feature.COMBO_HOLD));
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {

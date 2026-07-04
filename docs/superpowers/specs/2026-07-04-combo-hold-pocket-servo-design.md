@@ -74,78 +74,38 @@ matter: a false positive mid-scrap is the worst failure, and it costs only a
 
 ### 3.2 The servo (engine `comboFactor`, beside `paceFactor`)
 
-While active, every **fresh melee horizontal** knock from A to V is scaled by
-σ — and σ is an **exact inverse solve of the era flight equations** (owner
-directive 2026-07-04: the victim must land in a very specific position; a
-proportional nudge is not precise enough), then clamped:
+While active, every **fresh melee horizontal** knock from A to V is scaled by the
+**exact inverse solve of the era flight equations** — the derivation's final
+integrated form (`docs/superpowers/research/2026-07-04-pocket-servo-precision-derivation.md`
+§8), all quantities projected on the attacker→victim axis:
 
 ```
-window' = min(windowTicks, airTime(verticalStampShipped))       [tick-sim]
-dragSum = Σ_{k=0}^{window'-1} (era air drag)^k                  [kernel constants]
-σ*      = (target − d0 + chase(window') − residualCarry × dragSum)
-          / (freshEra × dragSum)
-σ       = clamp(minFactor, maxFactor, 1 + gain × (σ* − 1))
+w'     = c − round(rttA/2 / 50)                    the ping-shifted horizon (c = 10 cadence)
+D(w')  = Σ_{k=1}^{w'} Π(k)     Π = the launch-branch drag schedule: one ground-drag
+                              decay on a grounded launch tick, then air drag q,
+                              then the knock's own ground-drag tail after touchdown
+target = anchor (2.75)  |  the exposure-budget dynamic target (§3.2b, behind a knob)
+chase  = measured attacker-velocity trend  (fallback 0.2806 × attr/0.10 × w')
+tail   = D_ground(G) · dir(â)                       the victim's own ground-tail walk
+
+         target − d0 + chase − R·D(w') − ⟨â,u⟩·S2(w') − tail
+σ*  =  ─────────────────────────────────────────────────────────
+                           F · D(w')
+
+σ   = clamp(minFactor, maxFactor, 1 + gain × (σ* − 1))
 ```
 
-- The shipped horizontal is `residualCarry + σ × freshEra` (the ledger term is
-  never scaled — A3), so separation at next-swing time is
-  `d0 + (residualCarry + σ·freshEra)·dragSum − chase`; σ* is the value that
-  makes it EQUAL the target. `gain` blends toward the full solve (default 1.0
-  = exact); the clamps stay the honesty boundary.
-- `airTime` is computed from the SAME vertical stamp being shipped, by the
-  kernel's own tick simulation (gravity/drag — the CompensationQuery
-  flight-sim precedent): horizontal carry effectively dies at touchdown, so
-  travel truncates there. v1 assumes launch from ground level (combo hits
-  overwhelmingly connect in touchdown windows — the 1.6.0 boundary-ordering
-  work); the simulation pins quantify that approximation's error.
-- `chase` = era sprint ground speed (0.2806 b/t, a named pinned constant) ×
-  (attacker walk-normalized attr / 0.10) × window' — the 2.4.1 normalization
-  work supplies the attribute.
-- Every constant is the kernel's own era decay constant — no new
-  approximations — and the solve is pinned against a tick-by-tick era
-  simulation over a grid of (d0, residualCarry, vertical stamp, attacker
-  speed): unclamped cases must land |dNext − target| < 1e-9; clamped cases
-  pin the boundary exactly.
-
-### 3.2b The predictor's inputs — the precision mandate
-
-Owner directive (2026-07-04): extreme care goes into WHERE the victim is
-placed — everything measurable about them must feed the prediction. The v1
-solve (above) consumes (d0, residualCarry, vertical stamp, attacker
-normalized speed). The **precision round** — its own derivation + lab
-workstream before 2.5.0 ships — upgrades the predictor with, in priority
-order:
-
-1. **Victim self-drift.** Mid-air the victim steers at ~0.02 b/t² along their
-   input direction (sprint-air slightly more) — up to ~1 block over a 10-tick
-   window, the single largest unmodeled term. Source of truth: the MEASURED
-   per-tick horizontal velocity from the position ring (captures W/strafe/
-   sprint automatically, no input inference needed), blended with the input
-   channel where the wire streams it (player_input, 1.21.4+). Projected onto
-   the pair axis.
-2. **Axis projection.** The whole solve runs along the attacker→victim axis;
-   lateral components pass through unscaled (a strafing victim keeps their
-   lateral motion — the servo shapes radial spacing only).
-3. **Victim facing → a DYNAMIC target.** A victim already facing the attacker
-   can answer the instant geometry allows, so the far-edge bound comes from
-   the LIVE triangle — h ≥ √(reach² − Δ²) with Δ from the predicted apex
-   heights — plus ping slack; a faced-away victim relaxes the target toward
-   the hittability center. The static 2.75 remains the config anchor and the
-   fallback when inputs are unavailable.
-4. **Ping.** The attacker swings on what their CLIENT sees (RTT/2 old), so
-   the prediction horizon shifts by the attacker's half-RTT; the victim's
-   half-RTT widens the retaliation slack in the dynamic target. Mental's
-   per-connection latency model already measures both.
-5. **Ground-tail drift.** Grounded ticks inside the window drift at ground
-   speed × the victim's OWN normalized attribute (Speed/Slowness on the
-   victim matters here, not for the knock itself).
-6. Noted, not v1: slipperiness underfoot (ice ground drag, compendium §),
-   mid-air launch height (non-ground hits), Jump Boost in the apex.
-
-**Validation contract for every upgraded input:** (i) tick-sim grid pins in
-the kernel; (ii) a wire-measured lab round — SimpleBoxer scripted combos
-measuring ACTUAL landing positions against predicted, with a per-input error
-budget — before the input is trusted in the shipped default.
+- `F` (freshEra) = the σ=1 fresh horizontal (post-taper × pace × air-mult),
+  axis-projected; `R` (residualCarry) = the friction-carried residual,
+  axis-projected and **signed** (a residual moving V toward A reduces separation —
+  the v1 magnitude bug is fixed); **only F is scaled**, never `R` (the A3 law).
+- `D(w')` is the drag schedule with the **mandatory launch-ground-state branch**
+  (§3.2b): the pure-air sum overshoots a grounded launch by ~1.9 blocks. `⟨â,u⟩`
+  is the estimated held mid-air input (§3.2b victim self-drift); `S2` its air
+  double-sum; `tail` the victim's own locomotion over the `G` grounded ticks
+  inside the window; `chase` the measured attacker closing (attr model fallback).
+- The servo **declines (σ = 1)** on an ice-class landing (predicted slip > 0.7)
+  or a degenerate flight (air-time < 3, horizon < 1) — never a forced non-era knock.
 - Defaults: `target` 2.75 (§2), `gain` 1.0, clamps **[0.8, 1.2]** (owner
   decision — the stronger hold; the wider band trades a little visible KB
   variance for grip on the pocket). Past the clamps the pocket is honestly
@@ -179,7 +139,14 @@ module is OFF (zero-touch: scope-closed unit; era-exact defaults hold —
 - `ComboSettings` record (DEFAULTS + warn-and-fallback parsing) under
   `modules.combo-hold` + a commented settings block in the bundled config.
   Knobs: `min-hits`, `max-gap-ticks`, `grounded-run-ticks`, `blowout-blocks`,
-  `target`, `gain`, `min-factor`, `max-factor`.
+  `target`, `gain`, `min-factor`, `max-factor`, `window-ticks` (the cadence
+  horizon `c` — load-bearing but absent from the round-one list, derivation open
+  issue 1), and the §3.2b precision pair: `target-mode` (`anchor` | `dynamic`,
+  default `anchor` — the dynamic value is computed and journaled to the debug sink
+  either way, so the lab round can calibrate before flipping it) and `hit-cap`
+  (2.95, the dynamic target's upper clamp). The precision predictor (launch-state
+  branch, victim self-drift, ping horizons, ground tail) folds into `window-ticks`
+  with no further knobs — every input degrades to a no-op when unavailable.
 - Unit registers in MentalPluginV5; per-player state drops via a forget hook.
 - api: `ComboStartEvent`/`ComboEndEvent` (additive; japicmp-gated) — free
   scoreboard/integration surface.

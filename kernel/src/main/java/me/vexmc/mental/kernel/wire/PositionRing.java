@@ -44,6 +44,18 @@ public final class PositionRing {
         synchronized Sample latest() {
             return samples[(head - 1 + CAPACITY) % CAPACITY];
         }
+
+        synchronized List<Sample> recent(int n) {
+            int want = Math.min(n, CAPACITY);
+            List<Sample> out = new ArrayList<>(want);
+            for (int back = want - 1; back >= 0; back--) {
+                Sample sample = samples[(head - 1 - back + 2 * CAPACITY) % CAPACITY];
+                if (sample != null) {
+                    out.add(sample);
+                }
+            }
+            return out;
+        }
     }
 
     private final ConcurrentHashMap<UUID, Ring> rings = new ConcurrentHashMap<>();
@@ -77,6 +89,18 @@ public final class PositionRing {
     public Sample latest(UUID player) {
         Ring ring = rings.get(player);
         return ring == null ? null : ring.latest();
+    }
+
+    /**
+     * The last {@code n} samples for {@code player}, oldest-first (up to the ring
+     * capacity), or an empty list when untracked — the pocket-servo precision
+     * round's drift/chase estimators read consecutive per-tick deltas from it. Same
+     * synchronized section as {@link #latest}; the owning thread writes, the netty
+     * reader consumes frozen samples.
+     */
+    public List<Sample> recent(UUID player, int n) {
+        Ring ring = rings.get(player);
+        return ring == null ? List.of() : ring.recent(n);
     }
 
     public void forget(UUID player) {
