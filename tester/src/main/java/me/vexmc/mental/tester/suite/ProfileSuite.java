@@ -9,6 +9,7 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PaceScale;
 import me.vexmc.mental.kernel.ledger.MotionLedger;
 import me.vexmc.mental.kernel.model.EntityState;
+import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.CombatSession;
@@ -73,7 +74,11 @@ public final class ProfileSuite {
                 new TestCase("profile: pace-off ignores Speed III (the inverse control)", context ->
                         runPaceOffScenario(mental, tester, context)),
                 new TestCase("profile: signature Speed III combo hit-2 satisfies the A3 relation", context ->
-                        runPaceComboScenario(mental, tester, context)));
+                        runPaceComboScenario(mental, tester, context)),
+                new TestCase("profile: server-sprinting attacker with no wire journals paceFactor ~1.0 (F1)",
+                        context -> runStanceMismatchBaseSpeed(mental, tester, context)),
+                new TestCase("profile: server-sprinting Speed III attacker with no wire journals ~1.563 (F1)",
+                        context -> runStanceMismatchSpeedThree(mental, tester, context)));
     }
 
     /** A hit under a global kohi selection must equal kohi math, not the legacy default. */
@@ -564,6 +569,179 @@ public final class ProfileSuite {
         }
     }
 
+    /* --------------------- the F1 stance-mismatch regression (live) --------------------- */
+
+    /**
+     * The live discriminator for F1. A clientless fake attacker has NO connection
+     * wire, so a server-side NMS attack registers with an absent/false sprint
+     * verdict while the SERVER sprint flag and the ×1.3 movement-speed modifier ARE
+     * present — exactly the historical mismatch. The 2.4.0 region path paired the
+     * false verdict's baseline with the sprint-inclusive live attribute and shipped
+     * pace factor 1.3 at base speed. With the walk-normalized capture the sprint
+     * modifier is divided back out coherently, so the journal must record ~1.0 — a
+     * byte-identical era stamp — regardless of the verdict.
+     */
+    private static void runStanceMismatchBaseSpeed(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile("signature"),
+                    "signature preset missing"));
+            applyServerSprint(context, attacker);
+            context.awaitTicks(PROPAGATE_TICKS);
+
+            Double factor = stanceMismatchFactor(mental, context, attacker, victim, false);
+            if (factor == null) {
+                return; // note-skipped (setup gap) — recorded in stanceMismatchFactor
+            }
+            // The fix: ~1.0, not the 2.4.0 bug's 1.3. Assert the FACTOR (stance math),
+            // not an absolute vector — a 1.9/1.10 clientless fake reads isOnGround()
+            // false, so absolute verticals are version-noisy (project memory).
+            context.expectNear(1.0, factor, 0.02,
+                    "a server-sprinting attacker with no wire must journal paceFactor ~1.0 (was 1.3)");
+        } finally {
+            teardown(context, mental, attacker, victim, null);
+        }
+    }
+
+    /**
+     * The Speed III half of the F1 discriminator: the same server-flag-only sprint,
+     * now with Speed III genuinely elevating the attribute. The 2.4.0 region path
+     * divided the sprint-inclusive 0.208 by the false verdict's walk baseline (2.08
+     * → clamped 2.0); the walk-normalized capture reads 0.16 and yields
+     * {@code 1.6^0.95 ≈ 1.563}.
+     */
+    private static void runStanceMismatchSpeedThree(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile("signature"),
+                    "signature preset missing"));
+            applySpeedThreeSprint(context, attacker);
+            context.awaitTicks(PROPAGATE_TICKS);
+
+            Double factor = stanceMismatchFactor(mental, context, attacker, victim, true);
+            if (factor == null) {
+                return;
+            }
+            // The fix: ~1.563 (1.6^0.95), not the 2.4.0 bug's 2.0 clamp.
+            context.expectNear(EXPECTED_S, factor, 0.02,
+                    "a server-sprinting Speed III attacker with no wire must journal ~1.563 (was clamped 2.0)");
+            context.expect(factor < 2.0 - 1.0e-6,
+                    "the paceFactor must not be the old 2.0 clamp (got " + factor + ")");
+        } finally {
+            teardown(context, mental, attacker, victim, null);
+        }
+    }
+
+    /**
+     * Drives one server-side NMS attack from the server-sprinting fake attacker and
+     * returns the pace factor the desk journaled for it, or {@code null} (note-SKIP)
+     * when the clientless fake's ×1.3 sprint modifier did not apply — the whole
+     * mismatch depends on it, so its absence is a staging gap, not a regression.
+     */
+    private static Double stanceMismatchFactor(
+            MentalPluginV5 mental, TestContext context, FakePlayer attacker, FakePlayer victim,
+            boolean speedThree) throws Exception {
+        int[] shipsBefore = new int[1];
+        Boolean armed = context.sync(() -> {
+            KnockbackProfile signature = profileFor(mental, victim);
+            context.expect("signature".equals(signature.name()) && signature.paceScaling().active(),
+                    "signature must be resolved and pace-scaling active");
+            context.expect(attacker.player().isSprinting(),
+                    "the attacker must carry the SERVER sprint flag (the mismatch precondition)");
+
+            // Guard: the walk-normalized capture must read ~0.10 (base) / >0.14
+            // (Speed III). If it reads ~0.077, the ×1.3 modifier never applied to the
+            // clientless fake and the mismatch cannot be staged — note-SKIP.
+            EntityState captured = EntityStates.capture(attacker.player());
+            double normalized = captured.moveSpeedAttr();
+            boolean modifierPresent = speedThree
+                    ? normalized > PaceScale.WALK_BASELINE * 1.4
+                    : Math.abs(normalized - PaceScale.WALK_BASELINE) < 0.01;
+            if (!modifierPresent) {
+                return Boolean.FALSE;
+            }
+            shipsBefore[0] = countShips(mental, victim);
+            return Boolean.TRUE;
+        });
+        if (!Boolean.TRUE.equals(armed)) {
+            context.note("clientless fake never carried the ×1.3 sprint modifier — the wire-vs-server "
+                    + "stance mismatch cannot be staged; the stance math is unit-pinned in PaceScaleTest");
+            return null;
+        }
+        context.syncRun(() -> {
+            victim.player().setNoDamageTicks(0);
+            attacker.attack(victim.player()); // server-side NMS attack — the region path
+        });
+        JournalEntry ship = awaitNewShip(context, mental, victim, shipsBefore[0]);
+        context.expect(ship != null && ship.shipped() != null,
+                "the server-sprinting hit journalled no SHIP");
+        return ship == null ? null : ship.paceFactor();
+    }
+
+    /** setSprinting(true) with NO potion (base speed); a short settle lets the ×1.3 modifier apply. */
+    private static void applyServerSprint(TestContext context, FakePlayer attacker) throws Exception {
+        context.syncRun(() -> attacker.player().setSprinting(true));
+        context.awaitTicks(2);
+    }
+
+    /** SHIP entries (a delivered vector) currently in the victim's desk journal. */
+    private static int countShips(MentalPluginV5 mental, FakePlayer victim) {
+        CombatSession session = mental.sessions().sessionFor(victim.uuid());
+        if (session == null) {
+            return 0;
+        }
+        int ships = 0;
+        for (JournalEntry entry : session.desk().journal()) {
+            if (entry.shipped() != null) {
+                ships++;
+            }
+        }
+        return ships;
+    }
+
+    /** Polls the victim's desk journal for a NEW SHIP beyond {@code shipsBefore}. */
+    private static JournalEntry awaitNewShip(
+            TestContext context, MentalPluginV5 mental, FakePlayer victim, int shipsBefore) throws Exception {
+        for (int round = 0; round < 12; round++) {
+            JournalEntry ship = context.sync(() -> {
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                if (session == null) {
+                    return null;
+                }
+                int ships = 0;
+                JournalEntry lastShip = null;
+                for (JournalEntry entry : session.desk().journal()) {
+                    if (entry.shipped() != null) {
+                        ships++;
+                        lastShip = entry;
+                    }
+                }
+                return ships > shipsBefore ? lastShip : null;
+            });
+            if (ship != null) {
+                return ship;
+            }
+            context.awaitTicks(2);
+        }
+        return null;
+    }
+
     /** Speed III (amplifier 2) plus the sprint flag; a short settle lets the attribute modifiers apply. */
     @SuppressWarnings("deprecation") // getByName spans the 1.17.1 → 26.x API; SPEED is the stable alias
     private static void applySpeedThreeSprint(TestContext context, FakePlayer attacker) throws Exception {
@@ -600,7 +778,9 @@ public final class ProfileSuite {
             attacker.remove();
             victim.remove();
         });
-        captors.unregister();
+        if (captors != null) {
+            captors.unregister();
+        }
     }
 
     private static KnockbackProfile profileFor(MentalPluginV5 mental, FakePlayer victim) {
