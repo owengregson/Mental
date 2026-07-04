@@ -606,7 +606,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
         reconciler.register(new KnockbackUnit(
                 sessions, domains, ocmBinding, latency, scheduling, this::snapshot,
-                debug.scoped(DebugCategory.KNOCKBACK)));
+                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK)));
         reconciler.register(latencyCompensation);
         reconciler.register(new FishingKnockbackUnit(
                 sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));

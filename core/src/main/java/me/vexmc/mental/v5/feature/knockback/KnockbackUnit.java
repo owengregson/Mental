@@ -1,5 +1,7 @@
 package me.vexmc.mental.v5.feature.knockback;
 
+import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.protocol.player.User;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
@@ -8,25 +10,36 @@ import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
+import me.vexmc.mental.kernel.delivery.ValvePayload;
+import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.EntityState;
+import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.model.SprintVerdict;
+import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.CompensationQuery;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
+import me.vexmc.mental.v5.VelocityValve;
+import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.Snapshot;
+import me.vexmc.mental.v5.config.settings.HitRegSettings;
+import me.vexmc.mental.v5.delivery.HitIds;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.rim.BurstSender;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -62,18 +75,32 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private final LatencyModel latency;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
+    private final HitIds ids;
+    private final TickClock clock;
+    private final VelocityValve valve;
     private final DebugLog.Scoped debug;
+
+    /**
+     * The burst sender reused for the blocked-hit hurt presentation (ships
+     * VELOCITY + HURT exactly as the fast path would). Lazily constructed on the
+     * first blocked delivery so its {@code PacketEvents} version read happens at
+     * runtime (post-init), never eagerly at reconciler registration.
+     */
+    private volatile BurstSender blockBurst;
 
     public KnockbackUnit(
             SessionService sessions, ConnectionDomains domains, OcmBinding ocmBinding,
             LatencyModel latency, Scheduling scheduling, Supplier<Snapshot> snapshot,
-            DebugLog.Scoped debug) {
+            HitIds ids, TickClock clock, VelocityValve valve, DebugLog.Scoped debug) {
         this.sessions = sessions;
         this.domains = domains;
         this.ocmBinding = ocmBinding;
         this.latency = latency;
         this.scheduling = scheduling;
         this.snapshot = snapshot;
+        this.ids = ids;
+        this.clock = clock;
+        this.valve = valve;
         this.debug = debug;
     }
 
@@ -125,14 +152,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             return;
         }
         KnockbackProfile profile = profileFor(session, victim);
+        boolean blockModifier = event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
+                && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0;
         // Era rule: blocking shaped DAMAGE only (knockBack ran first), so a
         // blocking victim was knocked in FULL — cancel only for a FULL block
         // (final damage zero, the modern shield vanilla itself never knocks
         // through); a partial reduction knocks like the era.
-        if (profile.shieldBlockingCancels()
-                && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
-                && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0
-                && event.getFinalDamage() <= 0.0) {
+        if (profile.shieldBlockingCancels() && blockModifier && event.getFinalDamage() <= 0.0) {
             desk.withdraw(tx.context().id());
             return;
         }
@@ -144,9 +170,26 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         }
 
         boolean sprinting = attackerSprinting(source, tx, attacker);
+        // A PARTIAL native block (a negative BLOCKING modifier that still lands
+        // damage — the BLOCKS_ATTACKS component tier on 1.21.5+). Vanilla runs its
+        // blocked-damage pipeline but SKIPS markHurt, so no ENTITY_VELOCITY is
+        // broadcast and no PlayerVelocityEvent fires — the desk's await would be
+        // swept as "no-velocity-event" and the era knock lost. The era knocks a
+        // partial block in FULL, so deliver the vector directly. Only a FRESH hit
+        // (not a mid-invulnerability difference hit) knocks: the difference branch
+        // is era-silent and must stay so (compendium: stronger mid-invuln hit deals
+        // difference damage with NO knock and no flinch).
+        boolean freshPartialBlock = blockModifier && event.getFinalDamage() > 0.0
+                && !victimImmune(session, victim);
 
         HitTransaction.State state = tx.state();
         if (state == HitTransaction.State.PRE_SENT || state == HitTransaction.State.PINNED) {
+            if (freshPartialBlock) {
+                deliverBlockedKnock(
+                        session, victim, attacker, source, tx, tx.carried(),
+                        state == HitTransaction.State.PRE_SENT, sprinting);
+                return;
+            }
             // Adopt the pre-delivered vector — the era stamped once.
             desk.awaitVelocityEvent(tx);
             applyAttackerObligations(attacker, sprinting);
@@ -161,6 +204,11 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackVector vector = KnockbackEngine.compute(
                 attackerState, victimState, profile, compensationY,
                 ThreadLocalRandom.current(), freshSprint);
+
+        if (freshPartialBlock) {
+            deliverBlockedKnock(session, victim, attacker, source, tx, vector, false, sprinting);
+            return;
+        }
 
         desk.submit(tx, vector);
         desk.awaitVelocityEvent(tx);
@@ -232,6 +280,111 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (player.isSprinting()) {
             scheduling.runOn(player, () -> player.setSprinting(false), () -> {});
         }
+    }
+
+    /**
+     * Deliver a fresh partial-block knock when no vanilla velocity event will
+     * resolve it — the desk's no-velocity-event path (the same mechanism the
+     * thrown-projectile ensure uses). On the {@code BLOCKS_ATTACKS} component tier
+     * (1.21.5+) vanilla reduces a blocked hit natively but SKIPS {@code markHurt},
+     * so it broadcasts no {@code ENTITY_VELOCITY} and fires no {@code
+     * PlayerVelocityEvent}; the desk's await would be swept as "no-velocity-event"
+     * and the era knock lost. The era knocks a partial block in FULL
+     * (compendium: blocking halves damage AFTER knockBack ran), so we ship it.
+     *
+     * <p>The original transaction is withdrawn so the sweep never journals a false
+     * drop, and a fresh one is submitted next tick — stamped at that tick so it
+     * survives its own sweep. {@code setVelocity} triggers the tracker's velocity
+     * event, which the desk resolves to the full stamp (undecayed: a REGISTERED
+     * resolve ships the submitted vector, ignoring the physics-decayed api value)
+     * and journals a SHIP. Presentation mirrors the fast path: a client with no
+     * wire pre-send gets a VELOCITY + HURT burst (era: a blocked hit flinches and
+     * plays the vanilla hurt sound — no shield clang, the component's blockSound is
+     * empty), and the valve is armed whenever a wire copy exists so the
+     * authoritative tracker re-emission is consumed once, never doubled onto it.</p>
+     */
+    private void deliverBlockedKnock(
+            CombatSession session, Player victim, LivingEntity attacker, HitSource source,
+            HitTransaction original, KnockbackVector era, boolean wirePreSent, boolean sprinting) {
+        applyAttackerObligations(attacker, sprinting);
+        if (era == null) {
+            return; // nothing carried/computed — leave vanilla's (absent) knock
+        }
+        DeliveryDesk desk = session.desk();
+        // Drop the original pending so the tick sweep cannot journal it as a false
+        // "no-velocity-event"; the fresh transaction below carries the SHIP.
+        desk.withdraw(original.context().id());
+        UUID victimId = victim.getUniqueId();
+        UUID attackerId = attacker.getUniqueId();
+        PlayerView view = session.view();
+        int entityId = view != null ? view.entityId() : victim.getEntityId();
+        float hurtYaw = hurtYawFor(attacker, victim);
+        boolean bundle = bundleFeedback();
+        scheduling.runOn(victim, () -> {
+            HitTransaction fresh = mint(source, attackerId, victimId);
+            desk.submit(fresh, era);
+            desk.awaitVelocityEvent(fresh);
+            boolean wireCopy = wirePreSent;
+            if (!wirePreSent) {
+                User user = PacketEvents.getAPI().getPlayerManager().getUser(victim);
+                if (user != null) {
+                    // No registration burst reached the wire (server-side melee, or a
+                    // paced-out velocity): ship VELOCITY + HURT now, exactly as the
+                    // fast path would have — the client sees the era knock and flinch.
+                    burstSender().ship(user, entityId, era, hurtYaw, bundle);
+                    wireCopy = true;
+                }
+            }
+            if (wireCopy) {
+                // A wire copy already carries the value; arm the valve so the
+                // authoritative tracker re-emission below (and any late vanilla
+                // velocity for this hit) is consumed once, never stacked on it.
+                valve.arm(victimId, ValvePayload.of(entityId, era));
+            }
+            // The authoritative motion: overwrites vanilla's blocked deltaMovement,
+            // triggers the velocity event (→ desk SHIP journal), and moves the server
+            // entity (server-authoritative for anticheats and clientless fakes).
+            victim.setVelocity(Vectors.toBukkit(era));
+        }, () -> {});
+    }
+
+    private HitTransaction mint(HitSource source, UUID attackerId, UUID victimId) {
+        HitContext context = new HitContext(
+                ids.next(), source, attackerId, victimId,
+                new SprintVerdict(false, null, clock.current()), false, false, null, clock.current());
+        return new HitTransaction(context);
+    }
+
+    /** True when the victim was mid-invulnerability at hit time (the era-silent difference branch). */
+    private boolean victimImmune(CombatSession session, Player victim) {
+        PlayerView view = session.view();
+        if (view != null) {
+            return view.damageImmune();
+        }
+        return victim.getNoDamageTicks() > victim.getMaximumNoDamageTicks() / 2.0;
+    }
+
+    private static float hurtYawFor(LivingEntity attacker, Player victim) {
+        Location a = attacker.getLocation();
+        Location v = victim.getLocation();
+        return HurtYaw.hurtYaw(a.getX(), a.getZ(), v.getX(), v.getZ(), v.getYaw());
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean bundleFeedback() {
+        HitRegSettings settings = snapshot.get().settings(
+                (SettingsKey<HitRegSettings>) Feature.HIT_REGISTRATION.settingsKey());
+        return settings.bundleFeedback();
+    }
+
+    /** Lazily constructed on the first blocked delivery — {@code PacketEvents} read at runtime, not at boot. */
+    private BurstSender burstSender() {
+        BurstSender local = blockBurst;
+        if (local == null) {
+            local = new BurstSender();
+            blockBurst = local;
+        }
+        return local;
     }
 
     private KnockbackProfile profileFor(CombatSession session, Player victim) {
