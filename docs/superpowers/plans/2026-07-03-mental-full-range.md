@@ -156,10 +156,11 @@ need a sentinel self-check and a live tier assertion.
     reads), and by anything run on a Java 8 JVM (the JVM ignores
     `META-INF/versions/`). A **versions/13 tier is dead weight — killed**:
     1.14.4/1.15.2 would never read it.
-  - **versions/16 (major 60, jvmdg `multiReleaseVersions += VERSION_16`)** —
-    read by exactly 1.16.5-on-Java-16 (its loader opens reflectively
-    runtime-versioned; Java 16 caps class majors at 60 so it cannot take the
-    v61 tier).
+  - **versions/16 — DROPPED (Phase 1 escalation 1):** jvmdg 1.3.6's `-mro`
+    and `-mr` are CLI-verified mutually exclusive, and versions/17 (the
+    original bytecode) is the D-1-critical tier. 1.16.5-on-Java-16 therefore
+    reads the base v52 tier — fully functional and live-gated; a true v60
+    tier would need a two-pass merge, deferred with that evidence.
   - **versions/17 (major 61, the ORIGINAL bytecode, jvmdg
     `multiReleaseOriginal`)** — read by 1.17+ (direct/pipeline MR), AND — the
     round-2 surprise — by **1.9.4/1.10.2/1.11.2 on Java 9+**: those loaders
@@ -271,12 +272,20 @@ Java 14 (foojay `launcherFor`; same flagless recipe as the ladder) — take the
 newest CLEAN rung per version. Then `support-matrix.json`: legacy `jdk`
 values per the ladder map (1.9.4–1.12.2 → 21; 1.13.2 → probed; 1.14.4 → 13;
 1.15.2 → probed; 1.16.5 → 16), `serverFlags` removed everywhere, every paper
-entry gains its declared `bytecodeTier` (D-7 map: 1.9.4–1.11.2 → 61,
-1.12.2–1.15.2 → 52, 1.16.5 → 60, modern → 61); `_comment` rewritten (the
-flag story is dead — record the 25-boots-but-JEP-472-warns fact and why 21;
-the 1.14.4 hole note survives until Phase 3). Run tasks pass
+entry gains its declared `bytecodeTier` (D-7 map as revised by Phase 1
+escalation 1: 1.9.4–1.11.2 → 61, 1.12.2–1.15.2 → 52, **1.16.5 → 52**,
+modern/folia → 61); `_comment` rewritten (the flag story is dead — record
+the 25-boots-but-JEP-472-warns fact and why 21; the 1.14.4 hole note
+survives until Phase 3). Run tasks pass
 `-Dmental.tester.tier=<bytecodeTier>` (mandatory — the JVM-derived default
-is WRONG for plain-loader entries like 1.12.2@21) and the tester asserts it.
+is WRONG for plain-loader entries like 1.12.2@21) and the tester asserts it;
+fix F-FR1 while there: `BootSuite.expectedBytecodeMajor()`'s JVM-derived
+default still maps Java 16 ⇒ 60, but the v60 tier no longer exists — map
+16 ⇒ 52 with the escalation-1 comment. Step-down rule: if a version's FULL
+suite fails on its ladder-max JDK and the failure is JVM-version-caused
+(encapsulation/Unsafe/reflection drift, not a product bug), step that entry
+down one rung (e.g. 21 → 17, both boot-proven) and document the evidence in
+the outcome log — never weaken a suite assertion to keep the higher rung.
 `scripts/integration-matrix.sh`: `java_for` maps the full JDK set to the
 foojay-provisioned homes under `~/.gradle/jdks/` (helpful error naming the
 Gradle provisioning route when absent); fix the scout-found `--nogui` trap
@@ -287,7 +296,9 @@ universally) with the same pristine-reset discipline; pass the tier property.
 **Gate:** full 15-entry `integrationTestMatrix` + `integrationTestOcm`,
 fresh nonces, tier lines quoted per entry matching `bytecodeTier`, zero
 `IgnoreJavaVersion` anywhere outside historical docs, zero Java-advisory
-lines in the legacy boot logs.
+lines in the legacy boot logs; PLUS one `scripts/integration-matrix.sh` run
+ending `MATRIX PASSED` (the script was rewritten — its fixes need their own
+live proof).
 
 ### Phase 3 — 1.14.4 at full tier (Opus)
 
@@ -450,8 +461,10 @@ takes the newest clean rung); 1.14.4 → 13; 1.15.2 → 14 if it boots clean
 else 13; 1.16.5 → 16; modern entries unchanged**. Resulting `bytecodeTier`
 map (jdk × loader-MR): 1.9.4/1.10.2/1.11.2 → **61** (URLClassLoader MR on
 Java 21 serves the ORIGINAL bytecode); 1.12.2 → 52 (plain loader);
-1.13.2/1.14.4/1.15.2 → 52 (plain loaders); 1.16.5 → **60** (MR-aware on
-Java 16); 1.17.1+/Folia/OCM → 61. CI note for Phase 4: Temurin has no
+1.13.2/1.14.4/1.15.2 → 52 (plain loaders); 1.16.5 → **52** (MR-aware on
+Java 16, but the v60 tier was dropped — Phase 1 escalation 1; the loader
+finds no versioned tier ≤ 16 and serves base); 1.17.1+/Folia/OCM → 61. CI
+note for Phase 4: Temurin has no
 13/14/16 for `setup-java` — the workflows must install only the build JDK(s)
 via setup-java and let the Gradle foojay toolchain auto-provision the server
 JDKs (exactly as it does locally).
