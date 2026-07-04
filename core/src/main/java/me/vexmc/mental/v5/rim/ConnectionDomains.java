@@ -35,7 +35,14 @@ public final class ConnectionDomains {
 
         private final SprintWire sprint;
         private final GroundFsm ground;
-        private float lastYaw;
+        // Volatile: written by this connection's own netty thread (the rim yaw tap)
+        // and read cross-thread — the attacker's netty thread at hit-plan time (the
+        // hurt-yaw tilt) and, with the pocket-servo precision round, the dynamic
+        // target's victim-facing fallback. A single 32-bit value, so volatility is a
+        // coherent atomic read (the seams doc's flagged fix — never repeat the plain
+        // field for anything wider; multi-bit state must ride an AtomicReference/Long
+        // snapshot per the ConnectionDomains licensing rule).
+        private volatile float lastYaw;
 
         Domain(TickClock clock) {
             this.sprint = new SprintWire(clock);

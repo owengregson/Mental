@@ -58,6 +58,17 @@ public final class CombatSession {
      */
     private ComboTracker comboTracker;
 
+    /**
+     * Consecutive grounded ticks the victim has held (combo-hold §3.2b) — advanced
+     * once per session tick, reset to 0 the moment the victim leaves the ground.
+     * Published as a {@code PlayerView} component the pocket-servo precision solve
+     * reads. Distinct from the {@link ComboTracker}'s own grounded-run counter,
+     * which resets on a fresh KNOCK (its touchdown-end condition) rather than on
+     * leaving the ground; this is the "how long has the victim been standing" signal
+     * the predictor needs. Owning thread only.
+     */
+    private int groundedTicks;
+
     public CombatSession(double gravity, int entityId, TickClock clock, int journalCapacity) {
         this.ledger = new MotionLedger(gravity);
         this.desk = new DeliveryDesk(entityId, clock, journalCapacity);
@@ -131,6 +142,21 @@ public final class CombatSession {
      */
     public UUID comboAttackerId() {
         return comboTracker == null ? null : comboTracker.activeAttacker();
+    }
+
+    /** The consecutive grounded-tick count published into the view (combo-hold §3.2b). Owning thread only. */
+    public int groundedTicks() {
+        return groundedTicks;
+    }
+
+    /**
+     * Advances the consecutive grounded-tick count from this tick's ground state
+     * (increment while grounded, reset to 0 on leaving the ground) and returns the
+     * new value. Called once per session tick from the view build. Owning thread only.
+     */
+    public int advanceGroundedTicks(boolean grounded) {
+        groundedTicks = grounded ? groundedTicks + 1 : 0;
+        return groundedTicks;
     }
 
     /**

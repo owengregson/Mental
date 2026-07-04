@@ -63,4 +63,32 @@ public final class ViewBuilder {
                 noDamageTicks, maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback,
                 profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId);
     }
+
+    /**
+     * The pocket-servo precision overload (combo-hold §3.2b) — carries the five
+     * predictor inputs the netty pre-send reads for the precision solve: the
+     * victim's measured per-tick velocity (the drift signal, frozen at the SAME
+     * publish as the ledger residual so their difference is coherent), the published
+     * yaw and pose-aware eye height (the dynamic target's facing and geometry,
+     * packetless-safe where the connection-domain yaw wire is absent), and the
+     * consecutive grounded-tick count. The pre-precision overload defaults them to
+     * era-exact no-ops, so a view built without them degrades to the base solve.
+     */
+    public PlayerView build(
+            UUID id, int entityId,
+            Decay.Motion motion, boolean grounded, double slipperiness,
+            double gravity, double jumpImpulse, int jumpBoostAmplifier,
+            boolean sprinting, boolean creative, boolean pvpAllowed,
+            int noDamageTicks, int maxNoDamageTicks,
+            double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+            KnockbackProfile profile, int pingMillis,
+            KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId,
+            double measuredVx, double measuredVz, float yaw, double eyeHeight, int groundedTicks) {
+        return new PlayerView(
+                id, entityId, clock.current(), motion, grounded, slipperiness,
+                gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
+                noDamageTicks, maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback,
+                profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
+                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks);
+    }
 }

@@ -19,7 +19,37 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                          double knockbackResistance, boolean ocmOwnsMeleeKnockback,
                          KnockbackProfile profile, int pingMillis,
                          KinematicState kinematics, double moveSpeedAttr,
-                         UUID comboAttackerId) {
+                         UUID comboAttackerId,
+                         double measuredVx, double measuredVz, float yaw,
+                         double eyeHeight, int groundedTicks) {
+
+    /** The standing eye height above feet — the pocket-servo precision default (ReachValidator.EYE_HEIGHT). */
+    private static final double DEFAULT_EYE_HEIGHT = 1.62;
+
+    /**
+     * The pre-precision-round arity (combo-hold §3.2): carries the {@code
+     * comboAttackerId} but none of the §3.2b precision predictor inputs. The five
+     * new components — the victim's measured per-tick velocity (the drift signal),
+     * the published yaw and pose-aware eye height (dynamic target + packetless-safe
+     * facing), and the consecutive grounded-tick count — default to their era-exact
+     * no-ops (zero velocity, zero yaw, the standing eye, zero grounded run), so the
+     * precision solve degrades to the base solve for any view built without them.
+     */
+    public PlayerView(UUID id, int entityId, TickStamp at,
+                      Decay.Motion motion, boolean grounded, double slipperiness,
+                      double gravity, double jumpImpulse, int jumpBoostAmplifier,
+                      boolean sprinting, boolean creative, boolean pvpAllowed,
+                      int noDamageTicks, int maxNoDamageTicks,
+                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      KnockbackProfile profile, int pingMillis,
+                      KinematicState kinematics, double moveSpeedAttr,
+                      UUID comboAttackerId) {
+        this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
+                0.0, 0.0, 0.0f, DEFAULT_EYE_HEIGHT, 0);
+    }
 
     /**
      * The attacker holding an ACTIVE combo against this player, or null when none

@@ -335,6 +335,18 @@ public final class SessionService implements Listener, SessionAccess {
         KinematicState kinematics = new KinematicState(
                 location.getY(), GroundDistance.measure(location), grounded);
 
+        // Pocket-servo precision inputs (combo-hold §3.2b), all frozen at this
+        // publish. The measured per-tick velocity is the delta from the LAST ring
+        // sample (recorded end of the previous tick — the sample is read here BEFORE
+        // this tick's record()) to the live position, so the drift signal
+        // (measured − ledger residual) is coherent by construction. Yaw and the
+        // pose-aware eye height are packetless-safe (no connection-domain wire
+        // needed); the grounded-tick run is the D2 session counter.
+        PositionRing.Sample previous = positions.latest(id);
+        double measuredVx = previous == null ? 0.0 : location.getX() - previous.x();
+        double measuredVz = previous == null ? 0.0 : location.getZ() - previous.z();
+        int groundedTicks = session.advanceGroundedTicks(grounded);
+
         return viewBuilder.build(
                 id, player.getEntityId(),
                 session.ledger().current(), grounded, slipperiness,
@@ -342,7 +354,8 @@ public final class SessionService implements Listener, SessionAccess {
                 player.isSprinting(), player.getGameMode() == GameMode.CREATIVE, player.getWorld().getPVP(),
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
                 knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics,
-                moveSpeedAttr, session.comboAttackerId());
+                moveSpeedAttr, session.comboAttackerId(),
+                measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks);
     }
 
     /**
