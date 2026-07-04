@@ -563,26 +563,81 @@ val verifyDowngrade = tasks.register("verifyDowngrade") {
 }
 
 
+// D-8 has TWO failure modes, both fatal on the shared legacy class cache and both proven live:
+//   (a) the tester carrying Mental's OWN jvmdg-runtime prefix (me/vexmc/mental/lib/jvmdg) — two
+//       downgraded plugins sharing a same-FQN pruned runtime cross-link and fail;
+//   (b) a first-party class carrying an UN-RELOCATED jvmdg STUB type in a DESCRIPTOR. jvmdg
+//       rewrites a post-Java-8 type (e.g. java.util.random.RandomGenerator) to a stub under
+//       xyz/wagyourtail/jvmdg/*/stub/, and ShadeJar relocates it under each plugin's own
+//       …/lib/jvmdg/ prefix — but the relocator only rewrites CLASS constant-pool entries and
+//       invoke OWNERS. A stub type that appears ONLY as a parameter in a method-descriptor Utf8
+//       (a cross-plugin call's invokestatic descriptor) is left in the RAW xyz/wagyourtail/…
+//       namespace; on a v52-read server (below Java 17, reading the base tier) that raw FQN
+//       resolves to nothing and the caller dies with ClassNotFoundException the instant the
+//       method links — a LIVE-SERVER HANG, not a build failure. That is exactly how the 1.12.2
+//       gate hung: ComboSuite's servo computePaced call passed a java.util.Random into a
+//       RandomGenerator descriptor (fix: the kernel's java.util.Random additive overload, the
+//       computeBase precedent). This gate makes (b) a BUILD failure across BOTH mega jars, every
+//       tier (base + versions/*). Class bytes read as ISO-8859-1 so a substring match is an exact
+//       constant-pool byte match (verifyRelocation's proven technique).
 val verifyTesterIsolation = tasks.register("verifyTesterIsolation") {
     group = "verification"
-    description = "Fails if the tester mega jar references Mental's me/vexmc/mental/lib/jvmdg prefix (D-8)."
-    dependsOn(testerMegaJar)
-    val jarFile = testerMegaJar.flatMap { it.archiveFile }
-    inputs.file(jarFile)
+    description = "D-8 gate: the tester mega jar must not carry Mental's me/vexmc/mental/lib/jvmdg " +
+            "prefix, and NEITHER mega jar may reference an un-relocated jvmdg stub type in a descriptor."
+    dependsOn(megaJar, testerMegaJar)
+    val coreJar = megaJar.flatMap { it.archiveFile }
+    val testerJar = testerMegaJar.flatMap { it.archiveFile }
+    inputs.file(coreJar); inputs.file(testerJar)
     doLast {
-        val needle = "me/vexmc/mental/lib/jvmdg"
-        val hits = mutableListOf<String>()
-        ZipFile(jarFile.get().asFile).use { zip ->
-            val entries = zip.entries()
-            while (entries.hasMoreElements()) {
-                val entry = entries.nextElement()
-                if (!entry.name.endsWith(".class")) continue
-                val text = zip.getInputStream(entry).use { String(it.readBytes(), Charsets.ISO_8859_1) }
-                if (text.contains(needle)) hits.add(entry.name)
+        val stub = "xyz/wagyourtail/jvmdg/"
+        val reloc = "lib/jvmdg/"  // both plugins' relocation prefixes end with this; a relocated stub
+                                  // reads …/lib/jvmdg/xyz/wagyourtail/…, so the token is preceded by it.
+        val runtimePrefixes = listOf("me/vexmc/mental/lib/jvmdg/", "me/vexmc/mental/tester/lib/jvmdg/")
+        val problems = mutableListOf<String>()
+        // (a) Mental's jvmdg runtime must never appear inside the tester jar.
+        ZipFile(testerJar.get().asFile).use { zip ->
+            val es = zip.entries()
+            while (es.hasMoreElements()) {
+                val e = es.nextElement()
+                if (!e.name.endsWith(".class")) continue
+                val t = zip.getInputStream(e).use { String(it.readBytes(), Charsets.ISO_8859_1) }
+                if (t.contains("me/vexmc/mental/lib/jvmdg")) problems.add("tester references me/vexmc/mental/lib/jvmdg (${e.name})")
             }
         }
-        if (hits.isNotEmpty()) throw GradleException("verifyTesterIsolation: tester references $needle")
-        logger.lifecycle("[verifyTesterIsolation] OK")
+        // (b) No first-party class (NOT the bundled jvmdg runtime under …/lib/jvmdg/, whose own
+        //     internal self-references are jvmdg's concern — tolerated by verifyJdk8Api) in either
+        //     mega jar may reference an un-relocated jvmdg STUB. The /stub/ requirement excludes the
+        //     bare CLASS-retention marker annotations jvmdg leaves raw by design (j{N}/NestMembers … —
+        //     never resolved); a relocated copy is skipped by the lib/jvmdg/ predecessor test.
+        for (jar in listOf(coreJar.get().asFile, testerJar.get().asFile)) {
+            ZipFile(jar).use { zip ->
+                val es = zip.entries()
+                while (es.hasMoreElements()) {
+                    val e = es.nextElement()
+                    val name = e.name
+                    if (!name.endsWith(".class")) continue
+                    val logical = if (name.startsWith("META-INF/versions/"))
+                        name.substringAfter("META-INF/versions/").substringAfter('/') else name
+                    if (runtimePrefixes.any { logical.startsWith(it) }) continue
+                    val t = zip.getInputStream(e).use { String(it.readBytes(), Charsets.ISO_8859_1) }
+                    var i = t.indexOf(stub)
+                    while (i >= 0) {
+                        val relocated = i >= reloc.length && t.regionMatches(i - reloc.length, reloc, 0, reloc.length)
+                        if (!relocated) {
+                            var end = i
+                            while (end < t.length && (t[end].isLetterOrDigit() || t[end] == '/' || t[end] == '_' || t[end] == '$')) end++
+                            val fqn = t.substring(i, end)
+                            if (fqn.contains("/stub/")) problems.add("${jar.name}: $name → $fqn (un-relocated jvmdg stub in a descriptor)")
+                        }
+                        i = t.indexOf(stub, i + 1)
+                    }
+                }
+            }
+        }
+        if (problems.isNotEmpty()) throw GradleException("verifyTesterIsolation (D-8) — un-relocated cross-plugin " +
+                "type(s) that would ClassNotFoundException on a v52-read server:\n" +
+                problems.distinct().take(20).joinToString("\n") { "  - $it" })
+        logger.lifecycle("[verifyTesterIsolation] OK — tester carries no Mental jvmdg prefix; no un-relocated jvmdg stub descriptors in either mega jar.")
     }
 }
 tasks.named("check") { dependsOn(verifyDowngrade, verifyTesterIsolation, verifyJdk8Api) }
