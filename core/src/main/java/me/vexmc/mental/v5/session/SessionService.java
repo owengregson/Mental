@@ -263,10 +263,16 @@ public final class SessionService implements Listener, SessionAccess {
             return;
         }
         sampleGround(player, session);
+        // The combat grounded truth for this tick, resolved ONCE (D2 one-source
+        // doctrine) and shared by the combo detector's grounded-run end and the
+        // view's grounded-tick counter — a packetless player's flag lies airborne
+        // on the 1.9/1.10 NMS, so both must read the physical fallback, not the raw
+        // isOnGround() they used to read independently.
+        boolean combatGrounded = combatGrounded(player);
         // Drive the combo detector BEFORE building the view, so the view publishes
         // this tick's combo state (and its time-driven ends have already fired).
-        driveCombo(player, session);
-        PlayerView view = buildView(player, session);
+        driveCombo(player, session, combatGrounded);
+        PlayerView view = buildView(player, session, combatGrounded);
         session.tickStep(view);
         valve.clearStale(player.getUniqueId());
         // One owning-thread position sample per tick — the fast path's reach
@@ -310,11 +316,34 @@ public final class SessionService implements Listener, SessionAccess {
     }
 
     /**
+     * The combat grounded truth for {@code player} this tick (the D2 one-source
+     * feed for the combo detector's grounded-run end and the view's grounded-tick
+     * counter). A connected client is trusted verbatim — {@code isOnGround()} is
+     * the era-correct, packet-FSM-fed source. A PACKETLESS player (synthetic test
+     * player / in-process bot) whose flag lies airborne — the 1.9/1.10 NMS reads
+     * {@code isOnGround()==false} forever after a send-then-restore knock even while
+     * it rests on the floor — falls back to the physical read the live suite pins
+     * against (a solid surface under the feet with the vertical settled). The live
+     * block scan is only paid on that packetless fallback path.
+     */
+    @SuppressWarnings("deprecation") // Player#isOnGround — the client-reported flag (era-correct for real clients)
+    private boolean combatGrounded(Player player) {
+        boolean onGroundFlag = player.isOnGround();
+        boolean connected = domains.has(player.getUniqueId());
+        if (connected || onGroundFlag) {
+            return CombatGround.grounded(connected, onGroundFlag, Double.NaN, Double.NaN);
+        }
+        Location location = player.getLocation();
+        return CombatGround.grounded(false, false,
+                GroundDistance.measure(location), player.getVelocity().getY());
+    }
+
+    /**
      * Reads the live player on its owning thread and produces the frozen view.
      * Every read here is owning-thread-legal; the netty realm only ever sees the
      * published result.
      */
-    private PlayerView buildView(Player player, CombatSession session) {
+    private PlayerView buildView(Player player, CombatSession session, boolean combatGrounded) {
         UUID id = player.getUniqueId();
         Location location = player.getLocation();
         @SuppressWarnings("deprecation") // the client-reported flag is what knockback expectations use
@@ -345,7 +374,10 @@ public final class SessionService implements Listener, SessionAccess {
         PositionRing.Sample previous = positions.latest(id);
         double measuredVx = previous == null ? 0.0 : location.getX() - previous.x();
         double measuredVz = previous == null ? 0.0 : location.getZ() - previous.z();
-        int groundedTicks = session.advanceGroundedTicks(grounded);
+        // The grounded-tick run is a combo/precision signal, so it advances on the
+        // combat grounded truth (the packetless physical fallback) — NOT the raw
+        // client flag above, which stays the delivery/era air-multiplier baseline.
+        int groundedTicks = session.advanceGroundedTicks(combatGrounded);
 
         return viewBuilder.build(
                 id, player.getEntityId(),
@@ -366,7 +398,7 @@ public final class SessionService implements Listener, SessionAccess {
      * dropping with one DISABLED end on disable), then feeds the detector this
      * tick's grounded flag and pair separation and fires any transition.
      */
-    private void driveCombo(Player player, CombatSession session) {
+    private void driveCombo(Player player, CombatSession session, boolean combatGrounded) {
         ComboTracker tracker = session.comboTracker();
         if (!comboEnabled) {
             if (tracker != null) {
@@ -384,10 +416,12 @@ public final class SessionService implements Listener, SessionAccess {
             ComboEvents.fire(player, tracker.reset(ComboEndReason.RETIRED));
             tracker = session.installComboTracker(rules);
         }
-        @SuppressWarnings("deprecation") // the client-reported flag is the transition-relevant one
-        boolean grounded = player.isOnGround();
+        // The grounded-run end reads the combat grounded truth (the packetless
+        // physical fallback), NOT the raw isOnGround() it used to read here — a
+        // packetless victim's flag lies airborne forever on the 1.9/1.10 NMS, so
+        // the run never accumulated and a held combo never released.
         double separation = separationTo(player.getUniqueId(), tracker.activeAttacker());
-        ComboEvents.fire(player, tracker.onTick(clock.current(), grounded, separation));
+        ComboEvents.fire(player, tracker.onTick(clock.current(), combatGrounded, separation));
     }
 
     /**

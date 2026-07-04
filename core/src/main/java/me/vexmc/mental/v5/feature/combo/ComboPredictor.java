@@ -65,7 +65,14 @@ public final class ComboPredictor {
         double ux = len > 1.0e-9 ? dx / len : 0.0;
         double uz = len > 1.0e-9 ? dz / len : 0.0;
 
-        boolean launchGrounded = victimView.grounded();
+        // The launch ground state and the grounded-tick tail (below) are BOTH the
+        // combo/precision signal, so both read the session's grounded-tick counter —
+        // the one honest source (fed by the packetless physical fallback). Deriving
+        // launchGrounded from it (grounded ⟺ the run is ≥ 1 this tick) is byte-
+        // identical to the old view.grounded() read for real clients, but stays
+        // honest for a packetless victim whose isOnGround() flag lies airborne (the
+        // delivery/era baseline view.grounded() keeps that raw flag).
+        boolean launchGrounded = victimView.groundedTicks() > 0;
         double slip = victimView.slipperiness();
         double launchHeight = launchGrounded ? 0.0 : Math.max(0.0, victimView.kinematics().distanceToGround());
 
