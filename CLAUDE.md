@@ -8,15 +8,33 @@ resolvers) over the kernel; `core` is the plugin (shades PacketEvents + bStats,
 folds in `compat-folia` by name behind `Capabilities.folia()`); `tester` is the
 in-server integration harness. Version lives once in `gradle.properties`.
 
-**Legacy tier (1.9.4–1.16.5, Java 17+ required; 1.14.4 is an impossible hole —
-Java-13 hard cap).** `core` compiles against the 1.17.1 API floor but runs down
-to 1.9.4: every sub-floor absence is handled by boot-time probing at the platform
-seam (never scattered version conditionals), so absent APIs resolve to
-era-correct fallbacks printed in the boot report (material/enchantment names, the
-six Phase-5.5 resolvers, PDC), text sinks route through `TextPort` (relocated
-Adventure → legacy strings; no `Component` crosses a Bukkit boundary), and the
-latency probe rides window-confirmation TRANSACTIONs below 1.17 where the play
-PING/PONG channel is absent. The kernel stays modern-vocabulary and version-blind.
+**Legacy tier (1.9.4–1.16.5) — the full range 1.9.4 → 26.x ships as ONE jar,
+NO holes (1.14.4 included), NO server flags.** `core` compiles against the
+1.17.1 API floor but runs down to 1.9.4: every sub-floor absence is handled by
+boot-time probing at the platform seam (never scattered version conditionals),
+so absent APIs resolve to era-correct fallbacks printed in the boot report
+(material/enchantment names, the six Phase-5.5 resolvers, PDC), text sinks route
+through `TextPort` (relocated Adventure → legacy strings; no `Component` crosses
+a Bukkit boundary), and the latency probe rides window-confirmation TRANSACTIONs
+below 1.17 where the play PING/PONG channel is absent. The kernel stays
+modern-vocabulary and version-blind.
+
+Classloading down to Java 8 is an **artifact-level** fork (no source touched):
+`core` and `tester` each ship ONE **Multi-Release mega-jar** — `shadowJar` →
+jvmdg `DowngradeJar` (class-v52 base + `multiReleaseOriginal` original v61 under
+`META-INF/versions/17`) → `ShadeJar` (distinct per-plugin runtime prefixes,
+`me/vexmc/mental/lib/jvmdg` vs `…/tester/lib/jvmdg`) → the canonical
+`Mental-<version>.jar`. Four gates run in `check`: `verifyDowngrade`,
+`verifyJdk8Api`, `verifyTesterIsolation`, `verifyRelocation`. Every legacy Paper
+build runs its **native-era Java** — the newest it boots flagless, per-entry
+`jdk` in `support-matrix.json`; the tester asserts the actually-loaded tier per
+entry against its `bytecodeTier` (≥Java 17 reads v61, below reads v52). **D-8
+rule:** no post-Java-8 JDK type may cross a cross-plugin API descriptor (jvmdg
+rewrites Java-9+ types INTO descriptors and prunes its runtime per-jar — the
+kernel's Java-8-native `computeBase(…, java.util.Random)` overload is the
+precedent). Ground truth: the full-range plan
+(`docs/superpowers/plans/2026-07-03-mental-full-range.md`) + the v1_14_R1 shapes
+doc (`docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md`).
 
 ## Use the skills
 

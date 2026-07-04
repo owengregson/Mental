@@ -38,3 +38,13 @@ reflection-remapper instead of javap'ing obfuscated jars.
   boolean composition of a vanilla gate, including Paper-added config checks.
 - Check ALL int/boolean fields when hunting (`grep -E "boolean|int "`), not
   just name guesses — Mojang renames freely between snapshots.
+- **Static javap of loader internals can MIS-PLACE a behavior boundary — pair
+  every load-bearing static claim with a live assertion.** The full-range
+  campaign's round-2 javap sweep read plugin-classloader bytecode to predict
+  which versions honor Multi-Release jars and placed the plain-`JarFile`
+  boundary at 1.12.2 (⇒ predicted bytecode tier v52). The live tester assertion
+  caught it: 1.12.2 on Java 21 actually loaded v61 — its loader DOES honor MR,
+  exactly like 1.9.4–1.11.2. The static read was of ONE class and missed a
+  delegation path; the boot report's `bytecode tier:` line (self-inspected from
+  the plugin's own class bytes, asserted per entry) is the ground truth. Static
+  disassembly narrows the hypothesis; the running server confirms it.

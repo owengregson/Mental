@@ -1,6 +1,6 @@
 ---
 name: matrix-gate
-description: Use when running, verifying, or debugging Mental's verification gate — which command to run locally vs CI, the matrix shape / serverFlags / suite tiers, how to read results honestly, and the concurrency rules that keep the concurrent Paper servers stall-free.
+description: Use when running, verifying, or debugging Mental's verification gate — which command to run locally vs CI, the matrix shape / per-entry native-era JDK & bytecode tier / suite tiers, how to read results honestly, and the concurrency rules that keep the concurrent Paper servers stall-free.
 ---
 
 # Running the verification gate
@@ -30,37 +30,51 @@ tags/releases only when the version is bumped (no v<version> tag yet) and fully
 green — pushing a version bump to main IS the release action. Integration jobs
 carry 20-minute timeouts and upload server logs on every outcome: a hung
 server's log is the only evidence it leaves. It reuses run-paper's cached
-paperclip jars (`~/.gradle/caches/run-task-jars/paper/jars`) with `-add-plugin=`
-injection, one port per server from 25600. The OCM jar is staged reproducibly —
+paperclip jars (`~/.gradle/caches/run-task-jars/paper/jars`), one port per server
+from 25600; the plugin is injected via run-paper's `-add-plugin=` on modern
+builds and by COPYING the jars into `plugins/` on legacy builds (whose paperclip
+rejects both `-add-plugin=` and `--nogui` — use the bare `nogui` token
+range-wide). The OCM jar is staged reproducibly —
 `stageOcmJar` uses a local `run/ocm-jar/OldCombatMechanics.jar` fork build AS-IS
 if present, else downloads the release PINNED in `support-matrix.json` (url +
 sha256) and verifies the hash.
 
-## The matrix shape, serverFlags & suite tiers (the 2026-07-02 legacy backport)
+## The matrix shape, per-entry JDK/tier & suite tiers (the 2026-07-03 full range)
 
-- **Gate shape — 17 live server boots.** `integrationTestMatrix` = **15 entries**:
-  7 legacy Paper (1.9.4, 1.10.2, 1.11.2, 1.12.2, 1.13.2, 1.15.2, 1.16.5) at `full`
-  + 7 modern Paper (1.17.1 → 26.1.2) at `full` + 1 Folia (26.x) at `combat-smoke`.
-  `integrationTestOcm` adds the OCM pair (2). All 15 matrix entries fresh-nonce
-  PASS is the zero-regression proof. **1.14.4 is deliberately absent** — its
-  terminal Paper build hard-caps at Java 13 with no bypass, so a Java-17 plugin
-  cannot load on it (a documented hole in the range, not a gap in the gate).
-- **`serverFlags` (per-entry JVM args).** Legacy Paper builds ≥1.13
-  (1.13.2/1.15.2/1.16.5) carry `"serverFlags": ["-DPaper.IgnoreJavaVersion=true"]`
-  in `support-matrix.json` — the flag bypasses their soft Java-version guard so
-  they run on Java 17. `registerIntegrationServer` appends them to the server
-  `jvmArgs`, so they reach the SERVER JVM. **CI inherits them for free**: the
-  workflows invoke the same `checkIntegrationTest_<v>` Gradle task, so the flags
-  come from the JSON via task registration — there is no CI-side flag injection.
-  1.9.4–1.12.2 need no flags. Every legacy entry is `jdk: 17` (the same JDK the
-  modern 1.17–1.19 entries use — no new JDK in the union).
+- **Gate shape — 18 live server boots.** `integrationTestMatrix` = **16 entries**:
+  8 legacy Paper (1.9.4, 1.10.2, 1.11.2, 1.12.2, 1.13.2, **1.14.4**, 1.15.2,
+  1.16.5) at `full` + 7 modern Paper (1.17.1 → 26.1.2) at `full` + 1 Folia (26.x)
+  at `combat-smoke`. `integrationTestOcm` adds the OCM pair (2). All 16 matrix
+  entries fresh-nonce PASS is the zero-regression proof. **1.14.4 is now a
+  full-tier entry** — the Multi-Release mega-jar's v52 base loads under its
+  Java-13 cap, closing the range's last hole. `serverFlags`/`IgnoreJavaVersion`
+  are DEAD everywhere.
+- **Per-entry native-era JDK (no flags).** Each legacy Paper build runs on the
+  NEWEST Java it boots FLAGLESS — `jdk` per entry in `support-matrix.json`:
+  1.9.4–1.12.2 → 21, 1.13.2/1.14.4 → 13, 1.15.2 → 14, 1.16.5 → 16 (modern
+  entries 17/25). CI installs ONLY the build JDK (`jq '[.entries[].jdk] | max'`
+  = 25) via setup-java and the **Gradle foojay toolchain auto-provisions** every
+  server JDK on demand, exactly as locally — Temurin publishes no 13/14/16, so a
+  full-set install is impossible. Locally the JDKs resolve through
+  `javaToolchains.launcherFor(<major>)` (EXACT major — the script's `java_home_for`
+  validates the returned home's major, because `/usr/libexec/java_home -v N` is
+  "N-or-newer" and would hand a capped server too-new a JVM).
+- **`bytecodeTier` is a live gate FACT (H5/Q1).** Each entry declares the
+  Multi-Release tier its JVM×loader reads — v61 (`modern`) when the JVM feature
+  version is ≥ 17, v52 (`downgraded`) below — and the tester ASSERTS the actually
+  loaded major (`-Dmental.tester.tier=<tier>`, mandatory: the JVM-derived default
+  is wrong for plain-loader entries). The boot log's `[Mental] bytecode tier:`
+  line matching the declared `bytecodeTier` is REQUIRED gate evidence, quoted per
+  entry alongside the nonce. Map: 1.9.4–1.12.2 → 61 (their loaders honor MR on
+  Java 21), 1.13.2/1.14.4/1.15.2/1.16.5 → 52 (their JVMs are < 17), modern/Folia
+  /OCM → 61.
 - **`suites` tier** (`full | boot | combat-smoke`) reaches the tester via
   `-Dmental.tester.suites=<tier>`. `boot` = the legacy-backport classload/
   boot-safety suite only; `combat-smoke` = the Folia same-region pair; absent
-  property = today's full behaviour (modern entries untouched). All 7 legacy
-  versions were **promoted to `full`** through Phase 5/5.5 — none stay at `boot`.
+  property = today's full behaviour (modern entries untouched). All 8 legacy
+  versions are at `full` — none stay at `boot`.
 - **The floor 1.9.4 is on the PR lane** (`ci: "pr"`), so floor classload
-  regressions surface per-PR (~80s); the other legacy entries stay `release`.
+  regressions surface per-PR; the other legacy entries stay `release`.
 - **Trap — local `--ocm` vs the Gradle OCM gate diverge on floor.** The Gradle
   `integrationTestOcm` pins OCM to the FIXED **1.17.1 + 26.1.2** pair (its scope is
   the ownership split, unchanged by the backport; pinned by version, not
@@ -90,8 +104,11 @@ sha256) and verifies the hash.
 - Heaviest (newest) servers launch FIRST with a 3s stagger; the fast Java-17
   trio then boots into a calm machine instead of hitting its longest suites
   mid-ignition.
-- Small heaps (768M) — the fourteen concurrent paper JVMs must stay far from
-  memory pressure; page-fault storms read as tick stalls.
+- Small heaps (768M) — the fifteen concurrent paper JVMs must stay far from
+  memory pressure; page-fault storms read as tick stalls. (Adding 1.14.4 made
+  this the 15th concurrent JVM on one machine — enough extra load to tip the
+  oldest, most load-sensitive entry, 1.9.4, into the documented concurrency
+  flake; a retry clears it, no assertion weakened. CI never runs 15-on-one.)
 - A killed run leaves orphan servers holding `world/session.lock` (and
   ports); the script reaps `run-task-jars/paper/jars` processes at startup —
   do the same manually after killing anything.
