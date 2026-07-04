@@ -175,36 +175,60 @@ public final class DeliveryDesk {
             tx.adopted();
             record(tx, carried, false, null);
             directive = new Directive(Directive.Action.SHIP, carried, null);
-        } else {
-            // A non-pre-sent, non-pinned decision (vanilla path): ship the formula,
-            // no valve. Not one of the numbered items but reachable via adopted()
-            // from REGISTERED/PLANNED; kept for completeness.
+        } else if (LIVE.contains(tx.state())) {
+            // A live REGISTERED/PLANNED decision (vanilla path): ship the formula,
+            // no valve. Reachable via adopted() from REGISTERED/PLANNED.
             tx.adopted();
             record(tx, formula, false, null);
             directive = new Directive(Directive.Action.SHIP, formula, null);
+        } else {
+            // F6 hardening: a RECORDED/terminal pending reached resolve. The Folia
+            // counter/region skew can let the session sweep record+drop this tx just
+            // before its deferred damage re-submits it; adopted() would throw INSIDE
+            // the PlayerVelocityEvent handler ("Could not pass event
+            // PlayerVelocityEvent") — vanilla's vector ships plus a doubled wire.
+            // Journal a distinct note and pass the event through untouched; NEVER
+            // transition a terminal tx.
+            appendJournal(new JournalEntry(
+                    tx.context().id(), tx.context().source(), null, false, "late-resolve-recorded",
+                    clock.current(), tx.paceFactor()));
+            directive = new Directive(Directive.Action.PASS_THROUGH, null, null);
         }
         clearDecision();
         return directive;
     }
 
-    /** Session-tick sweep: any awaiting transaction from an earlier tick is DROPPED. */
+    /**
+     * Session-tick sweep. A still-awaiting (LIVE) transaction is DROPPED only once
+     * it is at least TWO ticks older than {@code now}: the one-tick margin absorbs
+     * Folia's counter/region phase skew of ±1 (F6). The sweep and the deferred
+     * damage task read the same {@link me.vexmc.mental.kernel.port.TickClock}, but a
+     * region-vs-global counter can be a tick apart, so an age-1 drop could race the
+     * velocity event and ship vanilla's vector plus a doubled wire. An
+     * already-RESOLVED-but-unrecorded pending (e.g. retracted by the retire path)
+     * has no velocity event coming, so it is journaled immediately.
+     */
     public void sweep(TickStamp now) {
         drainWire();
         if (pending == null) {
             return;
         }
         TickStamp registeredAt = pending.context().registeredAt();
-        if (registeredAt.known() && now.known() && registeredAt.value() < now.value()) {
-            if (LIVE.contains(pending.state())) {
+        if (!registeredAt.known() || !now.known() || registeredAt.value() >= now.value()) {
+            return; // same tick (its velocity event may still come) or an unknown clock
+        }
+        if (LIVE.contains(pending.state())) {
+            if (now.value() - registeredAt.value() >= 2) {
                 pending.dropped("no-velocity-event");
                 record(pending, null, false, "no-velocity-event");
-            } else {
-                // Already resolved (e.g. retracted by the retire path) but not
-                // recorded — journal it now (tick-causal, never a valve).
-                record(pending, null, false, reasonFor(pending.state()));
+                clearDecision();
             }
-            clearDecision();
+            return; // age 1: hold one more tick for the Folia skew window (F6)
         }
+        // Already resolved but not recorded — no velocity event is coming, so
+        // journal it now (tick-causal, never a valve).
+        record(pending, null, false, reasonFor(pending.state()));
+        clearDecision();
     }
 
     /** Ensure step for no-velocity-event sources: unresolved => Directive to setVelocity. */
