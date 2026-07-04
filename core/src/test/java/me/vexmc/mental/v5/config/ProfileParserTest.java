@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.TreeMap;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.Presets;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -68,6 +69,64 @@ class ProfileParserTest {
         assertTrue(issues.all().stream().anyMatch(w -> w.contains("base.horizontal")));
         assertTrue(issues.all().stream().anyMatch(w -> w.contains("modifiers.sprint")));
         assertTrue(issues.all().stream().anyMatch(w -> w.contains("modifiers.combos")));
+    }
+
+    @Test
+    void speedScalingAttackerModeParsesWithDefaults() throws Exception {
+        YamlConfiguration profile = new YamlConfiguration();
+        profile.loadFromString("""
+                knockback:
+                  speed-scaling:
+                    mode: attacker
+                """);
+        ConfigReader reader = new ConfigReader(
+                profile.getConfigurationSection("knockback"), "profiles/paced.yml", new ConfigIssues());
+        KnockbackProfile parsed = ProfileParser.parse("paced", "Paced", "", reader);
+        // mode attacker, with exponent/min/max defaulting to the OFF template.
+        assertEquals(new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0), parsed.paceScaling());
+    }
+
+    @Test
+    void speedScalingBadModeWarnsAndFallsBackButKeepsOtherKnobs() throws Exception {
+        YamlConfiguration profile = new YamlConfiguration();
+        profile.loadFromString("""
+                knockback:
+                  speed-scaling:
+                    mode: "sideways"
+                    exponent: 0.5
+                    min: 0.4
+                    max: 3.0
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        ConfigReader reader = new ConfigReader(
+                profile.getConfigurationSection("knockback"), "profiles/paced.yml", issues);
+        KnockbackProfile parsed = ProfileParser.parse("paced", "Paced", "", reader);
+
+        // Bad mode → loud warn + fallback to OFF; the other knobs still parse.
+        assertEquals(PaceScaling.Mode.OFF, parsed.paceScaling().mode());
+        assertTrue(issues.all().stream().anyMatch(w -> w.contains("speed-scaling.mode")),
+                () -> "issues: " + issues.all());
+        assertEquals(0.5, parsed.paceScaling().exponent());
+        assertEquals(0.4, parsed.paceScaling().min());
+        assertEquals(3.0, parsed.paceScaling().max());
+    }
+
+    @Test
+    void speedScalingModeOffIsSilentDespiteTheYamlBooleanTrap() throws Exception {
+        // SnakeYAML resolves an unquoted `off` to the boolean false; the parser
+        // maps it back to OFF with NO warning (it is the documented default).
+        YamlConfiguration profile = new YamlConfiguration();
+        profile.loadFromString("""
+                knockback:
+                  speed-scaling:
+                    mode: off
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        ConfigReader reader = new ConfigReader(
+                profile.getConfigurationSection("knockback"), "profiles/paced.yml", issues);
+        KnockbackProfile parsed = ProfileParser.parse("paced", "Paced", "", reader);
+        assertEquals(PaceScaling.Mode.OFF, parsed.paceScaling().mode());
+        assertTrue(issues.all().isEmpty(), () -> "issues: " + issues.all());
     }
 
     @Test

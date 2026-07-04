@@ -11,6 +11,7 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile.Limits;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.Push;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.RangeReduction;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.WtapExtra;
+import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
 import org.bukkit.configuration.ConfigurationSection;
@@ -48,6 +49,8 @@ public final class ProfileParser {
         ConfigReader range = reader.sub("range-reduction");
         ConfigReader modifiers = reader.sub("modifiers");
         ConfigReader delivery = reader.sub("delivery");
+        ConfigReader speed = reader.sub("speed-scaling");
+        PaceScaling pace = legacy.paceScaling();
         return new KnockbackProfile(
                 name,
                 displayName,
@@ -88,7 +91,36 @@ public final class ProfileParser {
                 delivery.oneOf("melee", legacy.meleeDelivery(), KnockbackDelivery.class),
                 delivery.oneOf("projectile", legacy.projectileDelivery(), KnockbackDelivery.class),
                 modifiers.oneOf("armor-resistance", legacy.resistance(), ResistancePolicy.class),
-                modifiers.flag("shield-blocking-cancels", legacy.shieldBlockingCancels()));
+                modifiers.flag("shield-blocking-cancels", legacy.shieldBlockingCancels()),
+                new PaceScaling(
+                        paceMode(speed, pace.mode()),
+                        speed.numberAtLeast("exponent", pace.exponent(), 0),
+                        speed.numberAtLeast("min", pace.min(), 0),
+                        speed.numberAtLeast("max", pace.max(), 0)));
+    }
+
+    /**
+     * Reads {@code speed-scaling.mode} tolerantly of the YAML 1.1 boolean trap:
+     * SnakeYAML (Bukkit's parser) resolves an unquoted {@code off} to the boolean
+     * {@code false}, so the documented default {@code mode: off} arrives as a
+     * Boolean. Map {@code false → OFF} silently (it IS off) and {@code true →}
+     * a loud warn + fallback (nonsensical); anything else parses as the enum,
+     * which warns loudly on an unknown value per the config conventions.
+     */
+    private static PaceScaling.Mode paceMode(ConfigReader speed, PaceScaling.Mode fallback) {
+        ConfigurationSection section = speed.section();
+        if (section == null || !section.isSet("mode")) {
+            return fallback;
+        }
+        if (section.isBoolean("mode")) {
+            if (!section.getBoolean("mode")) {
+                return PaceScaling.Mode.OFF; // `mode: off` booleanized by YAML
+            }
+            speed.issues().warn(
+                    speed.prefix() + ".mode", "expected off/attacker, found 'on/true'", fallback);
+            return fallback;
+        }
+        return speed.oneOf("mode", fallback, PaceScaling.Mode.class);
     }
 
     /**

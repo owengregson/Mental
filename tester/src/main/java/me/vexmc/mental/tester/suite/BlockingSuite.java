@@ -2,6 +2,7 @@ package me.vexmc.mental.tester.suite;
 
 import java.util.List;
 import me.vexmc.mental.kernel.math.SwordBlockReduction;
+import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.HandStates;
 import me.vexmc.mental.tester.Arena;
@@ -10,6 +11,7 @@ import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Bukkit;
@@ -18,6 +20,7 @@ import org.bukkit.Material;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.BlockFace;
+import org.bukkit.entity.Player;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
@@ -60,8 +63,143 @@ public final class BlockingSuite {
                         runEnterBlock(mental, tester, context)),
                 new TestCase("block: a blocked hit takes 1.8 (dmg-1)*0.5 and still knocks full", context ->
                         runBlockedReduction(mental, tester, context)),
+                new TestCase("block: a fresh partial block ships the FULL era knock (journal SHIP, no silent drop)",
+                        context -> runBlockedKnockDelivery(mental, tester, context)),
                 new TestCase("block: the off-hand shield decoration reverts on an exit trigger (B12)", context ->
                         runOffhandRevert(mental, tester, context)));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Case 4 — the silent-block-knock regression (BLOCKS_ATTACKS tier)   */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The silent-block-knock regression. On the native {@code BLOCKS_ATTACKS} tier
+     * (1.21.5+) vanilla reduces a partial block itself but SKIPS {@code markHurt},
+     * so it emits no {@code ENTITY_VELOCITY} and fires no {@code
+     * PlayerVelocityEvent} — the desk's await would be swept as "no-velocity-event"
+     * and the era knock lost. The era knocks a partial block in FULL (compendium:
+     * blocking halves damage AFTER knockBack ran), so the {@code KnockbackUnit}
+     * delivers the vector directly. This pins:
+     *
+     * <ul>
+     *   <li>(a) a FRESH blocked hit journals a SHIP of the full era vector (not a
+     *       "no-velocity-event" drop) and takes native partial damage;</li>
+     *   <li>(b) a mid-invulnerability (in-window) blocked hit stays era-SILENT —
+     *       the difference branch ships no knock.</li>
+     * </ul>
+     *
+     * <p>The clientless fake enters the REAL native block state via the module's
+     * component + a direct {@code startUsingItem} (the probe technique), because the
+     * ordinary interact path a real client confirms over the wire may not light up
+     * for a synthetic player. The bug is component-tier-specific: the software tiers
+     * fire a velocity event normally, and the off-hand shield can't be raised
+     * clientlessly on ≤1.20.6 — so this note-SKIPs off the BLOCKS_ATTACKS tier.</p>
+     */
+    private static void runBlockedKnockDelivery(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!blocksAttacksPresent()) {
+            context.note("no BLOCKS_ATTACKS tier on this version — the silent-block-knock bug is "
+                    + "component-tier-specific (software tiers fire a velocity event normally; the off-hand "
+                    + "shield cannot be raised clientlessly on ≤1.20.6)");
+            return;
+        }
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer blocker = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            toggleModule(context, "sword-blocking", true);
+            context.expect(moduleActive(mental, "sword-blocking"),
+                    "sword-blocking module failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                blocker.spawn(Arena.offset(centre, 3, 2));
+                blocker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+            });
+            context.awaitTicks(5);
+
+            boolean armed = context.sync(() -> armAttacker(attacker));
+            if (!armed) {
+                context.note("attack-damage/speed attribute unresolvable — covered by SwordBlockReductionTest");
+                return;
+            }
+
+            // Force the genuine native block state (module component + startUsingItem).
+            boolean blocking = forceNativeBlock(context, blocker);
+            if (!blocking) {
+                context.note("clientless fake never entered the native BLOCKS_ATTACKS block state — the "
+                        + "delivery regression needs the forced block state; the knock path is otherwise "
+                        + "pinned by KnockbackSuite");
+                return;
+            }
+
+            CombatSession session = mental.sessions().sessionFor(blocker.uuid());
+            context.expect(session != null, "blocker session missing after spawn");
+
+            // (a) FRESH blocked hit. Before the fix the desk swept the pending as
+            // "no-velocity-event" and shipped nothing; the era knocks it FULL.
+            int shipsBefore = shipCount(context, mental, blocker);
+            captors.reset();
+            context.syncRun(() -> {
+                blocker.player().setNoDamageTicks(0);
+                attacker.attack(blocker.player());
+            });
+            JournalEntry ship = awaitNewShip(context, mental, blocker, shipsBefore);
+            context.expect(ship != null,
+                    "a fresh blocked hit recorded no desk SHIP — the era knock was dropped "
+                            + "(the silent-block-knock bug: swept as no-velocity-event)");
+            context.expect(ship.shipped() != null,
+                    "the blocked hit journalled a suppression (" + ship.suppressReason()
+                            + "), not a delivery — era: a partial block knocks FULL");
+            // The full era stamp: a standing hit's horizontal is the era base 0.4.
+            double horizontal = Math.hypot(ship.shipped().x(), ship.shipped().z());
+            context.expectNear(0.4, horizontal, 5.0e-3,
+                    "blocked-hit shipped horizontal magnitude (era base 0.4 — a FULL knock)");
+            // Damage is a native PARTIAL reduction of the base 7.0 (never cancelled).
+            Double finalDmg = captors.finalDamageOf(blocker.uuid());
+            context.expect(finalDmg != null && finalDmg > 0.0 && finalDmg < 7.0,
+                    "blocked finalDamage " + finalDmg + " is not a partial reduction of base 7.0 "
+                            + "(expected ≈ (7+1)/2 = 4.0)");
+
+            // (b) IN-WINDOW blocked hit: the mid-invulnerability difference branch is
+            // era-SILENT. Pin the view to the invuln window (a tick for the session to
+            // publish it), then a second blocked hit must ship NO knock.
+            context.syncRun(() -> blocker.player().setNoDamageTicks(15));
+            context.awaitTicks(2); // let the session publish a view with damageImmune()
+            int shipsMid = shipCount(context, mental, blocker);
+            context.syncRun(() -> attacker.attack(blocker.player()));
+            context.awaitTicks(6);
+            int shipsAfter = shipCount(context, mental, blocker);
+            context.expect(shipsAfter == shipsMid,
+                    "an in-window blocked hit shipped a knock (" + shipsMid + " → " + shipsAfter
+                            + ") — the era difference branch must stay silent (no knock, no flinch)");
+
+            // (c) Feature OFF (zero-touch): disabling the module strips the block
+            // component, so a hit is a plain unblocked hit that knocks through the
+            // ordinary velocity event — no BLOCKING modifier, so the blocked-delivery
+            // path never engages and never disturbs a normal hit.
+            toggleModule(context, "sword-blocking", false);
+            context.awaitTicks(3); // component strip + block-state teardown
+            int shipsPreOff = shipCount(context, mental, blocker);
+            context.syncRun(() -> {
+                blocker.player().setNoDamageTicks(0);
+                attacker.attack(blocker.player());
+            });
+            JournalEntry normalShip = awaitNewShip(context, mental, blocker, shipsPreOff);
+            context.expect(normalShip != null && normalShip.shipped() != null,
+                    "with sword-blocking OFF a normal unblocked hit did not ship a knock — the "
+                            + "blocked-delivery path must leave an unblocked hit untouched (zero-touch)");
+        } finally {
+            toggleModule(context, "sword-blocking", false);
+            context.syncRun(() -> {
+                attacker.remove();
+                blocker.remove();
+            });
+            captors.unregister();
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -395,6 +533,109 @@ public final class BlockingSuite {
         } catch (Throwable absent) {
             return false;
         }
+    }
+
+    /** Pins the attacker's damage/speed so a held sword lands a well-above-1.0 base at full charge. */
+    private static boolean armAttacker(FakePlayer attacker) {
+        Attribute damageAttribute = Attributes.attackDamage();
+        Attribute speedAttribute = Attributes.attackSpeed();
+        if (damageAttribute == null || speedAttribute == null) {
+            return false;
+        }
+        AttributeInstance attackDamage = attacker.player().getAttribute(damageAttribute);
+        AttributeInstance attackSpeed = attacker.player().getAttribute(speedAttribute);
+        if (attackDamage == null || attackSpeed == null) {
+            return false;
+        }
+        attackDamage.setBaseValue(7.0); // diamond-sword-scale base, clearly > 1.0
+        attackSpeed.setBaseValue(40.0); // full attack-strength charge on every staged hit
+        return true;
+    }
+
+    /**
+     * Puts the clientless fake into the REAL native block state: the module's
+     * interact applies the block component, and a direct {@code startUsingItem}
+     * (the probe technique) raises the use-item — a synthetic player may not do so
+     * from the interact alone (no client confirms the use over the wire). Returns
+     * whether the block state was actually observed.
+     */
+    private static boolean forceNativeBlock(TestContext context, FakePlayer blocker) throws Exception {
+        Boolean staged = context.sync(() -> {
+            try {
+                PlayerInteractEvent event = new PlayerInteractEvent(
+                        blocker.player(),
+                        Action.RIGHT_CLICK_AIR,
+                        blocker.player().getInventory().getItemInMainHand(),
+                        null,
+                        BlockFace.SELF,
+                        EquipmentSlot.HAND);
+                Bukkit.getPluginManager().callEvent(event);
+                startUsingMainHand(blocker.player());
+                return Boolean.TRUE;
+            } catch (Throwable unsupported) {
+                return null;
+            }
+        });
+        if (staged == null) {
+            return false;
+        }
+        context.awaitTicks(3);
+        return context.sync(() ->
+                blocker.player().isBlocking() || HandStates.isHandRaised(blocker.player()));
+    }
+
+    /** {@code LivingEntity#startUsingItem(EquipmentSlot)} is 1.21+; reflect so the 1.17.1 floor compiles. */
+    private static void startUsingMainHand(Player player) {
+        try {
+            player.getClass().getMethod("startUsingItem", EquipmentSlot.class)
+                    .invoke(player, EquipmentSlot.HAND);
+        } catch (Throwable absent) {
+            // Below 1.21 the interact path is the only route; the caller note-skips if unobserved.
+        }
+    }
+
+    /** The number of journal entries that recorded a SHIP (a delivered vector), read region-safely. */
+    private static int shipCount(TestContext context, MentalPluginV5 mental, FakePlayer victim) throws Exception {
+        return context.sync(() -> {
+            CombatSession session = mental.sessions().sessionFor(victim.uuid());
+            if (session == null) {
+                return 0;
+            }
+            int ships = 0;
+            for (JournalEntry entry : session.desk().journal()) {
+                if (entry.shipped() != null) {
+                    ships++;
+                }
+            }
+            return ships;
+        });
+    }
+
+    /** Polls the victim's desk journal for a NEW SHIP entry beyond {@code shipsBefore}. */
+    private static JournalEntry awaitNewShip(
+            TestContext context, MentalPluginV5 mental, FakePlayer victim, int shipsBefore) throws Exception {
+        for (int round = 0; round < 12; round++) {
+            JournalEntry ship = context.sync(() -> {
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                if (session == null) {
+                    return null;
+                }
+                int ships = 0;
+                JournalEntry lastShip = null;
+                for (JournalEntry entry : session.desk().journal()) {
+                    if (entry.shipped() != null) {
+                        ships++;
+                        lastShip = entry;
+                    }
+                }
+                return ships > shipsBefore ? lastShip : null;
+            });
+            if (ship != null) {
+                return ship;
+            }
+            context.awaitTicks(2);
+        }
+        return null;
     }
 
     /* ------------------------------------------------------------------ */

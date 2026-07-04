@@ -35,11 +35,11 @@ public final class ViewBuilder {
             int noDamageTicks, int maxNoDamageTicks,
             double knockbackResistance, boolean ocmOwnsMeleeKnockback,
             KnockbackProfile profile, int pingMillis,
-            KinematicState kinematics) {
+            KinematicState kinematics, double moveSpeedAttr) {
         return new PlayerView(
                 id, entityId, clock.current(), motion, grounded, slipperiness,
                 gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
                 noDamageTicks, maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback,
-                profile, pingMillis, kinematics);
+                profile, pingMillis, kinematics, moveSpeedAttr);
     }
 }

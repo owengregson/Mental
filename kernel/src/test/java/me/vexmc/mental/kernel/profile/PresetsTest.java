@@ -137,6 +137,18 @@ class PresetsTest {
         assertEquals(velt.combos(), signature.combos());
         assertEquals(velt.meleeDelivery(), signature.meleeDelivery());
         assertEquals(velt.resistance(), signature.resistance());
+        // signature is the ONE preset that opts into speed-conformal knockback
+        // (the owner's ask, and Mental's own preset).
+        assertEquals(new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0), signature.paceScaling());
+
+        // Every OTHER preset stays OFF — archived-server presets are historical
+        // records, and OFF is the era-exact no-op.
+        for (KnockbackProfile profile : profiles.values()) {
+            if (!"signature".equals(profile.name())) {
+                assertEquals(PaceScaling.OFF, profile.paceScaling(),
+                        () -> profile.name() + " must not opt into pace scaling");
+            }
+        }
 
         // custom ships as legacy-1.7 values — selecting it changes nothing
         // until the owner edits the file.

@@ -135,6 +135,14 @@ public final class FamilyMenu extends Menu {
             icon.lore(kv("Combos", profile.combos() ? "yes" : "no"));
             icon.lore(kv("Sprint x", round(profile.sprintFactor())));
             icon.lore(kv("Resistance", profile.resistance().name().toLowerCase(Locale.ROOT)));
+            // Speed-conformal knockback — shown only when a profile opts in, so
+            // the era-exact OFF presets stay uncluttered. Read-only, like every
+            // other line here (the knockback screen is a profile picker).
+            if (profile.paceScaling().active()) {
+                icon.lore(kv("Pace scale", "attacker x"
+                        + round(profile.paceScaling().min()) + "–" + round(profile.paceScaling().max())
+                        + " ^" + round(profile.paceScaling().exponent())));
+            }
         }
         icon.blank();
         icon.lore(active

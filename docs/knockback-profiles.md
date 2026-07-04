@@ -44,7 +44,7 @@ notice. Any edited value freezes the file forever.
 | `velt` | VeltPvP's archived values — friction ÷10 residual **wipe**, fixed 0.36 vertical, full sprint horizontal. The late-era "dead consistent" practice shape (Ikari variant in the header). | Archived values (sprytex/Knockback-Values) |
 | `mmc` | Minemen Club's archived **dev123 (2017)** values — soft 0.32 base with the full vanilla sprint bonus, flat 1.8 delivery. Replaces the remake-derived revision (assigned vertical + taper). | Two independent archives, byte-identical |
 | `lunar` | Lunar Network's archived **Season 5** values — heavy base, split friction, the weakest sprint differential of any archived server (the era's "hold W" complaints are in the numbers, faithfully). Replaces the community-recreation revision. | Two independent archives, byte-identical |
-| `signature` | **Mental's own**, derived from `velt` and tuned by playtesting: the same residual wipe and full 0.5 sprint horizontal, with `air.horizontal 0.92` + `air.vertical 0.98` trimming the airborne follow-ups (hits 2+) so the victim holds the reach pocket instead of drifting out, and `base.vertical 0.365` keeping a touch more lift on descending hits (the 0.36 cap still bites on the grounded opener). | Original Mental tuning (a velt derivative) |
+| `signature` | **Mental's own**, derived from `velt` and tuned by playtesting: the same residual wipe and full 0.5 sprint horizontal, with `air.horizontal 0.92` + `air.vertical 0.98` trimming the airborne follow-ups (hits 2+) so the victim holds the reach pocket instead of drifting out, and `base.vertical 0.365` keeping a touch more lift on descending hits (the 0.36 cap still bites on the grounded opener). The only preset that opts into **speed-conformal knockback** (`speed-scaling: attacker`) so Speed/Slowness fights keep the base-speed combo rhythm. | Original Mental tuning (a velt derivative) |
 | `custom` | Yours. Ships as legacy-1.7 values with every knob documented in the file. | — |
 
 The full research trail behind these numbers — fork lineage, formula
@@ -101,7 +101,54 @@ knockback:
     combos: true            # 1.7.10 ledger stacking; false = 1.8.9 flat
     armor-resistance: none  # none | legacy (probabilistic) | scaling
     shield-blocking-cancels: true
+  speed-scaling:            # speed-conformal knockback (pace scaling)
+    mode: off               # off = no scaling (era-exact); attacker = scale
+                            # the HORIZONTAL knock by the attacker's movement
+                            # speed over its stance baseline
+    exponent: 1.0           # s = (attr / baseline)^exponent; 1.0 = conformal
+    min: 0.5                # clamp on the final factor
+    max: 2.0
 ```
+
+### Blocked hits still knock (the `BLOCKS_ATTACKS` silent-knock trap)
+
+Era truth (combat compendium): sword blocking halves damage **after** `knockBack`
+already ran, so a **partial** block knocks the victim **FULL** — only a would-be
+non-positive result is a "full block", cancelled iff `shield-blocking-cancels:
+true`. Mental owns the knock, so the `KnockbackUnit` shapes both:
+`isApplicable(BLOCKING) && getDamage(BLOCKING) < 0` distinguishes a block, and
+`getFinalDamage()` splits full (`≤ 0` → withdraw) from partial (`> 0` → knock).
+
+The delivery trap this fix closes (live-reproduced on Folia 1.21.11, javap-traced
+against the real jar): on the **`BLOCKS_ATTACKS` component tier (1.21.5+)** vanilla
+reduces a blocked hit **natively** but **skips `markHurt`**, so it broadcasts no
+`ENTITY_VELOCITY` and fires no `PlayerVelocityEvent`. Mental's desk `await` then
+had nothing to resolve and the tick sweep dropped the pending as
+`no-velocity-event` — the blocked hit landed at halved damage with **no knockback
+and no flinch**, contradicting the era. (The software tiers — `CONSUMABLE`
+1.21.0–1.21.4 and the ≤1.20.6 off-hand shield — reduce the *base* damage with no
+native `BLOCKING` modifier, so vanilla fires its velocity event normally; and a
+frontal shield full-block is `finalDamage ≤ 0`, handled by the cancel. The bug is
+`BLOCKS_ATTACKS`-specific.)
+
+The fix (`KnockbackUnit.deliverBlockedKnock`): a **fresh** partial block (negative
+`BLOCKING`, `finalDamage > 0`, and the victim **not** mid-invulnerability) delivers
+the era vector **directly** through the desk's no-velocity-event path (the same
+machinery the thrown-projectile ensure uses) — the original pending is withdrawn so
+the sweep records no false drop, a fresh transaction is submitted next tick and
+`setVelocity` triggers the velocity event the desk resolves to the **full stamp**
+(undecayed) and journals a `SHIP`. Presentation mirrors the fast path: a client
+with no wire pre-send gets a `VELOCITY + HURT` burst (era: a blocked hit flinches
+and plays the **vanilla hurt sound**; the component's `blockSound` is `Optional.
+empty()`, so `onBlocked`'s `ifPresent` plays **no** anachronistic shield clang —
+javap-verified), and the **quantized valve** is armed whenever a wire copy already
+carries the value so the authoritative tracker re-emission (or a late vanilla
+velocity for the same hit) is consumed once, never doubled. A **mid-invulnerability**
+blocked hit stays **era-silent** — the vanilla difference branch carries no knock,
+no flinch, on every version, and Mental does not "fix" it. Regression:
+`BlockingSuite` (the `BLOCKS_ATTACKS` fresh-ship + in-window-silence cases, forcing
+the native block state with `startUsingItem` since a clientless fake never raises it
+over the wire).
 
 ### ⚠ The #1 porting hazard
 
@@ -116,6 +163,39 @@ typically `2.0`) port as `1 / divisor`:
 | 1.5 | 0.6667 |
 
 Pasting a divisor value in unchanged inverts the feel entirely.
+
+### Speed-conformal knockback (pace scaling)
+
+A combo is a spacing equilibrium between three speeds: the victim's
+knock-**flight** (an absolute velocity stamp — it does *not* scale with the
+Speed attribute) and the attacker's ground **chase** and victim's ground
+**flee** (both ×1.6 at Speed III). At base speed they balance; Speed III
+scales chase and flee but leaves flight untouched, so the attacker overshoots
+and nobody can combo anyone — every fixed-stamp system (all of era 1.7/1.8)
+breaks the same way.
+
+`speed-scaling` makes the knock **conform**: it multiplies the **horizontal**
+components Mental delivers by
+
+```
+s = clamp(min, max, (attr / baseline)^exponent)
+```
+
+where `attr` is the attacker's effective movement-speed attribute and
+`baseline` is the value a base-speed attacker reads in that stance (`0.13`
+sprinting, `0.10` walking). Every *length* in the combo then scales together
+while every *time* (flight duration, click cadence, the immunity window) stays
+fixed — a spatially-zoomed replica with identical rhythm. **Vertical is never
+scaled** (that would stretch flight time and desync the rhythm). Plain
+base-speed play yields `s = 1.0` exactly, so the era stamp ships
+byte-identically; Speed III sprint (`attr 0.208`) yields `1.6`, and Slowness
+gives `s < 1` (slowed players stay comboable). Melee only — rods and
+projectiles are unaffected.
+
+`mode: off` (the default, and every archived-server preset) is a complete
+no-op. Only Mental's own `signature` preset opts in. Reach (`3.0`) cannot
+scale, so the `max` clamp marks where the conformal window ends (Speed V+
+still compresses the margin).
 
 ## Runtime control
 
