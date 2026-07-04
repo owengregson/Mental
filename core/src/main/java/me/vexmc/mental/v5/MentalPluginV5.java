@@ -629,7 +629,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
-        reconciler.register(new SwordBlockingUnit(domains, clock, swordBlockDecoration));
+        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration));
 
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);

@@ -10,8 +10,19 @@ import me.vexmc.mental.kernel.wire.SprintWire;
  * The D1 connection domain (spec §2): per-player {@link SprintWire} +
  * {@link GroundFsm}, keyed by UUID, each owned by that connection's netty read
  * thread. The map is concurrent because domains are created/forgotten across
- * threads, but a single {@link Domain}'s FSM/wire state is mutated only by its
- * own connection thread — thread-safety is ownership.
+ * threads.
+ *
+ * <p>The {@link GroundFsm} is single-writer by ownership — only its connection
+ * thread mutates it. The {@link SprintWire} is the ONE exception: besides its
+ * connection thread (packet START/STOP, reconcile, verdict reads) it is written
+ * by exactly two other sanctioned threads — {@code KnockbackUnit} on the VICTIM's
+ * region thread (the post-hit {@code onServerClear}) and {@code SwordBlockingUnit}
+ * on the ATTACKER's thread (the block-hit re-arm + {@code clientSprinting} read).
+ * That is licensed because {@code SprintWire} holds its whole state in one
+ * immutable snapshot swapped by CAS ({@code AtomicReference}), so every
+ * cross-thread read sees a coherent atomic value and each write happens-before the
+ * next read — no torn mix, no lost update. Do not add a fourth writer without
+ * preserving that atomicity.</p>
  *
  * <p>Domains are created lazily on the first Play packet a connection sends (the
  * UUID is stable only post-login, and the rim is Play-only anyway) and forgotten
