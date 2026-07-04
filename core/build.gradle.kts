@@ -733,6 +733,34 @@ fun registerIntegrationServer(
                             "The tester did not boot this run (a leftover result was left behind). " +
                             "Log: ${log.absolutePath}")
             }
+            // D-9 honesty extension: Bukkit swallows listener-registration failures and
+            // per-event handler throws into the console and keeps running, so the verdict
+            // file alone cannot see them — a PASS with such lines is structurally a FAIL.
+            // ("to Mental" deliberately also matches MentalTester — both jars are ours.)
+            // A linkage-error line counts only when its following stack frames name
+            // me.vexmc.mental (a relocated-lib frame is ours too).
+            val swallowed = Regex(
+                """has failed to register events for class me\.vexmc\.mental\.|Could not pass event .* to Mental""")
+            val linkage = Regex("""java\.lang\.(NoSuchFieldError|NoSuchMethodError|NoClassDefFoundError)""")
+            val scanHits = mutableListOf<String>()
+            var pendingLinkage: String? = null
+            if (log.exists()) log.forEachLine { line ->
+                if (swallowed.containsMatchIn(line)) scanHits.add(line.trim())
+                val frame = line.trimStart().startsWith("at ")
+                if (pendingLinkage != null) {
+                    if (frame && line.contains("me.vexmc.mental")) {
+                        scanHits.add(pendingLinkage!!)
+                        pendingLinkage = null
+                    } else if (!frame) pendingLinkage = null
+                }
+                if (linkage.containsMatchIn(line)) pendingLinkage = line.trim()
+            }
+            if (scanHits.isNotEmpty()) {
+                throw GradleException(
+                    "Swallowed listener/linkage errors for $label (D-9 log scan):\n  " +
+                            scanHits.distinct().take(8).joinToString("\n  ") +
+                            "\nLog: ${log.absolutePath}")
+            }
             when (verdict) {
                 "PASS" -> logger.lifecycle(
                     "[$label] integration tests passed (nonce=$nonce). Log: ${log.absolutePath}")
