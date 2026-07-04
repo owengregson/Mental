@@ -84,9 +84,10 @@ While active, every **fresh melee horizontal** knock from A to V is scaled by
   the cadence window (kernel decay math — the CompensationQuery flight-sim
   precedent) − the attacker's closing distance (walk-normalized move speed ×
   window; sprint assumed — the 2.4.1 normalization work supplies the attr).
-- Defaults: `target` 2.75 (§2), `gain` 1.0, clamps **[0.85, 1.15]** — inside
-  the band it reads as consistent KB, past it the pocket is honestly lost and
-  era physics wins.
+- Defaults: `target` 2.75 (§2), `gain` 1.0, clamps **[0.8, 1.2]** (owner
+  decision — the stronger hold; the wider band trades a little visible KB
+  variance for grip on the pocket). Past the clamps the pocket is honestly
+  lost and era physics wins.
 - Applied at the SAME seam as pace scaling: inside `KnockbackEngine`, on the
   post-taper fresh push and extras, **never the vertical, never the
   friction-carried residual** (the A3 law: the ledger records the scaled
@@ -139,14 +140,12 @@ module is OFF (zero-touch: scope-closed unit; era-exact defaults hold —
   ProfileSuite pins; the combo feel itself is field-judged — SimpleBoxer
   sparring at base speed and Speed III, servo on/off, on the signature preset.
 
-## 6. Open questions for owner review
+## 6. Resolved decisions (owner, 2026-07-04)
 
-1. `target` 2.75 / clamps [0.85, 1.15] as shipping defaults — or wider clamps
-   (e.g. [0.8, 1.2]) for a stronger hold at the cost of more visible KB
-   variance?
-2. Should the signature preset's *bundled config* ship with combo-hold ON
-   (module default stays OFF globally), or is the module strictly
-   opt-in-by-server for now? (Recommendation: strictly opt-in for 2.5.0;
-   revisit after field feel.)
-3. Combo events in the api from day one, or hold until a consumer exists?
-   (Recommendation: ship them — additive and cheap.)
+1. **Clamps ship at [0.8, 1.2]** — the stronger hold.
+2. **Strictly server-opt-in**: the module defaults OFF everywhere; no bundled
+   config pre-enables it.
+3. **API events ship from day one**: `ComboStartEvent` / `ComboEndEvent`.
+
+**Status: approved — implementation greenlit (2.5.0 line, based on
+release/2.4.1).**
