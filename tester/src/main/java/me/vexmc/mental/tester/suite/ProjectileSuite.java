@@ -1,7 +1,7 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Random;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.v5.MentalPluginV5;
@@ -69,7 +69,11 @@ public final class ProjectileSuite {
                                     shooter.player().getLocation().getX(),
                                     shooter.player().getLocation().getZ(),
                                     profile, null,
-                                    ThreadLocalRandom.current()),
+                                    // D-8: the java.util.Random overload keeps a jvmdowngrader
+                                    // RandomGenerator stub type out of this cross-jar call's descriptor.
+                                    // For a resting victim offset from the source the source is never
+                                    // consulted, so the expected vector is fully deterministic.
+                                    new Random()),
                             profile, victimState.grounded());
                 });
                 context.expect(expected != null, "engine returned no vector for an unresisted hit");
