@@ -341,7 +341,14 @@ public final class ProfileSuite {
                         "Speed III sprint must yield pace factor 1.6 (attr " + captured.moveSpeedAttr()
                                 + ", sprinting " + captured.sprinting() + ")");
 
-                EntityState victimState = KnockbackSuite.restingVictim(victim);
+                // The production victim capture over the session ledger — the EXACT
+                // grounded flag + residual the KnockbackUnit reads, so the air
+                // multipliers (signature is air-non-identity) match the wire on
+                // every version (a clientless fake reads isOnGround()=false on the
+                // 1.9/1.10 NMS, which selects the airborne air-multiplier branch).
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                context.expect(session != null, "no combat session for the victim");
+                EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
                 EntityState baseSpeed = withMoveSpeed(captured, baselineFor(captured.sprinting()));
                 KnockbackVector scaledV = KnockbackEngine.compute(captured, victimState, signature, null);
                 KnockbackVector baseV = KnockbackEngine.compute(baseSpeed, victimState, signature, null);
@@ -406,7 +413,11 @@ public final class ProfileSuite {
                 context.expect(captured.moveSpeedAttr() > baselineFor(captured.sprinting()) * 1.4,
                         "Speed III must be active for the inverse control (attr " + captured.moveSpeedAttr() + ")");
 
-                EntityState victimState = KnockbackSuite.restingVictim(victim);
+                // Production capture (see runPaceScaleScenario) — matches the wire's
+                // grounded flag on every version.
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                context.expect(session != null, "no combat session for the victim");
+                EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
                 EntityState baseSpeed = withMoveSpeed(captured, baselineFor(captured.sprinting()));
                 KnockbackVector withSpeed = KnockbackEngine.compute(captured, victimState, legacy, null);
                 KnockbackVector baseV = KnockbackEngine.compute(baseSpeed, victimState, legacy, null);
