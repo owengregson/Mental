@@ -22,6 +22,7 @@ import me.vexmc.mental.platform.HandStates;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.platform.PotionEffects;
+import me.vexmc.mental.platform.Recipes;
 import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
@@ -362,7 +363,8 @@ public final class MentalPluginV5 extends JavaPlugin {
                 + ", potion-effect=" + PotionEffects.describe()
                 + ", " + Cooldowns.describe()
                 + ", crit-posture[" + CritPosture.describe() + "]"
-                + ", hand-raised=" + HandStates.describe());
+                + ", hand-raised=" + HandStates.describe()
+                + ", recipe-keys=" + Recipes.describe());
     }
 
     @Override

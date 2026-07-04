@@ -10,6 +10,7 @@ import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Capabilities;
 import me.vexmc.mental.platform.Enchantments;
+import me.vexmc.mental.platform.Recipes;
 import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.inventory.ItemStack;
@@ -128,6 +129,11 @@ public final class PlatformProfile {
         entries.add(projectileRestored);
         entries.add(OptionalSince.resolve("marker:join_protection_layout", "1.21.2", Boolean.FALSE,
                 "the pre-1.21.2 join-invulnerability layout", () -> env.isAtLeast(1, 21, 2) ? Boolean.TRUE : null));
+        // NamespacedKey (and with it the keyed ShapedRecipe ctor) lands at 1.12; below it the
+        // golden-apples recipe rides the pre-keyed ctor + recipeIterator (platform Recipes resolver).
+        entries.add(OptionalSince.resolve("capability:recipe_key", "1.12.0", Boolean.FALSE,
+                "pre-keyed recipe ctor, lifecycle via recipeIterator",
+                () -> Recipes.keyedRecipeCtor() ? Boolean.TRUE : null));
 
         // --- Item-component adapters (probed once) ⇒ OptionalSince, the components as manifest consumers ---
         SwordBlockAdapter swordBlock = SwordBlockAdapter.probe(env, log);

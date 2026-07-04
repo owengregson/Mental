@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import me.vexmc.mental.platform.PotionEffects;
+import me.vexmc.mental.platform.Recipes;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects;
 import me.vexmc.mental.kernel.math.GoldenAppleEffects.EffectSpec;
@@ -41,6 +42,14 @@ import org.jetbrains.annotations.Nullable;
  * applied to the actual entity on a +1-tick {@code runOnLater} hop off the
  * confirmed consume — never by pre-mutating a hand item on a speculative interact.
  * The recipe is registered on enable and removed on scope close (zero-touch).</p>
+ *
+ * <p>Descriptor hygiene (the 2.4.1 GAP-1 rule): this class is handed to
+ * {@code registerEvents}, so NO sub-floor Bukkit type — {@code NamespacedKey}
+ * included — may appear in any of its method/field descriptors. The keyed-recipe
+ * capability probes live in the platform {@link Recipes} resolver and every
+ * NamespacedKey-typed symbol lives in the non-Listener {@link NappleKeyed}
+ * helper; body-only references (the {@code getByKey} probe, guarded behind its
+ * own boot resolution) are safe because constant-pool entries resolve lazily.</p>
  */
 public final class GoldenApplesUnit implements FeatureUnit, Listener {
 
@@ -73,25 +82,6 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
      */
     private static final boolean LEGACY_GAPPLE = ENCHANTED_GOLDEN_APPLE == null;
 
-    /**
-     * Whether the keyed ShapedRecipe ctor is usable — i.e. {@code org.bukkit.NamespacedKey} exists (1.12+).
-     * Below it (1.9–1.11) only the deprecated non-keyed ctor is available. Probed by class NAME so no
-     * {@code NamespacedKey} class literal is resolved at init on a server that lacks it.
-     */
-    private static final boolean KEYED_RECIPE_CTOR = classPresent("org.bukkit.NamespacedKey");
-
-    /**
-     * Whether Bukkit can manage a recipe by key for its whole lifecycle — BOTH {@code getRecipe} and
-     * {@code removeRecipe(NamespacedKey)}. They land at different versions ({@code removeRecipe} 1.15,
-     * {@code getRecipe} 1.16.5), so only 1.16.5+ (every modern target) qualifies; there the recipe path is
-     * byte-identical to the pre-backport code. Below it — 1.9.4 through 1.15.2 — the recipe is managed
-     * through the universal {@link Bukkit#recipeIterator()} instead (present on every version). Probed by
-     * parameter class NAME so the {@code NamespacedKey} literal is never resolved on a server without it.
-     */
-    private static final boolean KEYED_RECIPE_LIFECYCLE =
-            methodPresent(Bukkit.class, "getRecipe", "org.bukkit.NamespacedKey")
-                    && methodPresent(Bukkit.class, "removeRecipe", "org.bukkit.NamespacedKey");
-
     static {
         Method m = null;
         try {
@@ -107,11 +97,17 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
     private final Scheduling scheduling;
 
     /**
-     * The notch-apple recipe key — built lazily via {@link #nappleKey()} only where {@code NamespacedKey}
-     * exists ({@link #KEYED_RECIPE_CTOR}, 1.12+). Below that the field stays null and the recipe uses the
-     * non-keyed ctor; wherever the keyed get/remove APIs are absent, removal falls back to an iterator scan.
+     * The keyed recipe helper — built lazily via {@link #keyed()} only where the keyed ShapedRecipe ctor
+     * exists ({@link Recipes#keyedRecipeCtor()}, 1.12+). Below that the field stays null and the recipe
+     * uses the non-keyed ctor; wherever the keyed get/remove APIs are absent, removal falls back to an
+     * iterator scan. NEVER a bare {@code NamespacedKey}: no sub-floor Bukkit type may appear in any
+     * method/field descriptor of this class — Bukkit's {@code registerEvents} reflects over every declared
+     * method and one {@code NoClassDefFoundError} kills EVERY handler here with a single swallowed SEVERE
+     * line (the 2.4.1 GAP-1 finding: {@code onConsume} never registered on 1.9.4–1.11.2). The
+     * NamespacedKey-typed symbols live in the non-Listener {@link NappleKeyed}, classloaded harmlessly and
+     * linked only behind the probe.
      */
-    private @Nullable NamespacedKey nappleKey;
+    private @Nullable NappleKeyed keyed;
 
     public GoldenApplesUnit(@NotNull Plugin plugin, @NotNull Scheduling scheduling) {
         this.plugin = plugin;
@@ -130,11 +126,14 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
             registerNappleRecipe();
             return this::removeNappleRecipe;
         });
-        if (!KEYED_RECIPE_LIFECYCLE) {
+        if (!Recipes.keyedRecipeLifecycle()) {
             plugin.getLogger().info("golden-apples: legacy recipe path — "
                     + (LEGACY_GAPPLE ? "the enchanted gapple is GOLDEN_APPLE:1 (data value); " : "")
-                    + "the notch-apple recipe is managed via recipeIterator (Bukkit#getRecipe/"
-                    + "removeRecipe by key land at 1.16.5, absent on this version).");
+                    + (Recipes.keyedRecipeCtor()
+                            ? "recipe registered via the keyed ctor, "
+                            : "recipe registered via the pre-keyed ctor (NamespacedKey lands 1.12), ")
+                    + "managed via recipeIterator (Bukkit#getRecipe/removeRecipe by key land at "
+                    + "1.16.5, absent on this version); era consume effects ACTIVE.");
         }
     }
 
@@ -142,7 +141,7 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
     /*
      * The recipe lifecycle splits on TWO independent capabilities: the enchanted-gapple RESULT
      * representation (LEGACY_GAPPLE — data-value item vs its own material) and whether the key-addressable
-     * get/remove APIs exist (KEYED_RECIPE_LIFECYCLE — 1.16.5+). Registration and the universal
+     * get/remove APIs exist (Recipes.keyedRecipeLifecycle — 1.16.5+). Registration and the universal
      * recipeIterator work on every version, so the pre-1.16.5 band (1.9.4–1.15.2) is managed by scanning;
      * 1.16.5+ (every modern target) keeps the byte-identical keyed path.
      */
@@ -159,9 +158,9 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
     }
 
     private void removeNappleRecipe() {
-        if (KEYED_RECIPE_LIFECYCLE) {
-            if (nappleKey != null) {
-                Bukkit.removeRecipe(nappleKey);
+        if (Recipes.keyedRecipeLifecycle()) {
+            if (keyed != null) {
+                keyed.remove();
             }
             return;
         }
@@ -175,8 +174,8 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
 
     /** Whether our notch-apple recipe is already registered — keyed lookup where possible, else a scan. */
     private boolean nappleRecipeRegistered() {
-        if (KEYED_RECIPE_LIFECYCLE) {
-            return Bukkit.getRecipe(nappleKey()) != null;
+        if (Recipes.keyedRecipeLifecycle()) {
+            return keyed().registered();
         }
         Iterator<Recipe> recipes = Bukkit.recipeIterator();
         while (recipes.hasNext()) {
@@ -188,8 +187,8 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
     }
 
     private ShapedRecipe buildNappleRecipe() {
-        ShapedRecipe recipe = KEYED_RECIPE_CTOR
-                ? new ShapedRecipe(nappleKey(), nappleResult())
+        ShapedRecipe recipe = Recipes.keyedRecipeCtor()
+                ? keyed().shaped(nappleResult())
                 : legacyShapedRecipe(nappleResult());
         shapeNotchApple(recipe);
         return recipe;
@@ -209,12 +208,12 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
                 : new ItemStack(ENCHANTED_GOLDEN_APPLE);
     }
 
-    /** The recipe key, built lazily; only reachable where {@code NamespacedKey} exists (1.12+). */
-    private NamespacedKey nappleKey() {
-        if (nappleKey == null) {
-            nappleKey = new NamespacedKey(plugin, "enchanted_golden_apple");
+    /** The keyed recipe helper, built lazily; only reachable where the keyed ctor exists (1.12+). */
+    private NappleKeyed keyed() {
+        if (keyed == null) {
+            keyed = new NappleKeyed(plugin);
         }
-        return nappleKey;
+        return keyed;
     }
 
     /** Whether a recipe is our notch apple, matched by result (ENCHANTED_GOLDEN_APPLE or GOLDEN_APPLE:1). */
@@ -314,30 +313,4 @@ public final class GoldenApplesUnit implements FeatureUnit, Listener {
         return PotionEffectType.getByName(bukkitName);
     }
 
-    /* --------------------------- capability probes ------------------------- */
-
-    private static boolean classPresent(@NotNull String className) {
-        try {
-            Class.forName(className);
-            return true;
-        } catch (ClassNotFoundException | LinkageError absent) {
-            return false;
-        }
-    }
-
-    /**
-     * Whether {@code owner} declares {@code name(paramClassName)}. The parameter type is resolved by NAME
-     * (via {@link Class#forName}) rather than a class literal, so probing a method whose parameter type is
-     * itself absent on this server (e.g. {@code NamespacedKey} below 1.12) simply reports absent instead of
-     * failing class-init.
-     */
-    private static boolean methodPresent(
-            @NotNull Class<?> owner, @NotNull String name, @NotNull String paramClassName) {
-        try {
-            owner.getMethod(name, Class.forName(paramClassName));
-            return true;
-        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError absent) {
-            return false;
-        }
-    }
 }
