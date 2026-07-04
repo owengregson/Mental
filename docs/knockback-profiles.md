@@ -44,7 +44,7 @@ notice. Any edited value freezes the file forever.
 | `velt` | VeltPvP's archived values — friction ÷10 residual **wipe**, fixed 0.36 vertical, full sprint horizontal. The late-era "dead consistent" practice shape (Ikari variant in the header). | Archived values (sprytex/Knockback-Values) |
 | `mmc` | Minemen Club's archived **dev123 (2017)** values — soft 0.32 base with the full vanilla sprint bonus, flat 1.8 delivery. Replaces the remake-derived revision (assigned vertical + taper). | Two independent archives, byte-identical |
 | `lunar` | Lunar Network's archived **Season 5** values — heavy base, split friction, the weakest sprint differential of any archived server (the era's "hold W" complaints are in the numbers, faithfully). Replaces the community-recreation revision. | Two independent archives, byte-identical |
-| `signature` | **Mental's own**, derived from `velt` and tuned by playtesting: the same residual wipe and full 0.5 sprint horizontal, with `air.horizontal 0.92` + `air.vertical 0.98` trimming the airborne follow-ups (hits 2+) so the victim holds the reach pocket instead of drifting out, and `base.vertical 0.365` keeping a touch more lift on descending hits (the 0.36 cap still bites on the grounded opener). The only preset that opts into **speed-conformal knockback** (`speed-scaling: attacker`) so Speed/Slowness fights keep the base-speed combo rhythm. | Original Mental tuning (a velt derivative) |
+| `signature` | **Mental's own**, derived from `velt` and tuned by playtesting: the same residual wipe and full 0.5 sprint horizontal, with `air.horizontal 0.92` + `air.vertical 0.98` trimming the airborne follow-ups (hits 2+) so the victim holds the reach pocket instead of drifting out, and `base.vertical 0.365` keeping a touch more lift on descending hits (the 0.36 cap still bites on the grounded opener). The only preset that opts into **speed-conformal knockback** (`speed-scaling: attacker`, `exponent 0.95` — the owner's Speed-III feel tune) so Speed/Slowness fights keep the base-speed combo rhythm. | Original Mental tuning (a velt derivative) |
 | `custom` | Yours. Ships as legacy-1.7 values with every knob documented in the file. | — |
 
 The full research trail behind these numbers — fork lineage, formula
@@ -104,8 +104,9 @@ knockback:
   speed-scaling:            # speed-conformal knockback (pace scaling)
     mode: off               # off = no scaling (era-exact); attacker = scale
                             # the HORIZONTAL knock by the attacker's movement
-                            # speed over its stance baseline
-    exponent: 1.0           # s = (attr / baseline)^exponent; 1.0 = conformal
+                            # speed over the walk baseline (0.10)
+    exponent: 1.0           # s = (attr / 0.10)^exponent; 1.0 = fully conformal
+                            # (the PARSE DEFAULT; signature ships 0.95)
     min: 0.5                # clamp on the final factor
     max: 2.0
 ```
@@ -138,12 +139,17 @@ machinery the thrown-projectile ensure uses) — the original pending is withdra
 the sweep records no false drop, a fresh transaction is submitted next tick and
 `setVelocity` triggers the velocity event the desk resolves to the **full stamp**
 (undecayed) and journals a `SHIP`. Presentation mirrors the fast path: a client
-with no wire pre-send gets a `VELOCITY + HURT` burst (era: a blocked hit flinches
-and plays the **vanilla hurt sound**; the component's `blockSound` is `Optional.
-empty()`, so `onBlocked`'s `ifPresent` plays **no** anachronistic shield clang —
-javap-verified), and the **quantized valve** is armed whenever a wire copy already
-carries the value so the authoritative tracker re-emission (or a late vanilla
-velocity for the same hit) is consumed once, never doubled. A **mid-invulnerability**
+with no wire pre-send gets a `VELOCITY + HURT` burst, and the **quantized valve**
+is armed whenever a wire copy already carries the value so the authoritative
+tracker re-emission (or a late vanilla velocity for the same hit) is consumed
+once, never doubled. The **victim's own hurt sound** is played to the victim
+alone in both branches (`Sound.ENTITY_PLAYER_HURT`, pitch `1 + (r1 − r2) × 0.2`):
+`playHurtSound`'s broadcast excludes exactly the victim, and the victim's own
+1.19.4+ client derives its hurt sound from the `ClientboundDamageEventPacket`
+that the blocked branch replaces with a no-op `onBlocked` (`blockSound`
+`Optional.empty()`, so no anachronistic shield clang) — so the one missing
+audience is the victim (javap-verified; the 2.4.0 note that assumed vanilla still
+served it was wrong). A world broadcast would double the sound for bystanders. A **mid-invulnerability**
 blocked hit stays **era-silent** — the vanilla difference branch carries no knock,
 no flinch, on every version, and Mental does not "fix" it. Regression:
 `BlockingSuite` (the `BLOCKS_ATTACKS` fresh-ship + in-window-silence cases, forcing
@@ -178,24 +184,31 @@ breaks the same way.
 components Mental delivers by
 
 ```
-s = clamp(min, max, (attr / baseline)^exponent)
+s = clamp(min, max, (attr / 0.10)^exponent)
 ```
 
-where `attr` is the attacker's effective movement-speed attribute and
-`baseline` is the value a base-speed attacker reads in that stance (`0.13`
-sprinting, `0.10` walking). Every *length* in the combo then scales together
+where `attr` is the attacker's **walk-stance-normalized** movement-speed
+attribute against a **single walk baseline** of `0.10`. The attribute is
+normalized at capture: `isSprinting()` and the effective value are read
+back-to-back on the owning thread and the ×1.3 sprint modifier is divided back
+out when sprinting — the flag and the modifier move together inside
+`setSprinting`, so stripping that one stance-churning term makes the factor
+immune to a wire-vs-server stance disagreement (the 2.4.0 desync that shipped
+intermittent weak knockback). Every *length* in the combo then scales together
 while every *time* (flight duration, click cadence, the immunity window) stays
 fixed — a spatially-zoomed replica with identical rhythm. **Vertical is never
 scaled** (that would stretch flight time and desync the rhythm). Plain
-base-speed play yields `s = 1.0` exactly, so the era stamp ships
-byte-identically; Speed III sprint (`attr 0.208`) yields `1.6`, and Slowness
-gives `s < 1` (slowed players stay comboable). Melee only — rods and
-projectiles are unaffected.
+base-speed play yields `s ≈ 1.0` (the live base attribute carries only ~1.5e-8
+of float slack, below the wire quantum), so the era stamp ships
+byte-identically; a Speed III attacker (normalized `attr 0.16` / `0.10` = `1.6`)
+yields `1.6^0.95 ≈ 1.563` at the signature's `0.95` exponent, and Slowness gives
+`s < 1` (slowed players stay comboable). Melee only — rods and projectiles are
+unaffected.
 
 `mode: off` (the default, and every archived-server preset) is a complete
-no-op. Only Mental's own `signature` preset opts in. Reach (`3.0`) cannot
-scale, so the `max` clamp marks where the conformal window ends (Speed V+
-still compresses the margin).
+no-op. Only Mental's own `signature` preset opts in (`exponent 0.95`). Reach
+(`3.0`) cannot scale, so the `max` clamp marks where the conformal window ends
+(Speed V+ still compresses the margin).
 
 ## Runtime control
 

@@ -122,11 +122,12 @@ public final class SupersededPresets {
      * signature as shipped 2.2.1 → 2.3.1: the current velt-derivative values
      * (air {@code (0.92, 0.98)}, base vertical {@code 0.365}) but WITHOUT
      * speed-conformal knockback — the {@code speed-scaling} block did not exist,
-     * so an unedited file parses to {@link PaceScaling#OFF} (the 17-arg
-     * constructor). 2.3.2 opts the signature preset into pace scaling
-     * ({@code mode: attacker}, the owner's ask), so an unedited pre-pace
-     * signature file upgrades in place to gain the block. Identity strings match
-     * the current bundle, so only the pace default separates this from it.
+     * so an unedited file parses to {@link PaceScaling#OFF} (the pace default
+     * of the 18-arg constructor). 2.4.0 opts the signature preset into pace
+     * scaling ({@code mode: attacker}, the owner's ask), so an unedited pre-pace
+     * signature file upgrades in place to gain the block. Its values and identity
+     * strings match the current bundle except for the pace block AND (from 2.4.1)
+     * the exponent tune — see {@link #SIGNATURE_2_4_0}.
      */
     private static final KnockbackProfile SIGNATURE_2_2_1 = new KnockbackProfile(
             "signature",
@@ -150,11 +151,42 @@ public final class SupersededPresets {
             ResistancePolicy.NONE,
             true);
 
+    /**
+     * signature as shipped in 2.4.0: the current values WITH speed-conformal
+     * knockback at the fully-conformal exponent {@code 1.0} — the pace opt-in as
+     * it first shipped. 2.4.1 tunes the exponent to {@code 0.95} (the owner's
+     * Speed-III feel), so an unedited 2.4.0 install rolls forward in place; the
+     * identity strings are byte-identical to the current bundle, and only the
+     * exponent separates this superseded revision from it.
+     */
+    private static final KnockbackProfile SIGNATURE_2_4_0 = new KnockbackProfile(
+            "signature",
+            "Signature",
+            "Mental's signature feel — velt's residual wipe and full sprint"
+                    + " horizontal, tuned to hold the combo reach pocket (airborne"
+                    + " hits trimmed h x0.92 / v x0.98, base vertical 0.365).",
+            new Push(0.325, 0.365),
+            VerticalMode.ADD,
+            new Push(0.5, 0.0),
+            new WtapExtra(false, 0.5, 0.0),
+            new Friction(0.1, 0.1, 0.1),
+            new Limits(0.36, -3.9, -1.0),
+            new Push(0.92, 0.98),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true,
+            new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0));
+
     private static final Map<String, List<KnockbackProfile>> BY_PRESET = Map.of(
             "kohi", List.of(KOHI_1_3),
             "mmc", List.of(MMC_1_3),
             "lunar", List.of(LUNAR_1_3),
-            "signature", List.of(SIGNATURE_2_2_0, SIGNATURE_2_2_1));
+            "signature", List.of(SIGNATURE_2_2_0, SIGNATURE_2_2_1, SIGNATURE_2_4_0));
 
     private SupersededPresets() {}
 
