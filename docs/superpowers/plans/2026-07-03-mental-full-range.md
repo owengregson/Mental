@@ -558,3 +558,104 @@ the plugin shades its own runtime.
    the tester mega jar is looked up by task NAME). Keep additions to this file lean;
    if it must grow, move the verify logic into an `apply(from = …)` script (a
    separate script class with its own budget).
+
+### Phase 2 outcome (2026-07-03, Opus) — native-JDK matrix flipped, all gates green
+
+Commits `e85a444` (the flip) + `9b7a75b` (two gate-discovered corrections). The
+`-DPaper.IgnoreJavaVersion` server flag is dead: every legacy Paper build runs on
+the newest Java it boots FLAGLESS, and the tester asserts the loaded Multi-Release
+tier per entry.
+
+**Pre-step rung probes (flagless, port 25703, bare `nogui`, never
+IgnoreJavaVersion; foojay-provisioned AdoptOpenJDK 14.0.2 / 15.0.2 under Rosetta):**
+- **1.13.2 → Java 13.** Java 15 (major 59) AND Java 14 (major 58) BOTH refuse and
+  exit: `Unsupported Java detected (59.0/58.0). Only up to Java 12 is supported.`
+  The scout's "real cap 13–15, 14/15 unprobed" is **DISPROVEN** — the real cap is
+  Java 13 (the ladder's proven-clean rung). Newest clean rung = **13**.
+- **1.15.2 → Java 14.** Java 14 boots CLEAN: `Done (5.473s)`, zero advisory lines.
+  Its guard names 14 as the cap. Newest clean rung = **14**.
+
+**Final jdk × bytecodeTier table (as landed, every tier live-asserted):**
+
+| version | jdk | tier | loaded (live) | why |
+|---|---|---|---|---|
+| 1.9.4 | 21 | 61 | modern (v61) | Java 21 ≥17 → versions/17 via URLClassLoader-delegating loader |
+| 1.10.2 | 21 | 61 | modern (v61) | ″ |
+| 1.11.2 | 21 | 61 | modern (v61) | ″ |
+| 1.12.2 | 21 | **61** | modern (v61) | ″ — round-2 javap mis-placed the boundary; 1.12.2's loader honors MR too |
+| 1.13.2 | 13 | 52 | downgraded (v52) | Java 13 <17 → versions/17 unreachable → base |
+| 1.15.2 | 14 | 52 | downgraded (v52) | Java 14 <17 → base |
+| 1.16.5 | 16 | 52 | downgraded (v52) | Java 16 <17 → base |
+| 1.17.1 / 1.18.2 / 1.19.4 | 17 | 61 | modern (v61) | Java 17 → versions/17 |
+| 1.20.6 / 1.21.4 / 1.21.11 / 26.1.2 | 25 | 61 | modern (v61) | Java 25 → versions/17 |
+| 26.1.2 Folia | 25 | 61 | modern (v61) | ″ |
+
+**The one correction (escalate-don't-weaken, toward the observed truth):** the
+first `integrationTestMatrix` run FAILED at 1.12.2 — the tester's tier assertion
+caught `loaded bytecode major 61 … != expected 52`. 1.12.2 has no Java cap so it
+runs on Java 21 (≥17) and its loader reaches versions/17 — it reads v61, exactly
+like 1.9.4–1.11.2. The declaration (52, from the scout's plain-JarFile javap
+claim) was the error, not the tester; corrected to **61** (`9b7a75b`). Standalone
+tier-probes then confirmed 1.13.2/1.15.2/1.16.5 (Java 13/14/16, all <17) read v52
+by the MR spec regardless of loader. No suite assertion was weakened; a wrong
+prediction was corrected to the live fact. This was **not** a step-down (no rung
+changed).
+
+**Gate evidence (verbatim, fresh nonces):**
+- `./gradlew build` — GREEN (unit + japicmp + kernel-Bukkit-free + verifyDowngrade
+  / verifyJdk8Api / verifyRelocation / verifyTesterIsolation).
+- `integrationTestMatrix` — **BUILD SUCCESSFUL in 18m 25s, all 15 entries**; every
+  boot's `[Mental] bytecode tier:` line matched its declared `bytecodeTier`
+  (table above); **legacy Java-advisory sweep = 0 lines across all 7 legacy logs**
+  (OUTDATED / Unsupported Java / restricted method / terminally deprecated /
+  illegal reflective / Unsafe / UnsupportedClassVersionError):
+  - `[1.9.4] … (nonce=d3a63cfd-4a54-43f5-ad80-d5944fd65a54)`
+  - `[1.10.2] … (nonce=4b4d057a-4838-4355-af4a-33048e4bad6d)`
+  - `[1.11.2] … (nonce=b9ba10c7-1408-406d-81ce-50806cf53c3c)`
+  - `[1.12.2] … (nonce=205d5a97-8e73-4026-9069-74fff6c2708b)` — tier 61, the URLClassLoader MR surprise, live-proven here for the first time
+  - `[1.13.2] … (nonce=98c40f35-d534-452c-89ca-5ad106b31b65)`
+  - `[1.15.2] … (nonce=8f525ddc-c674-46af-baa4-07fd6d576e55)`
+  - `[1.16.5] … (nonce=b3094027-b467-4aed-ac0f-a4024ab2045f)`
+  - `[1.17.1] … (nonce=5e2c11db-258e-48bf-a888-25df1aa2d883)`
+  - `[1.18.2] … (nonce=3e88d96c-f64c-413e-afea-279d6a841d10)`
+  - `[1.19.4] … (nonce=8c078a40-f3e2-4964-8680-de7469ea3f7f)`
+  - `[1.20.6] … (nonce=8f7cab86-ffec-47ca-bc5f-c6ddaa364d70)`
+  - `[1.21.4] … (nonce=92e24ac6-eded-4715-8ba5-c86a32e5f9a7)`
+  - `[1.21.11] … (nonce=34255401-e526-4126-afda-6bf1e7c0ceb1)`
+  - `[26.1.2] … (nonce=fc40c557-a89c-4c55-b988-1b029d296f40)`
+  - `[26.1.2 Folia] … (nonce=7683f079-ebe1-4ec1-a394-5f169ba4db2d)`
+- `integrationTestOcm` — BUILD SUCCESSFUL, both entries tier v61:
+  - `[1.17.1 +OCM] … (nonce=964845ef-8a9a-4fb8-b5fb-893f2421d3aa)`
+  - `[26.1.2 +OCM] … (nonce=fa403127-5f2b-4542-96d1-684007be1bd5)`
+- `scripts/integration-matrix.sh --no-ocm` — **MATRIX PASSED (14 servers)** (the
+  rewritten script's own live proof: bare `nogui`, jars copied into `plugins/`,
+  per-entry JDK, `-Dmental.tester.tier` asserted). The FIRST script run FAILED
+  (NO-RESULT for 1.13.2/1.15.2/1.16.5): `/usr/libexec/java_home -v N` is "N or
+  newer" on macOS and handed the capped servers Java 25 → refused. Fixed
+  (`9b7a75b`): `java_home_for` validates the returned home's exact major (release
+  file) else uses the major-named foojay glob; re-run passed clean, 1.9.4 on
+  Java 21 with zero JEP-472 advisories.
+- `grep -r IgnoreJavaVersion` — zero hits in Phase-2-owned live code/config: the
+  build script, the integration script, and BootSuite carry **0**; support-matrix
+  carries exactly **1** — the deliberately-kept 1.14.4-hole sentence (Phase 3
+  removes it). Remaining hits are historical docs + this plan, plus README.md /
+  release.yml / the matrix-gate skill — all **Phase 4's** explicit scope (the
+  plan tasks Phase 4 with deleting the README/workflow flag lines and updating the
+  skills), untouched here by design. The live `serverFlags` mechanism is entirely
+  gone (0 occurrences repo-wide outside historical docs).
+
+**Notes for Phases 3–4:**
+1. **The loader-MR map is simpler than D-7 framed it.** With only base v52 +
+   versions/17 in the jar, the legacy tier is purely a function of the entry's
+   JVM: ≥17 → 61, <17 → 52. The plain-JarFile-vs-URLClassLoader boundary is moot
+   for 1.13.2–1.16.5 (their JVMs are <17 regardless), and wrong for 1.12.2 (its
+   loader DOES honor MR). Phase 3's 1.14.4 runs on Java 8 → tier **52**.
+2. **`/usr/libexec/java_home -v N` is minimum-version, not exact** — any local
+   tooling picking a JDK by feature version must validate the major (the script
+   now does). CI (Phase 4) sidesteps this: it lets the Gradle foojay toolchain
+   resolve JDKs (`launcherFor(N)` is exact), installing only the build JDK via
+   `setup-java`.
+3. **Dead-but-harmless Phase-1 artifacts left in place** (out of Phase-2 scope):
+   `MentalPluginV5.describeBytecodeTier` still has an `intermediate (v60)` branch
+   and the verify tasks still guard a `versions/16` tree — neither can occur now
+   (no v60 tier), so both are no-ops. Fold away when convenient.
