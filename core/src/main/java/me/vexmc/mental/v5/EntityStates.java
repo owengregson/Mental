@@ -51,14 +51,16 @@ public final class EntityStates {
     }
 
     /**
-     * The attacker's EFFECTIVE movement-speed attribute (base × sprint × any
-     * Speed/Slowness modifier) for speed-conformal knockback — read through the
-     * existing {@link Attributes} seam, so it is present 1.9+ and resolves to
-     * {@link EntityState#MOVE_SPEED_UNAVAILABLE} below the attribute API. That
-     * sentinel makes pace scaling fall back to the stance baseline (factor 1.0).
+     * The attacker's WALK-STANCE-NORMALIZED movement-speed attribute for
+     * speed-conformal knockback — {@link Attributes#movementSpeedWalkNormalized}
+     * reads {@code isSprinting()} and the effective value back-to-back on this
+     * (owning) thread and divides the sprint modifier back out, so the pace
+     * factor is immune to wire-vs-server stance disagreement (F1). Present 1.9+;
+     * resolves to {@link EntityState#MOVE_SPEED_UNAVAILABLE} below the attribute
+     * API, which pace scaling falls back to the walk baseline (factor 1.0).
      */
     private static double moveSpeedAttr(LivingEntity entity) {
-        return Attributes.valueOr(entity, Attributes.movementSpeed(), EntityState.MOVE_SPEED_UNAVAILABLE);
+        return Attributes.movementSpeedWalkNormalized(entity);
     }
 
     /**

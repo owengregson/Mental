@@ -11,7 +11,6 @@ import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
-import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.KinematicState;
 import me.vexmc.mental.kernel.model.LedgerEvent;
 import me.vexmc.mental.kernel.model.PlayerView;
@@ -287,12 +286,13 @@ public final class SessionService implements Listener, SessionAccess {
         double gravity = Attributes.valueOr(player, Attributes.gravity(), Decay.DEFAULT_GRAVITY);
         double knockbackResistance = clamp01(
                 Attributes.valueOr(player, Attributes.knockbackResistance(), 0.0));
-        // The attacker's effective movement-speed attribute for speed-conformal
-        // knockback — published so a pre-sent knock (built from this view) scales
-        // identically to the tick path. Unavailable below the attribute API ⇒ the
-        // sentinel ⇒ pace factor 1.0.
-        double moveSpeedAttr = Attributes.valueOr(
-                player, Attributes.movementSpeed(), EntityState.MOVE_SPEED_UNAVAILABLE);
+        // The attacker's walk-stance-normalized movement-speed attribute for
+        // speed-conformal knockback — the sprint modifier is divided back out at
+        // capture (a coherent same-thread isSprinting()+value pair), so a pre-sent
+        // knock (built from this view) scales identically to the tick path and is
+        // immune to wire-vs-server stance disagreement (F1). Unavailable below the
+        // attribute API ⇒ the sentinel ⇒ pace factor 1.0.
+        double moveSpeedAttr = Attributes.movementSpeedWalkNormalized(player);
         double slipperiness = GroundFriction.of(blockUnderFeet(player, location));
         boolean ocmOwnsMelee = !ocmBinding.mentalOwns(MechanicToken.MELEE_KNOCKBACK, id);
         KnockbackProfile profile = snapshot.get().profileFor(player.getWorld().getName());

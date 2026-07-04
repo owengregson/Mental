@@ -72,4 +72,48 @@ class PaceScaleTest {
         assertEquals(1.0, PaceScale.factor(EntityState.MOVE_SPEED_UNAVAILABLE, false, ATTACKER), 0.0);
         assertEquals(1.0, PaceScale.factor(0.0, true, ATTACKER), 0.0);
     }
+
+    /* ── the walk-normalized 2-arg factor (2.4.1, F1 fix) ─────────────────── */
+
+    /** The live base movement-speed attribute: the float {@code 0.1f} widened to double. */
+    private static final double LIVE_BASE = 0.10000000149011612;
+    /** The exact vanilla sprint modifier {@code 1 + 0.3f} the capture divides back out. */
+    private static final double SPRINT_MOD = 1.0 + (double) 0.3f;
+
+    @Test
+    void normalizedBaseSpeedIsOneWithinFloatSlackForBothStances() {
+        // Base WALK capture: the live 0.1f attribute divided by the 0.10 baseline
+        // is 1.0000000149…, so s = ratio^1.0 sits 1.49e-8 from 1.0 — below the wire
+        // quantum (1.25e-4), byte-identical on the wire.
+        assertEquals(1.0, PaceScale.factor(LIVE_BASE, ATTACKER), 1.5e-8);
+        // Base SPRINT capture: the effective 0.1f × 1.3 is divided by the SAME 1.3
+        // at capture, so the walk-normalized input round-trips to the walk value —
+        // one baseline, both stances, no stance boolean in sight (F1).
+        double sprintNormalized = (LIVE_BASE * SPRINT_MOD) / SPRINT_MOD;
+        assertEquals(1.0, PaceScale.factor(sprintNormalized, ATTACKER), 1.5e-8);
+    }
+
+    @Test
+    void normalizedSpeedThreeIsOnePointSix() {
+        // Speed III walk-normalized: 0.10000000149011612 × 1.6 = 0.1600000023841858;
+        // / 0.10 = 1.600000023841858 = ratio^1.0.
+        double normalizedSpeedThree = LIVE_BASE * 1.6;
+        double ratio = normalizedSpeedThree / PaceScale.WALK_BASELINE;
+        assertEquals(Math.pow(ratio, 1.0), PaceScale.factor(normalizedSpeedThree, ATTACKER), EPSILON);
+        assertEquals(1.600000023841858, PaceScale.factor(normalizedSpeedThree, ATTACKER), EPSILON);
+        // A tempered exponent (0.95, the signature tune) softens 1.6 toward 1.563.
+        PaceScaling tuned = new PaceScaling(PaceScaling.Mode.ATTACKER, 0.95, 0.5, 2.0);
+        assertEquals(Math.pow(ratio, 0.95), PaceScale.factor(normalizedSpeedThree, tuned), EPSILON);
+    }
+
+    @Test
+    void normalizedSentinelIsExactlyOneForAnyExponent() {
+        // The sentinel path returns EXACTLY 1.0 regardless of the exponent — the
+        // only 2-arg input that is byte-exact rather than within float slack.
+        PaceScaling tempered = new PaceScaling(PaceScaling.Mode.ATTACKER, 0.5, 0.5, 2.0);
+        assertEquals(1.0, PaceScale.factor(EntityState.MOVE_SPEED_UNAVAILABLE, ATTACKER), 0.0);
+        assertEquals(1.0, PaceScale.factor(EntityState.MOVE_SPEED_UNAVAILABLE, tempered), 0.0);
+        assertEquals(1.0, PaceScale.factor(0.0, ATTACKER), 0.0);
+        assertEquals(1.0, PaceScale.factor(0.208, PaceScaling.OFF), 0.0);
+    }
 }

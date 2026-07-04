@@ -92,8 +92,10 @@ public final class KnockbackEngine {
             return null;
         }
         // Speed-conformal factor: scales the fresh horizontal knock (base push +
-        // extras), 1.0 when off/base-speed (then every ×pace below is skipped).
-        double pace = PaceScale.factor(attacker.moveSpeedAttr(), attacker.sprinting(), profile.paceScaling());
+        // extras), 1.0 when off/base-speed (then every ×pace below is skipped). The
+        // attribute is walk-stance-normalized at capture, so the sprint flag no
+        // longer selects the baseline (F1) — a single 0.10 walk baseline serves both.
+        double pace = PaceScale.factor(attacker.moveSpeedAttr(), profile.paceScaling());
         double taper = profile.rangeReduction().reductionAt(distance(attacker, victim));
         double[] vector = base(victim, attacker.x(), attacker.z(), profile, victimYOverride, random, taper, pace);
 

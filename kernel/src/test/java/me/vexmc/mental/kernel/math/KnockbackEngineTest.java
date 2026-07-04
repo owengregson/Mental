@@ -540,9 +540,10 @@ class KnockbackEngineTest {
 
         KnockbackVector era = computed(attacker(0, 0, 0.0f, true, 0), motionVictim, DEFAULTS, null);
 
-        // Base sprint speed (attr 0.13 ⇒ 0.13/0.13 = 1.0).
+        // Base sprint speed (walk-normalized attr 0.10 ⇒ 0.10/0.10 = 1.0 — the
+        // sprint modifier is divided out at capture, so both stances read 0.10).
         KnockbackVector baseSpeed = computed(
-                pacedAttacker(0, 0, 0.0f, true, 0, PaceScale.SPRINT_BASELINE), motionVictim, paced, null);
+                pacedAttacker(0, 0, 0.0f, true, 0, PaceScale.WALK_BASELINE), motionVictim, paced, null);
         assertEquals(era.x(), baseSpeed.x(), 0.0);
         assertEquals(era.y(), baseSpeed.y(), 0.0);
         assertEquals(era.z(), baseSpeed.z(), 0.0);
@@ -566,9 +567,10 @@ class KnockbackEngineTest {
         assertEquals(0.5, base.y(), EPSILON);
         assertEquals(0.9, base.z(), EPSILON);
 
-        // Speed III sprint (attr 0.208 ⇒ s = 1.6): horizontal ×1.6, vertical untouched.
+        // Speed III sprint (walk-normalized attr 0.16 ⇒ s = 1.6): horizontal ×1.6,
+        // vertical untouched. Effective 0.208 (0.1×1.3×1.6) / 1.3 = 0.16 at capture.
         KnockbackVector scaled = computed(
-                pacedAttacker(0, 0, 0.0f, true, 0, 0.208), victim(0, 4, 0, 0, 0, 0), paced, null);
+                pacedAttacker(0, 0, 0.0f, true, 0, 0.16), victim(0, 4, 0, 0, 0, 0), paced, null);
         assertEquals(0.0, scaled.x(), EPSILON);
         assertEquals(0.5, scaled.y(), EPSILON);       // vertical NEVER scales
         assertEquals(1.44, scaled.z(), EPSILON);      // 0.9 × 1.6 = 1.44

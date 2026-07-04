@@ -4,13 +4,13 @@ package me.vexmc.mental.kernel.model;
  * The exact slice of an entity the knockback formula consumes — capturable
  * on the owning thread, then usable from anywhere.
  *
- * <p>{@code moveSpeedAttr} is the attacker's effective movement-speed attribute,
- * consumed only by speed-conformal knockback (pace scaling). It is meaningful
- * for an ATTACKER capture; victim captures, projectile sources, and every
- * pre-pace-scaling construction leave it {@link #MOVE_SPEED_UNAVAILABLE} (the
- * 11-arg constructor), which resolves to the stance baseline (pace factor 1.0).
- * Additive growth: the 11-arg constructor preserves every existing construction
- * byte-for-byte.</p>
+ * <p>{@code moveSpeedAttr} is the attacker's WALK-STANCE-NORMALIZED movement-speed
+ * attribute (the ×1.3 sprint modifier divided back out at capture), consumed only
+ * by speed-conformal knockback (pace scaling). It is meaningful for an ATTACKER
+ * capture; victim captures, projectile sources, and every pre-pace-scaling
+ * construction leave it {@link #MOVE_SPEED_UNAVAILABLE} (the 11-arg constructor),
+ * which resolves to the walk baseline (pace factor 1.0). Additive growth: the
+ * 11-arg constructor preserves every existing construction byte-for-byte.</p>
  */
 public record EntityState(
         double x,
@@ -28,7 +28,7 @@ public record EntityState(
 
     /**
      * The attacker's movement-speed attribute could not be read (below the
-     * attribute API, or a mob source). Pace scaling resolves it to the stance
+     * attribute API, or a mob source). Pace scaling resolves it to the walk
      * baseline ⇒ factor 1.0 — never silently something else. Any non-positive
      * value means the same; movement speed is always strictly positive.
      */
