@@ -225,7 +225,12 @@ public final class Presets {
             KnockbackDelivery.TRACKER,
             KnockbackDelivery.TRACKER,
             ResistancePolicy.NONE,
-            true);
+            true,
+            // Mental's own preset, and the owner's explicit ask: opt into
+            // speed-conformal knockback so Speed/Slowness fights keep the
+            // base-speed combo rhythm (design 2026-07-04). Archived-server
+            // presets stay OFF — they are historical records.
+            new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0));
 
     /**
      * Ships as legacy-1.7 values — selecting it changes nothing until the

@@ -95,3 +95,30 @@ knockback:
     # `none` avoids surprise zero-knock cancels on modern gear.
     armor-resistance: none
     shield-blocking-cancels: true
+
+  # ── speed-scaling ────────────────────────────────────────────────────
+  # Speed-conformal knockback ("pace scaling"). A combo is a spacing
+  # equilibrium between three speeds: the victim's knock-FLIGHT (absolute —
+  # it does NOT scale with the Speed attribute) and the attacker's ground
+  # CHASE and victim's ground FLEE (both x1.6 at Speed III). At base speed
+  # they balance ("buttery"); Speed III scales chase+flee but not flight, so
+  # nobody can combo anyone. This scales the horizontal knock Mental delivers
+  # by the attacker's movement speed over its stance baseline, so every LENGTH
+  # scales together while every TIME (flight, cadence, immunity) stays fixed —
+  # a spatially-zoomed replica with identical rhythm. VERTICAL is never scaled
+  # (that would stretch flight TIME and desync the rhythm).
+  #   mode      off | attacker.  off = the era stamp ships byte-identical
+  #             (every archived-server preset). Signature — Mental's own
+  #             preset — opts in.
+  #   exponent  s = (attr / baseline)^exponent. 1.0 = fully conformal; lower
+  #             tempers the effect.
+  #   min/max   clamp on the final factor. reach (3.0) can't scale, so extreme
+  #             factors (Speed V+) still compress the margin — max marks where
+  #             the conformal window ends.
+  # Base-speed play yields factor 1.0 exactly (byte-identical era stamp);
+  # Speed III sprint (attr 0.208 / baseline 0.13) yields 1.6.
+  speed-scaling:
+    mode: attacker
+    exponent: 1.0
+    min: 0.5
+    max: 2.0

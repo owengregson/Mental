@@ -124,3 +124,26 @@ knockback:
     armor-resistance: none
     # Skip Mental knockback when a shield absorbed the hit.
     shield-blocking-cancels: true
+
+  # ── speed-scaling ──────────────────────────────────────────────────────
+  # Speed-conformal knockback ("pace scaling"). Multiplies the HORIZONTAL
+  # knock by the attacker's movement speed over its stance baseline, so a
+  # Speed/Slowness fight keeps the base-speed combo rhythm — every LENGTH
+  # (chase, flee, flight) scales together while every TIME (flight duration,
+  # click cadence, the immunity window) stays fixed. Vertical is NEVER scaled.
+  #   s = clamp(min, max, (attr / baseline)^exponent)
+  # baseline is the movement-speed attribute a base-speed attacker reads —
+  # 0.13 sprinting, 0.10 walking — so plain base-speed play yields s = 1.0
+  # exactly and the era stamp ships byte-identical. Speed III sprint (attr
+  # 0.208) yields 1.6; Slowness gives s < 1 (slowed players stay comboable).
+  # Melee only (rods/projectiles are unaffected in v1).
+  #   mode      off | attacker.  off (the default) = no scaling. attacker =
+  #             scale by the ATTACKER's movement-speed attribute.
+  #   exponent  1.0 = fully conformal; lower tempers the effect toward 1.0.
+  #   min/max   clamp on the final factor (reach can't scale, so max marks
+  #             where the conformal window ends — Speed V+ still compresses).
+  speed-scaling:
+    mode: off
+    exponent: 1.0
+    min: 0.5
+    max: 2.0

@@ -46,7 +46,19 @@ public final class EntityStates {
                 location.getX(), location.getY(), location.getZ(), location.getYaw(),
                 velocity.getX(), velocity.getY(), velocity.getZ(),
                 entity.isOnGround(), sprinting,
-                heldKnockbackLevel(entity), clampedResistance(entity));
+                heldKnockbackLevel(entity), clampedResistance(entity),
+                moveSpeedAttr(entity));
+    }
+
+    /**
+     * The attacker's EFFECTIVE movement-speed attribute (base × sprint × any
+     * Speed/Slowness modifier) for speed-conformal knockback — read through the
+     * existing {@link Attributes} seam, so it is present 1.9+ and resolves to
+     * {@link EntityState#MOVE_SPEED_UNAVAILABLE} below the attribute API. That
+     * sentinel makes pace scaling fall back to the stance baseline (factor 1.0).
+     */
+    private static double moveSpeedAttr(LivingEntity entity) {
+        return Attributes.valueOr(entity, Attributes.movementSpeed(), EntityState.MOVE_SPEED_UNAVAILABLE);
     }
 
     /**
