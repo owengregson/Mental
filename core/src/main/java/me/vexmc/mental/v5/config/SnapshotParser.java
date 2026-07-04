@@ -16,6 +16,7 @@ import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
+import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Material;
 import org.bukkit.configuration.Configuration;
@@ -190,7 +191,9 @@ public final class SnapshotParser {
                 reader.numberAtLeast("gain", d.gain(), 0.0),
                 reader.numberAtLeast("min-factor", d.minFactor(), 0.0),
                 reader.numberAtLeast("max-factor", d.maxFactor(), 0.0),
-                reader.intAtLeast("window-ticks", d.windowTicks(), 1));
+                reader.intAtLeast("window-ticks", d.windowTicks(), 1),
+                reader.oneOf("target-mode", d.targetMode(), TargetMode.class),
+                reader.numberAtLeast("hit-cap", d.hitCap(), 0.5));
     }
 
     private static OffhandSettings parseOffhand(ConfigReader reader) {

@@ -320,8 +320,22 @@ modules:
 #   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
 #   max-factor   } stronger hold; past them the pocket is honestly lost and era
 #                  physics wins rather than the servo forcing a non-era knock.
-#   window-ticks the cadence horizon the flight is projected over (truncated at
-#                touchdown by the shipped vertical stamp).
+#   window-ticks the cadence horizon (t*) the flight is projected over — the era
+#                full-hit cadence (10). The predictor already folds the shipped
+#                vertical stamp's air-time, ping horizons and the ground tail into
+#                the window; this is the base cadence they shift from.
+#
+# ── Precision predictor (§3.2b): the solve now folds the victim's launch ground
+#    state (the mandatory grounded/air drag branch), measured mid-air steering,
+#    both parties' ping horizons and the ground tail into that same window — no
+#    knobs; every input degrades to a no-op when unavailable. The one knob pair:
+#   target-mode  anchor | dynamic. ANCHOR (default) always steers to `target`; the
+#                exposure-budget DYNAMIC target (facing- and ping-aware, relaxing
+#                between `target` and `hit-cap`) is COMPUTED and logged to the
+#                debug sink either way, so you can field-calibrate it before flipping
+#                the default. Leave it `anchor` until a lab round validates dynamic.
+#   hit-cap      the dynamic target's upper clamp — the practical hittable edge
+#                (2.95). Only consulted under `target-mode: dynamic`.
 #combo-hold:
 #  min-hits: 3
 #  max-gap-ticks: 20
@@ -332,6 +346,8 @@ modules:
 #  min-factor: 0.8
 #  max-factor: 1.2
 #  window-ticks: 10
+#  target-mode: anchor
+#  hit-cap: 2.95
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.
