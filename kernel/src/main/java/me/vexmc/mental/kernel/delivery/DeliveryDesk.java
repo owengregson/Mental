@@ -225,7 +225,8 @@ public final class DeliveryDesk {
     /** Journals the transaction and marks it RECORDED (terminal). */
     private void record(HitTransaction tx, KnockbackVector shipped, boolean wireCarried, String reason) {
         journal.addLast(new JournalEntry(
-                tx.context().id(), tx.context().source(), shipped, wireCarried, reason, clock.current()));
+                tx.context().id(), tx.context().source(), shipped, wireCarried, reason,
+                clock.current(), tx.paceFactor()));
         while (journal.size() > journalCapacity) {
             journal.removeFirst();
         }

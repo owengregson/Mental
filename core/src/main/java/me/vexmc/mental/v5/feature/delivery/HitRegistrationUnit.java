@@ -277,11 +277,13 @@ public final class HitRegistrationUnit implements FeatureUnit {
             KnockbackVector vector = null;
             String suppressed = suppressorFor(ocmOwns, profile, victimView);
             if (suppressed == null) {
-                vector = KnockbackEngine.compute(
+                KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                         preAttackerState(attackerId, attackerView, verdict),
                         preVictimState(victimId, victimView),
                         profile, compensationY, ThreadLocalRandom.current(),
                         verdict.fresh() != null && verdict.fresh() && verdict.sprinting());
+                vector = paced.vector();
+                tx.paceFactor(paced.paceFactor()); // journal the factor the pre-send applied (D-6)
             }
 
             // B4: the pacing gate paces the VELOCITY component ONLY. A hurt-only

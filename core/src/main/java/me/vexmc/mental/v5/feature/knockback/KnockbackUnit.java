@@ -201,9 +201,11 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         EntityState attackerState = EntityStates.capture(attacker, sprinting);
         boolean freshSprint = source instanceof HitSource.Melee && sprinting
                 && tx.context().sprint().fresh() != null && tx.context().sprint().fresh();
-        KnockbackVector vector = KnockbackEngine.compute(
+        KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                 attackerState, victimState, profile, compensationY,
                 ThreadLocalRandom.current(), freshSprint);
+        KnockbackVector vector = paced.vector();
+        tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
 
         if (freshPartialBlock) {
             deliverBlockedKnock(session, victim, attacker, source, tx, vector, false, sprinting);
