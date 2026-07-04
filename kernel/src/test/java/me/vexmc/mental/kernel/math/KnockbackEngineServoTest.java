@@ -8,6 +8,8 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import org.junit.jupiter.api.Test;
 
+// PredictorInputs, PocketServo, Decay all live in this package (kernel.math) — no imports.
+
 /**
  * The pocket servo's engine seam (combo-hold §3.2): σ scales the FRESH
  * horizontal knock (base push + extras) exactly like pace does — never the
@@ -63,11 +65,16 @@ class KnockbackEngineServoTest {
         EntityState attacker = attacker(3.0, 0, false); // 3 blocks along +x
         EntityState victim = victim(0, 0);
 
-        // The σ the engine will apply — derived from the same solve, not hardcoded.
+        // The σ the engine will apply — the SAME precision solve the engine runs for
+        // a servo-active hit with no wired precision seam: the mandatory grounded
+        // launch branch (stone slip 0.6, attr unavailable), every extra off. Not
+        // hardcoded — computed from the same degraded inputs the engine builds.
         double verticalStamp = 0.4;         // base 0.4, grounded (no air), vy 0
         double freshEra = 0.4;              // the base push magnitude at pace 1.0
+        PredictorInputs degraded = PredictorInputs.degraded(
+                true, Decay.DEFAULT_SLIPPERINESS, EntityState.MOVE_SPEED_UNAVAILABLE);
         double expectedSigma =
-                PocketServo.sigma(SERVO, 3.0, 0.0, freshEra, 0.10, verticalStamp);
+                PocketServo.sigma(SERVO, degraded, 3.0, 0.0, freshEra, verticalStamp, 0.10);
 
         KnockbackEngine.Paced paced =
                 KnockbackEngine.computePaced(attacker, victim, DEFAULTS, null, rng(), false, SERVO);
@@ -109,9 +116,11 @@ class KnockbackEngineServoTest {
     void aFasterAttackerClosesMoreSoTheServoPushesHarder() {
         // Speed III attacker (attr 0.16) closes 1.6× as fast, so to hold the same
         // target the servo must ship the victim farther: σ is strictly larger than
-        // at base speed for the same geometry.
-        EntityState baseSpeed = new EntityState(3.0, 0, 0, 0.0f, 0, 0, 0, true, false, 0, 0, 0.10);
-        EntityState speedThree = new EntityState(3.0, 0, 0, 0.0f, 0, 0, 0, true, false, 0, 0, 0.16);
+        // at base speed for the same geometry. d0 = 3.7 keeps the base-speed hit
+        // unclamped under the (tighter) grounded-launch drag branch, while the
+        // faster chase drives σ up to the clamp — fast > slow either way.
+        EntityState baseSpeed = new EntityState(3.7, 0, 0, 0.0f, 0, 0, 0, true, false, 0, 0, 0.10);
+        EntityState speedThree = new EntityState(3.7, 0, 0, 0.0f, 0, 0, 0, true, false, 0, 0, 0.16);
         EntityState victim = victim(0, 0);
 
         double slow = KnockbackEngine

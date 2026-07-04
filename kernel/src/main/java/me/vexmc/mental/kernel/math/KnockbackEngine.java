@@ -130,6 +130,30 @@ public final class KnockbackEngine {
     }
 
     /**
+     * Melee knockback with the pocket servo but WITHOUT the precision seam — the
+     * base-correctness path (combo-hold §3.2b; precision-derivation §6 row 1). The
+     * servo still branches on the victim's launch ground state (the mandatory
+     * grounded-vs-air drag branch — the pure-air sum overshoots a grounded launch
+     * by ~1.9 blocks), but every precision extra (victim self-drift, ping horizons,
+     * ground tail, dynamic target) is off; the launch slip defaults to stone. Used
+     * by the pace-only-plus-servo callers and the kernel pins that stage no
+     * predictor inputs. A core caller with the wired seam uses the {@link
+     * PredictorInputs} overload instead.
+     */
+    public static Paced computePaced(
+            EntityState attacker,
+            EntityState victim,
+            KnockbackProfile profile,
+            Double victimYOverride,
+            RandomGenerator random,
+            boolean freshSprint,
+            PocketServoConfig servo) {
+        PredictorInputs degraded = PredictorInputs.degraded(
+                victim.grounded(), Decay.DEFAULT_SLIPPERINESS, victim.moveSpeedAttr());
+        return computePaced(attacker, victim, profile, victimYOverride, random, freshSprint, servo, degraded);
+    }
+
+    /**
      * Melee knockback with the pocket servo (combo-hold §3.2), returning the
      * vector plus the pace AND combo factors applied. The servo factor {@code σ}
      * — {@link PocketServo}'s exact inverse solve of the era flight equations —
@@ -147,6 +171,13 @@ public final class KnockbackEngine {
      * of {@code σ}; then {@code σ} folds into the single {@code freshFactor =
      * pace × σ} the base push and extras share, and {@code finish} runs on the
      * combined vector exactly as before.</p>
+     *
+     * <p><b>Precision seam (§3.2b).</b> {@code predictorInputs} carries every
+     * per-hit quantity beyond {@link EntityState} the precision solve needs (victim
+     * self-drift, ping horizons, launch slip, ground-tail locomotion, the dynamic
+     * target's geometry) — one immutable value the netty and region sites freeze.
+     * {@link EntityState} grows no arity; the record is the whole seam. At
+     * {@link PocketServoConfig#INACTIVE} it is never consulted (byte-identical).</p>
      */
     public static Paced computePaced(
             EntityState attacker,
@@ -155,7 +186,8 @@ public final class KnockbackEngine {
             Double victimYOverride,
             RandomGenerator random,
             boolean freshSprint,
-            PocketServoConfig servo) {
+            PocketServoConfig servo,
+            PredictorInputs predictorInputs) {
 
         if (resistanceCancels(victim, profile, random)) {
             return new Paced(null, 1.0, 1.0); // suppressed before compute ⇒ no factors applied
@@ -172,7 +204,8 @@ public final class KnockbackEngine {
         // era values the flight model expects. 1.0 (skipped) when the servo is
         // inactive for this hit.
         double combo = servo.active()
-                ? servoFactor(attacker, victim, profile, victimYOverride, pace, taper, freshSprint, servo)
+                ? servoFactor(attacker, victim, profile, victimYOverride, pace, taper,
+                        freshSprint, servo, predictorInputs).sigma()
                 : 1.0;
         double freshFactor = pace * combo;
 
@@ -198,16 +231,38 @@ public final class KnockbackEngine {
     }
 
     /**
-     * The pocket-servo factor for one melee hit (combo-hold §3.2). Extracts the
-     * three era quantities the {@link PocketServo} solve needs — the horizontal
-     * separation {@code d0}, the σ=1 fresh horizontal magnitude {@code freshEra},
-     * the friction-carried residual magnitude {@code residualCarry}, and the
-     * shipped vertical stamp — then returns the clamped inverse solve. The fresh
-     * and residual magnitudes carry the airborne air-horizontal multiplier
-     * (matching {@code finish}); the horizontal cap and scaling-resistance are the
-     * documented v1 approximations the clamps bound.
+     * The full pocket-servo solve for one melee hit (combo-hold §3.2/§3.2b),
+     * exposed so the core can push the {@link PocketServo.Solution} to the debug
+     * sink for the lab round WITHOUT re-deriving the era quantities the engine
+     * already extracts. Recomputes the pace and taper (cheap) and defers to
+     * {@link #servoFactor}. The engine's own compute path shares the same solve.
      */
-    private static double servoFactor(
+    public static PocketServo.Solution explainServo(
+            EntityState attacker,
+            EntityState victim,
+            KnockbackProfile profile,
+            Double victimYOverride,
+            boolean freshSprint,
+            PocketServoConfig servo,
+            PredictorInputs predictorInputs) {
+        double pace = PaceScale.factor(attacker.moveSpeedAttr(), profile.paceScaling());
+        double taper = profile.rangeReduction().reductionAt(distance(attacker, victim));
+        return servoFactor(attacker, victim, profile, victimYOverride, pace, taper,
+                freshSprint, servo, predictorInputs);
+    }
+
+    /**
+     * The pocket-servo solve for one melee hit (combo-hold §3.2/§3.2b). Extracts the
+     * era quantities the {@link PocketServo} solve needs — the horizontal separation
+     * {@code d0}, the σ=1 fresh horizontal and the friction-carried residual both
+     * projected on the attacker→victim axis (the axis-projection-everywhere rule;
+     * a residual moving the victim toward the attacker is now correctly NEGATIVE),
+     * and the shipped vertical stamp — then runs the precision inverse solve over
+     * {@code predictorInputs}. The fresh and residual carry the airborne
+     * air-horizontal multiplier (matching {@code finish}); the horizontal cap and
+     * scaling-resistance are the documented v1 approximations the clamps bound.
+     */
+    private static PocketServo.Solution servoFactor(
             EntityState attacker,
             EntityState victim,
             KnockbackProfile profile,
@@ -215,21 +270,26 @@ public final class KnockbackEngine {
             double pace,
             double taper,
             boolean freshSprint,
-            PocketServoConfig servo) {
+            PocketServoConfig servo,
+            PredictorInputs predictorInputs) {
         double deltaX = attacker.x() - victim.x();
         double deltaZ = attacker.z() - victim.z();
         double separation = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+        // The attacker→victim unit axis u (pointing AWAY from the attacker); every
+        // directional quantity below projects onto it.
+        double ux = 0.0;
+        double uz = 0.0;
+        if (separation > 1.0e-9) {
+            ux = -deltaX / separation;
+            uz = -deltaZ / separation;
+        }
 
         // The fresh horizontal contribution at σ=1 (pace-scaled): the radial base
         // push (directed AWAY from the attacker, matching base()'s −pushX) plus the
         // yaw-directed extras.
         double push = Math.max(0.0, profile.base().horizontal() - taper) * pace;
-        double freshX = 0.0;
-        double freshZ = 0.0;
-        if (separation > 1.0e-9) {
-            freshX = -(deltaX / separation) * push;
-            freshZ = -(deltaZ / separation) * push;
-        }
+        double freshX = ux * push;
+        double freshZ = uz * push;
         double sprintLevels = attacker.sprinting() ? profile.sprintFactor() : 0.0;
         double enchantLevels = attacker.knockbackEnchantLevel();
         boolean bonus = sprintLevels + enchantLevels > 0;
@@ -243,14 +303,15 @@ public final class KnockbackEngine {
             freshZ += Math.cos(yawRadians) * horizontalBonus;
         }
         double airHorizontal = victim.grounded() ? 1.0 : profile.air().horizontal();
-        double freshEra = Math.hypot(freshX, freshZ) * airHorizontal;
+        double freshEra = (freshX * ux + freshZ * uz) * airHorizontal;
         double residualCarry =
-                Math.hypot(victim.vx() * profile.friction().x(), victim.vz() * profile.friction().z())
+                (victim.vx() * profile.friction().x() * ux + victim.vz() * profile.friction().z() * uz)
                         * airHorizontal;
         double verticalStamp = shippedVertical(victim, profile, victimYOverride, bonus, wtap);
 
-        return PocketServo.sigma(
-                servo, separation, residualCarry, freshEra, attacker.moveSpeedAttr(), verticalStamp);
+        return PocketServo.solve(
+                servo, predictorInputs, separation, residualCarry, freshEra,
+                verticalStamp, attacker.moveSpeedAttr());
     }
 
     /**
