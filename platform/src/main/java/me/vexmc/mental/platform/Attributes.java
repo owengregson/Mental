@@ -26,6 +26,8 @@ public final class Attributes {
             resolve("ATTACK_SPEED", "GENERIC_ATTACK_SPEED");
     private static final @Nullable Attribute KNOCKBACK_RESISTANCE =
             resolve("KNOCKBACK_RESISTANCE", "GENERIC_KNOCKBACK_RESISTANCE");
+    private static final @Nullable Attribute MOVEMENT_SPEED =
+            resolve("MOVEMENT_SPEED", "GENERIC_MOVEMENT_SPEED");
     private static final @Nullable Attribute GRAVITY =
             resolve("GRAVITY", "GENERIC_GRAVITY");
     private static final @Nullable Attribute ENTITY_INTERACTION_RANGE =
@@ -49,6 +51,19 @@ public final class Attributes {
 
     public static @Nullable Attribute knockbackResistance() {
         return KNOCKBACK_RESISTANCE;
+    }
+
+    /**
+     * {@code MOVEMENT_SPEED} (modern, 1.21.3+) / {@code GENERIC_MOVEMENT_SPEED}
+     * (legacy, 1.17.1–1.21.2) — present on every supported version (the
+     * attribute API exists from 1.9). Its {@link #valueOr} is the EFFECTIVE
+     * value (base × sprint × Speed/Slowness modifiers), which speed-conformal
+     * knockback reads for the attacker. Absent only pre-attribute-API (below the
+     * runtime floor) — callers fall back to {@link
+     * me.vexmc.mental.kernel.model.EntityState#MOVE_SPEED_UNAVAILABLE}.
+     */
+    public static @Nullable Attribute movementSpeed() {
+        return MOVEMENT_SPEED;
     }
 
     /** Absent below 1.20.5 — callers fall back to vanilla's 0.08. */

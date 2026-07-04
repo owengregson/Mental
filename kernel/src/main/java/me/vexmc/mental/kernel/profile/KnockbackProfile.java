@@ -35,7 +35,39 @@ public record KnockbackProfile(
         KnockbackDelivery meleeDelivery,
         KnockbackDelivery projectileDelivery,
         ResistancePolicy resistance,
-        boolean shieldBlockingCancels) {
+        boolean shieldBlockingCancels,
+        PaceScaling paceScaling) {
+
+    /**
+     * Additive growth: the 17-arg constructor defaults {@link #paceScaling} to
+     * {@link PaceScaling#OFF} (the era-exact no-op), so every existing preset,
+     * superseded revision, and unit pin constructs unchanged and yields OFF —
+     * the no-op proof — while only the {@code signature} preset and the parser
+     * pass the 18th argument to opt in.
+     */
+    public KnockbackProfile(
+            String name,
+            String displayName,
+            String description,
+            Push base,
+            VerticalMode verticalMode,
+            Push extra,
+            WtapExtra wtapExtra,
+            Friction friction,
+            Limits limits,
+            Push air,
+            Push add,
+            RangeReduction rangeReduction,
+            double sprintFactor,
+            boolean combos,
+            KnockbackDelivery meleeDelivery,
+            KnockbackDelivery projectileDelivery,
+            ResistancePolicy resistance,
+            boolean shieldBlockingCancels) {
+        this(name, displayName, description, base, verticalMode, extra, wtapExtra, friction,
+                limits, air, add, rangeReduction, sprintFactor, combos, meleeDelivery,
+                projectileDelivery, resistance, shieldBlockingCancels, PaceScaling.OFF);
+    }
 
     /** A horizontal/vertical pair — base push, bonus, multiplier, or offset. */
     public record Push(double horizontal, double vertical) {}
@@ -129,6 +161,7 @@ public record KnockbackProfile(
                 && meleeDelivery == other.meleeDelivery
                 && projectileDelivery == other.projectileDelivery
                 && resistance == other.resistance
-                && shieldBlockingCancels == other.shieldBlockingCancels;
+                && shieldBlockingCancels == other.shieldBlockingCancels
+                && paceScaling.equals(other.paceScaling);
     }
 }

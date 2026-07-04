@@ -6,6 +6,7 @@ import java.util.random.RandomGenerator;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
 
@@ -47,6 +48,21 @@ import me.vexmc.mental.kernel.profile.VerticalMode;
  *   8. SCALING resistance multiplies the horizontal result.
  *   9. Axes clamp to ±3.9, the legacy velocity-packet encoding limit.
  * </pre>
+ *
+ * <p><b>Speed-conformal knockback (pace scaling).</b> When the profile's
+ * {@link PaceScaling} opts in, the {@link PaceScale} factor {@code s} multiplies
+ * the FRESH horizontal knock — the base directional push (step 4's
+ * {@code −direction × push}) and the sprint/wtap/enchant extras (step 6) — but
+ * NOT the friction-carried residual (step 4's {@code victimMotion × friction})
+ * and NEVER the vertical. This is the exact realization of the design's
+ * "scale the horizontal knock" (§4.1) that makes the ledger interplay hold: the
+ * MotionLedger records the scaled stamp, so a combo hit's residual already
+ * carries the previous hits' scaling; re-scaling it would double-count. Scaling
+ * only the fresh contribution keeps every hit's wire at {@code s ×} its
+ * base-speed value, so a scaled hit-1 followed by a decayed combo hit-2 yields
+ * <em>exactly</em> {@code s ×} the base-speed hit-2 (assumption A3). At
+ * {@code s == 1.0} (mode off, base-speed play, or the projectile path) the
+ * multiply is skipped entirely — byte-identical to the era stamp.</p>
  */
 public final class KnockbackEngine {
 
@@ -75,8 +91,11 @@ public final class KnockbackEngine {
         if (resistanceCancels(victim, profile, random)) {
             return null;
         }
+        // Speed-conformal factor: scales the fresh horizontal knock (base push +
+        // extras), 1.0 when off/base-speed (then every ×pace below is skipped).
+        double pace = PaceScale.factor(attacker.moveSpeedAttr(), attacker.sprinting(), profile.paceScaling());
         double taper = profile.rangeReduction().reductionAt(distance(attacker, victim));
-        double[] vector = base(victim, attacker.x(), attacker.z(), profile, victimYOverride, random, taper);
+        double[] vector = base(victim, attacker.x(), attacker.z(), profile, victimYOverride, random, taper, pace);
 
         double sprintLevels = attacker.sprinting() ? profile.sprintFactor() : 0.0;
         double enchantLevels = attacker.knockbackEnchantLevel();
@@ -85,6 +104,9 @@ public final class KnockbackEngine {
             double sprintHorizontal = wtap ? profile.wtapExtra().horizontal() : profile.extra().horizontal();
             double horizontalBonus =
                     sprintLevels * sprintHorizontal + enchantLevels * profile.extra().horizontal();
+            if (pace != 1.0) {
+                horizontalBonus *= pace; // fresh extras scale; the flat vertical bonus never does
+            }
             double yawRadians = Math.toRadians(attacker.yaw());
             vector[0] += -Math.sin(yawRadians) * horizontalBonus;
             vector[2] += Math.cos(yawRadians) * horizontalBonus;
@@ -110,8 +132,11 @@ public final class KnockbackEngine {
         if (resistanceCancels(victim, profile, random)) {
             return null;
         }
+        // Projectiles/rods are unaffected by pace scaling in v1 (era rod/arrow
+        // knocks are shooter-position stamps; the combo equilibrium is a melee
+        // phenomenon) — pace 1.0.
         return finish(
-                base(victim, sourceX, sourceZ, profile, victimYOverride, random, 0.0), victim, profile);
+                base(victim, sourceX, sourceZ, profile, victimYOverride, random, 0.0, 1.0), victim, profile);
     }
 
     /**
@@ -173,7 +198,8 @@ public final class KnockbackEngine {
             KnockbackProfile profile,
             Double victimYOverride,
             RandomGenerator random,
-            double pushReduction) {
+            double pushReduction,
+            double paceFactor) {
 
         double deltaX = sourceX - victim.x();
         double deltaZ = sourceZ - victim.z();
@@ -187,14 +213,24 @@ public final class KnockbackEngine {
         double magnitude = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
         double push = Math.max(0.0, profile.base().horizontal() - pushReduction);
 
+        // The fresh directional push is the knock Mental adds, so pace scaling
+        // multiplies it here; the friction-carried residual below is the victim's
+        // own motion (already scaled in the ledger) and is left untouched (A3).
+        double pushX = (deltaX / magnitude) * push;
+        double pushZ = (deltaZ / magnitude) * push;
+        if (paceFactor != 1.0) {
+            pushX *= paceFactor;
+            pushZ *= paceFactor;
+        }
+
         // SET assigns the vertical outright — the victim's motion (and with it
         // the latency-compensation vertical hint) is irrelevant by definition.
         double victimVy = victimYOverride != null ? victimYOverride : victim.vy();
-        double x = victim.vx() * profile.friction().x() - (deltaX / magnitude) * push;
+        double x = victim.vx() * profile.friction().x() - pushX;
         double y = profile.verticalMode() == VerticalMode.SET
                 ? profile.base().vertical()
                 : victimVy * profile.friction().y() + profile.base().vertical();
-        double z = victim.vz() * profile.friction().z() - (deltaZ / magnitude) * push;
+        double z = victim.vz() * profile.friction().z() - pushZ;
 
         if (profile.limits().limitsHorizontal()) {
             double horizontal = Math.hypot(x, z);

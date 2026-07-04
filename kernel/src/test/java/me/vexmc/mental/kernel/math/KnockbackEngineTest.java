@@ -12,6 +12,7 @@ import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.profile.KnockbackDelivery;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
 import org.junit.jupiter.api.Test;
@@ -507,6 +508,117 @@ class KnockbackEngineTest {
         KnockbackVector legacy = computed(
                 attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, -2.0, 0, 0), DEFAULTS, null);
         assertEquals(-0.6, legacy.y(), EPSILON);
+    }
+
+    /* ----------------------- speed-conformal knockback (pace scaling) ----------------------- */
+
+    private static final PaceScaling PACE_ATTACKER = new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0);
+
+    /** DEFAULTS with a pace-scaling knob swapped in — every other value legacy-1.7. */
+    private static KnockbackProfile withPace(KnockbackProfile base, PaceScaling pace) {
+        return new KnockbackProfile(
+                base.name(), base.displayName(), base.description(),
+                base.base(), base.verticalMode(), base.extra(), base.wtapExtra(),
+                base.friction(), base.limits(), base.air(), base.add(), base.rangeReduction(),
+                base.sprintFactor(), base.combos(), base.meleeDelivery(), base.projectileDelivery(),
+                base.resistance(), base.shieldBlockingCancels(), pace);
+    }
+
+    /** An attacker carrying an explicit movement-speed attribute (12-arg capture). */
+    private static EntityState pacedAttacker(
+            double x, double z, float yaw, boolean sprinting, int enchant, double moveSpeed) {
+        return new EntityState(x, 0, z, yaw, 0, 0, 0, true, sprinting, enchant, 0, moveSpeed);
+    }
+
+    @Test
+    void paceOffAndBaseSpeedShipTheEraStampByteIdentically() {
+        // The no-op proof: pace ON at base speed (or with the attribute
+        // unavailable) is BYTE-identical to the era stamp — s = 1.0 exactly and
+        // the engine skips the multiply.
+        KnockbackProfile paced = withPace(DEFAULTS, PACE_ATTACKER);
+        EntityState motionVictim = victim(3, 4, 0.2, 0.3, -0.4, 0);
+
+        KnockbackVector era = computed(attacker(0, 0, 0.0f, true, 0), motionVictim, DEFAULTS, null);
+
+        // Base sprint speed (attr 0.13 ⇒ 0.13/0.13 = 1.0).
+        KnockbackVector baseSpeed = computed(
+                pacedAttacker(0, 0, 0.0f, true, 0, PaceScale.SPRINT_BASELINE), motionVictim, paced, null);
+        assertEquals(era.x(), baseSpeed.x(), 0.0);
+        assertEquals(era.y(), baseSpeed.y(), 0.0);
+        assertEquals(era.z(), baseSpeed.z(), 0.0);
+
+        // Attribute unavailable (plain 11-arg attacker) ⇒ baseline ⇒ s = 1.0.
+        KnockbackVector unavailable = computed(attacker(0, 0, 0.0f, true, 0), motionVictim, paced, null);
+        assertEquals(era.x(), unavailable.x(), 0.0);
+        assertEquals(era.y(), unavailable.y(), 0.0);
+        assertEquals(era.z(), unavailable.z(), 0.0);
+    }
+
+    @Test
+    void speedThreeScalesTheFreshHorizontalKnockByOnePointSixVerticalUnchanged() {
+        KnockbackProfile paced = withPace(DEFAULTS, PACE_ATTACKER);
+
+        // Base-speed sprint hit straight down +z: 0.4 base + 0.5 sprint = 0.9 on z,
+        // vertical 0.4 (capped) + 0.1 sprint = 0.5.
+        KnockbackVector base = computed(
+                attacker(0, 0, 0.0f, true, 0), victim(0, 4, 0, 0, 0, 0), DEFAULTS, null);
+        assertEquals(0.0, base.x(), EPSILON);
+        assertEquals(0.5, base.y(), EPSILON);
+        assertEquals(0.9, base.z(), EPSILON);
+
+        // Speed III sprint (attr 0.208 ⇒ s = 1.6): horizontal ×1.6, vertical untouched.
+        KnockbackVector scaled = computed(
+                pacedAttacker(0, 0, 0.0f, true, 0, 0.208), victim(0, 4, 0, 0, 0, 0), paced, null);
+        assertEquals(0.0, scaled.x(), EPSILON);
+        assertEquals(0.5, scaled.y(), EPSILON);       // vertical NEVER scales
+        assertEquals(1.44, scaled.z(), EPSILON);      // 0.9 × 1.6 = 1.44
+        assertEquals(1.6 * base.z(), scaled.z(), EPSILON);
+    }
+
+    @Test
+    void comboHitTwoIsExactlySTimesTheBaseSpeedHitTwo_A3() {
+        // A3: the pace factor scales the FRESH knock (base push + extras) but not
+        // the friction-carried residual — which already carries its own stamp's
+        // scaling in the ledger. So a scaled hit-1 followed by a decayed combo
+        // hit-2 is EXACTLY s × the base-speed hit-2 (re-scaling the residual would
+        // give s²). Vertical is never scaled.
+        KnockbackProfile paced = withPace(DEFAULTS, PACE_ATTACKER);
+        EntityState baseAttacker = pacedAttacker(0, 0, 0.0f, false, 0, PaceScale.WALK_BASELINE); // s = 1.0
+        EntityState fastAttacker = pacedAttacker(0, 0, 0.0f, false, 0, 0.16);                    // s = 1.6
+
+        // Hit 1 on a resting victim, straight +z: fresh push scales, vertical does not.
+        KnockbackVector base1 = computed(baseAttacker, victim(0, 4, 0, 0, 0, 0), paced, null);
+        KnockbackVector fast1 = computed(fastAttacker, victim(0, 4, 0, 0, 0, 0), paced, null);
+        assertEquals(0.4, base1.z(), EPSILON);
+        assertEquals(1.6 * 0.4, fast1.z(), EPSILON);
+        assertEquals(base1.y(), fast1.y(), EPSILON);
+
+        // The ledger records the DELIVERED (scaled) stamp; decay 12 ticks airborne.
+        Decay.Motion rBase = Decay.decay(base1.x(), base1.y(), base1.z(), 12, false, Decay.DEFAULT_GRAVITY);
+        Decay.Motion rFast = Decay.decay(fast1.x(), fast1.y(), fast1.z(), 12, false, Decay.DEFAULT_GRAVITY);
+        assertEquals(1.6 * rBase.vz(), rFast.vz(), EPSILON); // decay is linear: residual carries s
+
+        // Hit 2 compounds the decayed residual.
+        KnockbackVector base2 = computed(
+                baseAttacker, victim(0, 4, rBase.vx(), rBase.vy(), rBase.vz(), 0), paced, null);
+        KnockbackVector fast2 = computed(
+                fastAttacker, victim(0, 4, rFast.vx(), rFast.vy(), rFast.vz(), 0), paced, null);
+
+        assertEquals(1.6 * base2.z(), fast2.z(), EPSILON); // exactly s×, not s²
+        assertEquals(1.6 * base2.x(), fast2.x(), EPSILON);
+        assertEquals(base2.y(), fast2.y(), EPSILON);       // vertical unchanged
+    }
+
+    @Test
+    void paceScalingNeverTouchesTheProjectilePath() {
+        // computeBase (rods/projectiles) is unaffected in v1 — pace 1.0 always,
+        // even on a pace-on profile.
+        KnockbackProfile paced = withPace(DEFAULTS, PACE_ATTACKER);
+        KnockbackVector rod = KnockbackEngine.computeBase(
+                victim(0, 4, 0, 0, 0, 0), 0.0, 0.0, paced, null,
+                RandomGenerator.of("L64X128MixRandom"));
+        assertNotNull(rod);
+        assertEquals(0.4, rod.z(), EPSILON); // the bare base push, unscaled
     }
 
     private static RandomGenerator constantRandom(double value) {

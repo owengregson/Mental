@@ -351,8 +351,11 @@ public final class HitRegistrationUnit implements FeatureUnit {
             // Attacker velocity/enchant/resistance/grounded are unused by the
             // formula's attacker terms; yaw comes from the connection's last
             // movement packet, enchant is corrected on the authoritative pass.
+            // The movement-speed attribute rides the published view so the
+            // pre-sent knock's pace scaling matches the tick path (one truth).
             return new EntityState(x, y, z, domains.domainFor(attackerId).lastYaw(),
-                    0, 0, 0, view.grounded(), verdict.sprinting(), 0, view.knockbackResistance());
+                    0, 0, 0, view.grounded(), verdict.sprinting(), 0, view.knockbackResistance(),
+                    view.moveSpeedAttr());
         }
 
         private EntityState preVictimState(UUID victimId, PlayerView view) {

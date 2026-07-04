@@ -11,6 +11,7 @@ import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
+import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.KinematicState;
 import me.vexmc.mental.kernel.model.LedgerEvent;
 import me.vexmc.mental.kernel.model.PlayerView;
@@ -286,6 +287,12 @@ public final class SessionService implements Listener, SessionAccess {
         double gravity = Attributes.valueOr(player, Attributes.gravity(), Decay.DEFAULT_GRAVITY);
         double knockbackResistance = clamp01(
                 Attributes.valueOr(player, Attributes.knockbackResistance(), 0.0));
+        // The attacker's effective movement-speed attribute for speed-conformal
+        // knockback — published so a pre-sent knock (built from this view) scales
+        // identically to the tick path. Unavailable below the attribute API ⇒ the
+        // sentinel ⇒ pace factor 1.0.
+        double moveSpeedAttr = Attributes.valueOr(
+                player, Attributes.movementSpeed(), EntityState.MOVE_SPEED_UNAVAILABLE);
         double slipperiness = GroundFriction.of(blockUnderFeet(player, location));
         boolean ocmOwnsMelee = !ocmBinding.mentalOwns(MechanicToken.MELEE_KNOCKBACK, id);
         KnockbackProfile profile = snapshot.get().profileFor(player.getWorld().getName());
@@ -298,7 +305,8 @@ public final class SessionService implements Listener, SessionAccess {
                 gravity, Decay.JUMP_IMPULSE, jumpBoostAmplifier(player),
                 player.isSprinting(), player.getGameMode() == GameMode.CREATIVE, player.getWorld().getPVP(),
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
-                knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics);
+                knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics,
+                moveSpeedAttr);
     }
 
     private static String blockUnderFeet(Player player, Location location) {

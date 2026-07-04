@@ -44,7 +44,7 @@ notice. Any edited value freezes the file forever.
 | `velt` | VeltPvP's archived values — friction ÷10 residual **wipe**, fixed 0.36 vertical, full sprint horizontal. The late-era "dead consistent" practice shape (Ikari variant in the header). | Archived values (sprytex/Knockback-Values) |
 | `mmc` | Minemen Club's archived **dev123 (2017)** values — soft 0.32 base with the full vanilla sprint bonus, flat 1.8 delivery. Replaces the remake-derived revision (assigned vertical + taper). | Two independent archives, byte-identical |
 | `lunar` | Lunar Network's archived **Season 5** values — heavy base, split friction, the weakest sprint differential of any archived server (the era's "hold W" complaints are in the numbers, faithfully). Replaces the community-recreation revision. | Two independent archives, byte-identical |
-| `signature` | **Mental's own**, derived from `velt` and tuned by playtesting: the same residual wipe and full 0.5 sprint horizontal, with `air.horizontal 0.92` + `air.vertical 0.98` trimming the airborne follow-ups (hits 2+) so the victim holds the reach pocket instead of drifting out, and `base.vertical 0.365` keeping a touch more lift on descending hits (the 0.36 cap still bites on the grounded opener). | Original Mental tuning (a velt derivative) |
+| `signature` | **Mental's own**, derived from `velt` and tuned by playtesting: the same residual wipe and full 0.5 sprint horizontal, with `air.horizontal 0.92` + `air.vertical 0.98` trimming the airborne follow-ups (hits 2+) so the victim holds the reach pocket instead of drifting out, and `base.vertical 0.365` keeping a touch more lift on descending hits (the 0.36 cap still bites on the grounded opener). The only preset that opts into **speed-conformal knockback** (`speed-scaling: attacker`) so Speed/Slowness fights keep the base-speed combo rhythm. | Original Mental tuning (a velt derivative) |
 | `custom` | Yours. Ships as legacy-1.7 values with every knob documented in the file. | — |
 
 The full research trail behind these numbers — fork lineage, formula
@@ -101,6 +101,13 @@ knockback:
     combos: true            # 1.7.10 ledger stacking; false = 1.8.9 flat
     armor-resistance: none  # none | legacy (probabilistic) | scaling
     shield-blocking-cancels: true
+  speed-scaling:            # speed-conformal knockback (pace scaling)
+    mode: off               # off = no scaling (era-exact); attacker = scale
+                            # the HORIZONTAL knock by the attacker's movement
+                            # speed over its stance baseline
+    exponent: 1.0           # s = (attr / baseline)^exponent; 1.0 = conformal
+    min: 0.5                # clamp on the final factor
+    max: 2.0
 ```
 
 ### ⚠ The #1 porting hazard
@@ -116,6 +123,39 @@ typically `2.0`) port as `1 / divisor`:
 | 1.5 | 0.6667 |
 
 Pasting a divisor value in unchanged inverts the feel entirely.
+
+### Speed-conformal knockback (pace scaling)
+
+A combo is a spacing equilibrium between three speeds: the victim's
+knock-**flight** (an absolute velocity stamp — it does *not* scale with the
+Speed attribute) and the attacker's ground **chase** and victim's ground
+**flee** (both ×1.6 at Speed III). At base speed they balance; Speed III
+scales chase and flee but leaves flight untouched, so the attacker overshoots
+and nobody can combo anyone — every fixed-stamp system (all of era 1.7/1.8)
+breaks the same way.
+
+`speed-scaling` makes the knock **conform**: it multiplies the **horizontal**
+components Mental delivers by
+
+```
+s = clamp(min, max, (attr / baseline)^exponent)
+```
+
+where `attr` is the attacker's effective movement-speed attribute and
+`baseline` is the value a base-speed attacker reads in that stance (`0.13`
+sprinting, `0.10` walking). Every *length* in the combo then scales together
+while every *time* (flight duration, click cadence, the immunity window) stays
+fixed — a spatially-zoomed replica with identical rhythm. **Vertical is never
+scaled** (that would stretch flight time and desync the rhythm). Plain
+base-speed play yields `s = 1.0` exactly, so the era stamp ships
+byte-identically; Speed III sprint (`attr 0.208`) yields `1.6`, and Slowness
+gives `s < 1` (slowed players stay comboable). Melee only — rods and
+projectiles are unaffected.
+
+`mode: off` (the default, and every archived-server preset) is a complete
+no-op. Only Mental's own `signature` preset opts in. Reach (`3.0`) cannot
+scale, so the `max` clamp marks where the conformal window ends (Speed V+
+still compresses the margin).
 
 ## Runtime control
 
