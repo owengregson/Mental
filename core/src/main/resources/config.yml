@@ -257,6 +257,24 @@ modules:
   # from their hands, so neither a tightened attribute nor a stray component is
   # ever left behind. Default OFF (era-exact no-op when disabled).
   old-hitboxes: false
+  # Combo hold — the "pocket servo". Makes HOLDING a classic 1.8 sweet-spot combo
+  # easier by shaping ONLY the fresh horizontal knock so the victim lands in the
+  # attacker's un-retaliatable pocket, one swing from now — hittable on rhythm,
+  # geometrically unable to answer. It is NOT the "combo" arcade gamemode (no
+  # hit-delay changes, no juggling): normal 10-tick cadence, sweet-spot combos.
+  #
+  # It engages only once a real combo is detected (3+ melee hits from one attacker
+  # at combo cadence), scales the knock by an EXACT inverse solve of the era flight
+  # equations (so the victim lands at the configured target separation), and is
+  # bounded by honest clamps — past them the pocket is lost and era physics wins.
+  # It never touches the vertical, the victim's own residual motion, reach, or
+  # hit-delay, and it does nothing to any pair not in an active combo. Works under
+  # whichever knockback profile is active. Tune it in the combo-hold section below.
+  #
+  # This is Mental's own novel mechanic (no community precedent), so it is strictly
+  # server-opt-in: it defaults OFF and no bundled config pre-enables it. Field-judge
+  # the feel before trusting it in production. Default OFF (era-exact no-op).
+  combo-hold: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
@@ -275,6 +293,45 @@ modules:
 #  whitelist: true
 #  items: []
 #  denied-message: "&cOff-hand is disabled"
+
+# Combo-hold servo, active when modules.combo-hold is true. All knobs shown at
+# their defaults; the block is optional (an absent section uses these values).
+#
+# ── Detector: when is a combo "active"? ────────────────────────────────────
+#   min-hits            hits from ONE attacker before the servo engages (the
+#                       first two confirm intent; the servo helps from the third).
+#   max-gap-ticks       an inter-hit gap longer than this ends the chain — era
+#                       sweet-spot cadence is ~10-12 ticks, so 20 is generous.
+#   grounded-run-ticks  consecutive grounded ticks that end the combo: brief
+#                       ground-skims survive, a real touchdown (10) ends it.
+#   blowout-blocks      separation past this ends the combo (the pocket is gone).
+# A false positive mid-scrap is harmless: it costs only one clamped knock nudge,
+# so these thresholds err toward NOT detecting a combo.
+#
+# ── Servo: where does the victim land? ─────────────────────────────────────
+#   target       the separation (blocks) the servo steers the victim toward at
+#                the next swing. 2.75 is DERIVED from the reach triangle, not
+#                tuned: a launched victim needs the hypotenuse sqrt(reach^2 + dh^2)
+#                to answer while the attacker's shot is the flat base ~reach, so
+#                the un-retaliatable band sits at ~2.7-2.8 and staying hittable
+#                needs <~2.95. Vertical is deliberately never touched — the
+#                profile's launch height is what buys that margin.
+#   gain         blends toward the full exact solve (1.0 = exact; lower softens).
+#   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
+#   max-factor   } stronger hold; past them the pocket is honestly lost and era
+#                  physics wins rather than the servo forcing a non-era knock.
+#   window-ticks the cadence horizon the flight is projected over (truncated at
+#                touchdown by the shipped vertical stamp).
+#combo-hold:
+#  min-hits: 3
+#  max-gap-ticks: 20
+#  grounded-run-ticks: 10
+#  blowout-blocks: 6.0
+#  target: 2.75
+#  gain: 1.0
+#  min-factor: 0.8
+#  max-factor: 1.2
+#  window-ticks: 10
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.

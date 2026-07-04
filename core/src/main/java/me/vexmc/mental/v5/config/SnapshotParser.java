@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import me.vexmc.mental.v5.config.settings.AnticheatSettings;
+import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DebugSettings;
@@ -91,6 +92,7 @@ public final class SnapshotParser {
                     parseProjectile(reader(knockback, "projectile-knockback", "knockback.yml", issues));
             case CRAFTING -> parseCrafting(reader(main, "disable-crafting", "config.yml", issues));
             case OFFHAND -> parseOffhand(reader(main, "disable-offhand", "config.yml", issues));
+            case COMBO_HOLD -> parseCombo(reader(main, "combo-hold", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
         };
     }
@@ -175,6 +177,20 @@ public final class SnapshotParser {
                 .filter(material -> material != null)
                 .collect(Collectors.toUnmodifiableSet());
         return new CraftingSettings(blocked);
+    }
+
+    private static ComboSettings parseCombo(ConfigReader reader) {
+        ComboSettings d = ComboSettings.DEFAULTS;
+        return new ComboSettings(
+                reader.intAtLeast("min-hits", d.minHits(), 1),
+                reader.intAtLeast("max-gap-ticks", d.maxGapTicks(), 1),
+                reader.intAtLeast("grounded-run-ticks", d.groundedRunTicks(), 1),
+                reader.numberAtLeast("blowout-blocks", d.blowoutBlocks(), 0.0),
+                reader.numberAtLeast("target", d.target(), 0.5),
+                reader.numberAtLeast("gain", d.gain(), 0.0),
+                reader.numberAtLeast("min-factor", d.minFactor(), 0.0),
+                reader.numberAtLeast("max-factor", d.maxFactor(), 0.0),
+                reader.intAtLeast("window-ticks", d.windowTicks(), 1));
     }
 
     private static OffhandSettings parseOffhand(ConfigReader reader) {
