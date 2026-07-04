@@ -75,12 +75,30 @@ JDKS_DIR="$HOME/.gradle/jdks"
 # SAME homes launcherFor(N) resolves. The native-JDK flip put 13/14/16/21 on the
 # per-entry jdk (each legacy version's newest clean flagless rung); Temurin has
 # no arm64 13/14/16, so foojay serves those as x64 builds (run under Rosetta).
+# The feature (major) version a JDK home declares, read from its release file
+# (JAVA_VERSION="13.0.2+8" -> 13; "1.8.0_492" -> 8). Non-zero if unknown.
+jdk_major_of() {
+    local home=$1 v
+    [ -r "$home/release" ] || return 1
+    v=$(sed -n 's/^JAVA_VERSION="\(.*\)"/\1/p' "$home/release" | head -1)
+    case "$v" in
+        1.*) echo "$v" | cut -d. -f2 ;;   # 1.8.0_492 -> 8
+        "")  return 1 ;;
+        *)   echo "$v" | cut -d. -f1 ;;   # 13.0.2+8 -> 13
+    esac
+}
 java_home_for() {
     local n=$1 home exe
+    # A system JVM — but /usr/libexec/java_home -v N is "N OR NEWER" on macOS, so
+    # accept its answer ONLY when it is EXACTLY major N. Otherwise it hands back
+    # the newest installed JVM (e.g. -v 13 -> GraalVM 25), which the hard-capped
+    # legacy servers refuse ("Unsupported Java detected").
     home="$(/usr/libexec/java_home -v "$n" 2>/dev/null)"
-    if [ -n "$home" ] && [ -x "$home/bin/java" ]; then echo "$home/bin/java"; return 0; fi
-    # foojay layout: <vendor>-<n>-<arch>-os_x*/jdk-<n>*/Contents/Home (Java 9+);
-    # the Java-8 build instead nests jdk8u*/Contents/Home.
+    if [ -n "$home" ] && [ -x "$home/bin/java" ] && [ "$(jdk_major_of "$home")" = "$n" ]; then
+        echo "$home/bin/java"; return 0
+    fi
+    # foojay-provisioned toolchains, named by major: <vendor>-<n>-<arch>-os_x*/
+    # jdk-<n>*/Contents/Home (Java 9+); the Java-8 build nests jdk8u*/Contents/Home.
     if [ "$n" = 8 ]; then
         exe=$(ls -d "$JDKS_DIR"/*-8-*/jdk8u*/Contents/Home/bin/java 2>/dev/null | head -1)
     else
