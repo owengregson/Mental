@@ -44,6 +44,7 @@ public final class HitTransaction {
     private boolean wireCarried;
     private String suppressReason;
     private double paceFactor = 1.0;
+    private double comboFactor = 1.0;
 
     public HitTransaction(HitContext context) {
         this.context = context;
@@ -67,6 +68,25 @@ public final class HitTransaction {
     /** Records the pace factor the engine applied to this hit's fresh horizontal knock (D-6). */
     public void paceFactor(double factor) {
         this.paceFactor = factor;
+    }
+
+    /**
+     * The pocket-servo factor the engine applied when this hit's vector was
+     * computed (combo-hold §3.2 journal attribution, D-6). Defaults to {@code 1.0}
+     * — servo off, not-this-attacker, no lever, suppressed before compute, or a
+     * projectile — until a compute site records the factor it used via {@link
+     * #comboFactor(double)}. The desk journals it on every ship/suppress, so a
+     * non-era combo stamp is attributable in one journal read (a {@code 0.8}/{@code
+     * 1.2} is a hard servo clamp). A plain {@code double} — no downgraded stub type
+     * crosses the tester boundary (D-8).
+     */
+    public double comboFactor() {
+        return comboFactor;
+    }
+
+    /** Records the pocket-servo factor the engine applied to this hit's fresh horizontal knock (D-6). */
+    public void comboFactor(double factor) {
+        this.comboFactor = factor;
     }
 
     public State state() {

@@ -93,7 +93,7 @@ public final class DeliveryDesk {
     public void journalDrop(HitTransaction tx, String reason) {
         appendJournal(new JournalEntry(
                 tx.context().id(), tx.context().source(), null, false, reason,
-                clock.current(), tx.paceFactor()));
+                clock.current(), tx.paceFactor(), tx.comboFactor()));
     }
 
     /**
@@ -191,7 +191,7 @@ public final class DeliveryDesk {
             // transition a terminal tx.
             appendJournal(new JournalEntry(
                     tx.context().id(), tx.context().source(), null, false, "late-resolve-recorded",
-                    clock.current(), tx.paceFactor()));
+                    clock.current(), tx.paceFactor(), tx.comboFactor()));
             directive = new Directive(Directive.Action.PASS_THROUGH, null, null);
         }
         clearDecision();
@@ -280,7 +280,7 @@ public final class DeliveryDesk {
     private void record(HitTransaction tx, KnockbackVector shipped, boolean wireCarried, String reason) {
         appendJournal(new JournalEntry(
                 tx.context().id(), tx.context().source(), shipped, wireCarried, reason,
-                clock.current(), tx.paceFactor()));
+                clock.current(), tx.paceFactor(), tx.comboFactor()));
         tx.recorded();
     }
 

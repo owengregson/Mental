@@ -72,14 +72,25 @@ public final class KnockbackEngine {
     private KnockbackEngine() {}
 
     /**
-     * A melee compute result plus the pace factor the engine actually applied —
-     * the additive seam that lets a compute caller journal the factor without a
-     * second computation or any engine mutation (D-6). {@code paceFactor} is
-     * {@code 1.0} whenever pace was off/base-speed or the hit was suppressed
-     * before compute ({@code vector == null}); it carries only kernel/JDK-1.0
-     * types, so it crosses the plugin boundary safely (D-8).
+     * A melee compute result plus the pace AND combo factors the engine actually
+     * applied — the additive seam that lets a compute caller journal both without
+     * a second computation or any engine mutation (D-6). {@code paceFactor} is
+     * {@code 1.0} whenever pace was off/base-speed; {@code comboFactor} is {@code
+     * 1.0} whenever the pocket servo was off/not-this-attacker or had no lever;
+     * both are {@code 1.0} when the hit was suppressed before compute ({@code
+     * vector == null}). Each carries only kernel/JDK-1.0 types, so it crosses the
+     * plugin boundary safely (D-8).
+     *
+     * <p>Additive growth: the two-arg constructor (2.4.1's arity) defaults {@code
+     * comboFactor} to {@code 1.0}, so every pre-servo construction is unchanged.</p>
      */
-    public record Paced(KnockbackVector vector, double paceFactor) {}
+    public record Paced(KnockbackVector vector, double paceFactor, double comboFactor) {
+
+        /** The pre-servo arity (2.4.1): no combo factor applied. */
+        public Paced(KnockbackVector vector, double paceFactor) {
+            this(vector, paceFactor, 1.0);
+        }
+    }
 
     /** Melee knockback: base push away from the attacker plus yaw-directed bonus levels. */
     public static KnockbackVector compute(
@@ -102,9 +113,10 @@ public final class KnockbackEngine {
 
     /**
      * Melee knockback returning both the vector and the pace factor applied — the
-     * journal-attribution overload (D-6). Byte-identical to {@link #compute} for
-     * the vector; the {@link Paced#paceFactor()} is what the delivery journal
-     * records.
+     * journal-attribution overload (D-6), with the pocket servo OFF. Delegates to
+     * the servo overload with {@link PocketServoConfig#INACTIVE}, so it is
+     * byte-identical to {@link #compute} for the vector; the {@link
+     * Paced#paceFactor()} is what the delivery journal records.
      */
     public static Paced computePaced(
             EntityState attacker,
@@ -113,17 +125,58 @@ public final class KnockbackEngine {
             Double victimYOverride,
             RandomGenerator random,
             boolean freshSprint) {
+        return computePaced(
+                attacker, victim, profile, victimYOverride, random, freshSprint, PocketServoConfig.INACTIVE);
+    }
+
+    /**
+     * Melee knockback with the pocket servo (combo-hold §3.2), returning the
+     * vector plus the pace AND combo factors applied. The servo factor {@code σ}
+     * — {@link PocketServo}'s exact inverse solve of the era flight equations —
+     * scales the FRESH horizontal knock exactly like pace does: the post-taper
+     * base push (step 4's {@code −direction × push}) and the sprint/wtap/enchant
+     * extras (step 6), NEVER the friction-carried residual and NEVER the vertical.
+     * The two factors compose multiplicatively on the fresh contribution
+     * ({@code fresh = (base − rangeTaper) × pace × combo}), each touching each
+     * component once. At {@link PocketServoConfig#INACTIVE} — module off,
+     * not-this-attacker, or no lever — {@code σ == 1.0} and this is byte-identical
+     * to the pace-only path (zero-touch).
+     *
+     * <p>The servo reads the shipped vertical stamp (which {@code σ} never scales)
+     * to bound the flight window, so the vertical is computed first, independent
+     * of {@code σ}; then {@code σ} folds into the single {@code freshFactor =
+     * pace × σ} the base push and extras share, and {@code finish} runs on the
+     * combined vector exactly as before.</p>
+     */
+    public static Paced computePaced(
+            EntityState attacker,
+            EntityState victim,
+            KnockbackProfile profile,
+            Double victimYOverride,
+            RandomGenerator random,
+            boolean freshSprint,
+            PocketServoConfig servo) {
 
         if (resistanceCancels(victim, profile, random)) {
-            return new Paced(null, 1.0); // suppressed before compute ⇒ no factor applied
+            return new Paced(null, 1.0, 1.0); // suppressed before compute ⇒ no factors applied
         }
         // Speed-conformal factor: scales the fresh horizontal knock (base push +
-        // extras), 1.0 when off/base-speed (then every ×pace below is skipped). The
-        // attribute is walk-stance-normalized at capture, so the sprint flag no
+        // extras), 1.0 when off/base-speed (then every ×freshFactor below is skipped).
+        // The attribute is walk-stance-normalized at capture, so the sprint flag no
         // longer selects the baseline (F1) — a single 0.10 walk baseline serves both.
         double pace = PaceScale.factor(attacker.moveSpeedAttr(), profile.paceScaling());
         double taper = profile.rangeReduction().reductionAt(distance(attacker, victim));
-        double[] vector = base(victim, attacker.x(), attacker.z(), profile, victimYOverride, random, taper, pace);
+
+        // The pocket servo σ: the exact inverse solve, computed BEFORE the vector so
+        // its inputs (the σ=1 fresh horizontal and the shipped vertical stamp) are the
+        // era values the flight model expects. 1.0 (skipped) when the servo is
+        // inactive for this hit.
+        double combo = servo.active()
+                ? servoFactor(attacker, victim, profile, victimYOverride, pace, taper, freshSprint, servo)
+                : 1.0;
+        double freshFactor = pace * combo;
+
+        double[] vector = base(victim, attacker.x(), attacker.z(), profile, victimYOverride, random, taper, freshFactor);
 
         double sprintLevels = attacker.sprinting() ? profile.sprintFactor() : 0.0;
         double enchantLevels = attacker.knockbackEnchantLevel();
@@ -132,8 +185,8 @@ public final class KnockbackEngine {
             double sprintHorizontal = wtap ? profile.wtapExtra().horizontal() : profile.extra().horizontal();
             double horizontalBonus =
                     sprintLevels * sprintHorizontal + enchantLevels * profile.extra().horizontal();
-            if (pace != 1.0) {
-                horizontalBonus *= pace; // fresh extras scale; the flat vertical bonus never does
+            if (freshFactor != 1.0) {
+                horizontalBonus *= freshFactor; // fresh extras scale; the flat vertical bonus never does
             }
             double yawRadians = Math.toRadians(attacker.yaw());
             vector[0] += -Math.sin(yawRadians) * horizontalBonus;
@@ -141,7 +194,97 @@ public final class KnockbackEngine {
             vector[1] += wtap ? profile.wtapExtra().vertical() : profile.extra().vertical();
         }
 
-        return new Paced(finish(vector, victim, profile), pace);
+        return new Paced(finish(vector, victim, profile), pace, combo);
+    }
+
+    /**
+     * The pocket-servo factor for one melee hit (combo-hold §3.2). Extracts the
+     * three era quantities the {@link PocketServo} solve needs — the horizontal
+     * separation {@code d0}, the σ=1 fresh horizontal magnitude {@code freshEra},
+     * the friction-carried residual magnitude {@code residualCarry}, and the
+     * shipped vertical stamp — then returns the clamped inverse solve. The fresh
+     * and residual magnitudes carry the airborne air-horizontal multiplier
+     * (matching {@code finish}); the horizontal cap and scaling-resistance are the
+     * documented v1 approximations the clamps bound.
+     */
+    private static double servoFactor(
+            EntityState attacker,
+            EntityState victim,
+            KnockbackProfile profile,
+            Double victimYOverride,
+            double pace,
+            double taper,
+            boolean freshSprint,
+            PocketServoConfig servo) {
+        double deltaX = attacker.x() - victim.x();
+        double deltaZ = attacker.z() - victim.z();
+        double separation = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+
+        // The fresh horizontal contribution at σ=1 (pace-scaled): the radial base
+        // push (directed AWAY from the attacker, matching base()'s −pushX) plus the
+        // yaw-directed extras.
+        double push = Math.max(0.0, profile.base().horizontal() - taper) * pace;
+        double freshX = 0.0;
+        double freshZ = 0.0;
+        if (separation > 1.0e-9) {
+            freshX = -(deltaX / separation) * push;
+            freshZ = -(deltaZ / separation) * push;
+        }
+        double sprintLevels = attacker.sprinting() ? profile.sprintFactor() : 0.0;
+        double enchantLevels = attacker.knockbackEnchantLevel();
+        boolean bonus = sprintLevels + enchantLevels > 0;
+        boolean wtap = profile.wtapExtra().enabled() && sprintLevels > 0 && freshSprint;
+        if (bonus) {
+            double sprintHorizontal = wtap ? profile.wtapExtra().horizontal() : profile.extra().horizontal();
+            double horizontalBonus =
+                    (sprintLevels * sprintHorizontal + enchantLevels * profile.extra().horizontal()) * pace;
+            double yawRadians = Math.toRadians(attacker.yaw());
+            freshX += -Math.sin(yawRadians) * horizontalBonus;
+            freshZ += Math.cos(yawRadians) * horizontalBonus;
+        }
+        double airHorizontal = victim.grounded() ? 1.0 : profile.air().horizontal();
+        double freshEra = Math.hypot(freshX, freshZ) * airHorizontal;
+        double residualCarry =
+                Math.hypot(victim.vx() * profile.friction().x(), victim.vz() * profile.friction().z())
+                        * airHorizontal;
+        double verticalStamp = shippedVertical(victim, profile, victimYOverride, bonus, wtap);
+
+        return PocketServo.sigma(
+                servo, separation, residualCarry, freshEra, attacker.moveSpeedAttr(), verticalStamp);
+    }
+
+    /**
+     * The vertical the knock ships — a faithful, random-free replay of the
+     * vertical path through {@link #base} and {@link #finish} (SET/ADD base,
+     * vertical cap on the base, flat extra vertical, air multiplier, WindSpigot
+     * vertical add, vertical-min floor, packet clamp). The pocket servo feeds it
+     * to the air-time sim; {@code σ} never touches it, so the value is identical
+     * whether taken here or off the finished vector. Mirrors the engine's vertical
+     * ordering EXACTLY — kept in step with {@link #base}/{@link #finish} by hand
+     * (the engine is frozen additive-only, so the two do not drift).
+     */
+    private static double shippedVertical(
+            EntityState victim, KnockbackProfile profile, Double victimYOverride, boolean bonus, boolean wtap) {
+        double victimVy = victimYOverride != null ? victimYOverride : victim.vy();
+        double y = profile.verticalMode() == VerticalMode.SET
+                ? profile.base().vertical()
+                : victimVy * profile.friction().y() + profile.base().vertical();
+        if (profile.limits().limitsVertical() && y > profile.limits().vertical()) {
+            y = profile.limits().vertical();
+        }
+        if (bonus) {
+            y += wtap ? profile.wtapExtra().vertical() : profile.extra().vertical();
+        }
+        if (!victim.grounded()) {
+            y *= profile.air().vertical();
+        }
+        if (profile.add().vertical() != 0.0) {
+            y += Math.signum(y) * profile.add().vertical();
+        }
+        if (y < profile.limits().verticalMin()) {
+            y = profile.limits().verticalMin();
+        }
+        return Math.max(-PACKET_CLAMP, Math.min(PACKET_CLAMP, y));
     }
 
     /**

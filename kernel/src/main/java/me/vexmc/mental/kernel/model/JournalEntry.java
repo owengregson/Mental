@@ -17,18 +17,36 @@ package me.vexmc.mental.kernel.model;
  *                       {@code 2.0} a hard clamp). A plain {@code double}, so it
  *                       crosses the tester boundary without a downgraded stub type
  *                       (the D-8 rule).
+ * @param comboFactor    the pocket-servo factor actually applied to the fresh
+ *                       horizontal knock (combo-hold §3.2, D-6). {@code 1.0}
+ *                       whenever the servo was off/not-this-attacker/no-lever, the
+ *                       hit was suppressed before compute, or the hit is a
+ *                       projectile — so a non-era combo stamp is attributable in
+ *                       one journal read (a {@code 0.8}/{@code 1.2} is a hard servo
+ *                       clamp). A plain {@code double} (D-8).
  */
 public record JournalEntry(HitId id, HitSource source, KnockbackVector shipped,
                            boolean wireCarried, String suppressReason, TickStamp at,
-                           double paceFactor) {
+                           double paceFactor, double comboFactor) {
 
     /**
-     * Additive growth: the old-arity constructor defaults {@link #paceFactor} to
-     * {@code 1.0} (the no-pace record), so every construction that predates D-6
-     * builds unchanged.
+     * Additive growth (combo-hold): the 2.4.1 arity defaults {@link #comboFactor}
+     * to {@code 1.0} (the no-servo record), so every construction that predates
+     * the pocket servo builds unchanged.
+     */
+    public JournalEntry(HitId id, HitSource source, KnockbackVector shipped,
+                        boolean wireCarried, String suppressReason, TickStamp at,
+                        double paceFactor) {
+        this(id, source, shipped, wireCarried, suppressReason, at, paceFactor, 1.0);
+    }
+
+    /**
+     * Additive growth: the original arity defaults {@link #paceFactor} and {@link
+     * #comboFactor} to {@code 1.0} (the no-pace, no-servo record), so every
+     * construction that predates D-6 builds unchanged.
      */
     public JournalEntry(HitId id, HitSource source, KnockbackVector shipped,
                         boolean wireCarried, String suppressReason, TickStamp at) {
-        this(id, source, shipped, wireCarried, suppressReason, at, 1.0);
+        this(id, source, shipped, wireCarried, suppressReason, at, 1.0, 1.0);
     }
 }
