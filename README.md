@@ -23,6 +23,7 @@ Mental brings back the way PvP used to feel — 1.7/1.8 knockback, real combos, 
 - **The "ping problem" is fixed.** Mental measures each player's connection mid-fight and corrects the knockback they receive, so getting hit feels the same at 150 ms as at 20 ms.
 - **Legacy rods & projectiles.** Fishing hooks shove players on contact and cast like 1.8; snowballs, eggs and pearls knock back — all away from where the shooter stands, like they used to.
 - **Knockback profiles.** One file per feel — the archived configs of the era's best servers, plus Mental's own. Swap the whole game's feel from an in-game menu. (See [recommended presets](#recommended-presets).)
+- **Combo hold (opt-in).** A "pocket servo" that makes *holding* a classic sweet-spot combo easier — it shapes only the fresh knock so a combo'd victim lands back in the attacker's un-retaliatable pocket, by an exact inverse solve of the era flight, honestly clamped. Default OFF, works under any profile. (See [docs/combo-hold.md](docs/combo-hold.md).)
 - **Anticheat-friendly.** GrimAC and Vulcan are detected and accommodated automatically; most others work by design. Running none? Opt into Mental's own ping-rewound reach check.
 - **Optional full 1.8 ruleset.** 16 combat-rule modules (all default OFF) let you build a complete 1.8 server with no companion plugin. See [combat rules modules](#combat-rules-modules-optional).
 
