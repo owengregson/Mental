@@ -34,9 +34,11 @@ val apiCompat = tasks.register<JavaExec>("apiCompat") {
 
     val newJar = tasks.named<Jar>("jar").flatMap { it.archiveFile }
     val reportDir = layout.buildDirectory.dir("reports/japicmp")
+    val supertypeClasspath = configurations.named("compileClasspath")
 
     inputs.file(apiBaselineJar)
     inputs.file(newJar)
+    inputs.files(supertypeClasspath)
     outputs.dir(reportDir)
 
     doFirst {
@@ -44,14 +46,21 @@ val apiCompat = tasks.register<JavaExec>("apiCompat") {
         dir.mkdirs()
         // --only-modified keeps the report to the surface that actually
         // changed; --error-on-binary-incompatibility is the gate (non-zero
-        // exit => build fails); the baseline compiled against a different
-        // Paper build, so unresolved supertypes are ignored, not failed.
+        // exit => build fails). Both jars resolve their supertypes against
+        // the module's own compile classpath (the 1.17.1 Paper floor +
+        // annotations) rather than --ignore-missing-classes: that flag's
+        // startup WARNING banner leaked into the jvmdg warning gate's
+        // GLOBAL console capture under parallel execution and failed the
+        // 2.4.1 release job — and a real classpath is the stronger check
+        // anyway (an unresolvable supertype now fails loudly here).
+        val cp = supertypeClasspath.get().asPath
         args(
             "--old", apiBaselineJar.absolutePath,
             "--new", newJar.get().asFile.absolutePath,
+            "--old-classpath", cp,
+            "--new-classpath", cp,
             "--only-modified",
             "--error-on-binary-incompatibility",
-            "--ignore-missing-classes",
             "--html-file", dir.resolve("api-compat.html").absolutePath,
         )
     }

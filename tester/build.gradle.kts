@@ -114,6 +114,10 @@ downgradeMegaJar.configure {
     destinationDirectory.set(layout.buildDirectory.dir("jvmdg-stage"))
     archiveBaseName.set("MentalTester")
     archiveClassifier.set("downgraded")
+    // The warning capture listens on Gradle's GLOBAL console stream, so a
+    // parallel task's output can land in the window (the 2.4.1 release job
+    // failed on japicmp's banner this way — see core's twin comment).
+    mustRunAfter(":api:apiCompat")
     failOnJvmdgWarnings()
 }
 
@@ -125,6 +129,7 @@ megaJar.configure {
     destinationDirectory.set(layout.buildDirectory.dir("libs"))
     archiveBaseName.set("MentalTester")
     archiveClassifier.set("")
+    mustRunAfter(":api:apiCompat") // same global-capture caveat as downgradeJar above
     failOnJvmdgWarnings()
 }
 
