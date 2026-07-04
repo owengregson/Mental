@@ -158,3 +158,88 @@ Live (tester): a Speed-III fake pair on the signature preset — assert hit-1
 and combo-hit-2 wire stamps are exactly ×1.6 horizontal / unchanged vertical
 vs the base-speed pins; assert mode-off byte-identity under Speed III.
 Feel validation stays owner-side (SimpleBoxer sparring at Speed 0–III).
+
+## 7. Implementation outcome (2026-07-04)
+
+Shipped exactly as designed. Branch `feat/pace-scaling`.
+
+**Assumptions (javap on real 1.12.2 spigot-mapped + 1.21.11 Mojang-mapped
+jars; full evidence in `docs/superpowers/research/2026-07-04-pace-scaling-
+assumptions.md`):**
+
+- **A1 — TRUE both eras.** The movement-speed attribute is selected for the
+  horizontal move-relative speed ONLY inside the `if (onGround())` branch —
+  modern `LivingEntity.getFrictionInfluencedSpeed` (`getSpeed()×0.216/f³` when
+  grounded, `getFlyingSpeed()` = fixed `0.02f` when airborne); legacy
+  `EntityLiving.a(FFF)` offsets 1081–1106 (`cy()` grounded vs field `aR`
+  airborne). A knocked player's flight never scales with Speed. Premise holds;
+  no escalation.
+- **A2 — TRUE both eras.** SPEED = a `MOVEMENT_SPEED` modifier `0.2`/level,
+  `ADD_MULTIPLIED_TOTAL` (modern clinit); legacy `MobEffectList.a(int,mod)` =
+  `amount×(amplifier+1)`; `CraftAttributeInstance.getValue()` delegates to the
+  NMS effective value both eras. Measured attr matches the design exactly:
+  sprint baseline 0.13, Speed III sprint 0.208 ⇒ s = 1.6.
+
+**The one design refinement (§4.1 prose → the exact A3 pin).** §4.1 reads
+"scale the horizontal components of the final vector"; taken literally with
+the ledger storing the delivered (scaled) motion (§4.2, confirmed — the desk
+records the shipped vector), a combo hit-2 would double-count the residual and
+ship `s²`, breaking A3. The exact realization that satisfies A3 (the required
+pin) and the conformal goal is to scale the **fresh knock** (base push +
+sprint/wtap/enchant extras) and NOT the friction-carried residual, which
+already carries its own stamp's scaling. Then every hit's wire is `s ×` its
+base value, so hit-2 = exactly `s ×` base hit-2 (`s²` if the residual were
+re-scaled). This is faithful to the task's binding wording ("scaling at stamp
+creation so the ledger sees scaled motion" + the exact A3 pin); documented at
+`KnockbackEngine` and pinned in `KnockbackEngineTest.comboHitTwoIsExactly…_A3`.
+Verified numerically (LEGACY_17, s=1.6): base hit-2 z = R·0.5+0.4, scaled
+hit-2 z = 1.6R·0.5 + 0.64 = 1.6×(R·0.5+0.4). Not a spec/invariant conflict —
+a precise reading of imprecise prose — so implemented, not escalated.
+
+**Pin arithmetic (the 1.6 case).** Speed III sprint attr = 0.1×1.3×1.6 =
+0.208; 0.208 / 0.13 = 1.6 (exponent 1). Sprint hit-1 straight down +z on
+LEGACY_17: base z = 0.4 push + 0.5 sprint = 0.9; scaled = 1.6×0.4 + 1.6×0.5 =
+0.64 + 0.8 = 1.44 = 1.6×0.9. Vertical 0.5 → unchanged. All fresh (no residual)
+⇒ clean ×1.6.
+
+**Gate (fresh-nonce PASS, quoted verbatim):**
+
+- `./gradlew build` — GREEN (unit + apiCompat japicmp api-2.3.2 vs 2.2.2 +
+  kernel-Bukkit-free + all four mega-jar gates; new attribute reads Java-8-clean
+  in the base tree). Final-tree nonces below (re-run after the `SupersededPresets`
+  addition so the nonce matches the committed tree):
+- `checkIntegrationTest_1_9_4` — PASS `nonce=eba758cb-7b2d-46b4-bb39-a53ab6f82c02`
+- `checkIntegrationTest_1_21_11` — PASS `nonce=834b7b65-7b02-4774-92fe-c425071538de`
+- `checkIntegrationTest_26_1_2` — PASS `nonce=6b133933-6704-49f4-a9af-5fece336c44f`
+- All three pace cases (×1.6, inverse control, A3 combo) RAN (not skipped, 3/3)
+  on every entry, legacy floor included.
+
+**Discovered (legacy).** On the signature preset (air multipliers non-identity)
+a clientless fake reads `isOnGround()=false` on the 1.9/1.10 NMS, so the
+production `captureVictim` selects the airborne air-multiplier branch. The
+tester pace expectation now uses the same production `captureVictim` (not the
+physical-grounded `restingVictim`), so the grounded flag + air multipliers
+match the wire on every version. legacy-1.7's identity air multipliers had
+hidden the same divergence in the existing suites.
+
+**GUI/preset decisions.** The knockback GUI screen is a profile picker with a
+read-only per-profile lore summary (not a per-knob editor), so pace scaling
+gets one read-only lore line shown ONLY when a profile opts in — the nine OFF
+presets stay uncluttered; no bespoke screen was warranted.
+
+Preset rollout via the `SupersededPresets` pristine-upgrade precedent: the
+signature preset shipped 2.2.1–2.3.1 without a `speed-scaling` block, so an
+UNEDITED signature.yml on an existing install parses to those values with pace
+OFF — which would NOT match the new bundled default (ATTACKER) and so would
+silently miss the feature. So the pre-pace signature (current values, pace
+OFF) is registered as `SupersededPresets.SIGNATURE_2_2_1`; `ConfigStore`
+recognises an unedited pre-pace file as verbatim-superseded and regenerates it
+in place with the new block (pace ATTACKER), exactly as the 1.8.0 archived-
+values round rolled out. An OWNER-EDITED signature.yml (any value differs) is
+never touched. `sameValues` now compares `paceScaling`, so the OFF-on-both
+match still holds for kohi/mmc/lunar's existing superseded revisions. Every
+OTHER preset is untouched (OFF), and `parse(empty) == LEGACY_17` holds.
+
+**Deviations:** none beyond the §4.1-prose refinement above (all pins,
+invariants, and the parse-empty == LEGACY_17 test hold with the new block
+absent).
