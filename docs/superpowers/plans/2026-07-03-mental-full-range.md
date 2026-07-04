@@ -772,3 +772,112 @@ mention — the historical clause in the rewritten 1.14.4 note explaining why it
 ever a hole (kept deliberately). README / release.yml / the matrix-gate &
 live-server-testing skills still describe 1.14.4 as an "impossible hole" and cite
 the 14/15-entry gate shape — all Phase 4's scope.
+
+### Phase 4 outcome (2026-07-03, Opus) — reconciliation and release prep, all gates green
+
+Commits `ac6a69b` (version + CI), `c047800` (README + LGPL notice), `df60c40`
+(CLAUDE.md + skills), plus this outcome-log commit. Version is **2.3.2**
+(hyphenless — the releaser will publish a FULL release taking "Latest"); every
+user-facing and agent-facing surface now tells the one-jar full-range story; the
+release-candidate gate ran green on the final committed tree.
+
+**What landed, file-by-file:**
+- `gradle.properties`: `version=2.3.2`; comment rewritten (first non-beta of the
+  2.3 series — the full-range release; the hyphen-suffix pre-release explanation
+  kept for future betas).
+- `.github/workflows/release.yml`: notes-template header is now the one-jar story
+  (`**Supports** Paper $support_range · Folia — **one jar**, no plugin
+  dependencies.`, range still jq-derived); the two stale blockquotes
+  (IgnoreJavaVersion / "1.14.4 is not supported") DELETED, replaced by the
+  Multi-Release story (loads on ANY Java the server runs, 8+; no flags; 1.14.4
+  included) + a recommended-Java line. `jdks` (unique-set) output replaced by
+  `build_jdk` = `jq '[.entries[].jdk] | max'` (= 25; no JDK literal); every
+  setup-java installs ONLY that; server JDKs + the verifyJdk8Api JDK 8 are
+  foojay-auto-provisioned exactly as locally (Temurin publishes no 13/14/16 — the
+  old full-set install would now FAIL). `~/.gradle/jdks` added to the integration
+  job's cache and as a dedicated cache step in unit/folia/ocm/release. The
+  release job's `ls core/build/libs/Mental-*.jar | head -n1` verified unchanged
+  (H3 — the mega jar is the only match).
+- `.github/workflows/build.yml`: same rework (per-job `build_jdk` derivation, one
+  setup-java, jdks caches); no other stale assumptions found.
+- `README.md`: Compatibility rewritten — every version 1.9.4 → 26.x, **1.14.4
+  included**, Java 8+; the IgnoreJavaVersion/Java-17-required/1.14.4-gap
+  paragraph replaced by the Multi-Release admin story; the per-version table
+  gains a "Tested JVM" column (doubles as recommended Java); Java badge 17+ → 8+;
+  developer section gains the mega-jar paragraph + THIRD-PARTY-NOTICES link.
+- `THIRD-PARTY-NOTICES.md` (NEW — the repo had no third-party credits surface):
+  PacketEvents 2.12.1 (GPL-3.0), bStats 3.2.1 (MIT), Adventure 4.9.3 (MIT), and
+  **JVMDowngrader 1.3.6, LGPL-2.1 (dual-licensed), © William Gray (wagyourtail),
+  https://github.com/unimined/JVMDowngrader** — with the §6(a) analysis: the
+  un-downgraded v61 artifact is buildable from this repo's public source
+  (`core/build/jvmdg-stage/`), satisfying the relink provision per the author's
+  own LICENSE.md guidance (license facts re-verified against the upstream
+  LICENSE.md, not from memory).
+- `CLAUDE.md`: Legacy-tier paragraph rewritten — full range, no holes, no flags;
+  the mega-jar pipeline (shadowJar → DowngradeJar v52+`multiReleaseOriginal` v61
+  → ShadeJar distinct prefixes → canonical jar; four verify gates in `check`);
+  native-era per-entry `jdk` + live-asserted `bytecodeTier`; the D-8
+  no-post-Java-8-descriptor rule (`java.util.Random` overload precedent);
+  pointers to this plan + the shapes doc.
+- Skills: `paper-cross-version` (range/tier story + a new mega-jar section: the
+  jvmdg hazard classes with the record-toString and D-8 precedents; 1.14.4
+  un-holed), `matrix-gate` (16 entries / 18 boots, per-entry jdk+tier map,
+  foojay/build-JDK CI shape, script copy-into-plugins + bare `nogui` +
+  exact-major `java_home_for`, tier line as required gate evidence, the
+  15-concurrent-JVM local flake note; `serverFlags` dropped from the
+  description), `live-server-testing` (async-join split corrected to 1.15+;
+  1.14.4 = modern shapes + sync join straddle; v1_14_R1 doc pointer),
+  `nms-archaeology` (the campaign lesson: static javap of loader internals
+  mis-placed the 1.12.2 MR boundary — pair load-bearing static claims with a
+  live assertion).
+
+**Staleness sweep verdict:** `IgnoreJavaVersion` / "Java 17+ required" /
+"1.14.4 impossible/hole/not supported" now appear on ZERO support-story
+surfaces except as explicit negations ("no IgnoreJavaVersion flag to set",
+"serverFlags/IgnoreJavaVersion are DEAD", "not a hole") or the deliberately-kept
+historical clause in `support-matrix.json`'s 1.14.4 note; remaining `hole`/
+`impossible` grep hits are unrelated word matches (1.9.4 projectile "knock
+hole" in the effective-material contract, "impossible to stage" in wire
+research) and dated superpowers docs (historical records, untouched by design).
+
+**Gate evidence (verbatim, fresh nonces; release-candidate run on the FINAL
+committed 2.3.2 tree):**
+- YAML lint: `ruby -ryaml` loads both workflows clean. jq derivations re-run
+  against support-matrix.json: `[.entries[].jdk] | max` → **25**; the paper
+  matrix → `["1.9.4","1.10.2","1.11.2","1.12.2","1.13.2","1.14.4","1.15.2",
+  "1.16.5","1.17.1","1.18.2","1.19.4","1.20.6","1.21.4","1.21.11","26.1.2"]`;
+  the pr sample → `["1.9.4","1.17.1","1.20.6","1.21.11","26.1.2"]`; the notes
+  range → `1.9.4 → 26.1.2`.
+- `./gradlew build` — GREEN on 2.3.2: unit tests, japicmp, kernel-Bukkit-free,
+  verifyDowngrade (base ≤ v52, 180 forked v61 / 88 base-only, sentinel forked),
+  verifyJdk8Api (core + tester, allowlist empty), verifyRelocation,
+  verifyTesterIsolation.
+- **`integrationTestMatrix` — BUILD SUCCESSFUL in 19m 52s, all 16 entries,
+  every tier line matching its declared `bytecodeTier`, zero Java-advisory and
+  zero linkage-error lines in all 8 legacy logs:**
+  `[1.9.4] dd378089-8ad9-40b7-b148-f03736822809` v61 ·
+  `[1.10.2] a9217726-b041-4ed9-bc16-0f6b6f64cd6f` v61 ·
+  `[1.11.2] 910628aa-3cb7-4fa2-aa35-4ab27a59baf4` v61 ·
+  `[1.12.2] c76500db-df5a-4c22-8877-8b6051644592` v61 ·
+  `[1.13.2] c02cd164-7983-4c74-9858-f80e745f2f35` v52 ·
+  `[1.14.4] a4daa5e5-a808-4692-b97e-f5d9837538de` v52 ·
+  `[1.15.2] fe23b507-e6a1-461f-9f16-0bd7baf627fa` v52 ·
+  `[1.16.5] c914e2d5-afcb-41a6-8bef-79c49cfff0bb` v52 ·
+  `[1.17.1] a839c77b-9d8d-4bdb-88c1-c493b42ff612` v61 ·
+  `[1.18.2] fc330047-2d83-4ed7-b4a2-80069314f302` v61 ·
+  `[1.19.4] 066235c1-fc28-49b6-8fe2-11371cae39f5` v61 ·
+  `[1.20.6] 540e0468-3459-411e-b564-09a34ca4a4dc` v61 ·
+  `[1.21.4] 0da0fdd4-6d38-446e-b5e3-0887b3e284a6` v61 ·
+  `[1.21.11] 898a93ba-a870-42b4-905e-3643511a2309` v61 ·
+  `[26.1.2] e2ab7b81-17bc-4fb2-a048-c3cbae85ad45` v61 ·
+  `[26.1.2 Folia] 735bd7e2-6107-4888-bc81-40815c6f198a` v61.
+- **`integrationTestOcm` — BUILD SUCCESSFUL, both v61:**
+  `[1.17.1 +OCM] a6c3ba57-b480-4ffc-90ed-ee6edce49982` ·
+  `[26.1.2 +OCM] 5699d5a1-3163-4a8f-8c30-c5f52022cc6f`.
+- The Phase-3 `doFirst` prune re-proven on the 2.3.1-beta → 2.3.2 rename: every
+  `run/<v>/plugins` holds only run-paper's `-2.3.2_RunServer_plugin.jar` copies —
+  zero stale versioned jars anywhere (a leftover `Mental-2.3.1-beta.jar` would
+  have double-loaded).
+
+**Deviations: none.** The campaign is release-ready: merge `feat/full-range` →
+main and the auto-releaser tags v2.3.2 as the FULL release taking "Latest".
