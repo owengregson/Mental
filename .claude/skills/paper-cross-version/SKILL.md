@@ -78,6 +78,36 @@ under its Java-13 cap; the v52 base fixes exactly that.
   `Enchantments`. A probe that misses prints ONE loud boot line (no silent
   degradation — mandate B10) and installs the era-intent fallback. The manifest
   boot report is the ground truth of what resolved present/absent per version.
+- **The listener-descriptor hazard (2.4.1 GAP 1).** No sub-floor Bukkit type may
+  appear in ANY method/field descriptor of a class handed to `registerEvents`.
+  Bukkit's `createRegisteredListeners` reflects over EVERY declared method of the
+  listener class; resolving a descriptor whose parameter/return type is absent on
+  this server throws `NoClassDefFoundError`, which Bukkit swallows into a single
+  SEVERE line ("has failed to register events for class …") and registers ZERO
+  handlers — every handler in the class dies while the plugin keeps running and
+  the rest of the feature looks alive. The Bukkit-listener analog of the D-8
+  descriptor rule. The story: `GoldenApplesUnit`'s private `nappleKey()` returned
+  `NamespacedKey` (lands 1.12), so `onConsume` never registered on 1.9.4–1.11.2
+  while the recipe half (a `scope.task`, no reflection) kept working. Remedy:
+  hoist every sub-floor-typed symbol into a small NON-Listener helper
+  (`NappleKeyed`) instantiated only behind the platform resolver (`Recipes`);
+  merely LOADING the helper — which descriptor resolution does on every version —
+  links nothing sub-floor, because constant-pool entries resolve lazily. Body-only
+  references (guarded calls, caught `X.class` literals) are safe; descriptors are
+  not.
+- **The companion trap: the per-event bus swallow (2.4.1 GAP 2).** A handler that
+  throws is logged per event ("Could not pass event … to Mental") and the server
+  keeps going. A direct getstatic of a sub-floor enum constant
+  (`ENTITY_SWEEP_ATTACK`, lands 1.11) is a STICKY `NoSuchFieldError`: the failed
+  constant-pool entry rethrows on EVERY subsequent execution — here, on every
+  `EntityDamageEvent` of any cause. Resolve enum constants ONCE at boot via
+  `Enum.valueOf` in try/catch (platform `SweepCauses`, never a getstatic), and
+  where absent do not register the listener at all — the skip is decided once at
+  assemble with a printed degrade line (`SweepUnit`/`AttackCooldownUnit`). Since
+  2.4.1 the gate SCANS the captured console log for both signatures plus any
+  mental-framed linkage error (D-9, `checkIntegrationTest` +
+  `scripts/integration-matrix.sh`): a PASS with either is structurally a FAIL, so
+  neither trap can ride a green matrix again.
 - **`LegacyMaterialNames` is the SINGLE translation seam.** The kernel's material
   vocabulary stays modern and version-blind;
   `platform/LegacyMaterialNames.modernize` is the ONLY place pre-flattening names
