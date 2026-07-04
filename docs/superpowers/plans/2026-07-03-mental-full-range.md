@@ -659,3 +659,116 @@ changed).
    `MentalPluginV5.describeBytecodeTier` still has an `intermediate (v60)` branch
    and the verify tasks still guard a `versions/16` tree — neither can occur now
    (no v60 tier), so both are no-ops. Fold away when convenient.
+
+### Phase 3 outcome (2026-07-03, Opus) — 1.14.4 at full tier, the last hole closed
+
+Commit `bbfe10a`. 1.14.4 is now a supported full-tier matrix entry; the range is
+Paper 1.9.4 → 26.x with **no holes and no flags**. The scout was right — the
+FakePlayer needed **zero code changes** (every `v1_14_R1` reflective branch
+resolves; the `legacyAsyncJoin()` probe routes the synchronous join correctly).
+
+**1.14.4 download-source verdict (load-bearing for CI): GREEN.** `fill.papermc.io`
+v3 serves Paper **1.14.4 build 245** (`GET …/v3/projects/paper/versions/1.14.4/builds`
+→ HTTP 200; `paper-1.14.4-245.jar`, sha256 `bd8ec5cdb2…`, 43,972,138 bytes —
+byte-identical to the reference jar). run-paper downloaded it on the first
+`checkIntegrationTest_1_14_4` ("Latest build for 1.14.4 is 245… Verified SHA256
+hash") into `~/.gradle/caches/run-task-jars/paper/jars/1.14.4/245.jar`. No cache
+seeding was needed; CI will fetch it the same way.
+
+**What landed, file-by-file:**
+- `support-matrix.json`: the `{ "version": "1.14.4", "jdk": 13, "platform":
+  "paper", "suites": "full", "ci": "release", "bytecodeTier": 52 }` entry
+  (version-sorted between 1.13.2 and 1.15.2); the `_comment`'s hole sentence
+  rewritten — no longer a hole, keeping WHY it ever was (the old v61 jar could not
+  load on any JVM 1.14.4 accepts).
+- `docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md`: authored (14
+  per-branch verdicts, the straddle, loader/PDC/AbstractArrow/api-version
+  oddities, live proof).
+- `docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md`: three
+  divergence rows corrected in place (dated 2026-07-03) — PIM `(WorldServer)` and
+  `Vec3D mot`/`setMot` begin at **1.14.4** (not 1.15.2); the async-join split
+  begins at **1.15.2** (not 1.14).
+- `FakePlayer.java`: the two stale async-join comments fixed (split is 1.15+, and
+  1.14.4 stays synchronous — no code change, comment only).
+- `core/build.gradle.kts`: the integration `doFirst` now prunes stale versioned
+  plugin JARs (`Mental-*.jar` / `MentalTester-*.jar` / `OldCombatMechanics*.jar`)
+  from the shared `run/<v>/plugins` dir. **This was necessary, not just
+  future-proofing:** run-paper's own `deleteOldPlugins` only clears its
+  `_RunServer_plugin.jar`-suffixed copies, and the Phase-2 `integration-matrix.sh`
+  run had left verbatim `Mental-2.3.1-beta.jar` copies in every run dir — a Gradle
+  run over those would double-load an ambiguous "Mental". The fix is live-proven:
+  after `checkIntegrationTest_1_13_2`, `run/1.13.2/plugins` held only run-paper's
+  suffixed jars, zero ambiguous-plugin errors. (Placed in `doFirst`, which Gradle
+  runs before run-paper's `setupPlugins` in `exec()`, so this run's set is
+  re-copied afterward — verified against run-task 3.0.2 via javap.)
+
+**Item-4 finding — the "manifest-expectations table" is version-agnostic.**
+`BootSuite.manifestPresentSince()` keys by manifest ENTRY name with a
+present-since band, not by version — there are no per-version "1.13.2/1.15.2 rows"
+to add a "1.14.4 row" beside, and `ServerEnvironment.parse()` recognizes any
+numeric version generically. No manifest entry has a 1.14.x boundary, so 1.14.4
+resolves identically to its neighbours by construction; the live
+`manifestDegradesPerVersion` test (16/25 handles resolved, features disabled:
+none) IS the per-version pin and PASSED. Per escalate-don't-weaken, no fake
+version-keyed row was fabricated. **Every boot-report resolver cell matched the
+plan's predictions exactly** (captured live from the 1.14.4 gate boot log):
+
+> `platform profile — 16/25 handles resolved; sword-block=NONE
+> attack-range=attribute-only max-damage=material hurt-protocol=legacy; features
+> disabled: none` · `bytecode tier: downgraded (v52)` · `latency probe transport:
+> TRANSACTION (rim=TransactionProbeRim)` · `currentTick=true folia=false
+> modernSchedulers=false brigadierCommands=false registryAttributes=false
+> knockbackEvent=false` · `rule-feature accessors — absorption=LivingEntity#getAbsorptionAmount(),
+> potion-effect=LivingEntity#getPotionEffect(type), item-cooldown API present
+> (1.11.2+), crit-posture[climbing=FEET_BLOCK in-water=FEET_BLOCK
+> attack-charge=NMS_STRENGTH], hand-raised=HumanEntity#isHandRaised()` · PDC
+> present (no NBT-fallback warning; golden-apples takes the legacy `recipeIterator`
+> path).
+
+**Gate evidence (verbatim, fresh nonces; all runs: tier line matched
+`bytecodeTier`, zero LinkageError/NoClassDefFoundError/NoSuchMethodError/
+VerifyError, zero Java-advisory lines in every legacy log):**
+- `./gradlew build` — GREEN: unit tests, `:api:apiCompat` (japicmp), `:kernel:check`
+  (Bukkit-free), and all four mega-jar verify gates (verifyDowngrade / verifyJdk8Api
+  / verifyRelocation / verifyTesterIsolation).
+- **1.14.4 stability (twice, sequential, fresh nonce each):**
+  `[1.14.4] … (nonce=55eba8cb-d393-48d0-8578-73304870c65b)` then
+  `[1.14.4] … (nonce=a9c5654c-c580-4c15-9c82-6125e6023208)` — both tier
+  `downgraded (v52)`, 56/56.
+- **Neighbours re-pass:** `[1.13.2] … (nonce=d666c58b-787f-4d6d-a715-46e770b38e10)`,
+  `[1.15.2] … (nonce=60e39d93-e87d-41cc-a692-eb612d25456c)`.
+- **`integrationTestMatrix` — BUILD SUCCESSFUL in 19m 54s, all 16 entries:**
+  `[1.9.4] 7d70dba5-d4f4-4b95-af24-d508d461de7e` ·
+  `[1.10.2] e6bb85a0-2277-47e2-b736-d1f763c324c5` ·
+  `[1.11.2] 98c35b4e-e921-4b8b-bc4c-3937f037f39a` ·
+  `[1.12.2] f37a7833-aca7-4aee-86da-4779a97bba9d` ·
+  `[1.13.2] a05ef2a5-7bf0-482a-b8a6-adcc24f56440` ·
+  `[1.14.4] 6068814e-96ef-457d-8698-63b04b9a7dd8` (tier 52 — the new entry) ·
+  `[1.15.2] db25fc06-aba9-4b73-9a69-981a3ad80763` ·
+  `[1.16.5] 9ea71b60-0bbd-4262-b5b0-2e3840e85425` ·
+  `[1.17.1] f80e5b9f-0382-4064-ab56-539796f22edd` ·
+  `[1.18.2] 49bd56ba-8f07-4786-8e39-85d8ad410413` ·
+  `[1.19.4] 8747f4be-341f-48e5-949c-ec4678787868` ·
+  `[1.20.6] c735c5eb-87e9-4fb5-a9fd-2a217b1050eb` ·
+  `[1.21.4] a9f6643b-34df-451b-9549-da823ade3a66` ·
+  `[1.21.11] c4a2ea90-038a-401e-99d6-e8875c647568` ·
+  `[26.1.2] f576c028-59a8-47dd-8f3e-a28b4490e80e` ·
+  `[26.1.2 Folia] 73c1650d-3e6a-4681-92ab-21235a66e810`.
+- **`integrationTestOcm` — both v61:**
+  `[1.17.1 +OCM] a9970893-d449-4d49-857c-8e3805d7fd77` ·
+  `[26.1.2 +OCM] 08b840fc-4915-4657-aaaa-3208e09d8150`.
+- **`scripts/integration-matrix.sh --no-ocm` — MATRIX PASSED (15 servers)** on a
+  retry. The FIRST script run FAILED 1.9.4 only (55/56 — the combo-stacking ledger
+  test missed by `best delta 0.035`, a sub-tick wall/game skew), while the
+  authoritative sequential Gradle matrix passed 1.9.4 cleanly (`7d70dba5`) and
+  Phase 3 touches no combat/ledger code. Adding 1.14.4 makes this the **15th**
+  concurrent JVM on one machine — the extra load tipped 1.9.4 (oldest, most
+  load-sensitive) into the documented concurrency flake; the retry cleared it with
+  no assertion weakened. (CI runs the matrix sequentially / parallel-across-runners,
+  never 15-on-one-machine, so this is a local-only load ceiling.)
+
+**Note for Phase 4:** `support-matrix.json` now carries **1** `IgnoreJavaVersion`
+mention — the historical clause in the rewritten 1.14.4 note explaining why it was
+ever a hole (kept deliberately). README / release.yml / the matrix-gate &
+live-server-testing skills still describe 1.14.4 as an "impossible hole" and cite
+the 14/15-entry gate shape — all Phase 4's scope.
