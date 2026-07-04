@@ -219,6 +219,52 @@ class DeliveryDeskTest {
         assertEquals("superseded", desk.journal().get(0).suppressReason());
     }
 
+    /* ── withdrawSuperseded + journalDrop (blocked-knock correlation) ──── */
+
+    @Test
+    void withdrawSupersededJournalsTheRedeliverReferencingTheFreshId() {
+        DeliveryDesk desk = desk();
+        HitTransaction original = preSent(1, VECTOR, 0);
+        desk.submit(original, VECTOR);
+
+        desk.withdrawSuperseded(new HitId(1), "blocked-redeliver", new HitId(7));
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(1, journal.size());
+        assertNull(journal.get(0).shipped(), "a withdrawn redelivery ships nothing");
+        assertEquals("blocked-redeliver -> 7", journal.get(0).suppressReason(),
+                "the withdrawal must reference the superseding fresh id");
+        assertEquals(HitTransaction.State.RECORDED, original.state());
+
+        // The pending is cleared — a later resolve finds nothing to ship.
+        desk.awaitVelocityEvent(original);
+        assertEquals(Action.PASS_THROUGH, desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z()).action());
+    }
+
+    @Test
+    void withdrawSupersededIsANoOpForANeverSubmittedOriginal() {
+        DeliveryDesk desk = desk();
+        // A region-path original is never submitted to the desk (REGISTERED).
+        desk.withdrawSuperseded(new HitId(1), "blocked-redeliver", new HitId(7));
+        assertTrue(desk.journal().isEmpty(), "nothing pending ⇒ no correlation record");
+    }
+
+    @Test
+    void journalDropAppendsACorrelatedNoteWithoutAStateTransition() {
+        DeliveryDesk desk = desk();
+        HitTransaction fresh = new HitTransaction(ctx(9, new HitSource.Melee(), 0));
+
+        desk.journalDrop(fresh, "victim-retired");
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(1, journal.size());
+        assertEquals(9L, journal.get(0).id().value());
+        assertNull(journal.get(0).shipped());
+        assertEquals("victim-retired", journal.get(0).suppressReason());
+        // The fresh tx never became pending — no state transition (still REGISTERED).
+        assertEquals(HitTransaction.State.REGISTERED, fresh.state());
+    }
+
     /* ── 8/9. sweep drops earlier-tick awaiting transactions ───────────── */
 
     @Test

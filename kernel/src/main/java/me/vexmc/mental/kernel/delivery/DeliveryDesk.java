@@ -67,6 +67,36 @@ public final class DeliveryDesk {
     }
 
     /**
+     * Withdraw a pending decision that a fresh transaction supersedes — the
+     * blocked-knock redelivery. Unlike {@link #withdraw(HitId)}, which is silent
+     * for genuine cancels/yields, this JOURNALS the withdrawal (the reason,
+     * referencing {@code supersededBy}) so a blocked hit stays correlatable to the
+     * fresh id that carries its SHIP. A no-op when {@code id} is not the live
+     * pending (e.g. a region-path original that was never submitted to the desk).
+     */
+    public void withdrawSuperseded(HitId id, String reason, HitId supersededBy) {
+        drainWire();
+        if (pending != null && pending.context().id().equals(id) && LIVE.contains(pending.state())) {
+            pending.suppressed(reason);
+            record(pending, null, false, reason + " -> " + supersededBy.value());
+            clearDecision();
+        }
+    }
+
+    /**
+     * Journal a bare drop for a transaction that never reached a resolution — the
+     * blocked-knock redelivery whose owning-thread task retired before it could
+     * submit. It never became pending, so there is no state machine transition;
+     * the note is correlatable and never a valve (replaces a silent {@code () ->
+     * {}} retired fallback).
+     */
+    public void journalDrop(HitTransaction tx, String reason) {
+        appendJournal(new JournalEntry(
+                tx.context().id(), tx.context().source(), null, false, reason,
+                clock.current(), tx.paceFactor()));
+    }
+
+    /**
      * The damage pass marks that the imminent velocity event resolves the pending
      * decision. It never resurrects a withdrawn or absent decision — the pending
      * transaction is established only by {@link #submit}/{@link #submitFromWire};
@@ -224,13 +254,18 @@ public final class DeliveryDesk {
 
     /** Journals the transaction and marks it RECORDED (terminal). */
     private void record(HitTransaction tx, KnockbackVector shipped, boolean wireCarried, String reason) {
-        journal.addLast(new JournalEntry(
+        appendJournal(new JournalEntry(
                 tx.context().id(), tx.context().source(), shipped, wireCarried, reason,
                 clock.current(), tx.paceFactor()));
+        tx.recorded();
+    }
+
+    /** Appends a journal entry and evicts the oldest past capacity. */
+    private void appendJournal(JournalEntry entry) {
+        journal.addLast(entry);
         while (journal.size() > journalCapacity) {
             journal.removeFirst();
         }
-        tx.recorded();
     }
 
     private static String reasonFor(State state) {

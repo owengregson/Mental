@@ -56,6 +56,29 @@ public interface Scheduling {
     void runOn(@NotNull Entity entity, @NotNull Runnable task, @NotNull Runnable retired);
 
     /**
+     * Runs {@code task} on the thread that owns {@code entity} — INLINE and
+     * synchronously when the current thread already owns it (a damage handler on
+     * the victim's own region, or the single Paper main thread), otherwise
+     * deferred exactly like {@link #runOn}. The inline path removes the one-tick
+     * hop for work that is already on the right thread, which is era-consistent:
+     * vanilla knockback applies during the attack pass, not a tick later.
+     *
+     * <p>MUST be called from a region/owning thread (like
+     * {@link #isOwnedByCurrentRegion}) — never the netty loop — since the inline
+     * branch runs {@code task} on the caller's thread. A live entity owned by the
+     * caller never retires, so the inline branch never invokes {@code retired};
+     * the deferred branch honours the {@link #runOn} retired contract (either
+     * thread, exactly once).</p>
+     */
+    default void ensureOn(@NotNull Entity entity, @NotNull Runnable task, @NotNull Runnable retired) {
+        if (entity.isValid() && isOwnedByCurrentRegion(entity)) {
+            task.run();
+        } else {
+            runOn(entity, task, retired);
+        }
+    }
+
+    /**
      * Whether {@code entity} is owned by the region executing on the CURRENT
      * thread. On Paper there is a single region — the main thread owns
      * everything — so this is always {@code true}; on Folia it is the real

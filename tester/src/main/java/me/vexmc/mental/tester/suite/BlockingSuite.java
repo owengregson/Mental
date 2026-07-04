@@ -158,6 +158,11 @@ public final class BlockingSuite {
             double horizontal = Math.hypot(ship.shipped().x(), ship.shipped().z());
             context.expectNear(0.4, horizontal, 5.0e-3,
                     "blocked-hit shipped horizontal magnitude (era base 0.4 — a FULL knock)");
+            // Journal correlation (D-6): this suite runs the pace-off default profile,
+            // so the re-minted blocked redelivery must journal pace factor 1.0 — a
+            // stance-desync (0.769) or hard clamp (2.0) would trip here.
+            context.expectNear(1.0, ship.paceFactor(), 1.0e-9,
+                    "a pace-off blocked redelivery must journal paceFactor 1.0");
             // Damage is a native PARTIAL reduction of the base 7.0 (never cancelled).
             Double finalDmg = captors.finalDamageOf(blocker.uuid());
             context.expect(finalDmg != null && finalDmg > 0.0 && finalDmg < 7.0,
