@@ -133,6 +133,10 @@ public final class ComboSuite {
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
                         view, mental.sessions().viewOf(attacker.uuid()),
                         mental.sessions().positions(), new LatencyModel());
+                // D-8: the java.util.Random overload keeps a jvmdowngrader RandomGenerator
+                // stub type out of this cross-jar call's descriptor (a RandomGenerator descriptor
+                // resolves a mismatched per-plugin stub and NoSuchMethodErrors on the v52 tier).
+                // The seed is fixed so the resistance roll is deterministic against the desk's solve.
                 expected[0] = KnockbackEngine.computePaced(
                         attackerState, victimState, profile, null, new Random(0L), false, servo, inputs)
                         .comboFactor();
