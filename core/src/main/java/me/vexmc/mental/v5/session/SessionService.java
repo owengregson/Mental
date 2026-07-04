@@ -9,6 +9,9 @@ import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
+import me.vexmc.mental.kernel.combo.ComboEndReason;
+import me.vexmc.mental.kernel.combo.ComboRules;
+import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
 import me.vexmc.mental.kernel.model.KinematicState;
@@ -23,6 +26,10 @@ import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.coexist.OcmBinding;
+import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.feature.Feature;
+import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.config.Snapshot;
 import org.bukkit.GameMode;
@@ -88,6 +95,16 @@ public final class SessionService implements Listener, SessionAccess {
     /** Forget hooks other subsystems register (connection domains, latency, valve). */
     private final List<Consumer<UUID>> forgetHooks = new ArrayList<>();
 
+    /**
+     * Whether the combo-hold module holds an open scope (combo-hold §3). Flipped
+     * by the {@code ComboHoldUnit}'s assemble/close, so it is the reconciler's
+     * scope truth, not a re-read config flag. While false, sessions carry no
+     * tracker and the per-tick sweep does nothing (zero-touch); the transition to
+     * false is reconciled on each session's next tick (tracker dropped, one
+     * DISABLED end fired on its owning thread).
+     */
+    private volatile boolean comboEnabled;
+
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
             VelocityValve valve, OcmBinding ocmBinding, Supplier<Snapshot> snapshot,
@@ -126,6 +143,16 @@ public final class SessionService implements Listener, SessionAccess {
     /** Another subsystem's per-player teardown, run on quit/retire (rim domains, latency, …). */
     public void addForgetHook(Consumer<UUID> hook) {
         forgetHooks.add(hook);
+    }
+
+    /** The {@code ComboHoldUnit} opens combo tracking (assemble); trackers install lazily per tick. */
+    public void enableCombo() {
+        this.comboEnabled = true;
+    }
+
+    /** The {@code ComboHoldUnit} closes combo tracking (scope close); each session drops its tracker next tick. */
+    public void disableCombo() {
+        this.comboEnabled = false;
     }
 
     /* --------------------------- rim read seams --------------------------- */
@@ -168,6 +195,12 @@ public final class SessionService implements Listener, SessionAccess {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
+        // A player quitting mid-combo ends it (RETIRED) so the api events stay
+        // balanced; the session (and its tracker) is then discarded by forget.
+        CombatSession session = sessions.get(event.getPlayer().getUniqueId());
+        if (session != null && session.comboTracker() != null) {
+            ComboEvents.fire(event.getPlayer(), session.comboTracker().reset(ComboEndReason.RETIRED));
+        }
         forget(event.getPlayer().getUniqueId());
     }
 
@@ -230,6 +263,9 @@ public final class SessionService implements Listener, SessionAccess {
             return;
         }
         sampleGround(player, session);
+        // Drive the combo detector BEFORE building the view, so the view publishes
+        // this tick's combo state (and its time-driven ends have already fired).
+        driveCombo(player, session);
         PlayerView view = buildView(player, session);
         session.tickStep(view);
         valve.clearStale(player.getUniqueId());
@@ -306,7 +342,68 @@ public final class SessionService implements Listener, SessionAccess {
                 player.isSprinting(), player.getGameMode() == GameMode.CREATIVE, player.getWorld().getPVP(),
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
                 knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics,
-                moveSpeedAttr);
+                moveSpeedAttr, session.comboAttackerId());
+    }
+
+    /**
+     * The combo-hold per-tick sweep (combo-hold §3.1) — run on the owning thread
+     * before the view is built so the publish reflects this tick's state. Zero-touch
+     * when the module is off: no tracker exists, no work is done. Reconciles the
+     * tracker's presence with the module's scope (installing lazily on enable,
+     * dropping with one DISABLED end on disable), then feeds the detector this
+     * tick's grounded flag and pair separation and fires any transition.
+     */
+    private void driveCombo(Player player, CombatSession session) {
+        ComboTracker tracker = session.comboTracker();
+        if (!comboEnabled) {
+            if (tracker != null) {
+                ComboEvents.fire(player, tracker.reset(ComboEndReason.DISABLED));
+                session.clearComboTracker();
+            }
+            return;
+        }
+        ComboRules rules = comboRules();
+        if (tracker == null) {
+            tracker = session.installComboTracker(rules);
+        } else if (!tracker.rules().equals(rules)) {
+            // A reload changed the detector thresholds: end any active combo cleanly
+            // and rebuild with the new rules (rare — a deliberate admin action).
+            ComboEvents.fire(player, tracker.reset(ComboEndReason.RETIRED));
+            tracker = session.installComboTracker(rules);
+        }
+        @SuppressWarnings("deprecation") // the client-reported flag is the transition-relevant one
+        boolean grounded = player.isOnGround();
+        double separation = separationTo(player.getUniqueId(), tracker.activeAttacker());
+        ComboEvents.fire(player, tracker.onTick(clock.current(), grounded, separation));
+    }
+
+    /**
+     * Horizontal separation between the victim and {@code attackerId} from the
+     * position ring (≤1 tick stale — the ring writes once per owning-thread tick),
+     * or {@link Double#NaN} when the attacker is unknown or either sample is
+     * absent. NaN never triggers the blowout end, so an unresolved pair simply
+     * does not blow out.
+     */
+    private double separationTo(UUID victimId, UUID attackerId) {
+        if (attackerId == null) {
+            return Double.NaN;
+        }
+        PositionRing.Sample victim = positions.latest(victimId);
+        PositionRing.Sample attacker = positions.latest(attackerId);
+        if (victim == null || attacker == null) {
+            return Double.NaN;
+        }
+        double dx = attacker.x() - victim.x();
+        double dz = attacker.z() - victim.z();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    /** The live combo detector thresholds from the snapshot (picked up on reload). */
+    @SuppressWarnings("unchecked")
+    private ComboRules comboRules() {
+        ComboSettings settings = snapshot.get().settings(
+                (SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
+        return settings.rules();
     }
 
     private static String blockUnderFeet(Player player, Location location) {

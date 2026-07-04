@@ -1,13 +1,17 @@
 package me.vexmc.mental.v5.delivery;
 
 import me.vexmc.mental.api.event.KnockbackApplyEvent;
+import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.Directive;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.Vectors;
+import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.session.SessionService;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
@@ -36,10 +40,12 @@ public final class DeskRouter implements Listener {
 
     private final SessionService sessions;
     private final VelocityValve valve;
+    private final TickClock clock;
 
-    public DeskRouter(SessionService sessions, VelocityValve valve) {
+    public DeskRouter(SessionService sessions, VelocityValve valve, TickClock clock) {
         this.sessions = sessions;
         this.valve = valve;
+        this.clock = clock;
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -69,9 +75,32 @@ public final class DeskRouter implements Listener {
         Vector velocity = api.velocity();
         Directive directive = desk.resolve(velocity.getX(), velocity.getY(), velocity.getZ());
         DirectiveExecutor.apply(directive, sinkFor(event), victim.getUniqueId(), valve);
-        if (context != null) {
+        if (context != null && directive.ship() != null) {
             Deliveries.recordDelivered(session, context.source(), directive.ship());
+            // The combo detector's shipped-hit feed (combo-hold §3.1): a melee knock
+            // that actually shipped to this victim advances the chain on its attacker.
+            // This is the ONE ship seam every melee delivery funnels through — the
+            // region path, the pre-sent/pinned adopt, and the blocked re-delivery all
+            // resolve here — so it needs no per-path duplication.
+            feedComboOnShip(session, victim, context);
         }
+    }
+
+    /** Feeds the victim's combo tracker one shipped melee knock; fires any transition. Owning thread. */
+    private void feedComboOnShip(CombatSession session, Player victim, HitContext context) {
+        ComboTracker tracker = session.comboTracker();
+        if (tracker == null) {
+            return; // module off — zero-touch
+        }
+        if (!isMelee(context.source()) || context.attackerId() == null) {
+            return; // rods/projectiles/self-launches never form combos
+        }
+        ComboEvents.fire(victim, tracker.onKnockShipped(context.attackerId(), clock.current()));
+    }
+
+    private static boolean isMelee(HitSource source) {
+        return source instanceof HitSource.Melee
+                || (source instanceof HitSource.Vanilla vanilla && "ENTITY_ATTACK".equals(vanilla.damageCause()));
     }
 
     private static VelocitySink sinkFor(PlayerVelocityEvent event) {

@@ -8,11 +8,13 @@ import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
+import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.delivery.ValvePayload;
 import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -31,12 +33,14 @@ import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.Snapshot;
+import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.delivery.HitIds;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.rim.BurstSender;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
@@ -190,7 +194,8 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             if (freshPartialBlock) {
                 deliverBlockedKnock(
                         session, victim, attacker, source, tx, tx.carried(),
-                        state == HitTransaction.State.PRE_SENT, sprinting, tx.paceFactor());
+                        state == HitTransaction.State.PRE_SENT, sprinting, tx.paceFactor(),
+                        tx.comboFactor());
                 return;
             }
             // Adopt the pre-delivered vector — the era stamped once.
@@ -204,15 +209,20 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         EntityState attackerState = EntityStates.capture(attacker, sprinting);
         boolean freshSprint = source instanceof HitSource.Melee && sprinting
                 && tx.context().sprint().fresh() != null && tx.context().sprint().fresh();
+        // The pocket servo (combo-hold §3.2): active only when THIS attacker holds
+        // the victim's active combo, read from the victim's frozen view — one truth
+        // shared with the netty pre-send. INACTIVE ⇒ σ = 1.0 (byte-identical).
+        PocketServoConfig servo = comboServoFor(session.view(), attacker.getUniqueId());
         KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                 attackerState, victimState, profile, compensationY,
-                ThreadLocalRandom.current(), freshSprint);
+                ThreadLocalRandom.current(), freshSprint, servo);
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
+        tx.comboFactor(paced.comboFactor());
 
         if (freshPartialBlock) {
             deliverBlockedKnock(session, victim, attacker, source, tx, vector, false, sprinting,
-                    tx.paceFactor());
+                    tx.paceFactor(), tx.comboFactor());
             return;
         }
 
@@ -282,12 +292,20 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (!(attacker instanceof Player player)) {
             return;
         }
+        UUID attackerId = player.getUniqueId();
+        CombatSession attackerSession = sessions.sessionFor(attackerId);
+        // Combo-hold retaliation (combo-hold §3.1): the player who just landed this
+        // accepted melee is the combo VICTIM if they were being juggled — landing
+        // any hit ends the combo held against them. This resolves the ATTACKER's
+        // own session (same region as the victim for melee), so it stamps the
+        // right tracker regardless of whether the hit carried a sprint bonus.
+        if (attackerSession != null && attackerSession.comboTracker() != null) {
+            ComboEvents.fire(player, attackerSession.comboTracker().onOwnHitLanded(clock.current()));
+        }
         boolean bonus = sprinting || heldKnockbackLevel(player) > 0;
         if (!bonus) {
             return;
         }
-        UUID attackerId = player.getUniqueId();
-        CombatSession attackerSession = sessions.sessionFor(attackerId);
         if (attackerSession != null) {
             attackerSession.ledger().scaleHorizontal(0.6);
         }
@@ -345,7 +363,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private void deliverBlockedKnock(
             CombatSession session, Player victim, LivingEntity attacker, HitSource source,
             HitTransaction original, KnockbackVector era, boolean wirePreSent, boolean sprinting,
-            double paceFactor) {
+            double paceFactor, double comboFactor) {
         applyAttackerObligations(attacker, sprinting, original.context().sprint().at());
         if (era == null) {
             return; // nothing carried/computed — leave vanilla's (absent) knock
@@ -356,7 +374,8 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // Mint the fresh redelivery up front so the withdraw can name its
         // superseding id and a retired delivery can journal a correlated drop. It
         // carries the ORIGINAL sprint verdict — the journal context stays honest.
-        HitTransaction fresh = mint(source, attackerId, victimId, original.context().sprint(), paceFactor);
+        HitTransaction fresh = mint(source, attackerId, victimId, original.context().sprint(),
+                paceFactor, comboFactor);
         // Withdraw + JOURNAL the original (a PRE_SENT/PINNED submitFromWire) so the
         // tick sweep cannot record it as a false "no-velocity-event"; a REGISTERED
         // region-path original was never on the desk, so this is a no-op there.
@@ -402,11 +421,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     }
 
     private HitTransaction mint(
-            HitSource source, UUID attackerId, UUID victimId, SprintVerdict verdict, double paceFactor) {
+            HitSource source, UUID attackerId, UUID victimId, SprintVerdict verdict,
+            double paceFactor, double comboFactor) {
         HitContext context = new HitContext(
                 ids.next(), source, attackerId, victimId, verdict, false, false, null, clock.current());
         HitTransaction fresh = new HitTransaction(context);
-        fresh.paceFactor(paceFactor); // carry the factor the original applied (D-6)
+        fresh.paceFactor(paceFactor); // carry the factors the original applied (D-6)
+        fresh.comboFactor(comboFactor);
         return fresh;
     }
 
@@ -445,6 +466,26 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private KnockbackProfile profileFor(CombatSession session, Player victim) {
         PlayerView view = session.view();
         return view != null ? view.profile() : snapshot.get().profileFor(victim.getWorld().getName());
+    }
+
+    /**
+     * The pocket-servo config for a hit from {@code attackerId} to the victim
+     * whose frozen {@code view} is given (combo-hold §3.2). Active only when the
+     * module is on AND this attacker is the one the view says holds the victim's
+     * active combo — the same gate the netty pre-send uses, off one frozen truth.
+     * Otherwise {@link PocketServoConfig#INACTIVE} (σ = 1.0, byte-identical).
+     */
+    @SuppressWarnings("unchecked")
+    private PocketServoConfig comboServoFor(PlayerView view, UUID attackerId) {
+        if (view == null || attackerId == null || !snapshot.get().enabled(Feature.COMBO_HOLD)) {
+            return PocketServoConfig.INACTIVE;
+        }
+        if (!attackerId.equals(view.comboAttackerId())) {
+            return PocketServoConfig.INACTIVE;
+        }
+        ComboSettings settings = snapshot.get().settings(
+                (SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
+        return settings.servo();
     }
 
     private static int heldKnockbackLevel(Player player) {

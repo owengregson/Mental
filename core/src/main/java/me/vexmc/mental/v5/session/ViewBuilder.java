@@ -36,10 +36,31 @@ public final class ViewBuilder {
             double knockbackResistance, boolean ocmOwnsMeleeKnockback,
             KnockbackProfile profile, int pingMillis,
             KinematicState kinematics, double moveSpeedAttr) {
+        return build(id, entityId, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                pingMillis, kinematics, moveSpeedAttr, null);
+    }
+
+    /**
+     * The combo-hold overload — carries the {@code comboAttackerId} (the attacker
+     * holding an active combo against this player, or null) into the view so the
+     * pocket-servo application gate reads one frozen truth. The pre-servo overload
+     * defaults it to null (module off / no active combo ⇒ σ = 1.0).
+     */
+    public PlayerView build(
+            UUID id, int entityId,
+            Decay.Motion motion, boolean grounded, double slipperiness,
+            double gravity, double jumpImpulse, int jumpBoostAmplifier,
+            boolean sprinting, boolean creative, boolean pvpAllowed,
+            int noDamageTicks, int maxNoDamageTicks,
+            double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+            KnockbackProfile profile, int pingMillis,
+            KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId) {
         return new PlayerView(
                 id, entityId, clock.current(), motion, grounded, slipperiness,
                 gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
                 noDamageTicks, maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback,
-                profile, pingMillis, kinematics, moveSpeedAttr);
+                profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId);
     }
 }

@@ -69,6 +69,7 @@ import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
@@ -295,7 +296,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The delivery routers (spec §3.4–§3.6): the desk's sole PlayerVelocityEvent
         // writer, the damage-pass router, and the capability-gated knockback-event
         // mirror. Always-on infra, inert while nothing submits to a desk (all of 4A1).
-        getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve), this);
+        getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve, clock), this);
         getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock, hitIds), this);
         if (capabilities.knockbackEvent()) {
             new MirrorListener(sessions).register(this);
@@ -657,6 +658,14 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new CraftingUnit(this::snapshot));
         reconciler.register(new OffhandUnit(this::snapshot, scheduling));
         reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange()));
+
+        // The combo family (2.5.0). The pocket servo lives entirely session-side:
+        // the unit's scope opens/closes combo tracking on the SessionService; every
+        // tracker feed (the delivery fold, the victim's own landed hits, the per-tick
+        // sweep), the view publish, and the servo application at the engine seam are
+        // already wired into the session/delivery/knockback code. Zero-touch when the
+        // scope is closed (no tracker, no sweep work).
+        reconciler.register(new ComboHoldUnit(sessions));
     }
 
     private Snapshot parseSnapshot() {

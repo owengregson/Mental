@@ -19,6 +19,7 @@ import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -34,6 +35,7 @@ import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.kernel.wire.ReachValidator;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
+import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
@@ -145,6 +147,26 @@ public final class HitRegistrationUnit implements FeatureUnit {
     private HitRegSettings settings() {
         return snapshot.get().settings(
                 (me.vexmc.mental.v5.feature.SettingsKey<HitRegSettings>) Feature.HIT_REGISTRATION.settingsKey());
+    }
+
+    /**
+     * The pocket-servo config for a pre-send from {@code attackerId} to the victim
+     * whose frozen {@code victimView} is given (combo-hold §3.2). Active only when
+     * the module is on AND this attacker holds the victim's active combo — the same
+     * gate the region path uses, off the one frozen truth, so an adopted pre-send
+     * and a recompute agree. Otherwise {@link PocketServoConfig#INACTIVE}.
+     */
+    @SuppressWarnings("unchecked")
+    private PocketServoConfig comboServoFor(PlayerView victimView, UUID attackerId) {
+        if (victimView == null || attackerId == null || !snapshot.get().enabled(Feature.COMBO_HOLD)) {
+            return PocketServoConfig.INACTIVE;
+        }
+        if (!attackerId.equals(victimView.comboAttackerId())) {
+            return PocketServoConfig.INACTIVE;
+        }
+        ComboSettings settings = snapshot.get().settings(
+                (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
+        return settings.servo();
     }
 
     /* ---------------------------- the netty listener ---------------------------- */
@@ -277,13 +299,20 @@ public final class HitRegistrationUnit implements FeatureUnit {
             KnockbackVector vector = null;
             String suppressed = suppressorFor(ocmOwns, profile, victimView);
             if (suppressed == null) {
+                // The pocket servo (combo-hold §3.2): active only when THIS attacker
+                // holds the victim's active combo (read from the victim's frozen view
+                // — the SAME truth the region path reads, so the adopted pre-send and a
+                // recompute would agree). INACTIVE ⇒ σ = 1.0 (byte-identical).
+                PocketServoConfig servo = comboServoFor(victimView, attackerId);
                 KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                         preAttackerState(attackerId, attackerView, verdict),
                         preVictimState(victimId, victimView),
                         profile, compensationY, ThreadLocalRandom.current(),
-                        verdict.fresh() != null && verdict.fresh() && verdict.sprinting());
+                        verdict.fresh() != null && verdict.fresh() && verdict.sprinting(),
+                        servo);
                 vector = paced.vector();
-                tx.paceFactor(paced.paceFactor()); // journal the factor the pre-send applied (D-6)
+                tx.paceFactor(paced.paceFactor()); // journal the factors the pre-send applied (D-6)
+                tx.comboFactor(paced.comboFactor());
             }
 
             // B4: the pacing gate paces the VELOCITY component ONLY. A hurt-only

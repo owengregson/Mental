@@ -1,8 +1,11 @@
 package me.vexmc.mental.v5;
 
 import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
+import me.vexmc.mental.kernel.combo.ComboRules;
+import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.ledger.MotionLedger;
@@ -45,6 +48,15 @@ public final class CombatSession {
      * always this event's; owning thread only.
      */
     private HitTransaction eventTransaction;
+
+    /**
+     * The combo detector (combo-hold §3.1) — present ONLY while the combo-hold
+     * module is enabled, so a module-off session carries no tracker and pays zero
+     * cost (zero-touch). Mutated only by the owning thread. Published into the
+     * view via {@link #comboAttackerId()}; fed by the delivery fold, the victim's
+     * own landed hits, and the per-tick session sweep.
+     */
+    private ComboTracker comboTracker;
 
     public CombatSession(double gravity, int entityId, TickClock clock, int journalCapacity) {
         this.ledger = new MotionLedger(gravity);
@@ -92,6 +104,33 @@ public final class CombatSession {
     /** The knockback unit reads this event's transaction (MONITOR), or null; owning thread only. */
     public HitTransaction currentEventTransaction() {
         return eventTransaction;
+    }
+
+    /* ------------------------------ combo hold ------------------------------ */
+
+    /** The combo detector, or null when the combo-hold module is disabled; owning thread only. */
+    public ComboTracker comboTracker() {
+        return comboTracker;
+    }
+
+    /** Installs a fresh detector with {@code rules} (module enable); returns it. Owning thread only. */
+    public ComboTracker installComboTracker(ComboRules rules) {
+        this.comboTracker = new ComboTracker(rules);
+        return this.comboTracker;
+    }
+
+    /** Drops the detector (module disable / retire) — a module-off session carries none. Owning thread only. */
+    public void clearComboTracker() {
+        this.comboTracker = null;
+    }
+
+    /**
+     * The attacker holding an ACTIVE combo against this player, or null (no
+     * tracker, or no active combo) — the value published into the {@code
+     * PlayerView} for the servo-application gate. Owning thread only.
+     */
+    public UUID comboAttackerId() {
+        return comboTracker == null ? null : comboTracker.activeAttacker();
     }
 
     /**
