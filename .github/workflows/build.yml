@@ -15,23 +15,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Read the JDK set from support-matrix.json
-        id: jdks
+      - name: Derive the build JDK from support-matrix.json
+        id: jdk
         run: |
-          # The build/runtime JDKs are the unique jdk set in the matrix — no JDK
-          # literal lives in this workflow (support-matrix.json is the only home).
-          # The Gradle toolchain (build JDK) picks the newest; the compile floor
-          # keeps the jar loadable on the oldest.
-          { echo 'list<<EOF'; jq -r '[.entries[].jdk] | unique | .[]' support-matrix.json; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+          # The BUILD JDK = the NEWEST JDK the matrix targets (jq max). setup-java
+          # installs ONLY this one; the Gradle foojay toolchain auto-provisions
+          # JDK 8 (verifyJdk8Api) on demand, exactly as locally. Temurin does not
+          # publish 13/14/16, so installing the full matrix set is impossible
+          # anyway. No JDK literal lives in this workflow (support-matrix.json is
+          # the only home). The compile floor keeps the jar loadable on the oldest.
+          echo "build=$(jq '[.entries[].jdk] | max' support-matrix.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Set up JDKs (Temurin)
+      - name: Set up the build JDK (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: ${{ steps.jdks.outputs.list }}
+          java-version: ${{ steps.jdk.outputs.build }}
           distribution: 'temurin'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
+
+      # Cache the foojay-provisioned toolchain JDKs (e.g. the JDK 8 verifyJdk8Api
+      # resolves) so they are not re-downloaded every run. gradle/actions caches
+      # ~/.gradle/caches, not ~/.gradle/jdks.
+      - name: Cache foojay-provisioned JDKs
+        uses: actions/cache@v5
+        with:
+          path: ~/.gradle/jdks
+          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
+          restore-keys: |
+            gradle-jdks-${{ runner.os }}-
 
       - name: Build and unit test
         run: ./gradlew build
@@ -69,25 +82,27 @@ jobs:
       fail-fast: true
       matrix:
         # Each matrix job is its own VM, so they run fully in parallel. The
-        # per-version JDK comes from support-matrix.json (the unique jdk set is
-        # installed below; the Gradle toolchain selects per entry).
+        # per-version JDK is foojay-auto-provisioned by Gradle from
+        # support-matrix.json; only the build JDK is installed below.
         version: ${{ fromJSON(needs.matrix.outputs.versions) }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Read the JDK set from support-matrix.json
-        id: jdks
+      - name: Derive the build JDK from support-matrix.json
+        id: jdk
         run: |
-          # Install every JDK the matrix targets (the unique jdk set); the Gradle
-          # toolchain selects the right one per entry. No JDK literal here.
-          { echo 'list<<EOF'; jq -r '[.entries[].jdk] | unique | .[]' support-matrix.json; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+          # Install ONLY the build JDK (the newest matrix JDK, jq max); the Gradle
+          # foojay toolchain auto-provisions this entry's server JDK on demand,
+          # exactly as locally. No JDK literal here (support-matrix.json is the
+          # only home).
+          echo "build=$(jq '[.entries[].jdk] | max' support-matrix.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Set up JDKs (Temurin)
+      - name: Set up the build JDK (Temurin)
         uses: actions/setup-java@v5
         with:
-          java-version: ${{ steps.jdks.outputs.list }}
+          java-version: ${{ steps.jdk.outputs.build }}
           distribution: 'temurin'
 
       - name: Set up Gradle
@@ -96,7 +111,8 @@ jobs:
       # The expensive part of booting a version is downloading paperclip and
       # patching the server. Restore the newest cache for this version and
       # save an updated one every run (the run_id key never pre-exists, so
-      # new Paper builds keep flowing into the cache).
+      # new Paper builds keep flowing into the cache). ~/.gradle/jdks rides
+      # along so this entry's foojay-provisioned server JDK is cached too.
       - name: Cache the Paper server runtime
         uses: actions/cache@v5
         with:
@@ -106,6 +122,7 @@ jobs:
             run/${{ matrix.version }}/libraries
             run/${{ matrix.version }}/world*
             ~/.gradle/caches/run-task-jars
+            ~/.gradle/jdks
           key: paper-runtime-${{ matrix.version }}-${{ github.run_id }}
           restore-keys: |
             paper-runtime-${{ matrix.version }}-

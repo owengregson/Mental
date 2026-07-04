@@ -88,14 +88,22 @@ The FakePlayer NMS bootstrap has a legacy branch, boot-selected by versioned
 packages (`net.minecraft.server.<rev>` / `org.bukkit.craftbukkit.<rev>`,
 `ReflectionRemapper.noop()` — spigot names ARE the runtime names pre-1.17). All
 per-revision NMS shapes are javap-pinned in
-`docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md` — read it,
-don't guess. The whole legacy backport is documented in
-`docs/superpowers/plans/2026-07-02-mental-legacy-backport.md`.
+`docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md` (with the
+1.14.4 straddle rows in `docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md`)
+— read them, don't guess. The whole legacy backport is documented in
+`docs/superpowers/plans/2026-07-02-mental-legacy-backport.md`; the full-range
+campaign (1.14.4 + the mega-jar) in
+`docs/superpowers/plans/2026-07-03-mental-full-range.md`.
 
-- **Synchronous join below the chunk-gated async path.** On 1.15.2+ join is
-  async/chunk-gated (`onPlayerJoinFinish(EntityPlayer, WorldServer, String)`);
-  1.9.4–1.13.2 register synchronously (`onPlayerJoin(EntityPlayer, String)`,
-  `PlayerInteractManager(World)` not `(WorldServer)`). Spawn/join is driven
+- **Synchronous join below the chunk-gated async path — the split is 1.15.2+,
+  NOT 1.14.** 1.15.2+ join is async/chunk-gated
+  (`onPlayerJoinFinish(EntityPlayer, WorldServer, String)`); 1.9.4–**1.14.4**
+  register synchronously (`onPlayerJoin(EntityPlayer, String)`). **1.14.4 is a
+  straddle**: MODERN NMS shapes (`PlayerInteractManager(WorldServer)`,
+  `Vec3D mot`/`setMot` — both begin at 1.14.4, not 1.15.2) driven through the
+  1.13-era synchronous join; 1.9.4–1.13.2 use `PlayerInteractManager(World)` and
+  the legacy motion accessors. The `legacyAsyncJoin()` probe routes each
+  correctly (zero code changes were needed for v1_14_R1). Spawn/join is driven
   synchronously and the suite waits ~5 ticks, same as modern.
 - **NMS `EntityHuman.attack(Entity)` for melee — NOT `LivingEntity#attack`.**
   Bukkit `HumanEntity.attack` is absent on all 7; `LivingEntity#attack` exists

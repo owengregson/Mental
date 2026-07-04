@@ -19,6 +19,11 @@ junit = "5.11.4"
 reflection-remapper = "0.1.3"
 shadow = "9.4.2"
 run-paper = "3.0.2"
+# JVMDowngrader — lowers the shaded Java-17 (v61) jar to a Multi-Release mega-jar
+# whose base tree is class v52 (Java 8) with the original v61 kept under
+# META-INF/versions/17, so the one artifact classloads from Java 8 up (the
+# full-range campaign, decision D-2). Pinned; the CLI-recipe fallback is documented.
+jvmdowngrader = "1.3.6"
 
 [libraries]
 paper-api-floor = { module = "io.papermc.paper:paper-api", version.ref = "paper-floor" }
@@ -39,3 +44,4 @@ netty-all = { module = "io.netty:netty-all", version = "4.1.97.Final" }
 [plugins]
 shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
 run-paper = { id = "xyz.jpenilla.run-paper", version.ref = "run-paper" }
+jvmdowngrader = { id = "xyz.wagyourtail.jvmdowngrader", version.ref = "jvmdowngrader" }

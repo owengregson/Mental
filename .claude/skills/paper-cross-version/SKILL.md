@@ -11,13 +11,16 @@ description: Use when writing or changing code that must run across Mental's who
   common path is binary-safe everywhere. Anything needing a newer API lives in
   a `compat-*` module loaded behind runtime feature detection (`Capabilities`),
   e.g. `compat-folia`, `compat-brigadier`.
-- Class-file targets: `options.release = 17`. Servers ≤ 1.20.4 run Java 17;
-  1.20.5+ requires 21 (we run 25). The integration build provisions per-version
-  toolchains automatically.
+- Class-file **compile** target: `options.release = 17`. The SHIPPED jar is then
+  a Multi-Release mega-jar — downgraded to class v52 (Java 8) as the base tree,
+  the original v61 kept under `META-INF/versions/17` — so it classloads on any
+  JVM from Java 8 up. Each server runs its **native-era Java** (per-entry `jdk`
+  in `support-matrix.json`); the integration build foojay-provisions every
+  toolchain automatically.
 - `api-version: '1.17'` in plugin.yml; one universal jar serves the whole range.
 - **Runtime floor is Paper 1.9.4** (legacy backport, below the 1.17.1 compile
-  floor). Those servers must run on Java 17+ too — Mental ships Java-17
-  classfiles. See the legacy tier below.
+  floor). The full range 1.9.4 → 26.x ships as that ONE mega-jar with no server
+  flags and no holes (**1.14.4 included**). See the legacy tier below.
 
 ## Known binary breaks in the range (absorbed by boot-time resolvers)
 
@@ -49,19 +52,24 @@ description: Use when writing or changing code that must run across Mental's who
   the raw name as fallback, and degrade gracefully (best-effort) when a field
   genuinely doesn't exist on a version.
 - When adding a matrix version: add the entry to `support-matrix.json` (the
-  single source — version, jdk, platform, suites, ci, optional serverFlags);
-  the build task, both workflows, the local script, and the release-notes range
-  all derive from it. Expect the gradle task to download/cache the paperclip jar
-  that `scripts/integration-matrix.sh` then reuses.
+  single source — version, jdk (its native-era Java, the newest it boots
+  flagless), platform, suites, ci, bytecodeTier); the build task, both
+  workflows, the local script, and the release-notes range all derive from it.
+  `serverFlags` is DEAD — no legacy entry needs `IgnoreJavaVersion` anymore.
+  Expect the gradle task to download/cache the paperclip jar that
+  `scripts/integration-matrix.sh` then reuses.
 
 ## The legacy backport tier (1.9.4–1.16.5) — runtime floor below the compile floor
 
-`core` compiles against the 1.17.1 API but RUNS down to Paper 1.9.4 (Java 17+
-required on the server; **1.14.4 is impossible** — its terminal build hard-caps at
-Java 13, no bypass, so a Java-17 plugin can never load there). Because core
+`core` compiles against the 1.17.1 API but RUNS down to Paper 1.9.4. Because core
 compiles against 1.17.1, everything COMPILES and any sub-floor absence surfaces at
 RUNTIME as `NoSuchMethodError` / `NoSuchFieldError` / `NoClassDefFoundError` —
 legacy support is entirely a runtime-resolution problem, decided ONCE at boot.
+Classloading itself is solved by the **Multi-Release mega-jar** (see the next
+section): its v52 base tree loads on any JVM from Java 8 up, so each legacy
+server runs its native-era Java and **1.14.4 is a full-tier entry, not a hole**
+— its old impossibility was purely that the Java-17 classfiles could not load
+under its Java-13 cap; the v52 base fixes exactly that.
 
 - **Presence-probing idiom, never version parsing.** Every legacy path is selected
   by probing for the class/method/field itself (MethodHandles lookup,
@@ -94,3 +102,51 @@ legacy support is entirely a runtime-resolution problem, decided ONCE at boot.
   cached `run/legacy-probe/<v>/cache/patched_<v>.jar`. The backport corrected three
   prose guesses this way: tooltip path B floors at 1.16.5 (not 1.13.2); `FishHook`
   exists on all 7; `ProjectileHitEvent#getHitEntity` is absent on 1.9.4 only.
+
+## The Multi-Release mega-jar (classloading from Java 8 up)
+
+The shipped `Mental-<version>.jar` (and the tester jar) is a **Multi-Release
+mega-jar** produced at the ARTIFACT level — NO source file changes for the
+downgrade (kernel stays pure-JDK/additive). Pipeline (`core/build.gradle.kts`,
+via the `xyz.wagyourtail.jvmdowngrader` 1.3.6 plugin): `shadowJar` → jvmdg
+`DowngradeJar` (class-v52 base + `multiReleaseOriginal` keeps the original v61
+per-class under `META-INF/versions/17`) → jvmdg `ShadeJar` (relocates jvmdg's
+own runtime under a **distinct per-plugin prefix** — `me/vexmc/mental/lib/jvmdg`
+for core, `…/tester/lib/jvmdg` for the tester) → the canonical
+`Mental-<version>.jar` (the ONLY `Mental-*.jar` in `core/build/libs/`;
+intermediates live under `build/jvmdg-stage/`). A JVM reads v61 only when its own
+feature version is ≥ 17; below that it reads the v52 base. Each entry declares
+its `bytecodeTier` and the tester asserts the ACTUALLY-loaded major — which tree
+loaded is a live FACT, never assumed.
+
+Four gates run in `check` (every `./gradlew build`), each guarding a jvmdg
+hazard class:
+
+- **`verifyJdk8Api`** — jvmdg silently PASSES THROUGH un-shimmable JDK-9+
+  `java.*` APIs it has no stub for; they downgrade green and `NoSuchMethodError`
+  on a real Java 8 JVM (the fast-path blind spot — paths clientless suites never
+  drive). This ASM member-level scan validates the v52 base tree against a real
+  JDK-8 `rt.jar`; the allowlist starts EMPTY. It caught the jvmdg 1.3.6
+  record-`toString` bug (a synthesized `StringBuilder.append(short)` where Java 8
+  has only `append(int)` — the `ValvePayload` record, fixed with an explicit
+  int-widening `toString`).
+- **`verifyDowngrade`** — base tree ≤ v52; `versions/17` first-party classes
+  exactly v61; `Multi-Release: true`; the sentinel forked; greps the shaded tree
+  for reflective record introspection (`isRecord`/`RecordComponent`), since
+  downgraded records are NOT reflective records.
+- **`verifyRelocation`** — zero un-relocated `net/kyori` OR `xyz/wagyourtail`
+  outside their relocated prefixes, in BOTH trees.
+- **`verifyTesterIsolation`** (D-8) — the tester jar's constant pool holds ZERO
+  references to core's `me/vexmc/mental/lib/jvmdg` prefix.
+
+**D-8 — cross-plugin stub isolation.** jvmdg prunes its shaded runtime to each
+jar's referenced arities AND rewrites Java-9+ types INSIDE method descriptors —
+so two downgraded plugins must NEVER share a stub-typed API descriptor or a
+same-FQN pruned runtime (both reproduced live: a `J_U_List.of(7-arg)`
+`NoSuchMethodError` via Bukkit's shared class cache, and a `RandomGenerator`-stub
+`NoClassDefFoundError` baked into the kernel's `computeBase` descriptor as called
+by the tester). Fix = distinct shade prefixes (above) PLUS a Java-8-native
+additive overload `computeBase(…, java.util.Random)` in the kernel so no stub
+type crosses a plugin boundary. **Rule: no post-Java-8 JDK type in any
+cross-plugin API descriptor.** Full campaign:
+`docs/superpowers/plans/2026-07-03-mental-full-range.md`.

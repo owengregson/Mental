@@ -3,6 +3,8 @@ package me.vexmc.mental.v5;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -182,6 +184,13 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.platformProfile = PlatformProfile.resolve(
                 environment, capabilities, message -> getLogger().warning(message));
         getLogger().info(platformProfile.bootReport());
+        // Which Multi-Release tree this loader actually served is a per-version live FACT
+        // (campaign Q1/H5), never assumed: the plugin reads its OWN class bytes through its
+        // own classloader, so a runtime-versioned loader reports the versioned major it read.
+        // Legacy-on-Java-8 ⇒ downgraded (v52); 1.17.1+/Folia ⇒ modern (v61). The tester
+        // asserts this same value; a modern loader that surprised us by serving base would
+        // fail that assertion loudly (D-1 revisited with evidence), never silently.
+        getLogger().info("bytecode tier: " + describeBytecodeTier(loadedBytecodeMajor()));
         // No silent degradation (mandate B10): one loud line covers every PDC consumer at once when the
         // PersistentDataContainer API is absent (< 1.14). The effective-material marker becomes unreadable
         // (items resolve to their own type) and the temporary-shield tag + arrow-punch stamp ride in-memory
@@ -474,6 +483,56 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** The boot-resolved platform manifest — the tester reads version-gated flags through it. */
     public @NotNull PlatformProfile platformProfile() {
         return platformProfile;
+    }
+
+    /**
+     * The class-file major version of the bytecode THIS loader actually served for the
+     * plugin — the live proof of which Multi-Release tree loaded (campaign Q1/H5). Read
+     * by self-inspection: the plugin's own {@code .class} bytes fetched through its own
+     * classloader (bytes 6–7 are the big-endian major, per the JVMS class-file header),
+     * so a runtime-versioned loader returns the versioned major it read (52 = the Java-8
+     * base, 60 = the versions/16 tier, 61 = the original versions/17 tree), and a
+     * non-MR-aware loader returns the base 52. Returns -1 if the bytes cannot be read —
+     * an impossible-by-construction case the tier assertion surfaces loudly rather than
+     * masking. The mega-jar is the only shape where the answer varies; on a plain jar it
+     * is simply the one compiled major.
+     */
+    public int loadedBytecodeMajor() {
+        try (InputStream in = MentalPluginV5.class.getResourceAsStream("MentalPluginV5.class")) {
+            if (in == null) {
+                return -1;
+            }
+            byte[] header = new byte[8];
+            int read = 0;
+            while (read < header.length) {
+                int n = in.read(header, read, header.length - read);
+                if (n < 0) {
+                    return -1;
+                }
+                read += n;
+            }
+            return ((header[6] & 0xFF) << 8) | (header[7] & 0xFF);
+        } catch (IOException failure) {
+            return -1;
+        }
+    }
+
+    /**
+     * Human label for a class-file major version — the boot-report tier line and the
+     * tester share this vocabulary. An unexpected major is printed loudly (never masked
+     * as one of the three known tiers) so a mis-built jar is obvious in the log.
+     */
+    public static @NotNull String describeBytecodeTier(int major) {
+        switch (major) {
+            case 52:
+                return "downgraded (v52)";
+            case 60:
+                return "intermediate (v60)";
+            case 61:
+                return "modern (v61)";
+            default:
+                return "UNEXPECTED major " + major + " (v" + major + ")";
+        }
     }
 
     /** The config write-back seam behind the API facade and the (Phase 6) GUI. */

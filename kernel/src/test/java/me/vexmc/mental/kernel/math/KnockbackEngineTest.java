@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Random;
 import java.util.random.RandomGenerator;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.KnockbackVector;
@@ -214,6 +215,44 @@ class KnockbackEngineTest {
         assertEquals(0.2 * 0.5 + 0.24, vector.x(), EPSILON);
         assertEquals(0.4, vector.y(), EPSILON);
         assertEquals(0.32, vector.z(), EPSILON);
+    }
+
+    @Test
+    void computeBaseRandomOverloadMatchesRandomGeneratorOverload() {
+        // Campaign D-8: the java.util.Random overload of computeBase exists so the
+        // downgraded mega-jar never crosses a jvmdowngrader RandomGenerator stub type
+        // between the tester and the kernel. It must be byte-identical to the
+        // RandomGenerator path — same arithmetic, and where the coincident-position
+        // branch draws from the source, the same random sequence.
+
+        // 1. No draw (victim offset from source, zero resistance): the random source is
+        //    never consulted, so the result is the pinned base math — hand-computed here
+        //    from friction 0.5 and base push 0.4 (identical to the RandomGenerator-fed
+        //    computeBasePushesAwayFromSourcePositionWithoutBonuses pin above).
+        KnockbackVector viaRandom = KnockbackEngine.computeBase(
+                victim(3, 4, 0.2, 0.0, 0.0, 0), 0.0, 0.0, DEFAULTS, null, new Random(42));
+        assertNotNull(viaRandom);
+        assertEquals(0.2 * 0.5 + 0.24, viaRandom.x(), EPSILON);
+        assertEquals(0.4, viaRandom.y(), EPSILON);
+        assertEquals(0.32, viaRandom.z(), EPSILON);
+
+        // 2. Coincident source/victim: base() enters the tiny-random-direction branch and
+        //    draws four nextDouble()s. Two Randoms seeded identically feed the two
+        //    overloads, which must therefore agree bit-for-bit (exact equality, 0 delta) —
+        //    proving the Random overload is a pure delegate, not a re-implementation.
+        long seed = 0x9E3779B97F4A7C15L;
+        KnockbackVector viaGenerator = KnockbackEngine.computeBase(
+                victim(5, 5, 0, 0, 0, 0), 5.0, 5.0, DEFAULTS, null,
+                (RandomGenerator) new Random(seed));
+        KnockbackVector viaSeededRandom = KnockbackEngine.computeBase(
+                victim(5, 5, 0, 0, 0, 0), 5.0, 5.0, DEFAULTS, null, new Random(seed));
+        assertNotNull(viaGenerator);
+        assertNotNull(viaSeededRandom);
+        assertEquals(viaGenerator.x(), viaSeededRandom.x(), 0.0);
+        assertEquals(viaGenerator.y(), viaSeededRandom.y(), 0.0);
+        assertEquals(viaGenerator.z(), viaSeededRandom.z(), 0.0);
+        // The tiny-direction knock still normalizes to the base magnitude.
+        assertEquals(0.4, Math.hypot(viaSeededRandom.x(), viaSeededRandom.z()), EPSILON);
     }
 
     @Test

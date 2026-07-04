@@ -65,6 +65,23 @@ public final class BootSuite {
                                 "non-folia servers must select the bukkit scheduling backend");
                     }
                 }),
+                new TestCase("boot: loaded bytecode tier matches the expected tier for this server", context -> {
+                    // Q1/H5: the Multi-Release tree that actually loaded is a per-version live fact, not
+                    // an assumption. The plugin self-inspects its own class bytes (the SAME value the boot
+                    // report prints); the tester asserts it against the expected tier — the entry-declared
+                    // -Dmental.tester.tier when Phase 2 wires it per-entry, else the JVM-derived default
+                    // (Java 17+ ⇒ original versions/17 v61; Java 8–16 ⇒ base v52 — no versions/16 tier exists).
+                    // A modern loader that surprised us by serving the downgraded base fails HERE, loudly.
+                    int actual = mental.loadedBytecodeMajor();
+                    int expected = expectedBytecodeMajor();
+                    context.expect(actual == expected,
+                            "loaded bytecode major " + actual + " ("
+                                    + MentalPluginV5.describeBytecodeTier(actual) + ") != expected " + expected
+                                    + " (" + MentalPluginV5.describeBytecodeTier(expected) + ") on "
+                                    + mental.environment().describe() + " [java.specification.version="
+                                    + System.getProperty("java.specification.version") + ", mental.tester.tier="
+                                    + System.getProperty("mental.tester.tier", "<unset>") + "]");
+                }),
                 new TestCase("boot: public api facade responds", context -> {
                     var api = Mental.get();
                     context.expect(api != null, "Mental API facade is not registered");
@@ -129,6 +146,40 @@ public final class BootSuite {
                         context -> legacySwordBlockDecoration(mental, context)),
                 new TestCase("legacy: cooldown tooltip strip drops attack_speed, keeps attack_damage (path C)",
                         context -> legacyTooltipStrip(mental, context)));
+    }
+
+    /**
+     * The class-file major the plugin's bytecode is expected to load at on this server.
+     * The entry-declared {@code -Dmental.tester.tier} (an integer major) wins when present —
+     * Phase 2 sets it per matrix entry from the support-matrix {@code bytecodeTier}. Absent,
+     * it derives from the running JVM's feature version: Java 17+ reads the original
+     * versions/17 tree (v61); everything below (Java 8–16) reads the mega-jar base (v52).
+     * There is NO versions/16 tier — jvmdg 1.3.6 cannot co-produce it alongside versions/17
+     * (Phase 1 escalation 1) — so even a Java-16 MR-aware loader finds no versioned tier
+     * ≤ 16 and reads base. (The per-entry -Dmental.tester.tier is the authority in the
+     * matrix; this default only backs ad-hoc boots that do not set it.)
+     */
+    private static int expectedBytecodeMajor() {
+        String declared = System.getProperty("mental.tester.tier");
+        if (declared != null && !declared.trim().isEmpty()) {
+            return Integer.parseInt(declared.trim());
+        }
+        String spec = System.getProperty("java.specification.version", "");
+        if (spec.startsWith("1.")) {
+            spec = spec.substring(2); // "1.8" -> "8"
+        }
+        int feature;
+        try {
+            feature = Integer.parseInt(spec);
+        } catch (NumberFormatException malformed) {
+            feature = -1;
+        }
+        if (feature >= 17) {
+            return 61;
+        }
+        // Java 8–16 all read the base tree: there is no versioned tier ≤ 16 in the jar
+        // (versions/17 sits above even a Java-16 loader; the versions/16 tier was dropped).
+        return 52;
     }
 
     /* ------------------------------------------------------------------ */

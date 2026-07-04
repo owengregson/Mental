@@ -1,7 +1,7 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Random;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.v5.EntityStates;
@@ -93,7 +93,11 @@ public final class FishingSuite {
                                     rodder.player().getLocation().getX(),
                                     rodder.player().getLocation().getZ(),
                                     profile, null,
-                                    ThreadLocalRandom.current()),
+                                    // D-8: the java.util.Random overload keeps a jvmdowngrader
+                                    // RandomGenerator stub type out of this cross-jar call's descriptor.
+                                    // The rod vector is deterministic (see above), so the source is
+                                    // never consulted.
+                                    new Random()),
                             profile, victimState.grounded());
                 });
                 context.expect(expected != null, "engine returned no vector for an unresisted rod hit");

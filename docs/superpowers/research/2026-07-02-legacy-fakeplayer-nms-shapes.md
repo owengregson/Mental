@@ -25,12 +25,15 @@ package token; all NMS classes live in `net.minecraft.server.<v>`.
 
 ## Divergence axes
 
-**PlayerInteractManager ctor** — split at 1.14:
-`(World)` on 1.9.4–1.13.2; `(WorldServer)` on 1.15.2/1.16.5.
+**PlayerInteractManager ctor** — split exactly at 1.14 (2026-07-03: the
+full-range scout confirmed `v1_14_R1` takes `(WorldServer)`, so the WorldServer
+side begins at **1.14.4**, not 1.15.2):
+`(World)` on 1.9.4–1.13.2; `(WorldServer)` on 1.14.4/1.15.2/1.16.5.
 
-**Entity motion**:
+**Entity motion** (2026-07-03: `Vec3D mot` + `setMot(double,double,double)` begins
+at **1.14.4**, not 1.15.2 — javap-verified on `v1_14_R1`):
 `public double motX/motY/motZ` on 1.9.4–1.13.2;
-`private Vec3D mot` on 1.15.2/1.16.5 (use `getMot`/`setMot`, or setAccessible).
+`private Vec3D mot` on 1.14.4/1.15.2/1.16.5 (use `getMot`/`setMot`, or setAccessible).
 
 **Tick entrypoint** (the Entity per-tick override; the inner `playerTick()`
 exists only from 1.11.2):
@@ -42,7 +45,10 @@ exists only from 1.11.2):
 | 1.12.2 | `B_()` | present |
 | 1.13.2 / 1.15.2 / 1.16.5 | `tick()` | present |
 
-**PlayerList join callback**:
+**PlayerList join callback** (2026-07-03: the async/chunk-gated split begins at
+**1.15.2**, NOT 1.14 — on `v1_14_R1` the join is inline in the synchronous
+`PlayerList.a` with no `postChunkLoadJoin` and no separate `onPlayerJoin`/
+`onPlayerJoinFinish` callback, so 1.14.4 sits on the sync side):
 `onPlayerJoin(EntityPlayer, String)` on 1.9.4–1.13.2 →
 `onPlayerJoinFinish(EntityPlayer, WorldServer, String)` on 1.15.2/1.16.5
 (async/chunk-gated there).

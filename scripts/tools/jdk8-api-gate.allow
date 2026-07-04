@@ -1,0 +1,11 @@
+# jdk8-api-gate allowlist — anchored PREFIX exceptions for the closed-world JDK-8 gate (campaign H1).
+#
+# This file starts EMPTY and must stay that way: a real reference that resolves neither in Java 8, in-jar,
+# nor a documented server-provided --ignore package is a genuine hazard to FIX (use a Java-8 alternative, one
+# jvmdg shims, or shade the runtime), NOT to allowlist. An entry here is a deliberate, reviewed escape hatch
+# for a reference that is provably safe on a real 1.8 server despite the static scan flagging it.
+#
+# Format (StarEnchants-style): one anchored key prefix per line. A key is
+#   "CLASS <owner>"  |  "METHOD <owner>#<name> <desc>"  |  "FIELD <owner>#<name> <desc>"
+# and an entry matches when it is a prefix of the key (so it pins the tag + owner, ideally the descriptor).
+# Lines starting with '#' and blank lines are ignored.

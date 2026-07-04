@@ -1,5 +1,6 @@
 package me.vexmc.mental.kernel.math;
 
+import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.random.RandomGenerator;
 import me.vexmc.mental.kernel.model.EntityState;
@@ -111,6 +112,36 @@ public final class KnockbackEngine {
         }
         return finish(
                 base(victim, sourceX, sourceZ, profile, victimYOverride, random, 0.0), victim, profile);
+    }
+
+    /**
+     * The {@link java.util.Random} delivery of {@link #computeBase(EntityState, double,
+     * double, KnockbackProfile, Double, RandomGenerator)} — a Java-8-native overload so
+     * the downgraded mega-jar never bakes a jvmdowngrader {@code RandomGenerator} stub
+     * type into a public descriptor that crosses a plugin boundary (campaign D-8).
+     * {@code java.util.random.RandomGenerator} is a Java-17 type jvmdowngrader rewrites
+     * to a shaded stub whose FQN carries a per-plugin relocation prefix; two plugins that
+     * share such a descriptor (the tester calling into the kernel shipped in the Mental
+     * jar) resolve mismatched stub types and {@code NoSuchMethodError} on Java 8. {@code
+     * java.util.Random} is a Java-1.0 type present verbatim in every bytecode tier, so a
+     * descriptor over it is stable across the boundary. Additive-only: the
+     * {@code RandomGenerator} overload above is untouched, so the kernel's frozen-core
+     * invariant and the api japicmp gate stay green.
+     *
+     * <p>The cast to {@code RandomGenerator} is load-bearing: a bare {@code
+     * computeBase(…, random)} would re-select THIS overload (most-specific) and recurse
+     * forever. It is legal because {@code java.util.Random} implements {@code
+     * RandomGenerator} on Java 17+, and jvmdowngrader adapts the {@code Random ->} stub
+     * conversion inside this jar (never across the boundary).</p>
+     */
+    public static KnockbackVector computeBase(
+            EntityState victim,
+            double sourceX,
+            double sourceZ,
+            KnockbackProfile profile,
+            Double victimYOverride,
+            Random random) {
+        return computeBase(victim, sourceX, sourceZ, profile, victimYOverride, (RandomGenerator) random);
     }
 
     /** Clamps each axis to the legacy packet limit; bonus additions re-clamp through this. */

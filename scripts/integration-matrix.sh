@@ -3,9 +3,11 @@
 #  Concurrent live-server integration matrix.
 #
 #  Boots EVERY version at the same time — each server on its own port, each
-#  with the Mental + MentalTester jars injected via --add-plugin (the same
-#  mechanism the Gradle tasks use), reusing run-paper's downloaded Paper
-#  jars and the per-version run/ directories. The tester runs its suite and
+#  with the Mental + MentalTester jars copied into its plugins/ dir (the
+#  legacy Paper builds do not parse -add-plugin=; copying is universal),
+#  reusing run-paper's downloaded Paper jars and the per-version run/
+#  directories. Each server runs on its per-entry JDK — the newest clean
+#  flagless rung for legacy versions. The tester runs its suite and
 #  shuts its server down; this script collects PASS/FAIL per version and
 #  fails if anything but PASS comes back.
 #
@@ -66,19 +68,50 @@ if [ "$WITH_OCM" = auto ]; then
     [ -f "$OCM_JAR" ] && WITH_OCM=yes || WITH_OCM=no
 fi
 
-JAVA17="$(/usr/libexec/java_home -v 17 2>/dev/null)/bin/java"
-JAVA25="$(/usr/libexec/java_home -v 25 2>/dev/null)/bin/java"
-# The per-version JDK is declared in the descriptor (17 for the pre-1.20.5
-# class-file targets, 25 otherwise). An off-matrix override version falls back
-# to the newest toolchain.
-java_for() {
-    local jdk
-    jdk=$(jq -r --arg v "$1" '.entries[] | select(.version==$v) | .jdk' "$MATRIX")
-    case "$jdk" in
-        17) echo "$JAVA17" ;;
-        *) echo "$JAVA25" ;;
+JDKS_DIR="$HOME/.gradle/jdks"
+# Resolve the real java executable for a JDK feature version N. Prefers the
+# system JVMs (/usr/libexec/java_home) and falls back to the foojay-provisioned
+# toolchains the Gradle integration tasks download under ~/.gradle/jdks — the
+# SAME homes launcherFor(N) resolves. The native-JDK flip put 13/14/16/21 on the
+# per-entry jdk (each legacy version's newest clean flagless rung); Temurin has
+# no arm64 13/14/16, so foojay serves those as x64 builds (run under Rosetta).
+# The feature (major) version a JDK home declares, read from its release file
+# (JAVA_VERSION="13.0.2+8" -> 13; "1.8.0_492" -> 8). Non-zero if unknown.
+jdk_major_of() {
+    local home=$1 v
+    [ -r "$home/release" ] || return 1
+    v=$(sed -n 's/^JAVA_VERSION="\(.*\)"/\1/p' "$home/release" | head -1)
+    case "$v" in
+        1.*) echo "$v" | cut -d. -f2 ;;   # 1.8.0_492 -> 8
+        "")  return 1 ;;
+        *)   echo "$v" | cut -d. -f1 ;;   # 13.0.2+8 -> 13
     esac
 }
+java_home_for() {
+    local n=$1 home exe
+    # A system JVM — but /usr/libexec/java_home -v N is "N OR NEWER" on macOS, so
+    # accept its answer ONLY when it is EXACTLY major N. Otherwise it hands back
+    # the newest installed JVM (e.g. -v 13 -> GraalVM 25), which the hard-capped
+    # legacy servers refuse ("Unsupported Java detected").
+    home="$(/usr/libexec/java_home -v "$n" 2>/dev/null)"
+    if [ -n "$home" ] && [ -x "$home/bin/java" ] && [ "$(jdk_major_of "$home")" = "$n" ]; then
+        echo "$home/bin/java"; return 0
+    fi
+    # foojay-provisioned toolchains, named by major: <vendor>-<n>-<arch>-os_x*/
+    # jdk-<n>*/Contents/Home (Java 9+); the Java-8 build nests jdk8u*/Contents/Home.
+    if [ "$n" = 8 ]; then
+        exe=$(ls -d "$JDKS_DIR"/*-8-*/jdk8u*/Contents/Home/bin/java 2>/dev/null | head -1)
+    else
+        exe=$(ls -d "$JDKS_DIR"/*-"$n"-*/jdk-"$n"*/Contents/Home/bin/java 2>/dev/null | head -1)
+    fi
+    [ -n "$exe" ] && [ -x "$exe" ] && { echo "$exe"; return 0; }
+    return 1
+}
+# The per-version JDK and bytecodeTier live in the descriptor; this script is
+# paper-only, so read the paper entry (26.1.2 also has a folia row).
+jdk_for()  { jq -r --arg v "$1" '.entries[] | select(.version==$v and .platform=="paper") | .jdk'          "$MATRIX"; }
+tier_for() { jq -r --arg v "$1" '.entries[] | select(.version==$v and .platform=="paper") | .bytecodeTier' "$MATRIX"; }
+java_for() { java_home_for "$(jdk_for "$1")"; }
 
 MENTAL_JAR=$(ls "$PWD"/core/build/libs/Mental-*.jar 2>/dev/null | sort -V | tail -1)
 TESTER_JAR=$(ls "$PWD"/tester/build/libs/MentalTester-*.jar 2>/dev/null | sort -V | tail -1)
@@ -86,6 +119,25 @@ if [ -z "$MENTAL_JAR" ] || [ -z "$TESTER_JAR" ]; then
     echo "plugin jars missing — run ./gradlew build first" >&2
     exit 2
 fi
+
+# Pre-flight: every entry's JDK must resolve to a real java BEFORE we launch a
+# single server, so a missing toolchain fails loudly here instead of as an
+# opaque NO-RESULT per server after minutes of boots.
+preflight_versions="$VERSIONS"
+[ "$WITH_OCM" = yes ] && preflight_versions="$preflight_versions $OCM_VERSIONS"
+for v in $preflight_versions; do
+    n=$(jdk_for "$v")
+    if [ -z "$n" ] || [ "$n" = null ]; then
+        echo "no JDK declared for $v in support-matrix.json" >&2; exit 2
+    fi
+    if ! java_home_for "$n" >/dev/null; then
+        echo "JDK $n (needed by Paper $v) is not installed on this machine." >&2
+        echo "Provision it by running any Gradle integration task once (e.g." >&2
+        echo "'./gradlew integrationTest'): the foojay toolchain auto-downloads it under" >&2
+        echo "~/.gradle/jdks, where this script then finds it (no manual JDK install needed)." >&2
+        exit 2
+    fi
+done
 
 mkdir -p run
 : > "$LIVE"
@@ -119,7 +171,7 @@ run_one() {
     log="$dir/matrix-run.log"
     result="$dir/plugins/MentalTester/test-results.txt"
 
-    mkdir -p "$dir"
+    mkdir -p "$dir/plugins"
     # Mirror the Gradle doFirst: pristine plugin config trees per run.
     rm -rf "$dir/plugins/Mental"
     rm -f "$result" "$dir/plugins/MentalTester/test-failures.txt"
@@ -130,10 +182,21 @@ run_one() {
             > "$dir/server.properties"
     fi
 
-    # The single-dash -add-plugin= form is what run-paper itself uses across
-    # this whole version range — proven from the floor up.
-    local plugin_args="-add-plugin=$MENTAL_JAR -add-plugin=$TESTER_JAR"
-    [ "$flavour" = ocm ] && plugin_args="$plugin_args -add-plugin=$OCM_JAR"
+    # Plugin injection = COPY the jars into plugins/. The legacy Paper builds do
+    # NOT parse -add-plugin= (joptsimple reads it as clustered short options and
+    # help-dumps + exits — spike-proven on 1.13.2 build 657), and copying is the
+    # universal form that works across the whole range. Pristine-reset first: drop
+    # any Mental/tester/OCM jar a prior run (this script OR the Gradle RunServer,
+    # which shares run/<v>/) left in plugins/, so exactly this run's set loads.
+    rm -f "$dir/plugins/"Mental-*.jar "$dir/plugins/"MentalTester-*.jar
+    [ "$flavour" = ocm ] && rm -f "$dir/plugins/"OldCombatMechanics*.jar
+    cp "$MENTAL_JAR" "$TESTER_JAR" "$dir/plugins/"
+    [ "$flavour" = ocm ] && cp "$OCM_JAR" "$dir/plugins/"
+
+    # The declared Multi-Release bytecodeTier for this entry — passed to the tester
+    # as -Dmental.tester.tier so its boot suite asserts the tree that actually loaded.
+    local tier
+    tier=$(tier_for "$version")
 
     # A fresh freshness nonce per boot: the tester echoes it into the verdict
     # line ("PASS nonce=<n>"), and we accept ONLY this nonce below — a leftover
@@ -148,9 +211,12 @@ run_one() {
     # backgrounded servers — a napped JVM stalls without ever logging lag.
     local keepawake=""
     command -v caffeinate >/dev/null 2>&1 && keepawake="caffeinate -i"
+    # Bare 'nogui' token: the legacy joptsimple REJECTS the dashed --nogui form
+    # (help-dumps + exits — scout-proven range-wide); bare nogui works everywhere.
     ( cd "$dir" && exec $keepawake "$java" -Xmx768M -Dcom.mojang.eula.agree=true \
             -Ddisable.watchdog=true -Dmental.tester.nonce="$nonce" \
-            -jar "$jar" --nogui --port "$port" $plugin_args ) > "$log" 2>&1 &
+            -Dmental.tester.tier="$tier" \
+            -jar "$jar" nogui --port "$port" ) > "$log" 2>&1 &
     local server=$!
 
     # Live relay: boot marker + every test case transition, label-prefixed.

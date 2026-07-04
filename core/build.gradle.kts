@@ -4,13 +4,18 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.jar.JarFile
 import java.util.zip.ZipFile
+import org.gradle.kotlin.dsl.support.serviceOf
+import org.gradle.process.ExecOperations
 import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.service.DownloadsAPIService
+import xyz.wagyourtail.jvmdg.gradle.JVMDowngraderExtension
 
 plugins {
     alias(libs.plugins.shadow)
     alias(libs.plugins.run.paper)
+    alias(libs.plugins.jvmdowngrader)
 }
 
 evaluationDependsOn(":tester")
@@ -29,7 +34,7 @@ class SupportEntry(
     val platform: String,
     val ci: String,
     val suites: String,
-    val serverFlags: List<String>,
+    val bytecodeTier: Int,
 )
 
 val supportMatrixFile = rootProject.layout.projectDirectory.file("support-matrix.json").asFile
@@ -50,10 +55,11 @@ val supportEntries: List<SupportEntry> =
             platform = entry["platform"] as String,
             ci = entry["ci"] as String,
             // The suite tier the tester runs on this version (full | boot | combat-smoke); the boot tier
-            // is the legacy-backport classload/boot-safety suite. serverFlags are extra JVM args the legacy
-            // Paper builds need (e.g. -DPaper.IgnoreJavaVersion=true); absent ⇒ none.
+            // is the legacy-backport classload/boot-safety suite. bytecodeTier is the Multi-Release class
+            // major this entry's plugin loader × JVM actually reads from the mega jar (52 base / 61
+            // versions/17) — passed as -Dmental.tester.tier so the loaded tree is asserted live per-entry.
             suites = entry["suites"] as String,
-            serverFlags = (entry["serverFlags"] as? List<String>) ?: emptyList(),
+            bytecodeTier = (entry["bytecodeTier"] as Number).toInt(),
         )
     }
 
@@ -105,7 +111,13 @@ tasks.processResources {
 tasks.shadowJar {
     dependsOn(":compat-folia:classes")
     archiveBaseName.set("Mental")
-    archiveClassifier.set("")
+    // The shaded modern (v61) jar is now an INTERMEDIATE of the mega-jar pipeline, not
+    // the shipped artifact. Stage it out of build/libs (and off the canonical name) so
+    // the Mental-*.jar glob that release.yml and integration-matrix.sh read only ever
+    // resolves the final mega jar (campaign H3). Its bytecode is byte-identical to the
+    // 2.3.x line — it becomes the mega jar's META-INF/versions/17 tree unchanged (D-1).
+    archiveClassifier.set("modern")
+    destinationDirectory.set(layout.buildDirectory.dir("jvmdg-stage"))
 
     from(project(":compat-folia").sourceSets.main.get().output)
 
@@ -120,8 +132,108 @@ tasks.shadowJar {
     relocate("net.kyori", "me.vexmc.mental.lib.adventure")
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ *  The mega-jar pipeline (full-range campaign D-1/D-2/D-7).
+ *
+ *  JVMDowngrader lowers the shaded v61 jar to a Multi-Release mega-jar: the base
+ *  tree is class v52 (Java 8) so the ONE artifact classloads from Java 8 up, while
+ *  multiReleaseOriginal keeps the original v61 classes under META-INF/versions/17
+ *  (byte-identical modern behavior for 1.17.1+ loaders) and multiReleaseVersions
+ *  adds a v60 tier under versions/16 for 1.16.5-on-Java-16. Third-party classes
+ *  already ≤ v52 (packetevents/bstats/adventure targets) get no MR duplicate.
+ *
+ *  jvmdg's ShadeJar then relocates jvmdg's own runtime helpers under
+ *  me/vexmc/mental/lib/jvmdg/ and emits the canonical Mental-<version>.jar — the
+ *  ONLY Mental-*.jar in build/libs. Every consumer (build, the run tasks, the
+ *  verify gates) reads THIS task's output, never the staged intermediates.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+
+fun failOnJvmdgWarnings(jar: Jar) {
+    val captured = StringBuilder()
+    val sink = StandardOutputListener { text -> captured.append(text) }
+    val logSink = jar.project.layout.buildDirectory.file("jvmdg-stage/${jar.name}-output.log")
+    jar.doFirst {
+        logging.addStandardOutputListener(sink)
+        logging.addStandardErrorListener(sink)
+    }
+    jar.doLast {
+        logging.removeStandardOutputListener(sink)
+        logging.removeStandardErrorListener(sink)
+        val text = captured.toString()
+        val file = logSink.get().asFile
+        file.parentFile.mkdirs()
+        file.writeText(text)
+        val warnings = text.lines().filter { line -> Regex("(?i)\\b(warn|warning|error)\\b").containsMatchIn(line) }
+        if (warnings.isNotEmpty()) {
+            throw GradleException("jvmdowngrader emitted ${warnings.size} warning/error line(s) during '${jar.name}' " +
+                    "(full-range campaign: warnings are build failures). First:\n" +
+                    warnings.take(20).joinToString("\n") { "    $it" } + "\nFull: ${file.absolutePath}")
+        }
+    }
+}
+fun mrStrip(name: String): String {
+    if (!name.startsWith("META-INF/versions/")) return name
+    val rest = name.substringAfter("META-INF/versions/")
+    val slash = rest.indexOf('/')
+    return if (slash < 0) rest else rest.substring(slash + 1)
+}
+fun classMajor(bytes: ByteArray): Int {
+    return ((bytes[6].toInt() and 0xFF) shl 8) or (bytes[7].toInt() and 0xFF)
+}
+fun isFirstParty(logical: String): Boolean {
+    return logical.startsWith("me/vexmc/mental/")
+            && !logical.startsWith("me/vexmc/mental/lib/")
+            && !logical.startsWith("me/vexmc/mental/tester/lib/")
+}
+val jvmdg = extensions.getByType<JVMDowngraderExtension>()
+
+// The DowngradeJar the plugin pre-registers (input defaults to shadowJar) — retargeted
+// to the base v52 + versions/16 + versions/17 tier set and staged out of build/libs.
+val downgradeMegaJar = jvmdg.defaultTask
+downgradeMegaJar.configure {
+    inputFile.set(tasks.shadowJar.flatMap { it.archiveFile })
+    downgradeTo.set(JavaVersion.VERSION_1_8)
+    // base = v52 (Java 8) + versions/17 = the untouched original v61. multiReleaseOriginal
+    // is set WITHOUT multiReleaseVersions: jvmdg 1.3.6 treats -mro (keep original) and
+    // -mr <ver> (keep a semi-downgraded intermediate) as MUTUALLY EXCLUSIVE — requesting a
+    // v60/versions-16 tier DROPS the original v61, which would silently downgrade the modern
+    // path and void D-1 (modern must be byte-identical to the matrix-verified 2.3.x line).
+    // Keeping the original is the D-1-critical decision; the v60 tier D-7 planned for
+    // 1.16.5-on-Java-16 is a Phase-2 concern (it reads base v52 without it — v52 is the
+    // tested legacy base, and Mental uses sealed types so v60 is a real downgrade, not a
+    // no-op). See the Phase 1 outcome log for the escalated jvmdg limitation.
+    multiReleaseOriginal.set(true)
+    // The downgrade classpath must carry the supertypes of every referenced type. core
+    // compiles against the 1.17.1 floor, but shadowJar folds compat-folia's classes in,
+    // whose supertypes are the Folia scheduler API (absent from the floor). Union core's
+    // own compile classpath with compat-folia's so jvmdg resolves them with ZERO warnings.
+    classpath = sourceSets["main"].compileClasspath +
+            project(":compat-folia").sourceSets["main"].compileClasspath
+    destinationDirectory.set(layout.buildDirectory.dir("jvmdg-stage"))
+    archiveBaseName.set("Mental")
+    archiveClassifier.set("downgraded")
+    failOnJvmdgWarnings(this)
+}
+
+// The ShadeJar the plugin pre-registers — relocates jvmdg's runtime helpers under our
+// lib prefix and emits the canonical, glob-visible Mental-<version>.jar.
+val megaJar = jvmdg.defaultShadeTask
+megaJar.configure {
+    inputFile.set(downgradeMegaJar.flatMap { it.archiveFile })
+    downgradeTo.set(JavaVersion.VERSION_1_8)
+    // The relocation prefix jvmdg PREPENDS to its runtime helpers (Kotlin DSL sets the
+    // Function1 property directly; the input class path is ignored — every helper lands
+    // under this one prefix, i.e. me/vexmc/mental/lib/jvmdg/xyz/wagyourtail/…).
+    shadePath.set { "me/vexmc/mental/lib/jvmdg/" }
+    destinationDirectory.set(layout.buildDirectory.dir("libs"))
+    archiveBaseName.set("Mental")
+    archiveClassifier.set("")
+    failOnJvmdgWarnings(this)
+}
+
 tasks.build {
-    dependsOn(tasks.shadowJar)
+    dependsOn(megaJar)
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -157,8 +269,8 @@ val verifyRelocation = tasks.register("verifyRelocation") {
     group = "verification"
     description = "Fails if any un-relocated net/kyori entry or class reference survives the shade " +
             "(the shaded Adventure must stay under me.vexmc.mental.lib — review F-BP3)."
-    dependsOn(tasks.shadowJar)
-    val jarFile = tasks.shadowJar.flatMap { it.archiveFile }
+    dependsOn(megaJar)
+    val jarFile = megaJar.flatMap { it.archiveFile }
     inputs.file(jarFile)
     doLast {
         val relocatedPrefix = "me/vexmc/mental/lib/"
@@ -169,15 +281,19 @@ val verifyRelocation = tasks.register("verifyRelocation") {
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
                 val name = entry.name
-                // Scan 1: no entry may live under the un-relocated net/kyori/ path.
-                if (name.startsWith("net/kyori/")) {
+                val logical = if (name.startsWith("META-INF/versions/"))
+                    name.substringAfter("META-INF/versions/").substringAfter('/') else name
+                if (logical.startsWith("net/kyori/") || logical.startsWith("xyz/wagyourtail/")) {
                     entryViolations.add(name)
                 }
-                // Scan 2: class bytes outside the relocated prefix must not name net.kyori.
-                if (name.endsWith(".class") && !name.startsWith(relocatedPrefix)) {
+                if (name.endsWith(".class") && !logical.startsWith(relocatedPrefix)) {
                     val text = zip.getInputStream(entry).use { input ->
                         String(input.readBytes(), Charsets.ISO_8859_1)
                     }
+                    // jvmdg leaves bare CLASS-retention marker annotations (xyz/wagyourtail/jvmdg/j{11,16,17}
+                    // NestHost/NestMembers/RecordComponents/PermittedSubClasses) un-relocated by design —
+                    // harmless (never resolved; spike-proven on real Java 8). Their reference-correctness is
+                    // verifyJdk8Api's job; here only net.kyori (Adventure) is scanned by reference.
                     if (text.contains("net/kyori") || text.contains("net.kyori")) {
                         refViolations.add(name)
                     }
@@ -220,7 +336,248 @@ tasks.named("check") {
  * ──────────────────────────────────────────────────────────────────────── */
 
 val javaToolchains = extensions.getByType<JavaToolchainService>()
-val testerShadowJar = project(":tester").tasks.named<AbstractArchiveTask>("shadowJar")
+// The tester's FINAL mega jar (its jvmdg ShadeJar) — the artifact that must load on the
+// Java-8 legacy servers, NOT the staged v61 shadowJar. Looked up by task NAME (the jvmdg
+// plugin names its default shade task identically in every project, so core's own
+// megaJar.name is the tester's too), NOT by extensions.getByType<JVMDowngraderExtension>():
+// that reified plugin type resolves through core's plugin classloader and does NOT match the
+// tester project's separately-loaded extension class, so getByType throws cross-project.
+// AbstractArchiveTask is a Gradle core type (shared classloader), so the typed lookup is safe.
+// core evaluationDependsOn(":tester") above, so the tester's task exists here.
+val testerMegaJar = project(":tester").tasks.named<AbstractArchiveTask>(megaJar.name)
+
+/* ────────────────────────────────────────────────────────────────────────
+ *  Mega-jar verification gates (campaign Q2/Q3/H1/H4/D-8), all wired into `check`.
+ *
+ *  These make the mega-jar invariants un-rottable and prove them on EVERY
+ *  ./gradlew build, not only at release: the base tree is real Java-8 bytecode
+ *  (verifyDowngrade), every reference in it resolves on a real Java-8 JVM or a
+ *  server package (verifyJdk8Api), the modern tree is byte-identically forked,
+ *  and the two plugins' jvmdg runtimes never cross (verifyTesterIsolation).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/*  verifyDowngrade (Q2/H4) — the tier structure is exactly the D-7 shape.  */
+/*  verifyJdk8Api (H1) — closed-world scan of both base trees against a real JDK 8.  */
+val jdk8GateAsm: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+dependencies { jdk8GateAsm("org.ow2.asm:asm:9.7") }
+
+// Server-provided packages: present on the running server, never bundled, so never validated or required
+// in-jar. Each is documented — an addition must be a package the scan PROVES the server provides.
+val serverProvidedIgnores = listOf(
+    "org/bukkit",            // the Bukkit/Paper API
+    "net/minecraft",         // NMS (reflected, never linked directly, but appears in a few descriptors)
+    "com/destroystokyo",     // Paper's legacy API namespace
+    "io/papermc",            // modern Paper API (Folia schedulers, etc.)
+    "org/spigotmc",          // Spigot API surface
+    "io/netty",              // the server's shaded-in Netty (Mental shares it, never bundles it)
+    "com/mojang",            // Mojang/Brigadier/authlib provided by the server
+    "org/jetbrains",         // compile-only CLASS-retention annotations (@NotNull/@Nullable) — absent at runtime by design
+    "xyz/wagyourtail",       // jvmdg CLASS-retention marker annotations left bare (@NestMembers/@RecordComponents/…) — never resolved; class relocated & bundled
+    // Compile-only CLASS-retention annotations dragged in by the shaded packetevents/adventure, absent at
+    // runtime by design (the JVM never resolves a missing annotation class) — proven benign like org/jetbrains:
+    "org/intellij",          // IntelliJ @Pattern/@RegExp (adventure key validation)
+    "org/jspecify",          // JSpecify @Nullable/@NullMarked (packetevents)
+    "org/checkerframework",  // CheckerFramework @MonotonicNonNull etc. (packetevents)
+    "com/google/auto",       // Google @AutoService (packetevents build-time service registration marker)
+    "com/google/errorprone", // Error Prone @CanIgnoreReturnValue etc. (guava/packetevents)
+    // Google runtime libraries the SERVER bundles (packetevents links them; Paper ships both):
+    "com/google/gson",       // Gson — Paper-provided
+    "com/google/common",     // Guava — Paper-provided
+    "com/viaversion",        // the optional ViaVersion plugin: packetevents' ViaVersionAccessorImpl links it only
+                             //   when that plugin is installed (it provides the classes), guarded otherwise
+)
+
+val verifyJdk8Api = tasks.register("verifyJdk8Api") {
+    group = "verification"
+    description = "Fails if any reference in either mega jar's base (v52) tree resolves neither in a real " +
+            "JDK-8 rt.jar, in-jar, nor a documented server-provided package (campaign H1; subsumes H2)."
+    dependsOn(megaJar, testerMegaJar)
+    val coreJar = megaJar.flatMap { it.archiveFile }
+    val testerJar = testerMegaJar.flatMap { it.archiveFile }
+    val toolSrc = rootProject.layout.projectDirectory.file("scripts/tools/Jdk8ApiGate.java")
+    val allowFile = rootProject.layout.projectDirectory.file("scripts/tools/jdk8-api-gate.allow")
+    val jdk8Home = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) }
+        .map { it.metadata.installationPath.asFile }
+    val classesDir = layout.buildDirectory.dir("jdk8-gate/classes")
+    val asm = jdk8GateAsm
+    // Gradle 9 removed Project.javaexec; ExecOperations is the injected replacement, captured at
+    // configuration time so the doLast never touches the Project instance.
+    val execOps = serviceOf<ExecOperations>()
+    inputs.file(coreJar); inputs.file(testerJar); inputs.file(toolSrc); inputs.file(allowFile)
+    doLast {
+        val jdk8 = jdk8Home.get()
+        val out = classesDir.get().asFile
+        out.deleteRecursively(); out.mkdirs()
+        // Compile the standalone tool in-process against ASM (Gradle runs on a JDK, so the compiler is present).
+        val compiler = javax.tools.ToolProvider.getSystemJavaCompiler()
+            ?: throw GradleException("no system Java compiler — run Gradle on a JDK, not a JRE")
+        val asmCp = asm.files.joinToString(File.pathSeparator) { it.absolutePath }
+        val rc = compiler.run(null, null, System.err,
+            "-cp", asmCp, "-d", out.absolutePath, toolSrc.asFile.absolutePath)
+        if (rc != 0) throw GradleException("failed to compile ${toolSrc.asFile.name} (see errors above)")
+        val toolClasspath = files(asm.files + out)
+
+        // The tester provides no kernel/api/platform/core code (the Mental jar does at runtime), so those
+        // Mental packages are server-provided FROM ITS PERSPECTIVE — ignore me/vexmc/mental/ for it only.
+        // Inlined as a loop (a local fun here would truncate the Gradle Kotlin DSL script body).
+        val gates = listOf(
+            Triple(coreJar.get().asFile, serverProvidedIgnores, "Mental"),
+            Triple(testerJar.get().asFile, serverProvidedIgnores + "me/vexmc/mental/", "MentalTester"))
+        for ((jar, ignores, label) in gates) {
+            val gateArgs = mutableListOf(jar.absolutePath, jdk8.absolutePath,
+                "--allow", allowFile.asFile.absolutePath)
+            ignores.forEach { gateArgs.add("--ignore"); gateArgs.add(it) }
+            val result = execOps.javaexec {
+                classpath = toolClasspath
+                mainClass.set("Jdk8ApiGate")
+                args = gateArgs
+                isIgnoreExitValue = true
+            }
+            if (result.exitValue != 0) {
+                throw GradleException("[verifyJdk8Api] $label has references absent from Java 8 "
+                        + "(see the [jdk8-gate] output above).")
+            }
+        }
+    }
+}
+
+
+val verifyDowngrade = tasks.register("verifyDowngrade") {
+    group = "verification"
+    description = "Fails unless the mega jar is a well-formed Multi-Release tier set: base ≤ v52, " +
+            "versions/16 ≤ v60, versions/17 first-party == v61 and its class-set == base's, sentinel forked, " +
+            "and no reflective-record token in the downgraded tree (H4)."
+    dependsOn(megaJar)
+    val jarFile = megaJar.flatMap { it.archiveFile }
+    inputs.file(jarFile)
+    doLast {
+        val file = jarFile.get().asFile
+        val problems = mutableListOf<String>()
+        val sentinel = "me/vexmc/mental/v5/MentalPluginV5.class"
+        var baseSentinelMajor = -1
+        var v17SentinelMajor = -1
+        val baseFirstParty = sortedSetOf<String>()
+        val v17FirstParty = sortedSetOf<String>()
+        val baseBytesByLogical = mutableMapOf<String, ByteArray>()
+
+        // Manifest must declare Multi-Release: true.
+        JarFile(file).use { jar ->
+            val mr = jar.manifest?.mainAttributes?.getValue("Multi-Release")
+            if (!"true".equals(mr, ignoreCase = true)) {
+                problems.add("manifest Multi-Release is '$mr' (expected true)")
+            }
+        }
+
+        ZipFile(file).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                val name = entry.name
+                if (!name.endsWith(".class")) continue
+                val logical = mrStrip(name)
+                val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                val major = classMajor(bytes)
+                when {
+                    // versions/17 overlay: the original modern tree.
+                    name.startsWith("META-INF/versions/17/") -> {
+                        if (isFirstParty(logical)) {
+                            v17FirstParty.add(logical)
+                            if (major != 61) problems.add("versions/17 first-party $logical is v$major (expected 61)")
+                        }
+                        if (name == "META-INF/versions/17/$sentinel") v17SentinelMajor = major
+                    }
+                    // versions/16 overlay (if produced): must not exceed v60.
+                    name.startsWith("META-INF/versions/16/") -> {
+                        if (major > 60) problems.add("versions/16 entry $logical is v$major (>60)")
+                    }
+                    // Any other versioned overlay tier is unexpected in the D-7 shape.
+                    name.startsWith("META-INF/versions/") ->
+                        problems.add("unexpected versioned tier entry $name")
+                    // Base tree: nothing may exceed v52 (Java 8).
+                    else -> {
+                        if (major > 52) problems.add("base entry $logical is v$major (>52)")
+                        if (isFirstParty(logical)) {
+                            baseFirstParty.add(logical)
+                            baseBytesByLogical[logical] = bytes
+                        }
+                        if (name == sentinel) baseSentinelMajor = major
+                        // H4: no downgraded (non-jvmdg-runtime) base class may reflectively introspect records —
+                        // a downgraded record is NOT a reflective record (Class.isRecord()==false). ISO-8859-1
+                        // makes a substring match an exact constant-pool byte-sequence match.
+                        if (!logical.startsWith("me/vexmc/mental/lib/jvmdg/")) {
+                            val text = String(bytes, Charsets.ISO_8859_1)
+                            if (text.contains("isRecord") || text.contains("java/lang/reflect/RecordComponent")) {
+                                problems.add("base class $logical references Class.isRecord/java.lang.reflect.RecordComponent "
+                                        + "(H4) — a downgraded record is not a reflective record")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // The modern (versions/17) overlay must be a SUBSET of base (no phantom class), and its sentinel must
+        // fork to v61 — but it is NOT required to overlay EVERY base class. jvmdg's multiReleaseOriginal keeps
+        // the original v61 only for classes whose downgrade could behave differently on a modern JVM (the ones
+        // using shimmed Java-9+ APIs — those must run the REAL API on 1.17+). Classes needing only behavior-
+        // PRESERVING language downgrades (string-concat → StringBuilder, records/sealed/nestmate metadata
+        // annotations) get no overlay and load as v52 on modern — functionally identical to v61, so D-1's
+        // behavior identity holds (the live 1.17.1/26.1.2 gate proves it). A base-only class must therefore
+        // carry NO jvmdg-runtime reference (that would mean a shimmed API loading its shim on modern); if it
+        // did, that IS a D-1 break and fails here.
+        val phantom = v17FirstParty - baseFirstParty
+        if (phantom.isNotEmpty()) {
+            problems.add("versions/17 has ${phantom.size} first-party class(es) absent from base (e.g. "
+                    + "${phantom.take(3)}) — a phantom overlay")
+        }
+        val baseOnly = baseFirstParty - v17FirstParty
+        for (cls in baseOnly) {
+            val text = String(baseBytesByLogical.getValue(cls), Charsets.ISO_8859_1)
+            if (text.contains("me/vexmc/mental/lib/jvmdg")) {
+                problems.add("base-only class $cls references the jvmdg runtime but has NO v61 overlay — a "
+                        + "shimmed API would load its shim on modern (D-1 break)")
+            }
+        }
+        if (baseSentinelMajor != 52) problems.add("sentinel base major is $baseSentinelMajor (expected 52)")
+        if (v17SentinelMajor != 61) problems.add("sentinel versions/17 major is $v17SentinelMajor (expected 61)")
+
+        if (problems.isNotEmpty()) {
+            throw GradleException("verifyDowngrade: the mega jar is not a well-formed tier set:\n"
+                    + problems.take(30).joinToString("\n") { "  - $it" })
+        }
+        logger.lifecycle("[verifyDowngrade] OK — base ≤ v52; ${v17FirstParty.size} first-party classes forked to "
+                + "v61 under versions/17; ${baseOnly.size} behavior-preserving base-only (no jvmdg shim); sentinel "
+                + "forked 52/61; no reflective-record token.")
+    }
+}
+
+
+val verifyTesterIsolation = tasks.register("verifyTesterIsolation") {
+    group = "verification"
+    description = "Fails if the tester mega jar references Mental's me/vexmc/mental/lib/jvmdg prefix (D-8)."
+    dependsOn(testerMegaJar)
+    val jarFile = testerMegaJar.flatMap { it.archiveFile }
+    inputs.file(jarFile)
+    doLast {
+        val needle = "me/vexmc/mental/lib/jvmdg"
+        val hits = mutableListOf<String>()
+        ZipFile(jarFile.get().asFile).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                if (!entry.name.endsWith(".class")) continue
+                val text = zip.getInputStream(entry).use { String(it.readBytes(), Charsets.ISO_8859_1) }
+                if (text.contains(needle)) hits.add(entry.name)
+            }
+        }
+        if (hits.isNotEmpty()) throw GradleException("verifyTesterIsolation: tester references $needle")
+        logger.lifecycle("[verifyTesterIsolation] OK")
+    }
+}
+tasks.named("check") { dependsOn(verifyDowngrade, verifyTesterIsolation, verifyJdk8Api) }
 
 tasks.named<RunServer>("runServer") {
     enabled = false
@@ -245,7 +602,7 @@ fun registerIntegrationServer(
     jdk: Int,
     platform: String = "paper",
     suites: String = "full",
-    serverFlags: List<String> = emptyList(),
+    bytecodeTier: Int = 61,
 ): Pair<TaskProvider<RunServer>, TaskProvider<Task>> {
     val runDir = rootProject.layout.projectDirectory.dir("run/$runDirName").asFile
     val resultFile = runDir.resolve("plugins/MentalTester/test-results.txt")
@@ -263,7 +620,7 @@ fun registerIntegrationServer(
     val runTask = tasks.register<RunServer>("runIntegrationTest$taskSuffix") {
         group = "mental integration"
         description = "Boots $platform $label with Mental + tester and runs the suite."
-        dependsOn(tasks.shadowJar, testerShadowJar)
+        dependsOn(megaJar, testerMegaJar)
         runDirectory.set(runDir)
         // Folia downloads from its own project on the PaperMC API; Paper is the
         // RunServer default. Set the source before the version so the requested
@@ -275,18 +632,24 @@ fun registerIntegrationServer(
         // disable.watchdog matters on slow CI runners: a >60s tick stall
         // trips the legacy watchdog, whose forced shutdown can deadlock old
         // servers into a hung process that never writes a test result.
-        // serverFlags carries per-version boot flags from support-matrix.json (the
-        // legacy Paper builds ≥1.13 need -DPaper.IgnoreJavaVersion=true to run on
-        // Java 17); mental.tester.suites selects the tester's suite tier for this
-        // entry (boot ⇒ classload/boot-safety suite only).
+        // mental.tester.suites selects the tester's suite tier for this entry
+        // (boot ⇒ classload/boot-safety suite only); mental.tester.tier is the
+        // entry's declared Multi-Release bytecodeTier (the class major its loader ×
+        // JVM reads from the mega jar) — the tester asserts the loaded tree against
+        // it, so which Multi-Release tree loaded is a live per-version fact. No
+        // Java-version-guard bypass flag is passed: every legacy build runs its
+        // newest clean flagless JVM, and the v52 base tree loads there natively.
         jvmArgs("-Dcom.mojang.eula.agree=true", "-Ddisable.watchdog=true", "-Xmx2G",
-                "-Dmental.tester.nonce=$nonce", "-Dmental.tester.suites=$suites")
-        jvmArgs(serverFlags)
+                "-Dmental.tester.nonce=$nonce", "-Dmental.tester.suites=$suites",
+                "-Dmental.tester.tier=$bytecodeTier")
         javaLauncher.set(javaToolchains.launcherFor {
             languageVersion.set(JavaLanguageVersion.of(jdk))
         })
-        pluginJars.from(tasks.shadowJar.flatMap { it.archiveFile })
-        pluginJars.from(testerShadowJar.flatMap { it.archiveFile })
+        // The mega jars — the SHIPPED artifacts, so the live gate exercises the exact
+        // Multi-Release bytecode admins run (modern loaders read versions/17, the ad-hoc
+        // Java-8 legacy boots read base v52).
+        pluginJars.from(megaJar.flatMap { it.archiveFile })
+        pluginJars.from(testerMegaJar.flatMap { it.archiveFile })
         extraPluginJars.forEach { pluginJars.from(it) }
 
         doFirst {
@@ -298,6 +661,18 @@ fun registerIntegrationServer(
             // Companion plugins must start pristine too — their defaults are
             // part of what the coexistence suite asserts against.
             runDir.resolve("plugins/OldCombatMechanics").deleteRecursively()
+            // Stale versioned plugin JARs must go too. scripts/integration-matrix.sh copies
+            // this run's jars verbatim into the SHARED run/<v>/plugins dir; run-paper's own
+            // deleteOldPlugins only prunes its "_RunServer_plugin.jar"-suffixed copies, so a
+            // script-left Mental-*.jar / MentalTester-*.jar (or an OCM jar) — from a prior
+            // version or a non-OCM run — would double-load as an ambiguous plugin. run-paper's
+            // setupPlugins re-copies THIS run's pluginJars (OCM extra included) in exec(), after
+            // this doFirst, so clearing all three patterns unconditionally is the correct reset.
+            runDir.resolve("plugins").listFiles()?.forEach { jar ->
+                val n = jar.name
+                if (n.endsWith(".jar") && (n.startsWith("Mental-") || n.startsWith("MentalTester-")
+                        || n.startsWith("OldCombatMechanics"))) jar.delete()
+            }
             // Belt-and-suspenders EULA acceptance: modern Paper honours the
             // -Dcom.mojang.eula.agree property, but the legacy builds are more
             // reliably satisfied by the eula.txt on disk. Idempotent everywhere.
@@ -375,7 +750,7 @@ paperEntries.forEach { entry ->
     val (runTask, checkTask) =
         registerIntegrationServer(
             suffix, entry.version, entry.version, emptyList(), "", entry.jdk,
-            suites = entry.suites, serverFlags = entry.serverFlags)
+            suites = entry.suites, bytecodeTier = entry.bytecodeTier)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     checkTasks.add(checkTask)
@@ -400,7 +775,7 @@ foliaEntries.forEach { entry ->
     val suffix = "Folia_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
         suffix, entry.version, "folia/${entry.version}", emptyList(), " Folia", entry.jdk, "folia",
-        suites = entry.suites, serverFlags = entry.serverFlags)
+        suites = entry.suites, bytecodeTier = entry.bytecodeTier)
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
     foliaCheckTasks.add(checkTask)
@@ -468,7 +843,7 @@ paperEntries.filter { it.version in ocmVersions }.distinctBy { it.version }.forE
     val suffix = "Ocm_" + entry.version.replace(".", "_")
     val (runTask, checkTask) = registerIntegrationServer(
         suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk,
-        suites = entry.suites, serverFlags = entry.serverFlags)
+        suites = entry.suites, bytecodeTier = entry.bytecodeTier)
     runTask.configure { dependsOn(stageOcmJar) }
     previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
     previousCheck = checkTask
