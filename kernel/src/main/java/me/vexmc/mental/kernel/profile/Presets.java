@@ -230,7 +230,16 @@ public final class Presets {
             // speed-conformal knockback so Speed/Slowness fights keep the
             // base-speed combo rhythm (design 2026-07-04). Archived-server
             // presets stay OFF — they are historical records.
-            new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0));
+            //
+            // Exponent 0.95 (2.4.1): the owner's Speed-III feel tune, a light
+            // temper of the fully-conformal 1.0. Base speed is the anchor and is
+            // exponent-invariant — s = (attr/baseline)^e is 1.0 at attr == baseline
+            // for ANY e, and the live base ratio carries only ~1.5e-8 of float slack
+            // (below the wire quantum), so plain play still ships the era stamp
+            // byte-identically. Only genuine speed moves off 1.0: a Speed III sprint
+            // (walk-normalized 0.16/0.10 = 1.6) scales 1.6^0.95 ≈ 1.563 instead of
+            // 1.6 — a touch less compression at the top of the window.
+            new PaceScaling(PaceScaling.Mode.ATTACKER, 0.95, 0.5, 2.0));
 
     /**
      * Ships as legacy-1.7 values — selecting it changes nothing until the

@@ -2,7 +2,6 @@ package me.vexmc.mental.v5.feature.damage;
 
 import java.util.UUID;
 import me.vexmc.mental.kernel.math.SwordBlockReduction;
-import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.SprintWire;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
@@ -55,13 +54,10 @@ import org.jetbrains.annotations.NotNull;
 public final class SwordBlockingUnit implements FeatureUnit, Listener {
 
     private final ConnectionDomains domains;
-    private final TickClock clock;
     private final EphemeralDecoration decoration;
 
-    public SwordBlockingUnit(
-            ConnectionDomains domains, TickClock clock, EphemeralDecoration decoration) {
+    public SwordBlockingUnit(ConnectionDomains domains, EphemeralDecoration decoration) {
         this.domains = domains;
-        this.clock = clock;
         this.decoration = decoration;
     }
 
@@ -196,8 +192,13 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
             return; // no live connection wire (a synthetic/packetless player)
         }
         SprintWire wire = domains.domainFor(id).sprint();
-        if (!wire.verdictAt(clock.current()).sprinting()) {
-            return; // client not sprinting — a defensive block earns no phantom bonus
+        if (!wire.clientSprinting()) {
+            // Gate on the RAW client sprint flag — the only signal that survives
+            // Mental's own post-hit setSprinting(false)/onServerClear (F3, restoring
+            // the documented pre-v5 contract). verdictAt().sprinting() is the very
+            // flag those clears drop, so a real sprinter mid-combo would read false
+            // and lose the block-hit re-arm; a defensive block still earns no bonus.
+            return;
         }
         wire.onSprintStart(); // the block-release re-engage IS the w-tap signal — re-arm freshness
         if (!player.isSprinting()) {

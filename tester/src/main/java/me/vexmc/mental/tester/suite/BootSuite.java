@@ -13,6 +13,7 @@ import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.ProbeStrategy;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
+import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.gui.DashboardMenu;
 import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.v5.platform.ManifestEntry;
@@ -22,10 +23,12 @@ import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.ShapedRecipe;
+import org.bukkit.plugin.RegisteredListener;
 import org.jetbrains.annotations.NotNull;
 
 /** The plugin came up correctly on this exact server version. */
@@ -247,6 +250,8 @@ public final class BootSuite {
         table.put("attribute:entity_interaction_range", new int[] {1, 20, 5});
         table.put("capability:hurt_animation_bundle", new int[] {1, 19, 4});
         table.put("capability:knockback_event", new int[] {1, 20, 6});
+        table.put("capability:recipe_key", new int[] {1, 12, 0}); // GAP 1 — NamespacedKey + keyed ctor land 1.12
+        table.put("capability:sweep_cause", new int[] {1, 11, 0}); // GAP 2 — ENTITY_SWEEP_ATTACK lands 1.11
         table.put("flag:projectile_kb_restored", new int[] {1, 21, 2});
         table.put("marker:join_protection_layout", new int[] {1, 21, 2});
         table.put("component:max_damage", new int[] {1, 20, 5});
@@ -459,9 +464,29 @@ public final class BootSuite {
             context.expect(registered,
                     "golden-apples enabled but no notch-apple recipe registered — the legacy recipe "
                             + "path did not engage (pre-1.13 refusal not lifted?)");
+            // The 2.4.1 GAP-1 regression pin: the recipe half (scope.task) survives a poisoned
+            // registerEvents, so a recipe alone cannot prove the CONSUME half is alive. Bukkit
+            // reflects over every declared method at registerEvents and swallows a descriptor
+            // NoClassDefFoundError into one SEVERE line, registering ZERO handlers — before the
+            // NappleKeyed hoist this assertion failed on 1.9.4–1.11.2 (NamespacedKey lands 1.12).
+            boolean consumeRegistered = context.sync(BootSuite::goldenApplesConsumeHandlerRegistered);
+            context.expect(consumeRegistered,
+                    "golden-apples active but no GoldenApplesUnit handler is registered on "
+                            + "PlayerItemConsumeEvent — registerEvents swallowed a listener-descriptor "
+                            + "linkage error (the GAP-1 NamespacedKey hazard)");
         } finally {
             setFeature(mental, context, Feature.GOLDEN_APPLES, false);
         }
+    }
+
+    /** Whether a {@link GoldenApplesUnit} holds a live {@link PlayerItemConsumeEvent} handler. */
+    private static boolean goldenApplesConsumeHandlerRegistered() {
+        for (RegisteredListener listener : PlayerItemConsumeEvent.getHandlerList().getRegisteredListeners()) {
+            if (listener.getListener() instanceof GoldenApplesUnit) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Toggles a feature through the management write-back seam and waits one tick for convergence. */

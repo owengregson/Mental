@@ -19,6 +19,7 @@ import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.model.SprintVerdict;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.CompensationQuery;
@@ -41,6 +42,8 @@ import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Sound;
+import org.bukkit.SoundCategory;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -187,12 +190,12 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             if (freshPartialBlock) {
                 deliverBlockedKnock(
                         session, victim, attacker, source, tx, tx.carried(),
-                        state == HitTransaction.State.PRE_SENT, sprinting);
+                        state == HitTransaction.State.PRE_SENT, sprinting, tx.paceFactor());
                 return;
             }
             // Adopt the pre-delivered vector — the era stamped once.
             desk.awaitVelocityEvent(tx);
-            applyAttackerObligations(attacker, sprinting);
+            applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
             return;
         }
 
@@ -201,18 +204,21 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         EntityState attackerState = EntityStates.capture(attacker, sprinting);
         boolean freshSprint = source instanceof HitSource.Melee && sprinting
                 && tx.context().sprint().fresh() != null && tx.context().sprint().fresh();
-        KnockbackVector vector = KnockbackEngine.compute(
+        KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                 attackerState, victimState, profile, compensationY,
                 ThreadLocalRandom.current(), freshSprint);
+        KnockbackVector vector = paced.vector();
+        tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
 
         if (freshPartialBlock) {
-            deliverBlockedKnock(session, victim, attacker, source, tx, vector, false, sprinting);
+            deliverBlockedKnock(session, victim, attacker, source, tx, vector, false, sprinting,
+                    tx.paceFactor());
             return;
         }
 
         desk.submit(tx, vector);
         desk.awaitVelocityEvent(tx);
-        applyAttackerObligations(attacker, sprinting);
+        applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
     }
 
     /** A protection plugin cancelling the melee hit withdraws the queued knock. */
@@ -263,8 +269,16 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * sprint-bonus hit: the attacker's ledger {@code ×0.6} self-slow, the wire
      * sprint clear, and {@code setSprinting(false)} (a no-op when vanilla's own
      * attack already cleared it on the server-side melee path).
+     *
+     * <p>Both clears are guarded by the hit's verdict stamp ({@code asOf}). Vanilla
+     * cleared sprint synchronously inside {@code attack}, so it could never eat a
+     * re-engage that arrived afterwards; Mental's clears run 1–2 ticks late at the
+     * deferred EDBEE, so a w-tap START in that window must survive. The wire clear
+     * no-ops under a newer wire write ({@link SprintWire#onServerClear(TickStamp)}),
+     * and the deferred {@code setSprinting(false)} is skipped when the wire has
+     * re-armed to sprinting by execution time (F2).</p>
      */
-    private void applyAttackerObligations(LivingEntity attacker, boolean sprinting) {
+    private void applyAttackerObligations(LivingEntity attacker, boolean sprinting, TickStamp asOf) {
         if (!(attacker instanceof Player player)) {
             return;
         }
@@ -272,13 +286,22 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (!bonus) {
             return;
         }
-        CombatSession attackerSession = sessions.sessionFor(player.getUniqueId());
+        UUID attackerId = player.getUniqueId();
+        CombatSession attackerSession = sessions.sessionFor(attackerId);
         if (attackerSession != null) {
             attackerSession.ledger().scaleHorizontal(0.6);
         }
-        domains.domainFor(player.getUniqueId()).sprint().onServerClear();
+        domains.domainFor(attackerId).sprint().onServerClear(asOf);
         if (player.isSprinting()) {
-            scheduling.runOn(player, () -> player.setSprinting(false), () -> {});
+            scheduling.runOn(player, () -> {
+                // At execution time (the attacker's own thread), skip the clear when
+                // the wire re-armed to sprinting after the hit — a re-engage newer
+                // than asOf that vanilla's synchronous clear would never have eaten.
+                if (domains.domainFor(attackerId).sprint().verdictAt(clock.current()).sprinting()) {
+                    return;
+                }
+                player.setSprinting(false);
+            }, () -> {});
         }
     }
 
@@ -292,36 +315,57 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * and the era knock lost. The era knocks a partial block in FULL
      * (compendium: blocking halves damage AFTER knockBack ran), so we ship it.
      *
-     * <p>The original transaction is withdrawn so the sweep never journals a false
-     * drop, and a fresh one is submitted next tick — stamped at that tick so it
-     * survives its own sweep. {@code setVelocity} triggers the tracker's velocity
-     * event, which the desk resolves to the full stamp (undecayed: a REGISTERED
-     * resolve ships the submitted vector, ignoring the physics-decayed api value)
-     * and journals a SHIP. Presentation mirrors the fast path: a client with no
-     * wire pre-send gets a VELOCITY + HURT burst (era: a blocked hit flinches and
-     * plays the vanilla hurt sound — no shield clang, the component's blockSound is
-     * empty), and the valve is armed whenever a wire copy exists so the
-     * authoritative tracker re-emission is consumed once, never doubled onto it.</p>
+     * <p>The original transaction is withdrawn — and JOURNALED
+     * ({@code blocked-redeliver} → the fresh id) so the sweep never records a
+     * false drop and the blocked hit stays correlatable — and a fresh one is
+     * submitted carrying the ORIGINAL sprint verdict (not a misleading
+     * {@code SprintVerdict(false)}). {@code setVelocity} triggers the tracker's
+     * velocity event, which the desk resolves to the full stamp (undecayed: a
+     * REGISTERED resolve ships the submitted vector, ignoring the physics-decayed
+     * api value) and journals a SHIP. Delivery runs INLINE when the current thread
+     * already owns the victim (the EDBEE does), so the knock ships the SAME tick —
+     * era-consistent (vanilla knockback applies during attack processing, not a
+     * tick later) — falling back to {@code runOn} otherwise; a retired victim
+     * journals a {@code victim-retired} drop rather than vanishing silently.</p>
+     *
+     * <p>Presentation mirrors the fast path: a client with no wire pre-send gets a
+     * VELOCITY + HURT burst, and the valve is armed whenever a wire copy exists so
+     * the authoritative tracker re-emission is consumed once, never doubled. The
+     * VICTIM'S OWN HURT SOUND is played to the victim alone in BOTH branches:
+     * vanilla's {@code playHurtSound} broadcast excludes exactly the victim, and
+     * the victim's client derives its own hurt sound from the
+     * {@code ClientboundDamageEventPacket} that the blocked branch replaces with a
+     * no-op {@code onBlocked} (blockSound empty) — so the one missing audience is
+     * the victim (F4; the 2.4.0 record wrongly assumed vanilla still served it).
+     * Mental's HURT_ANIMATION burst is soundless by design. A world broadcast
+     * would double the sound for the bystanders vanilla already served. This path
+     * only triggers on the BLOCKS_ATTACKS tier (1.21.5+), so the direct Bukkit
+     * constant needs no legacy-name fallback (the ToolWear precedent).</p>
      */
     private void deliverBlockedKnock(
             CombatSession session, Player victim, LivingEntity attacker, HitSource source,
-            HitTransaction original, KnockbackVector era, boolean wirePreSent, boolean sprinting) {
-        applyAttackerObligations(attacker, sprinting);
+            HitTransaction original, KnockbackVector era, boolean wirePreSent, boolean sprinting,
+            double paceFactor) {
+        applyAttackerObligations(attacker, sprinting, original.context().sprint().at());
         if (era == null) {
             return; // nothing carried/computed — leave vanilla's (absent) knock
         }
         DeliveryDesk desk = session.desk();
-        // Drop the original pending so the tick sweep cannot journal it as a false
-        // "no-velocity-event"; the fresh transaction below carries the SHIP.
-        desk.withdraw(original.context().id());
         UUID victimId = victim.getUniqueId();
         UUID attackerId = attacker.getUniqueId();
+        // Mint the fresh redelivery up front so the withdraw can name its
+        // superseding id and a retired delivery can journal a correlated drop. It
+        // carries the ORIGINAL sprint verdict — the journal context stays honest.
+        HitTransaction fresh = mint(source, attackerId, victimId, original.context().sprint(), paceFactor);
+        // Withdraw + JOURNAL the original (a PRE_SENT/PINNED submitFromWire) so the
+        // tick sweep cannot record it as a false "no-velocity-event"; a REGISTERED
+        // region-path original was never on the desk, so this is a no-op there.
+        desk.withdrawSuperseded(original.context().id(), "blocked-redeliver", fresh.context().id());
         PlayerView view = session.view();
         int entityId = view != null ? view.entityId() : victim.getEntityId();
         float hurtYaw = hurtYawFor(attacker, victim);
         boolean bundle = bundleFeedback();
-        scheduling.runOn(victim, () -> {
-            HitTransaction fresh = mint(source, attackerId, victimId);
+        Runnable delivery = () -> {
             desk.submit(fresh, era);
             desk.awaitVelocityEvent(fresh);
             boolean wireCopy = wirePreSent;
@@ -341,18 +385,29 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                 // velocity for this hit) is consumed once, never stacked on it.
                 valve.arm(victimId, ValvePayload.of(entityId, era));
             }
+            // The victim's own hurt sound — the one client vanilla's blocked branch
+            // leaves silent (see the javadoc). Play it to the victim alone; pitch
+            // mirrors vanilla LivingEntity.handleDamageEvent (1 + (r1 − r2) × 0.2).
+            float pitch = 1.0f + (ThreadLocalRandom.current().nextFloat()
+                    - ThreadLocalRandom.current().nextFloat()) * 0.2f;
+            victim.playSound(victim.getLocation(), Sound.ENTITY_PLAYER_HURT, SoundCategory.PLAYERS, 1.0f, pitch);
             // The authoritative motion: overwrites vanilla's blocked deltaMovement,
             // triggers the velocity event (→ desk SHIP journal), and moves the server
             // entity (server-authoritative for anticheats and clientless fakes).
             victim.setVelocity(Vectors.toBukkit(era));
-        }, () -> {});
+        };
+        // Same-tick ship: the EDBEE already runs on the victim's owning thread, so
+        // run inline when we own it; a retired victim journals a drop, not silence.
+        scheduling.ensureOn(victim, delivery, () -> desk.journalDrop(fresh, "victim-retired"));
     }
 
-    private HitTransaction mint(HitSource source, UUID attackerId, UUID victimId) {
+    private HitTransaction mint(
+            HitSource source, UUID attackerId, UUID victimId, SprintVerdict verdict, double paceFactor) {
         HitContext context = new HitContext(
-                ids.next(), source, attackerId, victimId,
-                new SprintVerdict(false, null, clock.current()), false, false, null, clock.current());
-        return new HitTransaction(context);
+                ids.next(), source, attackerId, victimId, verdict, false, false, null, clock.current());
+        HitTransaction fresh = new HitTransaction(context);
+        fresh.paceFactor(paceFactor); // carry the factor the original applied (D-6)
+        return fresh;
     }
 
     /** True when the victim was mid-invulnerability at hit time (the era-silent difference branch). */

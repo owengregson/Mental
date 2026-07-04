@@ -91,6 +91,32 @@ public abstract class SchedulingTck {
     }
 
     @Test
+    void ensureOnAnOwnedLiveEntityRunsTheTaskInlineWithoutATick() {
+        AtomicInteger tasks = new AtomicInteger();
+        AtomicInteger retired = new AtomicInteger();
+
+        // The caller owns the entity, so ensureOn runs the task synchronously —
+        // no tick() drains a queue, unlike runOn.
+        scheduling().ensureOn(ownedEntity(), tasks::incrementAndGet, retired::incrementAndGet);
+
+        assertEquals(1, tasks.get(), "an owned live entity runs the task inline, before any tick");
+        assertEquals(0, retired.get(), "an owned live entity never retires");
+    }
+
+    @Test
+    void ensureOnARetiredEntityDefersAndFiresRetiredExactlyOnce() {
+        AtomicInteger tasks = new AtomicInteger();
+        AtomicInteger retired = new AtomicInteger();
+
+        scheduling().ensureOn(retiredEntity(), tasks::incrementAndGet, retired::incrementAndGet);
+        tick();
+        tick();
+
+        assertEquals(0, tasks.get(), "a retired entity never runs the task");
+        assertEquals(1, retired.get(), "retired fires exactly once via the deferred path");
+    }
+
+    @Test
     void repeatOnStopsAfterTheHandleIsCancelled() {
         AtomicInteger runs = new AtomicInteger();
 

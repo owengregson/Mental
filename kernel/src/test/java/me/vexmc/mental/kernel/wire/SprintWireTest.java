@@ -114,4 +114,72 @@ class SprintWireTest {
         assertFalse(verdict.sprinting());
         assertEquals(Boolean.FALSE, verdict.fresh());
     }
+
+    /* ── the stamp-guarded clear + raw client flag (2.4.1, F2/F3 fix) ─────── */
+
+    @Test
+    void guardedServerClearNoOpsUnderANewerWireWrite() {
+        Clock clock = new Clock();
+        SprintWire wire = new SprintWire(clock);
+
+        // A re-engage START arrives at tick 6 — strictly newer than a hit stamped
+        // at tick 5. The deferred post-hit clear pertains to that T=5 hit and must
+        // NOT eat the later re-engage (vanilla's synchronous clear never could).
+        clock.tick = 6;
+        wire.onSprintStart();
+        wire.onServerClear(new TickStamp(5));
+
+        SprintVerdict verdict = wire.verdictAt(new TickStamp(6));
+        assertTrue(verdict.sprinting(), "a START newer than the hit stamp survives the guarded clear");
+        assertEquals(Boolean.TRUE, verdict.fresh(), "and the freshness the re-engage armed survives too");
+    }
+
+    @Test
+    void guardedServerClearAtOrBeforeTheStampClears() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                 // lastWrite = 5
+        wire.onServerClear(new TickStamp(5)); // asOf == lastWrite, not strictly older ⇒ clears
+
+        SprintVerdict verdict = wire.verdictAt(new TickStamp(5));
+        assertFalse(verdict.sprinting(), "no strictly-newer wire write ⇒ the guarded clear drops sprint");
+        assertEquals(Boolean.FALSE, verdict.fresh());
+    }
+
+    @Test
+    void clientSprintingSurvivesAServerClearAndOnlyStopLowersIt() {
+        Clock clock = new Clock();
+        clock.tick = 3;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();
+        assertTrue(wire.clientSprinting(), "a START raises the raw client flag");
+
+        wire.onServerClear(new TickStamp(3));
+        assertFalse(wire.verdictAt(new TickStamp(3)).sprinting(), "the era wire view cleared");
+        assertTrue(wire.clientSprinting(),
+                "the RAW client flag survives the post-hit clear — the block-hit re-arm signal (F3)");
+
+        clock.tick = 4;
+        wire.onSprintStop();
+        assertFalse(wire.clientSprinting(), "only a STOP packet lowers the raw client flag");
+    }
+
+    @Test
+    @SuppressWarnings("deprecation") // the no-arg form retains the pre-guard behaviour by contract
+    void deprecatedNoArgServerClearStillRetroClearsUnconditionally() {
+        Clock clock = new Clock();
+        clock.tick = 6;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart(); // lastWrite = 6, sprinting + armed, clientSprinting
+        wire.onServerClear(); // the old form has NO guard — clears even a fresh START
+
+        SprintVerdict verdict = wire.verdictAt(new TickStamp(6));
+        assertFalse(verdict.sprinting(), "the unconditional form clears regardless of wire freshness");
+        assertEquals(Boolean.FALSE, verdict.fresh());
+        assertTrue(wire.clientSprinting(), "even the unconditional clear never touches the raw client flag");
+    }
 }

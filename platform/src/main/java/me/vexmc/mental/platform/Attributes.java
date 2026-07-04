@@ -2,9 +2,11 @@ package me.vexmc.mental.platform;
 
 import java.lang.reflect.Field;
 import java.util.Optional;
+import me.vexmc.mental.kernel.model.EntityState;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,13 +59,54 @@ public final class Attributes {
      * {@code MOVEMENT_SPEED} (modern, 1.21.3+) / {@code GENERIC_MOVEMENT_SPEED}
      * (legacy, 1.17.1–1.21.2) — present on every supported version (the
      * attribute API exists from 1.9). Its {@link #valueOr} is the EFFECTIVE
-     * value (base × sprint × Speed/Slowness modifiers), which speed-conformal
-     * knockback reads for the attacker. Absent only pre-attribute-API (below the
-     * runtime floor) — callers fall back to {@link
+     * value (base × sprint × Speed/Slowness modifiers). Speed-conformal knockback
+     * reads it through {@link #movementSpeedWalkNormalized}, which strips the
+     * sprint modifier so the pace factor is stance-agnostic. Absent only
+     * pre-attribute-API (below the runtime floor) — callers fall back to {@link
      * me.vexmc.mental.kernel.model.EntityState#MOVE_SPEED_UNAVAILABLE}.
      */
     public static @Nullable Attribute movementSpeed() {
         return MOVEMENT_SPEED;
+    }
+
+    /**
+     * The exact vanilla sprint movement-speed multiplier:
+     * {@code LivingEntity.SPEED_MODIFIER_SPRINTING} is the float {@code 0.3f}
+     * applied as an {@code ADD_MULTIPLIED_TOTAL} modifier, so the effective
+     * movement speed a sprinting entity reads is {@code base × (1 + 0.3f)} =
+     * {@code × 1.30000001192092896} (javap-verified on 1.21.11 and 1.12.2). It is
+     * spelt {@code 1.0 + (double) 0.3f} so the widening is byte-exact to the
+     * server's own arithmetic.
+     */
+    private static final double SPRINT_MODIFIER = 1.0 + (double) 0.3f;
+
+    /**
+     * The entity's WALK-STANCE-NORMALIZED movement-speed attribute — the value
+     * speed-conformal knockback (pace scaling) consumes for the attacker. It
+     * reads {@code isSprinting()} and the effective attribute value back-to-back
+     * on the caller's (owning) thread and divides the sprint modifier back out
+     * when sprinting, so the result is the same whether or not the attacker's
+     * stance agrees between the wire and the server.
+     *
+     * <p><b>Why the pair-read is coherent.</b> The sprint flag and the ×1.3
+     * modifier move together <em>inside</em> {@code LivingEntity.setSprinting}, so
+     * a same-thread pair always sees both or neither — {@code isSprinting()} true
+     * iff the modifier is present in the effective value. Dividing out the ONLY
+     * stance-churning term leaves just genuine speed (base, Speed/Slowness), so a
+     * wire-vs-server stance disagreement can no longer skew the pace factor (the
+     * 2.4.0 pace desync, F1: a wire-fresh sprint boolean was paired with an
+     * attribute captured a different instant, dividing {@code 0.10/0.13}). The
+     * {@link EntityState#MOVE_SPEED_UNAVAILABLE} sentinel (and any non-positive
+     * value) passes through UN-divided — pace resolves it to the walk baseline
+     * (factor 1.0) regardless.</p>
+     */
+    public static double movementSpeedWalkNormalized(@NotNull LivingEntity entity) {
+        double effective = valueOr(entity, movementSpeed(), EntityState.MOVE_SPEED_UNAVAILABLE);
+        if (effective <= 0.0) {
+            return effective; // sentinel / absent ⇒ resolved to the walk baseline downstream
+        }
+        boolean sprinting = entity instanceof Player player && player.isSprinting();
+        return sprinting ? effective / SPRINT_MODIFIER : effective;
     }
 
     /** Absent below 1.20.5 — callers fall back to vanilla's 0.08. */

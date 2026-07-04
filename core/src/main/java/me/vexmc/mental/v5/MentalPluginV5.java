@@ -22,7 +22,9 @@ import me.vexmc.mental.platform.HandStates;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.platform.PotionEffects;
+import me.vexmc.mental.platform.Recipes;
 import me.vexmc.mental.platform.ServerEnvironment;
+import me.vexmc.mental.platform.SweepCauses;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
@@ -362,7 +364,9 @@ public final class MentalPluginV5 extends JavaPlugin {
                 + ", potion-effect=" + PotionEffects.describe()
                 + ", " + Cooldowns.describe()
                 + ", crit-posture[" + CritPosture.describe() + "]"
-                + ", hand-raised=" + HandStates.describe());
+                + ", hand-raised=" + HandStates.describe()
+                + ", recipe-keys=" + Recipes.describe()
+                + ", sweep-cause=" + SweepCauses.describe());
     }
 
     @Override
@@ -625,14 +629,14 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
-        reconciler.register(new SwordBlockingUnit(domains, clock, swordBlockDecoration));
+        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration));
 
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);
         // attack-sounds and sweep are the standalone cosmetic/event suppressors.
-        reconciler.register(new AttackCooldownUnit(scheduling, platformProfile.weaponTooltip()));
+        reconciler.register(new AttackCooldownUnit(this, scheduling, platformProfile.weaponTooltip()));
         reconciler.register(new AttackSoundsUnit());
-        reconciler.register(new SweepUnit());
+        reconciler.register(new SweepUnit(this));
 
         // The sustain family (4C). Golden apples + potion durations compute era
         // values from the kernel and apply them at the confirmed terminal event

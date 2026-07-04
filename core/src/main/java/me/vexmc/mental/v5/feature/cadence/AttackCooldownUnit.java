@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5.feature.cadence;
 
 import me.vexmc.mental.platform.Scheduling;
+import me.vexmc.mental.platform.SweepCauses;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -13,6 +14,7 @@ import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -43,10 +45,13 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class AttackCooldownUnit implements FeatureUnit, Listener {
 
+    private final Plugin plugin;
     private final WeaponTooltipAdapter tooltip;
     private final AttackChargeReset chargeReset;
 
-    public AttackCooldownUnit(@NotNull Scheduling scheduling, @NotNull WeaponTooltipAdapter tooltip) {
+    public AttackCooldownUnit(
+            @NotNull Plugin plugin, @NotNull Scheduling scheduling, @NotNull WeaponTooltipAdapter tooltip) {
+        this.plugin = plugin;
         this.tooltip = tooltip;
         this.chargeReset = new AttackChargeReset(scheduling);
     }
@@ -69,8 +74,21 @@ public final class AttackCooldownUnit implements FeatureUnit, Listener {
         scope.packets(new CooldownSpoofListener());
         scope.packets(new CooldownTooltipListener(tooltip));
         // (d) sweep re-disable — the full charge restores 1.9 sweep on the vanilla path.
-        scope.listen(new SweepDamageListener());
-        scope.packets(new SweepParticleListener());
+        // Below 1.11 the ENTITY_SWEEP_ATTACK cause does not exist (a direct constant
+        // reference is a sticky per-event NoSuchFieldError the bus swallows — the 2.4.1
+        // GAP-2 finding) and sweep splash arrives as plain ENTITY_ATTACK, so the
+        // re-suppression cannot discriminate it. SweepCauses decides ONCE at assemble:
+        // neither half registers (a particle-only cancel would land sweep damage
+        // invisibly) and the degrade line prints. Vanilla sword sweep remains.
+        if (SweepCauses.present()) {
+            scope.listen(new SweepDamageListener());
+            scope.packets(new SweepParticleListener());
+        } else {
+            plugin.getLogger().info("attack-cooldown: the sweep re-suppression (B5(d)) is a documented "
+                    + "no-op on this version — the ENTITY_SWEEP_ATTACK damage cause is absent (lands "
+                    + "1.11); sweep splash arrives as plain ENTITY_ATTACK and cannot be discriminated; "
+                    + "vanilla sword sweep remains.");
+        }
     }
 
     /* ------------------------------- server-rule lifecycle ------------------------------- */

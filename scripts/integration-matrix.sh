@@ -250,6 +250,25 @@ run_one() {
             verdict="STALE($raw)"
         fi
     fi
+
+    # D-9 mirror of the Gradle log scan: Bukkit swallows listener-registration
+    # failures and per-event handler throws into the console and keeps running,
+    # so the tester's verdict cannot see them — a PASS with matches is downgraded
+    # to FAIL with the offending lines echoed. ("to Mental" deliberately also
+    # matches MentalTester — both jars are ours.) A linkage-error line counts
+    # only when its following stack frames name me.vexmc.mental.
+    if [ "$verdict" = "PASS" ]; then
+        local scan
+        scan=$( { grep -E "has failed to register events for class me\.vexmc\.mental\.|Could not pass event .* to Mental" "$log"; \
+                  awk '/java\.lang\.(NoSuchFieldError|NoSuchMethodError|NoClassDefFoundError)/ {err=$0; pend=1; next} \
+                       pend && /^[[:space:]]*at / { if (index($0, "me.vexmc.mental") > 0) {print err; pend=0}; next } \
+                       {pend=0}' "$log"; } 2>/dev/null )
+        if [ -n "$scan" ]; then
+            verdict="FAIL(log-scan)"
+            echo "[$label] D-9 log scan: swallowed listener/linkage errors:" >> "$LIVE"
+            printf '%s\n' "$scan" | sort -u | head -8 | sed "s/^/[$label]   /" >> "$LIVE"
+        fi
+    fi
     echo "[$label] finished: $verdict (log: $log)" >> "$LIVE"
     echo "$label $verdict" >> "$VERDICTS"
 }

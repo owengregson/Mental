@@ -9,6 +9,7 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PaceScale;
 import me.vexmc.mental.kernel.ledger.MotionLedger;
 import me.vexmc.mental.kernel.model.EntityState;
+import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.CombatSession;
@@ -68,12 +69,16 @@ public final class ProfileSuite {
                         runLunarScenario(mental, tester, context)),
                 new TestCase("profile: global selection persists, rejects unknowns, fires events", context ->
                         runGlobalApiScenario(mental, tester, context)),
-                new TestCase("profile: signature scales a Speed III sprint hit ×1.6 (pace scaling)", context ->
+                new TestCase("profile: signature scales a Speed III sprint hit ~1.563 (0.95 pace scaling)", context ->
                         runPaceScaleScenario(mental, tester, context)),
                 new TestCase("profile: pace-off ignores Speed III (the inverse control)", context ->
                         runPaceOffScenario(mental, tester, context)),
                 new TestCase("profile: signature Speed III combo hit-2 satisfies the A3 relation", context ->
-                        runPaceComboScenario(mental, tester, context)));
+                        runPaceComboScenario(mental, tester, context)),
+                new TestCase("profile: server-sprinting attacker with no wire journals paceFactor ~1.0 (F1)",
+                        context -> runStanceMismatchBaseSpeed(mental, tester, context)),
+                new TestCase("profile: server-sprinting Speed III attacker with no wire journals ~1.563 (F1)",
+                        context -> runStanceMismatchSpeedThree(mental, tester, context)));
     }
 
     /** A hit under a global kohi selection must equal kohi math, not the legacy default. */
@@ -293,17 +298,22 @@ public final class ProfileSuite {
     /* --------------------- speed-conformal knockback (pace scaling) --------------------- */
 
     private static final double PACE_EPSILON = 1.5e-3;
-    /** Speed III sprint: 0.1 × 1.3 × 1.6 = 0.208; 0.208 / 0.13 baseline = 1.6. */
-    private static final double EXPECTED_S = 1.6;
+    /**
+     * Speed III walk-normalized: 0.16 / 0.10 baseline = 1.6; the signature's 0.95
+     * exponent gives {@code 1.6^0.95 ≈ 1.5628}. An EXPRESSION, not a literal — the
+     * live attribute yields {@code pow(1.6000000474…, 0.95)}, which sits well
+     * inside the 0.02 guard and the 1.5e-3 wire epsilon of this value.
+     */
+    private static final double EXPECTED_S = Math.pow(1.6, 0.95);
 
     /**
      * The signature preset opts into speed-conformal knockback. A Speed III
-     * sprint hit-1 (no residual) must ship a stamp that is exactly ×1.6 the
-     * base-speed stamp HORIZONTALLY and UNCHANGED vertically, through the real
-     * capture → engine → velocity-event pipeline. The base-speed reference is the
-     * SAME captured state with the movement-speed attribute forced to its stance
-     * baseline (pace factor 1.0), so this isolates the pace factor from all other
-     * geometry.
+     * sprint hit-1 (no residual) must ship a stamp that is exactly ×{@code
+     * EXPECTED_S} (1.6^0.95 ≈ 1.563) the base-speed stamp HORIZONTALLY and
+     * UNCHANGED vertically, through the real capture → engine → velocity-event
+     * pipeline. The base-speed reference is the SAME captured state with the
+     * (walk-normalized) movement-speed attribute forced to the walk baseline (pace
+     * factor 1.0), so this isolates the pace factor from all other geometry.
      */
     private static void runPaceScaleScenario(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -332,13 +342,12 @@ public final class ProfileSuite {
                 victim.player().setNoDamageTicks(0);
 
                 EntityState captured = EntityStates.capture(attacker.player());
-                double s = PaceScale.factor(
-                        captured.moveSpeedAttr(), captured.sprinting(), signature.paceScaling());
-                // Guard: Speed III sprint must actually elevate the attribute so
-                // the pace factor is 1.6 — a failure here is a setup fault
-                // (potion/sprint modifier absent), never a silent 1.0 pass.
+                double s = PaceScale.factor(captured.moveSpeedAttr(), signature.paceScaling());
+                // Guard: Speed III sprint must actually elevate the (walk-normalized)
+                // attribute so the pace factor is ~1.563 — a failure here is a setup
+                // fault (potion/sprint modifier absent), never a silent 1.0 pass.
                 context.expectNear(EXPECTED_S, s, 0.02,
-                        "Speed III sprint must yield pace factor 1.6 (attr " + captured.moveSpeedAttr()
+                        "Speed III sprint must yield pace factor ~1.563 (attr " + captured.moveSpeedAttr()
                                 + ", sprinting " + captured.sprinting() + ")");
 
                 // The production victim capture over the session ledger — the EXACT
@@ -349,14 +358,14 @@ public final class ProfileSuite {
                 CombatSession session = mental.sessions().sessionFor(victim.uuid());
                 context.expect(session != null, "no combat session for the victim");
                 EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
-                EntityState baseSpeed = withMoveSpeed(captured, baselineFor(captured.sprinting()));
+                EntityState baseSpeed = withMoveSpeed(captured, PaceScale.WALK_BASELINE);
                 KnockbackVector scaledV = KnockbackEngine.compute(captured, victimState, signature, null);
                 KnockbackVector baseV = KnockbackEngine.compute(baseSpeed, victimState, signature, null);
 
                 // hit-1 has no residual, so the whole horizontal is fresh knock:
-                // exactly ×1.6, and the vertical is untouched.
-                context.expectNear(EXPECTED_S * baseV.x(), scaledV.x(), PACE_EPSILON, "pace hit-1 x ×1.6");
-                context.expectNear(EXPECTED_S * baseV.z(), scaledV.z(), PACE_EPSILON, "pace hit-1 z ×1.6");
+                // exactly ×EXPECTED_S (~1.563), and the vertical is untouched.
+                context.expectNear(EXPECTED_S * baseV.x(), scaledV.x(), PACE_EPSILON, "pace hit-1 x ×s");
+                context.expectNear(EXPECTED_S * baseV.z(), scaledV.z(), PACE_EPSILON, "pace hit-1 z ×s");
                 context.expectNear(baseV.y(), scaledV.y(), PACE_EPSILON, "pace hit-1 vertical UNCHANGED");
 
                 captors.reset();
@@ -408,9 +417,10 @@ public final class ProfileSuite {
                 victim.player().setNoDamageTicks(0);
 
                 EntityState captured = EntityStates.capture(attacker.player());
-                // Guard: the attribute IS elevated (Speed III active) — so a
-                // no-change result proves OFF ignores it, not that the potion missed.
-                context.expect(captured.moveSpeedAttr() > baselineFor(captured.sprinting()) * 1.4,
+                // Guard: the (walk-normalized) attribute IS elevated (Speed III
+                // active) — so a no-change result proves OFF ignores it, not that
+                // the potion missed.
+                context.expect(captured.moveSpeedAttr() > PaceScale.WALK_BASELINE * 1.4,
                         "Speed III must be active for the inverse control (attr " + captured.moveSpeedAttr() + ")");
 
                 // Production capture (see runPaceScaleScenario) — matches the wire's
@@ -418,7 +428,7 @@ public final class ProfileSuite {
                 CombatSession session = mental.sessions().sessionFor(victim.uuid());
                 context.expect(session != null, "no combat session for the victim");
                 EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
-                EntityState baseSpeed = withMoveSpeed(captured, baselineFor(captured.sprinting()));
+                EntityState baseSpeed = withMoveSpeed(captured, PaceScale.WALK_BASELINE);
                 KnockbackVector withSpeed = KnockbackEngine.compute(captured, victimState, legacy, null);
                 KnockbackVector baseV = KnockbackEngine.compute(baseSpeed, victimState, legacy, null);
                 // OFF ⇒ byte-identical: Speed III changes nothing.
@@ -498,10 +508,9 @@ public final class ProfileSuite {
             List<KnockbackVector> candidates = context.sync(() -> {
                 victim.player().setNoDamageTicks(0);
                 EntityState scaledAttacker = EntityStates.capture(attacker.player());
-                double s = PaceScale.factor(
-                        scaledAttacker.moveSpeedAttr(), scaledAttacker.sprinting(), signature.paceScaling());
+                double s = PaceScale.factor(scaledAttacker.moveSpeedAttr(), signature.paceScaling());
                 context.expectNear(EXPECTED_S, s, 0.02,
-                        "Speed III sprint must yield pace factor 1.6 for the combo (attr "
+                        "Speed III sprint must yield pace factor ~1.563 for the combo (attr "
                                 + scaledAttacker.moveSpeedAttr() + ")");
 
                 // The production victim capture over the session ledger — the
@@ -512,7 +521,7 @@ public final class ProfileSuite {
                 // combo — the same residual scaled DOWN by s (decay is linear) and
                 // a base-speed attacker — and assert the scaled hit-2 is exactly s×
                 // horizontally / unchanged vertically.
-                EntityState baseAttacker = withMoveSpeed(scaledAttacker, baselineFor(scaledAttacker.sprinting()));
+                EntityState baseAttacker = withMoveSpeed(scaledAttacker, PaceScale.WALK_BASELINE);
                 EntityState baseResidual = scaleHorizontal(scaledResidual, 1.0 / s);
                 KnockbackVector scaledHit2 = KnockbackEngine.compute(scaledAttacker, scaledResidual, signature, null);
                 KnockbackVector baseHit2 = KnockbackEngine.compute(baseAttacker, baseResidual, signature, null);
@@ -560,6 +569,179 @@ public final class ProfileSuite {
         }
     }
 
+    /* --------------------- the F1 stance-mismatch regression (live) --------------------- */
+
+    /**
+     * The live discriminator for F1. A clientless fake attacker has NO connection
+     * wire, so a server-side NMS attack registers with an absent/false sprint
+     * verdict while the SERVER sprint flag and the ×1.3 movement-speed modifier ARE
+     * present — exactly the historical mismatch. The 2.4.0 region path paired the
+     * false verdict's baseline with the sprint-inclusive live attribute and shipped
+     * pace factor 1.3 at base speed. With the walk-normalized capture the sprint
+     * modifier is divided back out coherently, so the journal must record ~1.0 — a
+     * byte-identical era stamp — regardless of the verdict.
+     */
+    private static void runStanceMismatchBaseSpeed(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile("signature"),
+                    "signature preset missing"));
+            applyServerSprint(context, attacker);
+            context.awaitTicks(PROPAGATE_TICKS);
+
+            Double factor = stanceMismatchFactor(mental, context, attacker, victim, false);
+            if (factor == null) {
+                return; // note-skipped (setup gap) — recorded in stanceMismatchFactor
+            }
+            // The fix: ~1.0, not the 2.4.0 bug's 1.3. Assert the FACTOR (stance math),
+            // not an absolute vector — a 1.9/1.10 clientless fake reads isOnGround()
+            // false, so absolute verticals are version-noisy (project memory).
+            context.expectNear(1.0, factor, 0.02,
+                    "a server-sprinting attacker with no wire must journal paceFactor ~1.0 (was 1.3)");
+        } finally {
+            teardown(context, mental, attacker, victim, null);
+        }
+    }
+
+    /**
+     * The Speed III half of the F1 discriminator: the same server-flag-only sprint,
+     * now with Speed III genuinely elevating the attribute. The 2.4.0 region path
+     * divided the sprint-inclusive 0.208 by the false verdict's walk baseline (2.08
+     * → clamped 2.0); the walk-normalized capture reads 0.16 and yields
+     * {@code 1.6^0.95 ≈ 1.563}.
+     */
+    private static void runStanceMismatchSpeedThree(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile("signature"),
+                    "signature preset missing"));
+            applySpeedThreeSprint(context, attacker);
+            context.awaitTicks(PROPAGATE_TICKS);
+
+            Double factor = stanceMismatchFactor(mental, context, attacker, victim, true);
+            if (factor == null) {
+                return;
+            }
+            // The fix: ~1.563 (1.6^0.95), not the 2.4.0 bug's 2.0 clamp.
+            context.expectNear(EXPECTED_S, factor, 0.02,
+                    "a server-sprinting Speed III attacker with no wire must journal ~1.563 (was clamped 2.0)");
+            context.expect(factor < 2.0 - 1.0e-6,
+                    "the paceFactor must not be the old 2.0 clamp (got " + factor + ")");
+        } finally {
+            teardown(context, mental, attacker, victim, null);
+        }
+    }
+
+    /**
+     * Drives one server-side NMS attack from the server-sprinting fake attacker and
+     * returns the pace factor the desk journaled for it, or {@code null} (note-SKIP)
+     * when the clientless fake's ×1.3 sprint modifier did not apply — the whole
+     * mismatch depends on it, so its absence is a staging gap, not a regression.
+     */
+    private static Double stanceMismatchFactor(
+            MentalPluginV5 mental, TestContext context, FakePlayer attacker, FakePlayer victim,
+            boolean speedThree) throws Exception {
+        int[] shipsBefore = new int[1];
+        Boolean armed = context.sync(() -> {
+            KnockbackProfile signature = profileFor(mental, victim);
+            context.expect("signature".equals(signature.name()) && signature.paceScaling().active(),
+                    "signature must be resolved and pace-scaling active");
+            context.expect(attacker.player().isSprinting(),
+                    "the attacker must carry the SERVER sprint flag (the mismatch precondition)");
+
+            // Guard: the walk-normalized capture must read ~0.10 (base) / >0.14
+            // (Speed III). If it reads ~0.077, the ×1.3 modifier never applied to the
+            // clientless fake and the mismatch cannot be staged — note-SKIP.
+            EntityState captured = EntityStates.capture(attacker.player());
+            double normalized = captured.moveSpeedAttr();
+            boolean modifierPresent = speedThree
+                    ? normalized > PaceScale.WALK_BASELINE * 1.4
+                    : Math.abs(normalized - PaceScale.WALK_BASELINE) < 0.01;
+            if (!modifierPresent) {
+                return Boolean.FALSE;
+            }
+            shipsBefore[0] = countShips(mental, victim);
+            return Boolean.TRUE;
+        });
+        if (!Boolean.TRUE.equals(armed)) {
+            context.note("clientless fake never carried the ×1.3 sprint modifier — the wire-vs-server "
+                    + "stance mismatch cannot be staged; the stance math is unit-pinned in PaceScaleTest");
+            return null;
+        }
+        context.syncRun(() -> {
+            victim.player().setNoDamageTicks(0);
+            attacker.attack(victim.player()); // server-side NMS attack — the region path
+        });
+        JournalEntry ship = awaitNewShip(context, mental, victim, shipsBefore[0]);
+        context.expect(ship != null && ship.shipped() != null,
+                "the server-sprinting hit journalled no SHIP");
+        return ship == null ? null : ship.paceFactor();
+    }
+
+    /** setSprinting(true) with NO potion (base speed); a short settle lets the ×1.3 modifier apply. */
+    private static void applyServerSprint(TestContext context, FakePlayer attacker) throws Exception {
+        context.syncRun(() -> attacker.player().setSprinting(true));
+        context.awaitTicks(2);
+    }
+
+    /** SHIP entries (a delivered vector) currently in the victim's desk journal. */
+    private static int countShips(MentalPluginV5 mental, FakePlayer victim) {
+        CombatSession session = mental.sessions().sessionFor(victim.uuid());
+        if (session == null) {
+            return 0;
+        }
+        int ships = 0;
+        for (JournalEntry entry : session.desk().journal()) {
+            if (entry.shipped() != null) {
+                ships++;
+            }
+        }
+        return ships;
+    }
+
+    /** Polls the victim's desk journal for a NEW SHIP beyond {@code shipsBefore}. */
+    private static JournalEntry awaitNewShip(
+            TestContext context, MentalPluginV5 mental, FakePlayer victim, int shipsBefore) throws Exception {
+        for (int round = 0; round < 12; round++) {
+            JournalEntry ship = context.sync(() -> {
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                if (session == null) {
+                    return null;
+                }
+                int ships = 0;
+                JournalEntry lastShip = null;
+                for (JournalEntry entry : session.desk().journal()) {
+                    if (entry.shipped() != null) {
+                        ships++;
+                        lastShip = entry;
+                    }
+                }
+                return ships > shipsBefore ? lastShip : null;
+            });
+            if (ship != null) {
+                return ship;
+            }
+            context.awaitTicks(2);
+        }
+        return null;
+    }
+
     /** Speed III (amplifier 2) plus the sprint flag; a short settle lets the attribute modifiers apply. */
     @SuppressWarnings("deprecation") // getByName spans the 1.17.1 → 26.x API; SPEED is the stable alias
     private static void applySpeedThreeSprint(TestContext context, FakePlayer attacker) throws Exception {
@@ -571,10 +753,6 @@ public final class ProfileSuite {
             player.addPotionEffect(new PotionEffect(speed, 20 * 60, 2, false, false));
         });
         context.awaitTicks(2); // let the sprint + Speed III movement-speed modifiers settle
-    }
-
-    private static double baselineFor(boolean sprinting) {
-        return sprinting ? PaceScale.SPRINT_BASELINE : PaceScale.WALK_BASELINE;
     }
 
     private static EntityState withMoveSpeed(EntityState state, double moveSpeedAttr) {
@@ -600,7 +778,9 @@ public final class ProfileSuite {
             attacker.remove();
             victim.remove();
         });
-        captors.unregister();
+        if (captors != null) {
+            captors.unregister();
+        }
     }
 
     private static KnockbackProfile profileFor(MentalPluginV5 mental, FakePlayer victim) {

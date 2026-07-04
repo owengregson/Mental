@@ -43,6 +43,7 @@ public final class HitTransaction {
     private KnockbackVector carried;
     private boolean wireCarried;
     private String suppressReason;
+    private double paceFactor = 1.0;
 
     public HitTransaction(HitContext context) {
         this.context = context;
@@ -50,6 +51,22 @@ public final class HitTransaction {
 
     public HitContext context() {
         return context;
+    }
+
+    /**
+     * The speed-conformal pace factor the engine applied when this hit's vector
+     * was computed (journal attribution, D-6). Defaults to {@code 1.0} — pace off,
+     * suppressed before compute, or a projectile — until a compute site records
+     * the factor it actually used via {@link #paceFactor(double)}. The desk
+     * journals this on every ship/suppress, so a weak knock is attributable.
+     */
+    public double paceFactor() {
+        return paceFactor;
+    }
+
+    /** Records the pace factor the engine applied to this hit's fresh horizontal knock (D-6). */
+    public void paceFactor(double factor) {
+        this.paceFactor = factor;
     }
 
     public State state() {

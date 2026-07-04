@@ -71,6 +71,16 @@ public final class KnockbackEngine {
 
     private KnockbackEngine() {}
 
+    /**
+     * A melee compute result plus the pace factor the engine actually applied —
+     * the additive seam that lets a compute caller journal the factor without a
+     * second computation or any engine mutation (D-6). {@code paceFactor} is
+     * {@code 1.0} whenever pace was off/base-speed or the hit was suppressed
+     * before compute ({@code vector == null}); it carries only kernel/JDK-1.0
+     * types, so it crosses the plugin boundary safely (D-8).
+     */
+    public record Paced(KnockbackVector vector, double paceFactor) {}
+
     /** Melee knockback: base push away from the attacker plus yaw-directed bonus levels. */
     public static KnockbackVector compute(
             EntityState attacker,
@@ -87,13 +97,31 @@ public final class KnockbackEngine {
             Double victimYOverride,
             RandomGenerator random,
             boolean freshSprint) {
+        return computePaced(attacker, victim, profile, victimYOverride, random, freshSprint).vector();
+    }
+
+    /**
+     * Melee knockback returning both the vector and the pace factor applied — the
+     * journal-attribution overload (D-6). Byte-identical to {@link #compute} for
+     * the vector; the {@link Paced#paceFactor()} is what the delivery journal
+     * records.
+     */
+    public static Paced computePaced(
+            EntityState attacker,
+            EntityState victim,
+            KnockbackProfile profile,
+            Double victimYOverride,
+            RandomGenerator random,
+            boolean freshSprint) {
 
         if (resistanceCancels(victim, profile, random)) {
-            return null;
+            return new Paced(null, 1.0); // suppressed before compute ⇒ no factor applied
         }
         // Speed-conformal factor: scales the fresh horizontal knock (base push +
-        // extras), 1.0 when off/base-speed (then every ×pace below is skipped).
-        double pace = PaceScale.factor(attacker.moveSpeedAttr(), attacker.sprinting(), profile.paceScaling());
+        // extras), 1.0 when off/base-speed (then every ×pace below is skipped). The
+        // attribute is walk-stance-normalized at capture, so the sprint flag no
+        // longer selects the baseline (F1) — a single 0.10 walk baseline serves both.
+        double pace = PaceScale.factor(attacker.moveSpeedAttr(), profile.paceScaling());
         double taper = profile.rangeReduction().reductionAt(distance(attacker, victim));
         double[] vector = base(victim, attacker.x(), attacker.z(), profile, victimYOverride, random, taper, pace);
 
@@ -113,7 +141,7 @@ public final class KnockbackEngine {
             vector[1] += wtap ? profile.wtapExtra().vertical() : profile.extra().vertical();
         }
 
-        return finish(vector, victim, profile);
+        return new Paced(finish(vector, victim, profile), pace);
     }
 
     /**

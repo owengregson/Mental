@@ -79,8 +79,10 @@ class CombatSessionTest {
         tx.preSent(new KnockbackVector(0.9, 0.46, 0.0));
         session.desk().submitFromWire(tx); // ahead of a damage task that never comes
 
-        serverTick.set(1);
-        session.tickStep(freshView(1)); // drains the wire, sweeps the earlier-tick tx
+        // Age 2: the sweep holds a LIVE tx one extra tick for the Folia counter
+        // skew margin (F6), then drops it as no-velocity-event.
+        serverTick.set(2);
+        session.tickStep(freshView(2)); // drains the wire, sweeps the earlier-tick tx
 
         assertEquals(1, session.desk().journal().size());
         assertEquals("no-velocity-event", session.desk().journal().get(0).suppressReason());

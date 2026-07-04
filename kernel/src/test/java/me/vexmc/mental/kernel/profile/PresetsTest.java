@@ -138,8 +138,9 @@ class PresetsTest {
         assertEquals(velt.meleeDelivery(), signature.meleeDelivery());
         assertEquals(velt.resistance(), signature.resistance());
         // signature is the ONE preset that opts into speed-conformal knockback
-        // (the owner's ask, and Mental's own preset).
-        assertEquals(new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0), signature.paceScaling());
+        // (the owner's ask, and Mental's own preset); exponent 0.95 is the 2.4.1
+        // Speed-III feel tune.
+        assertEquals(new PaceScaling(PaceScaling.Mode.ATTACKER, 0.95, 0.5, 2.0), signature.paceScaling());
 
         // Every OTHER preset stays OFF — archived-server presets are historical
         // records, and OFF is the era-exact no-op.

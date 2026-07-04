@@ -111,14 +111,18 @@ knockback:
   #             (every archived-server preset). Signature — Mental's own
   #             preset — opts in.
   #   exponent  s = (attr / baseline)^exponent. 1.0 = fully conformal; lower
-  #             tempers the effect.
+  #             tempers the effect. Signature ships 0.95 (the owner's Speed-III
+  #             feel) — a light temper, base speed is exponent-invariant.
   #   min/max   clamp on the final factor. reach (3.0) can't scale, so extreme
   #             factors (Speed V+) still compress the margin — max marks where
   #             the conformal window ends.
-  # Base-speed play yields factor 1.0 exactly (byte-identical era stamp);
-  # Speed III sprint (attr 0.208 / baseline 0.13) yields 1.6.
+  # The attribute is WALK-STANCE-NORMALIZED at capture: the sprint modifier is
+  # divided back out, so a single baseline (walk 0.10) serves both stances and
+  # the factor can't be skewed by a wire-vs-server stance disagreement. Base-speed
+  # play yields factor ~1.0 (byte-identical era stamp); a Speed III attacker
+  # (normalized attr 0.16 / baseline 0.10 = 1.6) yields 1.6^0.95 ~= 1.563.
   speed-scaling:
     mode: attacker
-    exponent: 1.0
+    exponent: 0.95
     min: 0.5
     max: 2.0

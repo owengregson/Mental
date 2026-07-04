@@ -21,13 +21,16 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                          KinematicState kinematics, double moveSpeedAttr) {
 
     /**
-     * Additive growth: the 19-arg constructor defaults {@code moveSpeedAttr} to
+     * The attacker's WALK-STANCE-NORMALIZED movement-speed attribute (the ×1.3
+     * sprint modifier stripped at capture) for speed-conformal knockback.
+     *
+     * <p>Additive growth: the 19-arg constructor defaults {@code moveSpeedAttr} to
      * {@link EntityState#MOVE_SPEED_UNAVAILABLE}. The netty fast path pre-sends
      * an attacker knock from the attacker's published view, so this field rides
      * the per-tick publish (single-writer) — the ONLY way a pre-sent knock can
      * see the attacker's movement speed and scale identically to the tick path
      * (one stamp, one truth). Views constructed without it (tests) resolve to
-     * the stance baseline ⇒ pace factor 1.0.
+     * the walk baseline ⇒ pace factor 1.0.</p>
      */
     public PlayerView(UUID id, int entityId, TickStamp at,
                       Decay.Motion motion, boolean grounded, double slipperiness,

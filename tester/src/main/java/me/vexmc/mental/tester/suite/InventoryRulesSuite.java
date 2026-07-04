@@ -1,6 +1,7 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
+import me.vexmc.mental.platform.SweepCauses;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
@@ -8,6 +9,7 @@ import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.feature.Feature;
+import me.vexmc.mental.v5.feature.cadence.SweepDamageListener;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -15,6 +17,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.RegisteredListener;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -86,6 +89,24 @@ public final class InventoryRulesSuite {
             context.expect(moduleActive(mental, "disable-sword-sweep"),
                     "disable-sword-sweep module failed to enable");
 
+            // Below 1.11 the ENTITY_SWEEP_ATTACK cause does not exist and the feature is a
+            // documented no-op (the 2.4.1 GAP-2 contract, printed as a boot degrade line by
+            // SweepUnit.assemble): pin the degrade EXPLICITLY instead of silently skipping —
+            // the module is on, yet NO SweepDamageListener may be registered, because a
+            // registered one rethrows a sticky NoSuchFieldError on every damage event.
+            if (!SweepCauses.present()) {
+                boolean sweepListenerRegistered = context.sync(
+                        InventoryRulesSuite::sweepDamageListenerRegistered);
+                context.expect(!sweepListenerRegistered,
+                        "ENTITY_SWEEP_ATTACK is absent on this version (lands 1.11), yet a "
+                                + "SweepDamageListener is registered — the assemble-time skip "
+                                + "regressed (it would NoSuchFieldError on every damage event)");
+                context.note("sweep cause absent (< 1.11): pinned the documented no-op — no "
+                        + "SweepDamageListener registered while disable-sword-sweep is on "
+                        + "(vanilla sword sweep remains; see the boot degrade line)");
+                return;
+            }
+
             Boolean cancelledWhenOn = fireSweep(context, attacker, victim);
             if (cancelledWhenOn == null) {
                 context.note("this version cannot construct an ENTITY_SWEEP_ATTACK event — "
@@ -115,6 +136,16 @@ public final class InventoryRulesSuite {
                 victim.remove();
             });
         }
+    }
+
+    /** Whether any {@code SweepDamageListener} holds a live {@link EntityDamageEvent} registration. */
+    private static boolean sweepDamageListenerRegistered() {
+        for (RegisteredListener listener : EntityDamageEvent.getHandlerList().getRegisteredListeners()) {
+            if (listener.getListener() instanceof SweepDamageListener) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
