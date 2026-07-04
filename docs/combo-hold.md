@@ -34,26 +34,33 @@ touched** — the profile's launch height is what buys the `Δ²` margin.
 While a combo is active, every **fresh melee horizontal** knock from the attacker
 to the victim is scaled by a factor **σ**. σ is the **exact inverse solve of the
 era flight equations** — the value that makes the victim land at `target` at the
-next swing:
+next swing. Everything is projected on the attacker→victim axis:
 
 ```
-dNext = d0 + (residualCarry + σ·freshEra)·dragSum − chase
-σ*    = (target − d0 + chase − residualCarry·dragSum) / (freshEra·dragSum)
-σ     = clamp(min-factor, max-factor, 1 + gain·(σ* − 1))
+σ*  =  (target − d0 + chase − R·D(w') − ⟨â,u⟩·S2(w') − tail) / (F·D(w'))
+σ   =  clamp(min-factor, max-factor, 1 + gain·(σ* − 1))
 ```
 
 - `d0` — the current attacker→victim horizontal separation.
-- `freshEra` — the fresh knock's horizontal magnitude (base push + sprint/wtap/
-  enchant extras); **only this is scaled**.
-- `residualCarry` — the victim's own friction-carried motion; **never scaled**
-  (the A3 law — a combo hit's residual already carries its previous hits' factors).
-- `dragSum` — the era air-drag geometric sum over the flight window, and the
-  window truncates at touchdown (computed from the shipped vertical stamp by the
-  kernel's own tick simulation).
-- `chase` — the sprinting attacker's closing distance (era sprint ground speed
-  0.2806 b/t, scaled by the attacker's movement-speed attribute).
+- `F` (freshEra) — the fresh knock's horizontal (base push + sprint/wtap/enchant
+  extras), axis-projected; **only this is scaled**.
+- `R` (residualCarry) — the victim's own friction-carried motion, axis-projected
+  and signed; **never scaled** (the A3 law — a combo hit's residual already carries
+  its previous hits' factors).
+- `D(w')` — the drag schedule over the flight window `w'`, with the **launch
+  ground-state branch** (one ground-drag decay on a grounded launch, then air drag,
+  then the ground tail after touchdown) — a grounded launch travels ~1.9 blocks
+  less than the pure-air sum. `w'` is the era cadence shaved by the attacker's
+  half-RTT and shifted by the victim's.
+- `chase` — the attacker's measured closing (from the position ring), falling back
+  to the era sprint model `0.2806 × attr/0.10 × w'`.
+- `⟨â,u⟩·S2` — the victim's estimated held mid-air steering (recovered from the
+  ring, history-free) accumulated over the window; `tail` their own ground-tail
+  walk over any grounded ticks inside it.
 
 Every constant is one of Mental's existing era decay constants — no new physics.
+The servo **declines (σ = 1)** on an ice-class landing or a flight too brief to
+shape, rather than forcing a non-era knock.
 
 **The clamps are the honesty boundary.** Past `[min-factor, max-factor]` the
 pocket is honestly lost and era physics wins — the servo never forces a non-era
@@ -88,7 +95,9 @@ All optional; an absent section uses the defaults shown.
 | `gain` | `1.0` | blend toward the full exact solve (1.0 = exact) |
 | `min-factor` | `0.8` | lower honesty clamp on the knock multiplier |
 | `max-factor` | `1.2` | upper honesty clamp on the knock multiplier |
-| `window-ticks` | `10` | the cadence horizon the flight is projected over |
+| `window-ticks` | `10` | the cadence horizon the flight is projected over (ping-shifted per hit) |
+| `target-mode` | `anchor` | `anchor` steers to `target`; `dynamic` uses the facing-/ping-aware exposure-budget target (computed and logged either way — flip only after a lab round) |
+| `hit-cap` | `2.95` | the dynamic target's upper clamp (the practical hittable edge); only consulted under `target-mode: dynamic` |
 
 ## Integration surface
 
@@ -105,11 +114,28 @@ The servo factor Mental applied to each hit is journaled as `comboFactor` beside
 `paceFactor` in the delivery journal, so any non-era stamp is attributable in one
 read.
 
-## Roadmap: the precision round
+## The precision round (§3.2b)
 
-v1 solves exactly over four inputs (`d0`, `residualCarry`, vertical stamp,
-attacker speed). A follow-up **precision round** upgrades the predictor — victim
-self-drift (measured mid-air steering), axis projection, a facing-driven dynamic
-target, ping horizons, and ground-tail drift — behind a single predictor seam, so
-the solve and every other seam stay put. Each upgraded input ships only after its
-own tick-sim pins and a wire-measured lab round (SimpleBoxer) validate it.
+v1 solved over four inputs (`d0`, `residualCarry`, vertical stamp, attacker
+speed). The **precision round** (derivation
+`docs/superpowers/research/2026-07-04-pocket-servo-precision-derivation.md`)
+upgraded the predictor behind that single seam — the `PocketServo.sigma` inversion
+never changed, only what feeds it:
+
+- the **launch ground-state drag branch** (mandatory — the pure-air sum overshoots
+  a grounded launch by ~1.9 blocks) with signed, axis-projected `R`/`F`;
+- **victim self-drift** — the held mid-air steering, recovered from the position
+  ring history-free (`DriftEstimator`), κ=0.7-shrunk;
+- **ping horizons** — the attacker's half-RTT shaves the judgment horizon, the
+  victim's shifts the arc's touchdown;
+- the **ground tail** — the victim's own walk over grounded ticks inside the window;
+- the **exposure-budget dynamic target** (`target-mode: dynamic`), which relaxes
+  between the anchor and `hit-cap` on the victim's facing and ping.
+
+Everything is axis-projected; ice landings decline the servo. `target-mode`
+defaults to `anchor`: the dynamic value and the full solve are pushed to the debug
+sink per hit (not the journal), so a wire-measured lab round (SimpleBoxer, the
+derivation's §7.2 protocol) can calibrate the exposure-budget geometry before the
+default flips. The tick-sim grid, drift-estimator recovery, ping-shift, ground-tail
+and dynamic-target functions are all kernel-pinned to 1e-9 against an independent
+era fold.
