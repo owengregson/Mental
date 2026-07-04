@@ -43,15 +43,18 @@ import org.jetbrains.annotations.NotNull;
  * ledger contaminates across hits) and restores the defaults in its finally.
  *
  * <p><b>Clientless-fake reality (the load-bearing caveat).</b> A fake victim is
- * clientless: a melee knock is send-then-restore, so it never moves and reads as
- * grounded every tick on modern NMS (and, conversely, {@code isOnGround()} lies
- * false on 1.9/1.10). Two consequences the scenarios design around: (1) the
- * chain scenarios widen {@code grounded-run-ticks}/{@code max-gap-ticks} via the
- * overlay so a stationary victim does not ground-/gap-out mid-chain — the servo
- * value is what we measure, not the end conditions; (2) the grounded-end scenario
- * derives its grounded truth from the production position read (the {@code
- * KnockbackSuite.physicallyGrounded} source), note-skipping where the flag is
- * unreliable. The servo VALUE itself is unit-pinned exactly in PocketServoTest; a
+ * clientless: a melee knock is send-then-restore, so it never moves, and under the
+ * honest combat-ground feed a stationary fake reads grounded EVERY tick on every
+ * tier (the {@code CombatGround} authority resolves a motionless on-the-floor fake
+ * as grounded whether or not its raw {@code isOnGround()} flag agrees). Two
+ * consequences the scenarios design around: (1) the chain scenarios widen {@code
+ * grounded-run-ticks}/{@code max-gap-ticks} via the overlay so a stationary victim
+ * does not ground-/gap-out mid-chain — the servo value is what we measure, not the
+ * end conditions; (2) the grounded-end scenario keeps the REAL threshold and instead
+ * stages the ground state physically — it floats the victim (a per-tick upward
+ * server-side motion) through the build-up so the run cannot accrue while the combo
+ * forms, then lands it and idles so the honest feed accumulates the genuine
+ * touchdown. The servo VALUE itself is unit-pinned exactly in PocketServoTest; a
  * combo's real FEEL is field-judged (SimpleBoxer), per §5's known limit.</p>
  *
  * <p><b>One-hit publish latency.</b> The detector is fed at the delivery fold and
@@ -180,34 +183,92 @@ public final class ComboSuite {
 
     /* ------------------------ scenario 3: a grounded run ends it ------------------- */
 
+    /**
+     * The genuine touchdown end (combo-hold §3.1): after a real grounded run of
+     * {@code groundedRunTicks} the held combo releases and the next knock is
+     * era-plain again. This case exercises the REAL threshold (10, un-widened) —
+     * that is its whole point — which forces it to stage the victim's ground state
+     * physically rather than lean on a widened window.
+     *
+     * <p><b>Why the physical staging.</b> A clientless fake never moves from a melee
+     * knock (send-then-restore), so under the honest combat-ground feed a stationary
+     * victim reads grounded EVERY tick — and the real 10-tick run (< the 3× build-up
+     * cadence would let it survive to) would fire the grounded end mid-build-up, so
+     * the combo would never publish active. Production semantics are correct here: a
+     * real victim is launched airborne by each knock, resetting the run; only the
+     * motionless fake sits grounded forever. So the scenario reproduces the real
+     * physics: it floats the victim clear of the platform for the build-up (the run
+     * cannot accrue while airborne), confirms the combo activates, THEN lands it and
+     * idles past the threshold so the honest feed accumulates the run and the
+     * {@code GROUNDED} end fires — the same assertion the case always made.</p>
+     */
     private static void runGroundedScenario(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
         FakePlayer victim = new FakePlayer(tester, mental.scheduling());
         try {
-            // Default grounded-run (10) — but keep the gap window wide so the gap
-            // never expires first; the grounded run is what we exercise here.
+            // The REAL grounded-run (10), NOT widened — the touchdown is what we
+            // exercise. Keep only the gap window wide so the gap never expires first.
             setUp(mental, context, attacker, victim, /*holdOpenChain=*/ false);
             configureRules(mental, context, /*groundedRun=*/ 10, /*maxGap=*/ 400);
+
+            // The victim's settled on-platform position — the anchor we ground it back
+            // onto after the airborne build-up.
+            Location groundLoc = context.sync(() -> victim.player().getLocation().clone());
+
+            // ── build-up airborne ────────────────────────────────────────────────
+            // Physically float the victim so the honest feed reads airborne every tick
+            // (no support within the foot epsilon; a rising fake's raw isOnGround()
+            // flag is false on modern too, so BOTH tiers take the same honest path).
+            // A per-tick upward server-side motion is the era suite's own owning-thread
+            // client stand-in (Folia-safe — no teleport-in-region). While airborne the
+            // grounded run never accrues, so the combo builds and STAYS active.
+            context.syncRun(() -> victim.preTick(() -> victim.setMotion(0.0, 0.42, 0.0)));
+            context.awaitTicks(3); // clear the floor before the first hit
+
             buildActiveCombo(mental, context, attacker, victim);
 
-            // A clientless fake that reads grounded lets the run accumulate; where the
-            // flag is unreliable (1.9/1.10), derive from the production position read.
-            boolean grounded = context.sync(() ->
-                    KnockbackSuite.physicallyGrounded(victim, victim.player().isOnGround()));
-            if (!grounded) {
-                context.note("clientless fake victim never reads grounded here — the grounded-run end is "
-                        + "unobservable in the matrix; the state-machine end is unit-pinned in ComboTrackerTest");
-                return;
-            }
-            // Sit still, no new hits, well past grounded-run-ticks so the sweep ends it.
-            context.awaitTicks(16);
+            // ── touchdown ────────────────────────────────────────────────────────
+            // Land it: stop lifting, pin the vertical to a settled rest (kills the
+            // upward residual so it settles at once), and place it back on the
+            // platform. From here the honest feed reads grounded every tick, so the
+            // detector's grounded-run counter accrues to the real threshold.
+            context.syncRun(() -> {
+                victim.preTick(() -> victim.setMotion(0.0, 0.0, 0.0));
+                teleportOnOwningThread(mental, victim, groundLoc);
+            });
+            // Idle well past grounded-run-ticks (10) so the touchdown end fires.
+            context.awaitTicks(20);
+
+            // The grounded run must have RELEASED the combo before the measured hit —
+            // the direct proof that the touchdown, not some other end, did the work.
+            boolean released = context.sync(() -> {
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                PlayerView view = session == null ? null : session.view();
+                return view != null && view.comboAttackerId() == null;
+            });
+            context.expect(released, "the grounded run must have ended the combo before the next hit");
 
             double factor = driveHitFactor(mental, context, attacker, victim);
             context.expectNear(1.0, factor, SIGMA_EPSILON,
                     "after a grounded run the next knock must be era-plain (1.0)");
         } finally {
+            context.syncRun(() -> victim.preTick(null));
             teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * Teleports {@code fake} on its owning thread — the sync teleport on Paper (the
+     * main thread owns the entity, and it is the form that exists down to 1.9.4),
+     * the async teleport on Folia (a region-thread sync teleport is banned). Mirrors
+     * {@code FakePlayer.spawn}; call inside a global/owning-thread hop.
+     */
+    private static void teleportOnOwningThread(MentalPluginV5 mental, FakePlayer fake, Location location) {
+        if ("folia".equals(mental.scheduling().describe())) {
+            fake.player().teleportAsync(location);
+        } else {
+            fake.player().teleport(location);
         }
     }
 
