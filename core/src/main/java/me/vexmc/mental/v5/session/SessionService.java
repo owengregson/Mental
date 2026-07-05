@@ -378,6 +378,11 @@ public final class SessionService implements Listener, SessionAccess {
         // combat grounded truth (the packetless physical fallback) — NOT the raw
         // client flag above, which stays the delivery/era air-multiplier baseline.
         int groundedTicks = session.advanceGroundedTicks(combatGrounded);
+        // The measured yaw rate (target-v2 repair #4): mean |Δyaw| over the last few
+        // ticks, the V2 dynamic target's continuous turn-cost divisor. Advanced once
+        // per tick here (the same owning-thread publish as measuredVx); NaN until the
+        // first delta ⇒ the kernel's conservative 30°/tick floor.
+        double yawRate = session.advanceYawRate(location.getYaw());
 
         return viewBuilder.build(
                 id, player.getEntityId(),
@@ -387,7 +392,8 @@ public final class SessionService implements Listener, SessionAccess {
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
                 knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics,
                 moveSpeedAttr, session.comboAttackerId(),
-                measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks);
+                measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks,
+                yawRate);
     }
 
     /**

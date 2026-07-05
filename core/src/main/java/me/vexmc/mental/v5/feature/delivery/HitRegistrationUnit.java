@@ -331,6 +331,10 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     PocketServo.Solution solution = KnockbackEngine.explainServo(
                             preAttacker, preVictim, profile, compensationY, freshSprint, servo, inputs);
                     debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
+                    // Commit the V2 dynamic-target smoothing memory (target-v2 repair #2)
+                    // so the victim's next hit relaxes from this one — inert under the
+                    // shipped ANCHOR default (the dynamic value is journaled, not used).
+                    ComboPredictor.remember(victimId, solution);
                 }
             }
 
