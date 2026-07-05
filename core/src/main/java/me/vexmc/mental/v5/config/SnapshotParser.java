@@ -212,6 +212,20 @@ public final class SnapshotParser {
 
     private static ComboSettings parseCombo(ConfigReader reader) {
         ComboSettings d = ComboSettings.DEFAULTS;
+        double minFactor = reader.numberAtLeast("min-factor", d.minFactor(), 0.0);
+        double maxFactor = reader.numberAtLeast("max-factor", d.maxFactor(), 0.0);
+        // Cross-field sanity: a transposed pair (min > max) turns the servo's
+        // Math.max(min, Math.min(max, blended)) clamp into a constant min-factor
+        // amplifier with no per-field parse noise — a non-era knock on every combo
+        // hit. Warn and fall BOTH back to the defaults (the warn-and-fallback contract).
+        if (minFactor > maxFactor) {
+            reader.issues().warn(reader.prefix() + ".min-factor/max-factor",
+                    "min-factor " + minFactor + " exceeds max-factor " + maxFactor
+                            + " (the clamp would pin every combo hit to min-factor)",
+                    "defaults " + d.minFactor() + "/" + d.maxFactor());
+            minFactor = d.minFactor();
+            maxFactor = d.maxFactor();
+        }
         return new ComboSettings(
                 reader.intAtLeast("min-hits", d.minHits(), 1),
                 reader.intAtLeast("max-gap-ticks", d.maxGapTicks(), 1),
@@ -219,8 +233,8 @@ public final class SnapshotParser {
                 reader.numberAtLeast("blowout-blocks", d.blowoutBlocks(), 0.0),
                 reader.numberAtLeast("target", d.target(), 0.5),
                 reader.numberAtLeast("gain", d.gain(), 0.0),
-                reader.numberAtLeast("min-factor", d.minFactor(), 0.0),
-                reader.numberAtLeast("max-factor", d.maxFactor(), 0.0),
+                minFactor,
+                maxFactor,
                 reader.intAtLeast("window-ticks", d.windowTicks(), 1),
                 reader.oneOf("target-mode", d.targetMode(), TargetMode.class),
                 reader.numberAtLeast("hit-cap", d.hitCap(), 0.5));

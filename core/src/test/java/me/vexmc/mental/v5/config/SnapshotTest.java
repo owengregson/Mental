@@ -258,6 +258,25 @@ class SnapshotTest {
     }
 
     @Test
+    void servoClampWithMinFactorAboveMaxFactorWarnsAndFallsBackToDefaults() throws Exception {
+        // A transposed pair (min > max) would pin sigma to min-factor on every combo
+        // hit through the clamp's Math.max(min, ...) — a constant amplifier. The parser
+        // must warn and fall BOTH back to the defaults, not accept it silently.
+        SnapshotParser.Result result = parse("""
+                combo-hold:
+                  min-factor: 1.2
+                  max-factor: 0.8
+                """, "", "", "");
+
+        ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
+        assertEquals(ComboSettings.DEFAULTS.minFactor(), combo.minFactor(), "min-factor fell back");
+        assertEquals(ComboSettings.DEFAULTS.maxFactor(), combo.maxFactor(), "max-factor fell back");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("min-factor"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("max-factor"), () -> result.issues().get(0));
+    }
+
+    @Test
     void potsSettingsReadFromTheConfig() throws Exception {
         SnapshotParser.Result result = parse("""
                 pot-fill:
