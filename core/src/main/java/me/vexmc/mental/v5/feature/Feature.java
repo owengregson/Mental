@@ -4,10 +4,12 @@ import java.util.Set;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
+import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 
 /**
@@ -278,7 +280,29 @@ public enum Feature {
                     Facets.none("no client-visible change"),
                     Facets.none("no damage contribution"),
                     Facets.none("no damage contribution")),
-            new SettingsKey<>("old-hitboxes", NoSettings.class));
+            new SettingsKey<>("old-hitboxes", NoSettings.class)),
+
+    /* --------------------------------- POTS --------------------------------- */
+
+    POT_FILL("pot-fill", Family.POTS, "Pot Fill",
+            "The /potfill command — fill empty inventory slots with splash Instant Health II.",
+            "SPLASH_POTION", false, Set.of(),
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("no client-visible change — inventory is filled server-side"),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("pot-fill", PotFillSettings.class)),
+
+    FAST_POTS("fast-pots", Family.POTS, "Fast Pots",
+            "Redirect a steeply-thrown splash potion at the thrower's own feet at a multiplied speed.",
+            "SPLASH_POTION", false, Set.of(),
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("velocity is re-aimed server-side; the client sees a normal throw"),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("fast-pots", FastPotsSettings.class));
 
     private final String yamlKey;
     private final Family family;

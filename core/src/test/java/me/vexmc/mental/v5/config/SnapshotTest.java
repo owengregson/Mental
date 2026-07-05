@@ -11,10 +11,12 @@ import java.util.Map;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
+import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
@@ -67,6 +69,8 @@ class SnapshotTest {
         assertEquals(ProjectileKnockbackSettings.DEFAULTS, settings(snapshot, Feature.PROJECTILE_KNOCKBACK));
         assertEquals(CraftingSettings.DEFAULTS, settings(snapshot, Feature.CRAFTING));
         assertEquals(OffhandSettings.DEFAULTS, settings(snapshot, Feature.OFFHAND));
+        assertEquals(PotFillSettings.DEFAULTS, settings(snapshot, Feature.POT_FILL));
+        assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -137,6 +141,50 @@ class SnapshotTest {
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
         assertTrue(result.issues().get(0).contains("max-cps"));
         assertTrue(result.issues().get(0).contains("hit-registration.yml"));
+    }
+
+    @Test
+    void potsSettingsReadFromTheConfig() throws Exception {
+        SnapshotParser.Result result = parse("""
+                pot-fill:
+                  permission: "server.vip.pots"
+                  cost-per-potion: 5.0
+                fast-pots:
+                  angle-degrees: 50.0
+                  speed-multiplier: 2.5
+                """, "", "", "");
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+
+        PotFillSettings potFill = settings(result.snapshot(), Feature.POT_FILL);
+        assertEquals("server.vip.pots", potFill.permission());
+        assertEquals(5.0, potFill.costPerPotion());
+
+        FastPotsSettings fastPots = settings(result.snapshot(), Feature.FAST_POTS);
+        assertEquals(50.0, fastPots.angleDegrees());
+        assertEquals(2.5, fastPots.speedMultiplier());
+    }
+
+    @Test
+    void fastPotsKnobsAreParseClampedToTheirBounds() throws Exception {
+        // Angle above 90 and multiplier above 5 clamp to the nearest bound, each with one warn.
+        SnapshotParser.Result high = parse("""
+                fast-pots:
+                  angle-degrees: 120.0
+                  speed-multiplier: 9.0
+                """, "", "", "");
+        FastPotsSettings clampedHigh = settings(high.snapshot(), Feature.FAST_POTS);
+        assertEquals(FastPotsSettings.MAX_ANGLE, clampedHigh.angleDegrees());
+        assertEquals(FastPotsSettings.MAX_MULTIPLIER, clampedHigh.speedMultiplier());
+        assertEquals(2, high.issues().size(), () -> "issues: " + high.issues());
+
+        // A multiplier below 1.0 clamps up to the floor (never slower than vanilla).
+        SnapshotParser.Result low = parse("""
+                fast-pots:
+                  speed-multiplier: 0.2
+                """, "", "", "");
+        FastPotsSettings clampedLow = settings(low.snapshot(), Feature.FAST_POTS);
+        assertEquals(FastPotsSettings.MIN_MULTIPLIER, clampedLow.speedMultiplier());
+        assertEquals(1, low.issues().size(), () -> "issues: " + low.issues());
     }
 
     @Test

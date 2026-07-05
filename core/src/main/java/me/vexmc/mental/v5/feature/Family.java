@@ -24,7 +24,9 @@ public enum Family {
     SUSTAIN("Sustain", "GOLDEN_APPLE",
             "Era potions and golden apples, ender-pearl spam, and natural regen."),
     LOADOUT("Loadout", "SHIELD",
-            "Off-hand blocking, crafting restrictions, and era melee reach.");
+            "Off-hand blocking, crafting restrictions, and era melee reach."),
+    POTS("Potions", "SPLASH_POTION",
+            "Splash-potion utilities — the /potfill command and steep-throw fast pots.");
 
     private final String displayName;
     private final String iconName;

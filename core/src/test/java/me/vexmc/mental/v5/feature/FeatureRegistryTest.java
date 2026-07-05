@@ -46,7 +46,9 @@ class FeatureRegistryTest {
             "old-critical-hits",
             "old-tool-durability",
             "sword-blocking",
-            "old-hitboxes");
+            "old-hitboxes",
+            "pot-fill",
+            "fast-pots");
 
     @Test
     void yamlKeysAreExactlyTheOperatorContractSetUniqueAndNonNull() {

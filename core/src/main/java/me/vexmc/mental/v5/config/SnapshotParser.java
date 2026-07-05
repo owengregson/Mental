@@ -10,10 +10,12 @@ import me.vexmc.mental.v5.config.settings.AnticheatSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DebugSettings;
+import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
+import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Material;
@@ -91,6 +93,8 @@ public final class SnapshotParser {
                     parseProjectile(reader(knockback, "projectile-knockback", "knockback.yml", issues));
             case CRAFTING -> parseCrafting(reader(main, "disable-crafting", "config.yml", issues));
             case OFFHAND -> parseOffhand(reader(main, "disable-offhand", "config.yml", issues));
+            case POT_FILL -> parsePotFill(reader(main, "pot-fill", "config.yml", issues));
+            case FAST_POTS -> parseFastPots(reader(main, "fast-pots", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
         };
     }
@@ -175,6 +179,24 @@ public final class SnapshotParser {
                 .filter(material -> material != null)
                 .collect(Collectors.toUnmodifiableSet());
         return new CraftingSettings(blocked);
+    }
+
+    private static PotFillSettings parsePotFill(ConfigReader reader) {
+        PotFillSettings d = PotFillSettings.DEFAULTS;
+        // A blank permission would open the command to everyone; text() already
+        // keeps the fallback (and warns) on a blank/non-string value.
+        return new PotFillSettings(
+                reader.text("permission", d.permission()),
+                reader.numberAtLeast("cost-per-potion", d.costPerPotion(), 0.0));
+    }
+
+    private static FastPotsSettings parseFastPots(ConfigReader reader) {
+        FastPotsSettings d = FastPotsSettings.DEFAULTS;
+        return new FastPotsSettings(
+                reader.numberInRange("angle-degrees", d.angleDegrees(),
+                        FastPotsSettings.MIN_ANGLE, FastPotsSettings.MAX_ANGLE),
+                reader.numberInRange("speed-multiplier", d.speedMultiplier(),
+                        FastPotsSettings.MIN_MULTIPLIER, FastPotsSettings.MAX_MULTIPLIER));
     }
 
     private static OffhandSettings parseOffhand(ConfigReader reader) {
