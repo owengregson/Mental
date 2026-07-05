@@ -48,9 +48,12 @@ even faces the attacker stacks a timing asymmetry on top. When the victim
 grounds, Δ → ~0.2 and reach goes symmetric: combos end on touchdown windows.
 
 **Therefore:** the un-retaliatable band is h ≥ √(reach² − Δ²) ≈ **2.7–2.8**
-at era launch heights, and staying hittable needs h ≲ 2.95. The servo's
-default target (2.75) is derived, not tuned. Vertical is deliberately NOT
-touched: the preset's launch height is what buys the Δ² margin.
+at era launch heights, and staying hittable needs h ≲ 2.95. The reach triangle
+derives that band; the shipped default target is **2.85** — the target-v2
+data-backed retune (the lab's 71-combo round: the five longest combos held
+2.81–2.86, the [2.8, 2.92) band broke combos 1.3%/hit vs 5.9% at the cap edge,
+and 2.75 was unreachable at signature scale so it never regulated). Vertical is
+deliberately NOT touched: the preset's launch height is what buys the Δ² margin.
 
 ## 3. Mechanism
 
@@ -84,7 +87,7 @@ w'     = c − round(rttA/2 / 50)                    the ping-shifted horizon (c
 D(w')  = Σ_{k=1}^{w'} Π(k)     Π = the launch-branch drag schedule: one ground-drag
                               decay on a grounded launch tick, then air drag q,
                               then the knock's own ground-drag tail after touchdown
-target = anchor (2.75)  |  the exposure-budget dynamic target (§3.2b, behind a knob)
+target = anchor (2.85)  |  the V2 exposure-budget dynamic target (§3.2b, behind a knob)
 chase  = measured attacker-velocity trend  (fallback 0.2806 × attr/0.10 × w')
 tail   = D_ground(G) · dir(â)                       the victim's own ground-tail walk
 
@@ -106,7 +109,9 @@ tail   = D_ground(G) · dir(â)                       the victim's own ground-ta
   inside the window; `chase` the measured attacker closing (attr model fallback).
 - The servo **declines (σ = 1)** on an ice-class landing (predicted slip > 0.7)
   or a degenerate flight (air-time < 3, horizon < 1) — never a forced non-era knock.
-- Defaults: `target` 2.75 (§2), `gain` 1.0, clamps **[0.8, 1.2]** (owner
+- Defaults: `target` **2.85** (§2, the target-v2 data-backed retune — the lab's
+  held-separation equilibrium; the old reach-triangle 2.75 was unreachable at
+  signature scale so it never regulated), `gain` 1.0, clamps **[0.8, 1.2]** (owner
   decision — the stronger hold; the wider band trades a little visible KB
   variance for grip on the pocket). Past the clamps the pocket is honestly
   lost and era physics wins.

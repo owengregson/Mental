@@ -2,6 +2,7 @@ package me.vexmc.mental.v5.feature.combo;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.DriftEstimator;
 import me.vexmc.mental.kernel.math.PocketServo;
@@ -18,7 +19,9 @@ import me.vexmc.mental.kernel.wire.PositionRing;
  * published values and ring samples (never a live entity), so it is safe on the
  * attacker's netty thread as well as the victim's region thread; both sites freeze
  * ONE {@link PredictorInputs} from it, so an adopted pre-send and a region
- * recompute see the same truth.
+ * recompute see the same truth. It also carries one small per-victim lab cache
+ * ({@link #MEMORY}) — the V2 dynamic target's cross-hit smoothing state (target-v2
+ * repair #2) — concurrent because both delivery seams commit to it.
  *
  * <p>Every term degrades independently to its no-op: a missing ring history drops
  * the drift/chase estimate, an unprobed RTT falls back to the view's Bukkit ping,
@@ -43,6 +46,16 @@ public final class ComboPredictor {
     /** How many ring samples the chase trend averages (~3 deltas). */
     private static final int CHASE_SAMPLES = 4;
 
+    /**
+     * The per-victim pocket-servo memory (target-v2 repair #2): {@code {chaseEma,
+     * dynamicTarget}} carried hit-to-hit so the V2 dynamic target's smoothing (chase
+     * EMA + ≤0.05/hit slew) survives across a combo. A lab-instrument cache — read
+     * by {@link #build} and committed by {@link #remember}; both delivery seams touch
+     * it, hence the concurrent map. Empty (no smoothing) under the shipped ANCHOR
+     * default, which uses the anchor and never reads the dynamic value.
+     */
+    private static final ConcurrentHashMap<UUID, double[]> MEMORY = new ConcurrentHashMap<>();
+
     private ComboPredictor() {}
 
     /**
@@ -50,6 +63,12 @@ public final class ComboPredictor {
      * whose frozen {@code victimView} is given. {@code attackerView} may be null
      * (its RTT then falls back to the model / zero); the positions are the current
      * ring-latest feet positions of both parties (the axis source).
+     *
+     * <p>The victim's per-combo pocket-servo memory (target-v2 repair #2) is read
+     * from {@link #MEMORY} and ridden into the kernel via {@link PredictorInputs}
+     * so the V2 dynamic target smooths across the combo — {@link Double#NaN} for a
+     * fresh combo. It never touches the σ* placement solve; the memory is committed
+     * by {@link #remember} at the delivery seam.</p>
      */
     public static PredictorInputs build(
             UUID attackerId, UUID victimId,
@@ -84,6 +103,10 @@ public final class ComboPredictor {
 
         double yawVsAxis = yawVsAxisDeg(victimView.yaw(), ux, uz);
 
+        double[] memory = MEMORY.get(victimId);
+        double priorChaseEma = memory != null ? memory[0] : Double.NaN;
+        double priorDynamicTarget = memory != null ? memory[1] : Double.NaN;
+
         return new PredictorInputs(
                 launchGrounded, slip, slip, launchHeight,
                 driftAxis, chaseAxis, victimView.moveSpeedAttr(),
@@ -91,8 +114,31 @@ public final class ComboPredictor {
                 Double.NaN,                 // attacker head-top Y: flat-arena constant (dynamic target is OFF by default)
                 victimView.eyeHeight(),
                 yawVsAxis,
-                Double.NaN,                 // victim yaw slew rate: no per-tick source yet (open issue 4)
-                victimView.groundedTicks());
+                victimView.yawRateDegPerTick(),   // the measured yaw slew — the V2 turn divisor (target-v2 repair #4)
+                victimView.groundedTicks(),
+                priorChaseEma, priorDynamicTarget);
+    }
+
+    /**
+     * Commits the pocket-servo memory this hit produced (target-v2 repair #2): the
+     * advanced chase EMA and the emitted dynamic target, so the victim's next hit's
+     * V2 target smooths from them. Keyed by victim; a {@link ConcurrentHashMap}
+     * because the two delivery seams (netty pre-send D1, region recompute D2) both
+     * assemble the solve. A declined solve (NaN chaseEma) leaves the memory alone,
+     * so a stray non-combo hit never poisons it. Cleared by {@link #forget} on
+     * session teardown. Only meaningful under {@code target-mode: dynamic}; harmless
+     * (unread) under the shipped ANCHOR default.
+     */
+    public static void remember(UUID victimId, PocketServo.Solution solution) {
+        if (victimId == null || Double.isNaN(solution.chaseEma())) {
+            return;
+        }
+        MEMORY.put(victimId, new double[] {solution.chaseEma(), solution.dynamicTarget()});
+    }
+
+    /** Drops the victim's servo memory (session forget hook / combo teardown). */
+    public static void forget(UUID victimId) {
+        MEMORY.remove(victimId);
     }
 
     /* ── the measured estimators ──────────────────────────────────────────── */
@@ -178,22 +224,32 @@ public final class ComboPredictor {
     /* ── the debug sink (precision-derivation §7.2) ──────────────────────────── */
 
     /**
-     * The per-hit debug line the lab round parses (precision-derivation §7.2): every
-     * predictor input and the resolved solve, space-separated {@code key=value}
-     * pairs. The dynamic target rides here (NOT the journal) so the lab can
-     * calibrate the exposure-budget geometry before the default flips; the journal
-     * carries only the applied σ (comboFactor).
+     * The per-hit debug line the lab round parses (precision-derivation §7.2; the
+     * target-v2 sink extension): every predictor input and the resolved solve,
+     * space-separated {@code key=value} pairs. The dynamic target rides here (NOT
+     * the journal) so the lab can calibrate the exposure-budget geometry before the
+     * default flips; the journal carries only the applied σ (comboFactor).
+     *
+     * <p>The V2 round adds the fields the forensics attribution gaps named
+     * (open-gaps 1/2): the victim facing (<b>yawVsAxis</b>) and its measured slew
+     * (<b>yawRateHat</b>), the continuous retaliation cost (<b>turn</b>, <b>tAllow
+     * = tPing + turn</b>), the smoothed terminal closing (<b>closingEma</b>), and
+     * the <b>launchHeight</b> that the reconstruction previously had to assume.</p>
      */
     public static String debugLine(UUID victimId, UUID attackerId, PredictorInputs inputs, PocketServo.Solution s) {
         return "combo-servo"
                 + " victim=" + victimId + " attacker=" + attackerId
                 + " d0=" + fmt(s.d0()) + " R=" + fmt(s.residualCarry()) + " F=" + fmt(s.freshEra())
                 + " V0=" + fmt(s.verticalStamp()) + " launchGrounded=" + s.launchGrounded()
-                + " slip=" + fmt(s.launchSlip())
+                + " slip=" + fmt(s.launchSlip()) + " launchHeight=" + fmt(inputs.launchHeight())
                 + " wPrime=" + s.windowTicks() + " tStar=" + s.horizonTicks()
                 + " shiftV=" + s.shiftVictimTicks() + " airTime=" + s.airTicks()
                 + " aHat=" + fmt(inputs.driftAlongAxis())
                 + " chase=" + fmt(s.chaseRate()) + (s.chaseMeasured() ? "(measured)" : "(model)")
+                + " yawVsAxis=" + fmt(inputs.victimYawVsAxisDeg())
+                + " yawRateHat=" + fmt(inputs.victimYawRateDegPerTick())
+                + " turn=" + fmt(s.turn()) + " tAllow=" + fmt(s.tAllow())
+                + " closingEma=" + fmt(s.closingEnd())
                 + " targetAnchor=" + fmt(s.anchor()) + " targetDyn=" + fmt(s.dynamicTarget())
                 + " targetUsed=" + fmt(s.target())
                 + " sigmaStar=" + fmt(s.sigmaStar()) + " sigma=" + fmt(s.sigma())

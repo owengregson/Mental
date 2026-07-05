@@ -69,6 +69,21 @@ public final class CombatSession {
      */
     private int groundedTicks;
 
+    /**
+     * A small per-tick yaw-slew window (target-v2 repair #4) — the source for the
+     * dynamic target's continuous turn term ({@code yawRateHat}). Mirrors the
+     * measured-velocity pattern: each session tick pushes {@code |Δyaw|} (shortest-
+     * arc, wrap-corrected) and {@link #advanceYawRate} publishes the mean over the
+     * last {@value #YAW_WINDOW} ticks; {@link Double#NaN} until the first delta, so
+     * the kernel degrades to its conservative 30°/tick floor. Owning thread only.
+     */
+    private static final int YAW_WINDOW = 3;
+    private float lastYaw;
+    private boolean hasYaw;
+    private final double[] yawDeltas = new double[YAW_WINDOW];
+    private int yawDeltaCount;
+    private int yawDeltaNext;
+
     public CombatSession(double gravity, int entityId, TickClock clock, int journalCapacity) {
         this.ledger = new MotionLedger(gravity);
         this.desk = new DeliveryDesk(entityId, clock, journalCapacity);
@@ -157,6 +172,44 @@ public final class CombatSession {
     public int advanceGroundedTicks(boolean grounded) {
         groundedTicks = grounded ? groundedTicks + 1 : 0;
         return groundedTicks;
+    }
+
+    /**
+     * Pushes this tick's yaw into the slew window and returns the victim's measured
+     * yaw rate — the mean {@code |Δyaw|} (shortest-arc) over the last {@value
+     * #YAW_WINDOW} ticks (target-v2 repair #4), or {@link Double#NaN} before the
+     * first delta. Called once per session tick from the view build. Owning thread only.
+     */
+    public double advanceYawRate(float yaw) {
+        if (hasYaw) {
+            yawDeltas[yawDeltaNext] = Math.abs(wrapDegrees(yaw - lastYaw));
+            yawDeltaNext = (yawDeltaNext + 1) % yawDeltas.length;
+            if (yawDeltaCount < yawDeltas.length) {
+                yawDeltaCount++;
+            }
+        }
+        lastYaw = yaw;
+        hasYaw = true;
+        if (yawDeltaCount == 0) {
+            return Double.NaN;
+        }
+        double sum = 0.0;
+        for (int i = 0; i < yawDeltaCount; i++) {
+            sum += yawDeltas[i];
+        }
+        return sum / yawDeltaCount;
+    }
+
+    /** Shortest-arc yaw delta in degrees, folded into [−180, 180) — a spin never reads as a huge rate. */
+    private static double wrapDegrees(double degrees) {
+        double d = degrees % 360.0;
+        if (d >= 180.0) {
+            d -= 360.0;
+        }
+        if (d < -180.0) {
+            d += 360.0;
+        }
+        return d;
     }
 
     /**

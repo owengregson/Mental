@@ -71,6 +71,7 @@ import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
 import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
+import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
@@ -612,6 +613,7 @@ public final class MentalPluginV5 extends JavaPlugin {
                 new LatencyCompensationUnit(latency, scheduling, this::snapshot, probeTransport);
         sessions.addForgetHook(hitRegistration::forget);
         sessions.addForgetHook(latencyCompensation::forget);
+        sessions.addForgetHook(ComboPredictor::forget); // drop the V2 servo smoothing memory on teardown
 
         reconciler.register(new AnticheatCompatUnit(
                 anticheatPolicy, this::snapshot, message -> getLogger().info(message)));

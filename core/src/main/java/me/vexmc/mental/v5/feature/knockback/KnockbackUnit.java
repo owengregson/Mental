@@ -243,6 +243,9 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                     attackerState, victimState, profile, compensationY, freshSprint, servo, inputs);
             debug.log(() -> ComboPredictor.debugLine(
                     victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
+            // Commit the V2 dynamic-target smoothing memory (target-v2 repair #2) so
+            // the next hit relaxes from this one — inert under the ANCHOR default.
+            ComboPredictor.remember(victim.getUniqueId(), solution);
         }
 
         if (freshPartialBlock) {

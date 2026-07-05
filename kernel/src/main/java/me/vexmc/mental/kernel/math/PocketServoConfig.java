@@ -3,11 +3,13 @@ package me.vexmc.mental.kernel.math;
 /**
  * The pocket servo's tunables (combo-hold §3.2/§3.2b) — a kernel-pure, immutable
  * value the {@link PocketServo} solve reads. {@code target} is the anchor
- * separation the servo steers the victim toward at next-swing time (2.75 blocks,
- * the hittability centre derived from the reach-triangle in §2, not tuned);
- * {@code gain} blends toward the full exact solve (1.0 = exact); {@code min}/{@code
- * max} are the honesty clamps ([0.8, 1.2], the owner's stronger-hold decision);
- * {@code windowTicks} is the cadence horizon (10) the flight is projected over.
+ * separation the servo steers the victim toward at next-swing time (the shipped
+ * default is 2.85 after the target-v2 data-backed retune — the lab's held-
+ * separation equilibrium; 2.75 was the reach-triangle centre but unreachable at
+ * signature scale, so it never regulated); {@code gain} blends toward the full
+ * exact solve (1.0 = exact); {@code min}/{@code max} are the honesty clamps
+ * ([0.8, 1.2], the owner's stronger-hold decision); {@code windowTicks} is the
+ * cadence horizon (10) the flight is projected over.
  *
  * <p><b>Precision-round growth (§3.2b).</b> {@code targetMode} selects the anchor
  * (the default — the computed dynamic value is journaled to the debug sink but not
@@ -30,9 +32,9 @@ public record PocketServoConfig(
     /** The practical hittable edge — the dynamic target's upper clamp (§3.1, hitCap ≈ 2.95). */
     public static final double DEFAULT_HIT_CAP = 2.95;
 
-    /** The module-off / not-applicable value — the solve returns exactly 1.0. */
+    /** The module-off / not-applicable value — the solve returns exactly 1.0 (the target is never read). */
     public static final PocketServoConfig INACTIVE =
-            new PocketServoConfig(false, 2.75, 1.0, 0.8, 1.2, 10, TargetMode.ANCHOR, DEFAULT_HIT_CAP);
+            new PocketServoConfig(false, 2.85, 1.0, 0.8, 1.2, 10, TargetMode.ANCHOR, DEFAULT_HIT_CAP);
 
     /**
      * An active anchor-mode config with the given knobs and the default 2.95 hit

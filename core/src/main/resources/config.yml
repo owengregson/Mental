@@ -310,12 +310,13 @@ modules:
 #
 # ── Servo: where does the victim land? ─────────────────────────────────────
 #   target       the separation (blocks) the servo steers the victim toward at
-#                the next swing. 2.75 is DERIVED from the reach triangle, not
-#                tuned: a launched victim needs the hypotenuse sqrt(reach^2 + dh^2)
-#                to answer while the attacker's shot is the flat base ~reach, so
-#                the un-retaliatable band sits at ~2.7-2.8 and staying hittable
-#                needs <~2.95. Vertical is deliberately never touched — the
-#                profile's launch height is what buys that margin.
+#                the next swing. 2.85 is the DATA-BACKED anchor from the lab's
+#                71-combo round: every one of the five longest combos (120-173
+#                hits) held 2.81-2.86, the [2.8, 2.92) band broke combos 1.3% per
+#                hit vs 5.9% at the cap edge, and the old reach-triangle 2.75 was
+#                unreachable at signature scale (the 0.8 clamp) so it never
+#                regulated. Vertical is deliberately never touched — the profile's
+#                launch height is what buys that margin.
 #   gain         blends toward the full exact solve (1.0 = exact; lower softens).
 #   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
 #   max-factor   } stronger hold; past them the pocket is honestly lost and era
@@ -362,7 +363,7 @@ modules:
 #  max-gap-ticks: 20
 #  grounded-run-ticks: 10
 #  blowout-blocks: 6.0
-#  target: 2.75
+#  target: 2.85
 #  gain: 1.0
 #  min-factor: 0.8
 #  max-factor: 1.2
