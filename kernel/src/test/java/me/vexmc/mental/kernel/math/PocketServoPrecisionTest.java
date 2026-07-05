@@ -172,15 +172,60 @@ class PocketServoPrecisionTest {
                 "no fresh horizontal — no lever");
     }
 
-    /* ── the dynamic target function (§3.3) ────────────────────────────────── */
+    /* ── the V2 dynamic target (§3.3; target-v2 repairs #1–#4) ─────────────── */
+
+    /** A wide-interval synthetic config so the exposure min-selection is exercisable
+     *  (at signature-knock scale capEff collapses to the anchor — see below). */
+    private static final PocketServoConfig WIDE =
+            PocketServoConfig.of(2.30, 1.0, 0.8, 1.2, 10, TargetMode.DYNAMIC, 3.20);
 
     @Test
-    void turnCostBands() {
-        assertEquals(0, PocketServo.turnCost(30.0, 0.0), "facing (<60°) → 0");
-        assertEquals(1, PocketServo.turnCost(90.0, 0.0), "quarter-turn (<120°) → 1");
-        assertEquals(2, PocketServo.turnCost(150.0, 0.0), "faced away (≥120°) → 2");
-        assertEquals(0, PocketServo.turnCost(150.0, 40.0), "already flicking (≥30°/t) → 0 regardless");
-        assertEquals(0, PocketServo.turnCost(Double.NaN, 40.0), "flicking overrides even a NaN facing");
+    void turnIsContinuousAndFlickAware() {
+        // repair #4: 0 within 60° of the axis; else (|yaw|−60)/max(rate, 30°/t).
+        assertEquals(0.0, PocketServo.turn(30.0, Double.NaN), EPSILON, "facing (≤60°) → 0");
+        assertEquals(0.0, PocketServo.turn(60.0, Double.NaN), EPSILON, "exactly 60° → 0");
+        assertEquals(1.0, PocketServo.turn(90.0, Double.NaN), EPSILON, "90°, unknown rate → (30)/30 = 1.0");
+        assertEquals(3.0, PocketServo.turn(150.0, 10.0), EPSILON, "150°, slow 10°/t → (90)/max(10,30) = 3.0");
+        assertEquals(1.0, PocketServo.turn(150.0, 90.0), EPSILON, "150°, fast 90°/t flick → (90)/90 = 1.0");
+        assertEquals(0.0, PocketServo.turn(Double.NaN, 90.0), EPSILON, "NaN facing → 0 (no geometry)");
+    }
+
+    @Test
+    void tAllowIsContinuousPingPlusTurn() {
+        // repair #4: tPing = rttV/100 (real ticks, no floor) + turn. The three journal
+        // examples' budgets, recomputed exactly from the constants.
+        assertEquals(3.8, PocketServo.tAllow(80, 150.0, 10.0), EPSILON,
+                "faced-away high-ping: 80/100 + 90/30 = 0.8 + 3.0");
+        assertEquals(1.4, PocketServo.tAllow(40, 90.0, Double.NaN), EPSILON,
+                "perpendicular mid-ping: 40/100 + 30/30 = 0.4 + 1.0");
+        assertEquals(0.1, PocketServo.tAllow(10, 30.0, Double.NaN), EPSILON,
+                "facing low-ping: 10/100 + 0 = 0.1");
+        assertEquals(1.0, PocketServo.tAllow(-1, 90.0, Double.NaN), EPSILON,
+                "unavailable RTT (<0) → no ping slack, just the turn");
+    }
+
+    @Test
+    void capEffIsChaseAwareAndClampedAboveAnchor() {
+        // repair #3: capEff = hitEdge(3.0) − 0.5·chaseEma − landingSlack(0.17), clamped
+        // to [anchor, hitCap]. A wide-anchor config exposes the raw value; the shipped
+        // signature anchor clamps it up (the verifier's hole-12 inverted interval).
+        double raw = PocketServo.HIT_EDGE - 0.5 * 0.12 - PocketServo.LANDING_SLACK; // 2.77
+        assertEquals(2.77, raw, 1.0e-9);
+        assertEquals(2.77, PocketServo.capEff(WIDE, 0.12), EPSILON, "raw value inside [2.30, 3.20]");
+        // Signature chase 0.2806 → raw 2.6897 < the shipped 2.85 anchor → clamps to it.
+        PocketServoConfig shipped = PocketServoConfig.of(
+                2.85, 1.0, 0.8, 1.2, 10, TargetMode.DYNAMIC, 2.95);
+        assertEquals(2.85, PocketServo.capEff(shipped, 0.2806), EPSILON,
+                "capEff clamps up to the anchor rather than inverting the interval");
+    }
+
+    @Test
+    void chaseEmaSeedsThenBlends() {
+        // repair #2: NaN prior seeds to the instantaneous rate; then α=0.3 blend.
+        assertEquals(0.30, PocketServo.chaseEma(Double.NaN, 0.30), EPSILON, "first hit seeds");
+        double blended = PocketServo.CHASE_EMA_ALPHA * 0.50 + (1.0 - PocketServo.CHASE_EMA_ALPHA) * 0.30;
+        assertEquals(blended, PocketServo.chaseEma(0.30, 0.50), EPSILON, "0.3·0.5 + 0.7·0.3 = 0.36");
+        assertEquals(0.36, blended, 1.0e-9);
     }
 
     @Test
@@ -194,41 +239,148 @@ class PocketServoPrecisionTest {
     }
 
     @Test
-    void dynamicTargetRelaxesBetweenAnchorAndHitCap() {
-        // A facing, low-ping victim near touchdown (small Δ) pushes the target up
-        // toward the hit cap; the value always clamps to [anchor, hitCap].
-        double target = PocketServo.dynamicTarget(
-                SERVO, facing(0.0, 0.0, 0), /*wPrime*/10, /*shiftV*/0, /*vstamp*/0.30,
-                /*chaseRate*/0.2806, /*knockRateEnd*/0.02, /*driftRateEnd*/0.0);
-        assertTrue(target >= SERVO.target() - EPSILON && target <= SERVO.hitCap() + EPSILON,
-                "dynamic target stays within [anchor, hitCap]: " + target);
-        // A faced-away, high-ping victim (large tAllow) relaxes the target toward the
-        // anchor — strictly ≤ the facing case.
-        double faced = PocketServo.dynamicTarget(
-                SERVO, facing(150.0, 0.0, 200), 10, 2, 0.30, 0.2806, 0.02, 0.0);
-        assertTrue(faced <= target + EPSILON, "a faced-away laggy victim relaxes toward the anchor");
+    void outDriftingVictimKeepsTheAnchor() {
+        // repair #2: closing ≤ 0 (the knock still out-runs the chase at the terminal
+        // tick) keeps the pull-in anchor, never relaxes toward the cap.
+        double[] pi = signatureSchedule();
+        // Weak chase, full signature knock → closingEnd < 0.
+        PocketServo.DynResult r = PocketServo.dynamicTarget(
+                WIDE, facingV2(90.0, Double.NaN, 40, Double.NaN, Double.NaN),
+                10, 0, 0.35716, /*chase*/0.10, /*shippedH1*/0.845, /*drift*/0.0, pi);
+        assertTrue(r.closingEnd() < 0.0, "the victim is out-drifting: " + r.closingEnd());
+        assertEquals(WIDE.target(), r.target(), EPSILON, "out-drift → the anchor");
     }
 
     @Test
-    void dynamicTargetHonorsTheTAllowArithmetic() {
-        // relaxed = safeNeed − tAllow·closing, clamped. Reconstruct safeNeed from the
-        // arc and assert the pre-clamp arithmetic in the relaxing band.
-        double vstamp = 0.30;
-        int wPrime = 10;
-        int shiftV = 0;
-        double chaseRate = 0.35;
-        double knockRateEnd = 0.02;
-        double driftRateEnd = 0.0;
-        double closing = chaseRate - knockRateEnd - driftRateEnd;
-        double feetY = PocketServo.arcHeight(vstamp, 0.0, wPrime - shiftV);
-        double dEnd = Math.max(0.0, feetY + PocketServo.EYE_HEIGHT - PocketServo.PLAYER_HEIGHT);
-        double safeNeed = PocketServo.HALF_WIDTH
-                + Math.sqrt(PocketServo.VICTIM_REACH * PocketServo.VICTIM_REACH - dEnd * dEnd);
-        int tAllow = shiftV + PocketServo.turnCost(150.0, 0.0); // 0 + 2
-        double expected = Math.max(SERVO.target(), Math.min(SERVO.hitCap(), safeNeed - tAllow * closing));
-        double actual = PocketServo.dynamicTarget(
-                SERVO, facing(150.0, 0.0, 0), wPrime, shiftV, vstamp, chaseRate, knockRateEnd, driftRateEnd);
-        assertEquals(expected, actual, EPSILON);
+    void exposureIsMonotoneNonIncreasingInTarget() {
+        // repair #1: e(T) never rises as T grows (a farther-launched victim sits inside
+        // the answer envelope for no more terminal ticks). The premise the min-rule needs.
+        double[] pi = signatureSchedule();
+        double prev = Double.POSITIVE_INFINITY;
+        for (double t = 2.30; t <= 2.95 + 1.0e-9; t += 0.01) {
+            double e = PocketServo.exposure(t, 10, 0, 0.35716, 0.0, PocketServo.EYE_HEIGHT,
+                    /*chaseEma*/0.50, /*shippedH1*/0.0, /*drift*/0.0, pi);
+            assertTrue(e <= prev + 1.0e-9, "e nondecreasing at T=" + t + " (" + e + " > " + prev + ")");
+            prev = e;
+        }
+    }
+
+    @Test
+    void minSelectionEmptySetFallsBackToCapEff() {
+        // repair #1: no T bounds the exposure (tiny budget) → capEff, the least exposed.
+        double[] pi = signatureSchedule();
+        double chaseEma = 0.50;
+        double capEff = PocketServo.capEff(WIDE, chaseEma);
+        PocketServo.DynResult r = PocketServo.dynamicTarget(
+                WIDE, facingV2(30.0, Double.NaN, 10, Double.NaN, Double.NaN),
+                10, 0, 0.35716, chaseEma, /*shippedH1*/0.0, 0.0, pi);
+        assertEquals(0.1, r.tAllow(), EPSILON);
+        double eCap = PocketServo.exposure(capEff, 10, 0, 0.35716, 0.0, PocketServo.EYE_HEIGHT,
+                chaseEma, 0.0, 0.0, pi);
+        assertTrue(eCap > r.tAllow(), "even capEff is over budget → infeasible");
+        assertEquals(capEff, r.target(), EPSILON, "infeasible → capEff (least-exposed)");
+    }
+
+    @Test
+    void minSelectionWithinBudgetReturnsAnchor() {
+        // repair #1: even the anchor already fits the budget (huge tAllow) → the anchor.
+        double[] pi = signatureSchedule();
+        double chaseEma = 0.50;
+        PocketServo.DynResult r = PocketServo.dynamicTarget(
+                WIDE, facingV2(150.0, 10.0, 800, Double.NaN, Double.NaN),
+                10, 0, 0.35716, chaseEma, /*shippedH1*/0.0, 0.0, pi);
+        double eAnchor = PocketServo.exposure(WIDE.target(), 10, 0, 0.35716, 0.0,
+                PocketServo.EYE_HEIGHT, chaseEma, 0.0, 0.0, pi);
+        assertTrue(eAnchor <= r.tAllow(), "the anchor is within budget");
+        assertEquals(WIDE.target(), r.target(), EPSILON, "within budget → the anchor");
+    }
+
+    @Test
+    void minSelectionInteriorCrossingBisects() {
+        // repair #1: a budget strictly between e(capEff) and e(anchor) selects the
+        // interior crossing e(T*) == tAllow — the honest min, found by bisection.
+        double[] pi = signatureSchedule();
+        double chaseEma = 0.50;
+        // tAllow 1.5 comes from yaw 90 (turn 1.0, NaN rate) + rttV 50 (tPing 0.5).
+        PredictorInputs in = facingV2(90.0, Double.NaN, 50, Double.NaN, Double.NaN);
+        PocketServo.DynResult r = PocketServo.dynamicTarget(
+                WIDE, in, 10, 0, 0.35716, chaseEma, /*shippedH1*/0.0, 0.0, pi);
+        assertEquals(1.5, r.tAllow(), EPSILON);
+        double capEff = PocketServo.capEff(WIDE, chaseEma);
+        assertTrue(r.target() > WIDE.target() + 1.0e-6 && r.target() < capEff - 1.0e-6,
+                "the solution is strictly interior: " + r.target());
+        double eAt = PocketServo.exposure(r.target(), 10, 0, 0.35716, 0.0, PocketServo.EYE_HEIGHT,
+                chaseEma, 0.0, 0.0, pi);
+        assertEquals(r.tAllow(), eAt, 1.0e-4, "e(T*) == tAllow at the crossing");
+        double eJustBelow = PocketServo.exposure(r.target() - 0.02, 10, 0, 0.35716, 0.0,
+                PocketServo.EYE_HEIGHT, chaseEma, 0.0, 0.0, pi);
+        assertTrue(eJustBelow > r.tAllow(), "it is the MINIMUM feasible T (below it is over budget)");
+    }
+
+    @Test
+    void facingOrdersTheTargetFacedAwayLowFacingHigh() {
+        // The three journal examples' INTENT, recomputed from the final constants in an
+        // open-interval regime: faced-away+laggy relaxes toward the anchor, a facing
+        // low-ping victim is pushed to capEff, perpendicular lands between. (At the
+        // signature knock scale this interval collapses to the anchor — see the
+        // shipped-anchor test; the ordering here is the mechanism, exercised open.)
+        double[] pi = signatureSchedule();
+        double chaseEma = 0.50;
+        double capEff = PocketServo.capEff(WIDE, chaseEma);
+        double facedAway = PocketServo.dynamicTarget(
+                WIDE, facingV2(150.0, 10.0, 80, Double.NaN, Double.NaN),
+                10, 0, 0.35716, chaseEma, 0.0, 0.0, pi).target();
+        double perpendicular = PocketServo.dynamicTarget(
+                WIDE, facingV2(90.0, Double.NaN, 40, Double.NaN, Double.NaN),
+                10, 0, 0.35716, chaseEma, 0.0, 0.0, pi).target();
+        double facing = PocketServo.dynamicTarget(
+                WIDE, facingV2(30.0, Double.NaN, 10, Double.NaN, Double.NaN),
+                10, 0, 0.35716, chaseEma, 0.0, 0.0, pi).target();
+        assertEquals(WIDE.target(), facedAway, EPSILON, "faced-away high-ping → the anchor");
+        assertEquals(capEff, facing, EPSILON, "facing low-ping → capEff-bound");
+        assertTrue(perpendicular > facedAway + 1.0e-6 && perpendicular < facing - 1.0e-6,
+                "perpendicular lands strictly between: " + perpendicular);
+    }
+
+    @Test
+    void chaseEmaAndSlewKillTheCoinFlip() {
+        // repair #2: the v1 cliff moved the target by the full 0.20 on ±chase noise.
+        // With the EMA + the ≤0.05/hit slew, an oscillating chase can never move the
+        // EMITTED target more than the slew limit between consecutive hits.
+        double[] pi = signatureSchedule();
+        double[] noisyChase = {0.20, 0.60, 0.22, 0.58, 0.25, 0.55, 0.30, 0.50, 0.35, 0.45};
+        double priorEma = Double.NaN;
+        double priorTarget = Double.NaN;
+        double last = Double.NaN;
+        for (double chase : noisyChase) {
+            PredictorInputs in = facingV2(90.0, Double.NaN, 50, priorEma, priorTarget);
+            PocketServo.DynResult r = PocketServo.dynamicTarget(
+                    WIDE, in, 10, 0, 0.35716, chase, /*shippedH1*/0.0, 0.0, pi);
+            if (!Double.isNaN(last)) {
+                assertTrue(Math.abs(r.target() - last) <= PocketServo.TARGET_SLEW_LIMIT + EPSILON,
+                        "the target cannot jump the old cliff: Δ=" + Math.abs(r.target() - last));
+            }
+            last = r.target();
+            priorEma = r.chaseEma();
+            priorTarget = r.target();
+        }
+    }
+
+    @Test
+    void shippedAnchorCollapsesDynamicToTheAnchor() {
+        // The honest recomputation of the journal examples at the SHIPPED constants:
+        // anchor 2.85 + signature chase makes capEff ≤ the anchor (the flatness the
+        // verifier predicted), so V2 rides the anchor — DYNAMIC ≡ ANCHOR at signature
+        // scale, exactly the feel verdict's "an honest ~2.85 target".
+        PocketServoConfig shipped = PocketServoConfig.of(
+                2.85, 1.0, 0.8, 1.2, 10, TargetMode.DYNAMIC, 2.95);
+        double[] pi = signatureSchedule();
+        for (double yaw : new double[] {30.0, 90.0, 150.0}) {
+            PocketServo.DynResult r = PocketServo.dynamicTarget(
+                    shipped, facingV2(yaw, Double.NaN, 40, Double.NaN, Double.NaN),
+                    10, 0, 0.35716, /*chase*/0.2806, /*shippedH1*/0.845, 0.0, pi);
+            assertEquals(2.85, r.target(), EPSILON, "capEff collapses to the anchor at signature scale");
+        }
     }
 
     /* ── independent fold + brute references (never the production sum code) ─── */
@@ -332,9 +484,24 @@ class PocketServoPrecisionTest {
         return PocketServo.solve(SERVO, in, 2.35, 0.0, 0.4, 0.4607, 0.10);
     }
 
-    private static PredictorInputs facing(double yawDeg, double yawRate, int rttV) {
+    /** A facing/ping/per-combo-memory input for the V2 dynamic-target pins. */
+    private static PredictorInputs facingV2(
+            double yawDeg, double yawRate, int rttV, double priorEma, double priorTarget) {
         return new PredictorInputs(
                 true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
-                -1, rttV, Double.NaN, Double.NaN, yawDeg, yawRate, 0);
+                -1, rttV, Double.NaN, Double.NaN, yawDeg, yawRate, 0, priorEma, priorTarget);
+    }
+
+    /** The σ-invariant Π(k) schedule for a grounded signature 10-tick flight (tLand 10). */
+    private static double[] signatureSchedule() {
+        double[] pi = new double[10];
+        double p = 1.0;
+        double sq = 0.6 * Q; // stone ground drag 0.546
+        for (int k = 1; k <= 10; k++) {
+            pi[k - 1] = p;
+            boolean groundedPre = (k == 1) || (k > 10); // grounded launch, airborne through the window
+            p *= (groundedPre ? sq : Q);
+        }
+        return pi;
     }
 }
