@@ -26,7 +26,15 @@ public final class GroundFsm {
 
     private final TickClock clock;
 
-    private boolean seen;
+    // Volatile: written only by this connection's own netty thread (onMovement /
+    // onTeleport) but, since the 2.4.4 domain-poisoning fix, read cross-thread by
+    // the D2 region thread — SessionService.sampleGround keys its packetless
+    // ground-sampler stand-down on packets ACTUALLY seen (this flag) rather than on
+    // mere connection-domain existence, so a spuriously-created domain can never
+    // again silence a packetless player's ledger feed. A single boolean, so
+    // volatility is a coherent atomic read; a stale false only ever costs one benign
+    // extra sample tick before the writer's value is visible.
+    private volatile boolean seen;
     private boolean lastOnGround;
     private double lastY;
 
@@ -95,6 +103,17 @@ public final class GroundFsm {
             jumpVy = Decay.groundedEquilibrium(view.gravity());
         }
         return new LedgerEvent.Liftoff(jumpVy, pushX, pushZ, clock.current());
+    }
+
+    /**
+     * Whether this FSM has ever consumed a movement packet — i.e. a real
+     * connection is actively feeding it. The session-side ground sampler stands
+     * down only once this reads true (defense in depth: a connection domain that
+     * exists but has never been fed a packet must not silence the packetless
+     * ledger feed, the 2.4.4 domain-poisoning belt).
+     */
+    public boolean hasSeenMovement() {
+        return seen;
     }
 
     /** The teleport ack seam: emit a reset and forget the last state. */

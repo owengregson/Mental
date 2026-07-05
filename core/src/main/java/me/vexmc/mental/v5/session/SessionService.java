@@ -299,9 +299,14 @@ public final class SessionService implements Listener, SessionAccess {
     @SuppressWarnings("deprecation") // Player#isOnGround — the transition-relevant client flag
     private void sampleGround(Player player, CombatSession session) {
         UUID id = player.getUniqueId();
-        if (domains.has(id)) {
-            return; // real connection — the packet FSM feeds the ledger
+        ConnectionDomains.Domain domain = domains.peek(id);
+        if (domain != null && domain.ground().hasSeenMovement()) {
+            return; // real connection — the packet FSM is actively feeding the ledger
         }
+        // Defense in depth (2.4.4): key the stand-down on packets ACTUALLY seen, not
+        // on mere domain existence. A domain spuriously created by a read (the
+        // poisoning bug's shape) has an unfed GroundFsm (hasSeenMovement()==false),
+        // so the sampler stays live and the packetless ledger feed is never silenced.
         GroundFsm sampler = samplers.get(id);
         if (sampler == null) {
             return;

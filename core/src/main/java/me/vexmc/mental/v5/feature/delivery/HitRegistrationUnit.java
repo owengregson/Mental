@@ -375,7 +375,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     attackerView == null ? 0 : positionX(attackerId),
                     attackerView == null ? 0 : positionZ(attackerId),
                     positionX(victimId), positionZ(victimId),
-                    domains.domainFor(victimId).lastYaw());
+                    lastYaw(victimId));
             // The wire burst ships whenever the victim has a wire and the hit is
             // NOT an eligible-but-gated velocity: the velocity when it passed the
             // gate (shipped != null), else a hurt-only burst — which is gated by
@@ -417,7 +417,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             // movement packet, enchant is corrected on the authoritative pass.
             // The movement-speed attribute rides the published view so the
             // pre-sent knock's pace scaling matches the tick path (one truth).
-            return new EntityState(x, y, z, domains.domainFor(attackerId).lastYaw(),
+            return new EntityState(x, y, z, lastYaw(attackerId),
                     0, 0, 0, view.grounded(), verdict.sprinting(), 0, view.knockbackResistance(),
                     view.moveSpeedAttr());
         }
@@ -440,6 +440,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
         private double positionZ(UUID id) {
             PositionRing.Sample sample = sessions.positions().latest(id);
             return sample == null ? 0 : sample.z();
+        }
+
+        /**
+         * The connection's last movement-packet yaw, resolved through a NON-creating
+         * {@link ConnectionDomains#peek}. A packetless party (synthetic player /
+         * in-process bot) has no domain and falls back to 0 — never {@code domainFor},
+         * which would spuriously create the domain and poison the ledger feed (the
+         * 2.4.4 domain-poisoning bug).
+         */
+        private float lastYaw(UUID id) {
+            ConnectionDomains.Domain domain = domains.peek(id);
+            return domain == null ? 0f : domain.lastYaw();
         }
     }
 
@@ -469,7 +481,13 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
     private SprintVerdict sprintVerdict(UUID attackerId) {
         if (wtapConsultWire.get()) {
-            return domains.domainFor(attackerId).sprint().verdictAt(clock.current());
+            // NON-creating peek: a packetless attacker has no wire, so it falls
+            // through to the published-view sprint rather than materialising a
+            // domain here and poisoning its own ledger feed (the 2.4.4 bug).
+            ConnectionDomains.Domain domain = domains.peek(attackerId);
+            if (domain != null) {
+                return domain.sprint().verdictAt(clock.current());
+            }
         }
         PlayerView view = sessions.viewOf(attackerId);
         return new SprintVerdict(view != null && view.sprinting(), null, clock.current());

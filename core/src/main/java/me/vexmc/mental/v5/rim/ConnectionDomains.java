@@ -74,9 +74,29 @@ public final class ConnectionDomains {
         this.clock = clock;
     }
 
-    /** The connection domain for {@code id}, created on first use. */
+    /**
+     * The connection domain for {@code id}, created on first use. ONLY the packet
+     * rim ({@link PacketTap}) may call this: a domain must be born of a real
+     * inbound packet, never as a side effect of a read. Any seam that merely
+     * OBSERVES a domain (the hurt-yaw tilt, the attacker's facing yaw, the sprint
+     * verdict) must use {@link #peek} instead — see its contract.
+     */
     public Domain domainFor(UUID id) {
         return byId.computeIfAbsent(id, key -> new Domain(clock));
+    }
+
+    /**
+     * The connection domain for {@code id} if one already exists, else {@code
+     * null} — a NON-creating lookup. Reads that only observe a domain MUST use
+     * this rather than {@link #domainFor}: creating a domain as a side effect of
+     * a read makes a packetless player (synthetic test player, in-process bot)
+     * masquerade as connected, which permanently stands the session ground
+     * sampler down ({@link #has}-keyed) and free-falls its {@code MotionLedger} —
+     * the 2.4.4 domain-poisoning zero-vertical bug. Callers fall back to a neutral
+     * value (yaw 0 / the published-view sprint) when this returns {@code null}.
+     */
+    public Domain peek(UUID id) {
+        return byId.get(id);
     }
 
     /**

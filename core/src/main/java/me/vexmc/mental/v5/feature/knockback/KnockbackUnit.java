@@ -374,13 +374,25 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (attackerSession != null) {
             attackerSession.ledger().scaleHorizontal(0.6);
         }
-        domains.domainFor(attackerId).sprint().onServerClear(asOf);
+        // Mirror vanilla's in-attack sprint clear onto the wire — but ONLY when a
+        // real connection domain already exists to clear. A packetless attacker
+        // (synthetic player / in-process bot) has no SprintWire the rim ever fed,
+        // and creating one here (domainFor is computeIfAbsent) would make it look
+        // connected — permanently standing its ground sampler down and free-falling
+        // its ledger to a zero vertical (the 2.4.4 domain-poisoning bug; the
+        // SwordBlockingUnit:259 non-creating idiom is the precedent).
+        if (domains.has(attackerId)) {
+            domains.domainFor(attackerId).sprint().onServerClear(asOf);
+        }
         if (player.isSprinting()) {
             scheduling.runOn(player, () -> {
                 // At execution time (the attacker's own thread), skip the clear when
                 // the wire re-armed to sprinting after the hit — a re-engage newer
                 // than asOf that vanilla's synchronous clear would never have eaten.
-                if (domains.domainFor(attackerId).sprint().verdictAt(clock.current()).sprinting()) {
+                // With no wire (a packetless attacker) there is nothing to consult,
+                // so mirror vanilla's unconditional clear directly.
+                if (domains.has(attackerId)
+                        && domains.domainFor(attackerId).sprint().verdictAt(clock.current()).sprinting()) {
                     return;
                 }
                 player.setSprinting(false);

@@ -491,6 +491,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         return sessions;
     }
 
+    /**
+     * The D1 connection domains (per-player sprint + ground FSM, keyed by UUID).
+     * Exposed for the tester's domain-poisoning regression pin: a packetless
+     * attacker must never gain a domain as a side effect of landing a hit.
+     */
+    public @NotNull ConnectionDomains domains() {
+        return domains;
+    }
+
     /** The velocity valve — armed by the desk, consumed by the rim's outbound listener. */
     public @NotNull VelocityValve valve() {
         return valve;

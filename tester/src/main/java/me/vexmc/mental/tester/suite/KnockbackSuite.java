@@ -56,7 +56,92 @@ public final class KnockbackSuite {
                 new TestCase("knockback: sprint hit matches engine + tracker delivery", context ->
                         runScenario(mental, tester, context, true)),
                 new TestCase("knockback: second hit stacks the ledger residual (1.7.10 combos)", context ->
-                        runComboScenario(mental, tester, context)));
+                        runComboScenario(mental, tester, context)),
+                new TestCase("knockback: a packetless attacker's sprint hit never poisons its ledger feed",
+                        context -> runDomainPoisonScenario(mental, tester, context)));
+    }
+
+    /**
+     * The 2.4.4 domain-poisoning regression pin. Every tester {@link FakePlayer} is
+     * exactly the pathological case: a real Bukkit player whose inbound packets never
+     * reach the parse rim (no PacketEvents user), so it must NEVER own a
+     * {@link me.vexmc.mental.v5.rim.ConnectionDomains} entry. Before the fix, landing
+     * an accepted SPRINT hit as attacker created one as a side effect of the post-hit
+     * sprint-clear obligation ({@code KnockbackUnit.applyAttackerObligations →
+     * domainFor}); that spurious domain then permanently stood the session ground
+     * sampler down, the player's {@code MotionLedger} never landed again, and its melee
+     * verticals free-fell to ~0 — the field report's "boxers take zero vertical
+     * knockback".
+     *
+     * <p>The discriminating guard is {@code !domains.has(attacker)} after the sprint
+     * hit: it fails hard under the old code (domain created) and passes under the fix
+     * (the {@code domains.has()} guard skips the packetless clear). The behavioural
+     * belt then confirms the attacker's ledger feed is intact — becoming a victim, it
+     * still receives a healthy era vertical, never the collapsed ~0. The FULL free-fall
+     * collapse needs a client-brained bot that physically flies (the SimpleBoxer vlab
+     * repro: a healthy standing opener rises 1.485 blocks on legacy-1.7); a clientless
+     * fake cannot be flown, so the matrix pins the mechanism, not the flight.</p>
+     */
+    private static void runDomainPoisonScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            // Land and settle — spawn invulnerability is cleared at spawn.
+            context.awaitTicks(5);
+
+            // A packetless fake never reaches the parse rim: no domain before it acts.
+            context.expect(!mental.domains().has(attacker.uuid()),
+                    "a packetless attacker already owns a connection domain before attacking");
+
+            // Land one accepted SPRINT hit as attacker — the old poison trigger.
+            context.syncRun(() -> {
+                attacker.player().setSprinting(true);
+                victim.player().setNoDamageTicks(0);
+                captors.reset();
+                attacker.attack(victim.player());
+            });
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the sprint hit's velocity event");
+            context.awaitTicks(3); // let the deferred sprint-clear obligation run
+
+            // THE PIN: the sprint-clear obligation must not have created a domain for
+            // the packetless attacker (the fix guards domainFor with domains.has()).
+            context.expect(!mental.domains().has(attacker.uuid()),
+                    "landing a sprint hit created a connection domain for a packetless attacker"
+                            + " — its ground sampler is now silenced and its ledger will free-fall"
+                            + " to a zero vertical (2.4.4 domain-poisoning regression)");
+
+            // Belt: the attacker's own ledger feed is intact — taking a fresh sprint
+            // hit still ships a healthy era vertical, not the collapsed ~0.
+            context.syncRun(() -> {
+                victim.player().setSprinting(true);
+                attacker.player().setNoDamageTicks(0);
+                captors.reset();
+                victim.attack(attacker.player());
+            });
+            context.awaitUntil(() -> captors.velocityOf(attacker.uuid()) != null, 40,
+                    "the retaliation hit's velocity event");
+            Vector applied = captors.velocityOf(attacker.uuid());
+            context.expect(applied != null,
+                    "no velocity event for the formerly-poisoned attacker as victim");
+            context.expect(applied.getY() > 0.3,
+                    "formerly-poisoned attacker took a collapsed vertical (" + applied.getY()
+                            + ") — a healthy era sprint knock is ~0.4608");
+        } finally {
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
     }
 
     private static void runScenario(
