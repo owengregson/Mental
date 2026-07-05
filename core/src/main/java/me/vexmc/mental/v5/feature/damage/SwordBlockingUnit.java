@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5.feature.damage;
 
 import java.util.UUID;
+import java.util.function.Supplier;
 import me.vexmc.mental.kernel.math.SwordBlockReduction;
 import me.vexmc.mental.kernel.wire.SprintWire;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -60,10 +61,13 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
 
     private final ConnectionDomains domains;
     private final EphemeralDecoration decoration;
+    private final Supplier<Snapshot> snapshot;
 
-    public SwordBlockingUnit(ConnectionDomains domains, EphemeralDecoration decoration) {
+    public SwordBlockingUnit(
+            ConnectionDomains domains, EphemeralDecoration decoration, Supplier<Snapshot> snapshot) {
         this.domains = domains;
         this.decoration = decoration;
+        this.snapshot = snapshot;
     }
 
     @Override
@@ -110,7 +114,6 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     /* ------------------------------------------------------------------ */
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    @SuppressWarnings("deprecation") // the granular BLOCKING setter is the only un-zero lever Bukkit has
     public void onDamage(@NotNull EntityDamageByEntityEvent event) {
         if (decoration.nativeReduction()) {
             return; // native reduction — never double-reduce
@@ -118,29 +121,72 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
         if (!(event.getEntity() instanceof Player victim) || !decoration.blocking(victim)) {
             return;
         }
+        applyBlockedDamage(event, armourStrengthActive());
+    }
+
+    /**
+     * The blocked-hit damage shape, extracted pure-over-the-event for the unit pin.
+     *
+     * <p>Two granular concerns compose here (interaction audit C1 + the
+     * block×armour drift):</p>
+     * <ul>
+     *   <li><b>Vanilla-full-blocked hits</b> (the off-hand tier's injected shield is
+     *       a REAL vanilla shield, so a raised frontal hit arrives with a negative
+     *       BLOCKING modifier negating the whole hit): the total setter cannot
+     *       un-zero them — Bukkit's {@code setDamage(double)} re-applies the stored
+     *       BLOCKING function, which negates whatever base it is given — so the era
+     *       value is written straight into the BLOCKING modifier:
+     *       {@code final = incoming − (incoming−1)×0.5}. When the era reduction is
+     *       0 (incoming ≤ 1.0) the write clears the full negate so the era-full
+     *       damage still lands. Never cancelled — the era knock ships through the
+     *       {@code KnockbackUnit}'s blocked-knock redelivery.</li>
+     *   <li><b>The era armour order</b>: 1.7/1.8 shaped the block BEFORE armour
+     *       ({@code EntityHuman.damageEntity} halves, then
+     *       {@code applyArmorCalculations}). With ARMOUR_STRENGTH active the block
+     *       therefore writes the granular BLOCKING modifier and re-runs the shared
+     *       era cascade over the blocked pre-armour damage — the total setter would
+     *       instead shift the era-written defensive modifiers by MODERN-formula
+     *       deltas (a hybrid neither era nor vanilla, drifting wherever the modern
+     *       armour slope differs from the era 4%/point). With ARMOUR_STRENGTH off,
+     *       the unblocked-signature path keeps the total setter so the block
+     *       composes with vanilla's own model exactly as before; the
+     *       vanilla-full-block path cannot use it (see above), so its armoured
+     *       corner under a MODERN armour model is a documented gap — pair
+     *       sword-blocking with old-armour-strength for era damage end to end.</li>
+     * </ul>
+     */
+    @SuppressWarnings("deprecation") // the granular BLOCKING setter is the only un-zero / era-order lever
+    static void applyBlockedDamage(@NotNull EntityDamageByEntityEvent event, boolean eraArmourCascade) {
         double incoming = event.getDamage();
         double reduction = SwordBlockReduction.blockedDamage(incoming);
-        // The off-hand tier's injected shield is a REAL vanilla shield, so a raised
-        // frontal hit arrives already vanilla-FULL-blocked: a negative BLOCKING
-        // modifier negating the whole hit. The total setter cannot un-zero it —
-        // Bukkit's setDamage(double) re-applies the stored BLOCKING function, which
-        // negates whatever base it is given (interaction audit C1) — so the era
-        // half-damage is written straight into the BLOCKING modifier instead:
-        // final = incoming − (incoming−1)×0.5, the 1.8 sword-block value. When the
-        // era reduction is 0 (incoming ≤ 1.0) the write clears the full negate so
-        // the era-full damage still lands. Never cancelled — the era knock ships
-        // through the KnockbackUnit's blocked-knock redelivery.
         boolean vanillaBlocked = event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
                 && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0.0;
         if (vanillaBlocked) {
             event.setDamage(EntityDamageEvent.DamageModifier.BLOCKING, -reduction);
+            if (eraArmourCascade) {
+                ArmourStrengthUnit.applyEraCascade(event);
+            }
             return;
         }
         if (reduction <= 0.0) {
             return;
         }
+        if (eraArmourCascade && event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)) {
+            // Era order: the block shapes the damage BEFORE armour sees it — the
+            // BLOCKING modifier carries the reduction and the shared cascade
+            // recomputes the era defences off the blocked pre-armour value.
+            event.setDamage(EntityDamageEvent.DamageModifier.BLOCKING, -reduction);
+            ArmourStrengthUnit.applyEraCascade(event);
+            return;
+        }
         // Reduce DAMAGE only; never cancel — a blocked hit still knocks full.
         event.setDamage(Math.max(0.0, incoming - reduction));
+    }
+
+    /** Whether the era armour cascade owns the defensive modifiers this hit (live snapshot read). */
+    private boolean armourStrengthActive() {
+        Snapshot current = snapshot.get();
+        return current != null && current.enabled(Feature.ARMOUR_STRENGTH);
     }
 
     /* ------------------------------------------------------------------ */
