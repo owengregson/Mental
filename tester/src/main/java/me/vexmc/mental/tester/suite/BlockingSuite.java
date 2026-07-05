@@ -65,6 +65,8 @@ public final class BlockingSuite {
                         runBlockedReduction(mental, tester, context)),
                 new TestCase("block: a fresh partial block ships the FULL era knock (journal SHIP, no silent drop)",
                         context -> runBlockedKnockDelivery(mental, tester, context)),
+                new TestCase("block: a temp-shield vanilla FULL block keeps era half damage + the era knock (off-hand tier)",
+                        context -> runTempShieldFullBlock(mental, tester, context)),
                 new TestCase("block: the off-hand shield decoration reverts on an exit trigger (B12)", context ->
                         runOffhandRevert(mental, tester, context)));
     }
@@ -204,6 +206,166 @@ public final class BlockingSuite {
                 blocker.remove();
             });
             captors.unregister();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Case 5 — the temp-shield full-block inversion (off-hand tier)      */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The interaction-audit C1 conflict, live: on the off-hand tier (≤1.20.6)
+     * Mental's injected temp shield is a REAL {@code SHIELD}, so a raised frontal
+     * hit is vanilla-FULL-blocked — zero damage, and the knockback profile's
+     * {@code shieldBlockingCancels} withdrew the era knock. The fix rewrites the
+     * BLOCKING modifier to the era {@code (dmg−1)×0.5} at HIGH and exempts the
+     * decoration from the cancel, so the era sword-block contract (half damage,
+     * FULL knock) survives vanilla's shield semantics. This case pins both halves
+     * where the raised state can be staged.
+     *
+     * <p><b>Clientless honesty:</b> a synthetic player raises the shield only via
+     * {@code startUsingItem}, which surfaces as a Bukkit method on 1.21+ and as
+     * the Mojang-mapped NMS method on 1.20.5+. Below that (the Spigot-mapped
+     * runtimes) there is no version-stable clientless raise, so the case
+     * note-SKIPs — the audit's live-test residual for those entries is a manual
+     * pass (the modifier rewrite itself is order-of-listeners logic identical on
+     * every off-hand-tier version).</p>
+     */
+    private static void runTempShieldFullBlock(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer control = new FakePlayer(tester, mental.scheduling());
+        FakePlayer blocker = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            toggleModule(context, "sword-blocking", true);
+            context.expect(moduleActive(mental, "sword-blocking"),
+                    "sword-blocking module failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                control.spawn(Arena.offset(centre, -3, 2));
+                blocker.spawn(Arena.offset(centre, 3, 2));
+                blocker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+                blocker.player().getInventory().setItemInOffHand(new ItemStack(Material.AIR));
+            });
+            context.awaitTicks(5);
+
+            boolean armed = context.sync(() -> armAttacker(attacker));
+            if (!armed) {
+                context.note("attack-damage/speed attribute unresolvable — covered by SwordBlockReductionTest");
+                return;
+            }
+
+            // The unblocked base this exact setup delivers (the control victim).
+            captors.reset();
+            context.syncRun(() -> {
+                control.player().setNoDamageTicks(0);
+                attacker.attack(control.player());
+            });
+            context.awaitUntil(() -> captors.damageOf(control.uuid()) != null, 40,
+                    "the control (unblocked) hit's damage event");
+            Double unblockedBase = captors.damageOf(control.uuid());
+            if (unblockedBase == null || unblockedBase <= 1.0) {
+                context.note("control hit produced no usable base damage (" + unblockedBase
+                        + ") — covered by SwordBlockReductionTest");
+                return;
+            }
+
+            // Right-click the sword: the OFF-HAND tier injects the temp shield. A
+            // component tier injects nothing, which routes this case to a skip.
+            context.syncRun(() -> Bukkit.getPluginManager().callEvent(new PlayerInteractEvent(
+                    blocker.player(), Action.RIGHT_CLICK_AIR,
+                    blocker.player().getInventory().getItemInMainHand(),
+                    null, BlockFace.SELF, EquipmentSlot.HAND)));
+            context.awaitTicks(2);
+            boolean injected = context.sync(() ->
+                    blocker.player().getInventory().getItemInOffHand().getType() == Material.SHIELD);
+            if (!injected) {
+                context.note("no off-hand temp shield injected — the full-block inversion is off-hand-tier"
+                        + " specific (component tiers block via BLOCKS_ATTACKS/CONSUMABLE, covered by case 4)");
+                return;
+            }
+
+            // Face the attacker (shields block FRONTAL hits only) and raise the
+            // off-hand use — clientless best-effort; the raise is what vanilla's
+            // full-block gate keys on, plus its ~5-tick warmup.
+            context.syncRun(() -> {
+                Location facing = blocker.player().getLocation().clone().setDirection(
+                        attacker.player().getLocation().toVector()
+                                .subtract(blocker.player().getLocation().toVector()));
+                blocker.player().teleport(facing);
+                startUsingOffhand(blocker.player());
+            });
+            context.awaitTicks(8); // clear the shield-raise warmup
+            boolean raised = context.sync(() -> blocker.player().isBlocking());
+            if (!raised) {
+                context.note("clientless fake never raised the temp shield (no startUsingItem surface on "
+                        + "this runtime) — the audit C1 residual stays a manual pass on this entry; the "
+                        + "BLOCKING rewrite + cancel exemption are listener logic shared with every tier");
+                return;
+            }
+
+            // The raised frontal hit: era = half damage + FULL era knock. Before
+            // the fix: 0 damage and a withdrawn knock.
+            int shipsBefore = shipCount(context, mental, blocker);
+            captors.reset();
+            context.syncRun(() -> {
+                blocker.player().setNoDamageTicks(0);
+                attacker.attack(blocker.player());
+            });
+            JournalEntry ship = awaitNewShip(context, mental, blocker, shipsBefore);
+            context.expect(ship != null && ship.shipped() != null,
+                    "a temp-shield full block shipped no knock — the shieldBlockingCancels withdraw must "
+                            + "exempt Mental's own decoration (era: a sword block knocks FULL)");
+            if (ship != null && ship.shipped() != null) {
+                double horizontal = Math.hypot(ship.shipped().x(), ship.shipped().z());
+                context.expectNear(0.4, horizontal, 5.0e-3,
+                        "temp-shield blocked-hit horizontal (era base 0.4 — a FULL standing knock)");
+            }
+            Double blockedFinal = captors.finalDamageOf(blocker.uuid());
+            context.expect(blockedFinal != null && blockedFinal > 0.0,
+                    "a temp-shield full block still dealt zero damage (" + blockedFinal
+                            + ") — the BLOCKING rewrite to the era value did not land");
+            if (blockedFinal != null) {
+                double expected = unblockedBase - SwordBlockReduction.blockedDamage(unblockedBase);
+                context.expectNear(expected, blockedFinal, 0.05,
+                        "temp-shield blocked final = base " + unblockedBase + " − (dmg−1)×0.5 (era half)");
+            }
+        } finally {
+            toggleModule(context, "sword-blocking", false);
+            context.syncRun(() -> {
+                attacker.remove();
+                control.remove();
+                blocker.remove();
+            });
+            captors.unregister();
+        }
+    }
+
+    /**
+     * Raises the OFF-hand use-item clientlessly, best-effort: the Bukkit
+     * {@code startUsingItem(EquipmentSlot)} (1.21+), then the Mojang-mapped NMS
+     * {@code startUsingItem(InteractionHand)} (1.20.5+ runtimes). On older
+     * Spigot-mapped runtimes neither resolves and the caller note-SKIPs.
+     */
+    private static void startUsingOffhand(Player player) {
+        try {
+            player.getClass().getMethod("startUsingItem", EquipmentSlot.class)
+                    .invoke(player, EquipmentSlot.OFF_HAND);
+            return;
+        } catch (Throwable absent) {
+            // Fall through to the NMS attempt.
+        }
+        try {
+            Object handle = player.getClass().getMethod("getHandle").invoke(player);
+            Class<?> hand = Class.forName("net.minecraft.world.InteractionHand");
+            Object offHand = hand.getField("OFF_HAND").get(null);
+            handle.getClass().getMethod("startUsingItem", hand).invoke(handle, offHand);
+        } catch (Throwable absent) {
+            // No clientless raise on this runtime — the caller note-skips.
         }
     }
 

@@ -26,7 +26,9 @@ public enum Family {
     LOADOUT("Loadout", "SHIELD",
             "Off-hand blocking, crafting restrictions, and era melee reach."),
     COMBO("Combo Hold", "TRIPWIRE_HOOK",
-            "The pocket servo — hold a sweet-spot combo by shaping the fresh knock.");
+            "The pocket servo — hold a sweet-spot combo by shaping the fresh knock."),
+    POTS("Potions", "SPLASH_POTION",
+            "Splash-potion utilities — the /potfill command and steep-throw fast pots.");
 
     private final String displayName;
     private final String iconName;

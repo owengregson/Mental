@@ -99,6 +99,20 @@ public final class OcmCompatUnit implements FeatureUnit, Listener {
         }
     }
 
+    /**
+     * Re-derives the binding and the double-apply warnings on demand (interaction
+     * audit: the warnings were computed only at startup and OCM plugin enable, so
+     * an admin enabling a ported rule feature via the GUI/reload while OCM's
+     * matching module was on got NO coexistence warning and the silent
+     * double-apply the loud-warn contract exists to catch). The plugin invokes
+     * this after every converge that CHANGED the enabled-token set; a plain
+     * value-only reload stays quiet. Idempotent — {@link #evaluate} re-reads
+     * OCM's presence/config and re-binds exactly as the startup pass did.
+     */
+    public void rewarn(String trigger) {
+        evaluate(trigger);
+    }
+
     private void evaluate(String trigger) {
         Plugin ocm = Bukkit.getPluginManager().getPlugin(OCM_PLUGIN_NAME);
         if (ocm == null || !ocm.isEnabled()

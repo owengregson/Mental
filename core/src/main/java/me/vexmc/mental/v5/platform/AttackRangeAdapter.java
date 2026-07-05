@@ -141,6 +141,19 @@ public final class AttackRangeAdapter {
     }
 
     /**
+     * Whether {@code stack} currently carries an explicit {@code ATTACK_RANGE}
+     * component — the read-only probe the combo/handicap coordination and the
+     * live suites assert against (an explicit component overrides the
+     * interaction-range attribute for the whole attack window).
+     */
+    public boolean carries(@Nullable ItemStack stack) {
+        if (!supported || stack == null || stack.getType() == Material.AIR || attackRangeType == null) {
+            return false;
+        }
+        return nmsHas(stack, attackRangeType);
+    }
+
+    /**
      * Removes the {@code ATTACK_RANGE} component this driver may have applied.
      * Returns {@code true} if the stack was modified (the caller must write it back).
      * Strips regardless of material so a no-longer-weapon stack is still cleaned.

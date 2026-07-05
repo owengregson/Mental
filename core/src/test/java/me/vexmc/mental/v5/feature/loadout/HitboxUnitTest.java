@@ -10,6 +10,7 @@ import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.v5.feature.Registrar;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.platform.AttackRangeAdapter;
 import org.junit.jupiter.api.Test;
 
@@ -69,7 +70,10 @@ class HitboxUnitTest {
         // registrar never invokes, so null is never dereferenced.
         AttackRangeAdapter component =
                 AttackRangeAdapter.probe(ServerEnvironment.parse("1.20.6-R0.1-SNAPSHOT"), message -> {});
-        HitboxUnit unit = new HitboxUnit(null, null, component);
+        // The handicap coordination is only consulted from the combo-event handlers
+        // (never during assemble/close), so a bare instance with inert deps suffices.
+        HitboxUnit unit = new HitboxUnit(null, null, component,
+                new ComboReachHandicap(null, null, () -> null));
 
         try {
             unit.assemble(scope, null);

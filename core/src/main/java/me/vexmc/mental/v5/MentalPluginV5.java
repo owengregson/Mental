@@ -69,7 +69,10 @@ import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
+import me.vexmc.mental.v5.feature.combo.ComboPredictor;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
@@ -77,6 +80,8 @@ import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
 import me.vexmc.mental.v5.feature.loadout.HitboxUnit;
 import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
+import me.vexmc.mental.v5.feature.pots.FastPotsUnit;
+import me.vexmc.mental.v5.feature.pots.PotFillUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProfile;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
@@ -147,11 +152,16 @@ public final class MentalPluginV5 extends JavaPlugin {
     private OcmBinding ocmBinding;
     private BukkitRegistrar registrar;
     private Reconciler reconciler;
+    /** The always-on OCM coordination unit — held so a reload can re-derive the warnings. */
+    private OcmCompatUnit ocmCompat;
 
     private VelocityValve valve;
     private ViewBuilder viewBuilder;
     private SessionService sessions;
     private ConnectionDomains domains;
+    /** The combo-hold reach handicap (design §1) and the transition dispatcher that drives it. */
+    private ComboReachHandicap comboReachHandicap;
+    private ComboEvents comboEvents;
     private LatencyModel latency;
     private LatencyCompensationUnit latencyCompensation;
     /** The effective latency-probe transport for this server version, resolved at parse. */
@@ -265,8 +275,16 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.valve = new VelocityValve();
         this.viewBuilder = new ViewBuilder(clock);
         this.positions = new PositionRing();
+        // The combo-hold reach handicap (design §1) and the transition dispatcher that
+        // drives it: every combo START/END funnels through ComboEvents, so the handicap
+        // apply/remove rides the SAME point that fires the api events, on the owning
+        // thread. Constructed before the session/delivery routers so all three
+        // transition-firing sites share the one dispatcher instance.
+        this.comboReachHandicap = new ComboReachHandicap(this, scheduling, this::snapshot);
+        this.comboEvents = new ComboEvents(comboReachHandicap);
         this.sessions = new SessionService(
-                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions, domains);
+                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions, domains,
+                comboEvents);
         sessions.start(this);
 
         // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —
@@ -296,7 +314,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The delivery routers (spec §3.4–§3.6): the desk's sole PlayerVelocityEvent
         // writer, the damage-pass router, and the capability-gated knockback-event
         // mirror. Always-on infra, inert while nothing submits to a desk (all of 4A1).
-        getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve, clock), this);
+        getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve, clock, comboEvents), this);
         getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock, hitIds), this);
         if (capabilities.knockbackEvent()) {
             new MirrorListener(sessions).register(this);
@@ -423,11 +441,19 @@ public final class MentalPluginV5 extends JavaPlugin {
      * warn-and-fallback issues for the invoking sender.
      */
     public @NotNull List<String> reloadAll() {
+        Set<MechanicToken> tokensBefore = enabledTokens();
         configStore.ensureDefaultFiles();
         this.overlay = new Overlay(configStore.overridesFile());
         this.snapshot = parseSnapshot();
         applyDebug(snapshot.debug());
         reconciler.converge(snapshot);
+        // Re-derive the OCM coexistence warnings whenever this converge CHANGED
+        // the enabled-token set (interaction audit: the double-apply warning was
+        // startup-only, so a GUI toggle of a ported rule feature against a live
+        // OCM module double-applied silently). Value-only reloads stay quiet.
+        if (ocmCompat != null && !tokensBefore.equals(enabledTokens())) {
+            ocmCompat.rewarn("reload: enabled features changed");
+        }
         return parseIssues;
     }
 
@@ -599,19 +625,25 @@ public final class MentalPluginV5 extends JavaPlugin {
                 new LatencyCompensationUnit(latency, scheduling, this::snapshot, probeTransport);
         sessions.addForgetHook(hitRegistration::forget);
         sessions.addForgetHook(latencyCompensation::forget);
+        sessions.addForgetHook(ComboPredictor::forget); // drop the V2 servo smoothing memory on teardown
 
         reconciler.register(new AnticheatCompatUnit(
                 anticheatPolicy, this::snapshot, message -> getLogger().info(message)));
         // Live OCM arbiter binding — keeps the OcmBinding current (service API
         // per-player, else config-conservative), the driver the routers' frozen
         // ownership reads and the coexistence warnings depend on.
-        reconciler.register(new OcmCompatUnit(
-                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message)));
+        this.ocmCompat = new OcmCompatUnit(
+                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message));
+        reconciler.register(ocmCompat);
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
+        // The knockback unit reads the sword-block decoration (observation only) so
+        // Mental's own injected temp shield is never mistaken for a real modern
+        // shield by the full-block cancel (audit C1 — era: half damage, FULL knock).
         reconciler.register(new KnockbackUnit(
                 sessions, domains, ocmBinding, latency, scheduling, this::snapshot,
-                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK)));
+                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK), comboEvents,
+                swordBlockDecoration));
         reconciler.register(latencyCompensation);
         reconciler.register(new FishingKnockbackUnit(
                 sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));
@@ -627,10 +659,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // port the era flat armour reduction and Unbreaking skip.
         reconciler.register(new ArmourStrengthUnit());
         reconciler.register(new ArmourDurabilityUnit());
-        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
+        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot, sessions));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
-        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration));
+        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration, this::snapshot));
 
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);
@@ -656,8 +688,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         // component (1.21.5+, boot-probed on the PlatformProfile) — a documented no-op
         // where neither exists (the client picks the melee target).
         reconciler.register(new CraftingUnit(this::snapshot));
-        reconciler.register(new OffhandUnit(this::snapshot, scheduling));
-        reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange()));
+        // Off-hand consults the sword-block decoration (observation only) so its
+        // enable/reload strip pass never eats Mental's own temp shield mid-block
+        // (audit: permanent loss of the stored original + a conjured marked shield).
+        reconciler.register(new OffhandUnit(this::snapshot, scheduling, swordBlockDecoration));
+        // Hitbox coordinates with the combo reach handicap (audit): on 1.21.5+ its
+        // ATTACK_RANGE component would override the handicap-shortened attribute,
+        // so the unit strips a comboed victim's held weapon for the combo's span.
+        reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange(),
+                comboReachHandicap));
 
         // The combo family (2.5.0). The pocket servo lives entirely session-side:
         // the unit's scope opens/closes combo tracking on the SessionService; every
@@ -665,7 +704,16 @@ public final class MentalPluginV5 extends JavaPlugin {
         // sweep), the view publish, and the servo application at the engine seam are
         // already wired into the session/delivery/knockback code. Zero-touch when the
         // scope is closed (no tracker, no sweep work).
-        reconciler.register(new ComboHoldUnit(sessions));
+        reconciler.register(new ComboHoldUnit(sessions, comboReachHandicap));
+        // The POTS family (owner directive 2026-07-04) — two independently-toggled
+        // splash-potion utilities, both default OFF. Pot-fill dynamically registers
+        // /potfill on the command map on enable and strips it whole on disable
+        // (zero-touch: no command-map or tab-complete trace when off); fast-pots
+        // redirects a steeply-thrown splash potion at the thrower's own predicted
+        // feet at a multiplied launch speed. Neither is OCM-arbitrated.
+        reconciler.register(new PotFillUnit(this, this::snapshot, scheduling,
+                message -> getLogger().info(message)));
+        reconciler.register(new FastPotsUnit(this::snapshot));
     }
 
     private Snapshot parseSnapshot() {

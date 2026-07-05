@@ -134,6 +134,19 @@ campaign (1.14.4 + the mega-jar) in
   1.16.5), so an invuln gate reading live `noDamageTicks` misfired — fixed by
   reading the frozen `PlayerView` (pre-hit by construction on every version).
   Decompile-cite, don't guess.
+- **A staged ThrownPotion's tagless item reads back as AIR on 1.16.x–1.20.4**
+  (not legacy-only — the band runs into modern). The 1.16 projectile refactor's
+  `setItem` stores the item ONLY when it differs from the entity default or
+  carries an NBT tag, and `CraftThrownPotion#getItem` reads the raw datawatcher
+  with no empty→default fallback (that lives in `getSuppliedItem`); ≤1.15.2
+  stores unconditionally (and even coerces "no item" to a splash stack), 1.20.5+
+  stores unconditionally again (`copyWithCount`). A plain
+  `new ItemStack(SPLASH_POTION)` staging therefore passes 1.9.4–1.15.2 and
+  1.20.6+ but reads AIR in between — item-gated production listeners silently
+  no-op there (the 2026-07-04 PotsSuite x=0.15 gate failure). Stage potions the
+  way players throw them — TAGGED, via the production `HealPotItems` seam —
+  and production treats an empty ThrownPotion item as the unstored splash
+  default (`FastPotsUnit.splashItem`).
 
 ## Suite rules
 

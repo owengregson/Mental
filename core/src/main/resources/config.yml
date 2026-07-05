@@ -275,6 +275,26 @@ modules:
   # server-opt-in: it defaults OFF and no bundled config pre-enables it. Field-judge
   # the feel before trusting it in production. Default OFF (era-exact no-op).
   combo-hold: false
+  # POTS family — two independent splash-potion utilities. These are PvP-server
+  # conveniences, not a 1.7/1.8 restoration; both default OFF and touch nothing
+  # while disabled.
+  #
+  # pot-fill: registers the /potfill command (aliases /pots, /pf) — fills every
+  # empty slot of your main inventory (the 36 main + hotbar slots; armour and
+  # off-hand are never touched) with a glowing splash Instant Health II potion.
+  # The command is registered on enable and REMOVED on disable, so a disabled
+  # module leaves no command or tab-completion behind. Permission and an optional
+  # per-potion economy cost are configured in the pot-fill section below.
+  # Default OFF.
+  pot-fill: false
+  # fast-pots: the classic "fast pot" self-heal, made reliable. When you throw a
+  # splash potion while looking down more steeply than fast-pots.angle-degrees,
+  # Mental re-aims it at your own feet (predicting where they will be by the time
+  # it lands) and multiplies its speed, so the splash lands on you instantly.
+  # Throws shallower than the angle are left completely untouched, and LINGERING
+  # potions are never redirected (this aids the instant splash, not the cloud).
+  # Tuned in the fast-pots section below. Default OFF.
+  fast-pots: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
@@ -310,12 +330,13 @@ modules:
 #
 # ── Servo: where does the victim land? ─────────────────────────────────────
 #   target       the separation (blocks) the servo steers the victim toward at
-#                the next swing. 2.75 is DERIVED from the reach triangle, not
-#                tuned: a launched victim needs the hypotenuse sqrt(reach^2 + dh^2)
-#                to answer while the attacker's shot is the flat base ~reach, so
-#                the un-retaliatable band sits at ~2.7-2.8 and staying hittable
-#                needs <~2.95. Vertical is deliberately never touched — the
-#                profile's launch height is what buys that margin.
+#                the next swing. 2.85 is the DATA-BACKED anchor from the lab's
+#                71-combo round: every one of the five longest combos (120-173
+#                hits) held 2.81-2.86, the [2.8, 2.92) band broke combos 1.3% per
+#                hit vs 5.9% at the cap edge, and the old reach-triangle 2.75 was
+#                unreachable at signature scale (the 0.8 clamp) so it never
+#                regulated. Vertical is deliberately never touched — the profile's
+#                launch height is what buys that margin.
 #   gain         blends toward the full exact solve (1.0 = exact; lower softens).
 #   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
 #   max-factor   } stronger hold; past them the pocket is honestly lost and era
@@ -336,18 +357,42 @@ modules:
 #                the default. Leave it `anchor` until a lab round validates dynamic.
 #   hit-cap      the dynamic target's upper clamp — the practical hittable edge
 #                (2.95). Only consulted under `target-mode: dynamic`.
+#
+# ── Reach handicap (opt-in WITHIN this opt-in module) ──────────────────────
+# While a victim is held in a combo, scale DOWN their entity-interaction-range
+# attribute so their own client raycast shortens and they cannot answer. This is
+# a SECONDARY lever: the servo (above) steers SPACING, the reach handicap tightens
+# RETALIATION. Applied the moment a combo goes active, removed the moment it ends
+# by ANY reason — fully reversible, and swept clean on join / enable / disable so a
+# crash never leaves a shortened reach in a saved profile.
+#
+#   1.20.5+ ONLY. The interaction-range attribute is client-synced from 1.20.5, so
+#   shortening it makes the client's OWN raycast shorten (no phantom misses). Below
+#   1.20.5 the attribute does not exist and this sub-feature is a documented no-op
+#   (one loud line is logged if you enable it there). NOTE: ViaVersion legacy
+#   clients ignore the synced attribute even on a 1.20.5+ server — the server
+#   cannot shorten their reach; there is no server-side fix for those clients.
+#
+#   enabled      default false — off inside the opt-in module (leave it off unless
+#                you specifically want reach tightened during a hold).
+#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.8 → 2.4
+#                blocks; an out-of-range value warns on reload and 0.8 stands. It
+#                only ever SHORTENS reach (a handicap never inflates it).
 #combo-hold:
 #  min-hits: 3
 #  max-gap-ticks: 20
 #  grounded-run-ticks: 10
 #  blowout-blocks: 6.0
-#  target: 2.75
+#  target: 2.85
 #  gain: 1.0
 #  min-factor: 0.8
 #  max-factor: 1.2
 #  window-ticks: 10
 #  target-mode: anchor
 #  hit-cap: 2.95
+#  reach-handicap:
+#    enabled: false
+#    reach-scale: 0.8
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.
@@ -357,6 +402,56 @@ modules:
 # reload and are skipped — the rest of the list still applies.
 #disable-crafting:
 #  items: [SHIELD]
+
+# The /potfill command, active when modules.pot-fill is true. Fills every empty
+# main-inventory slot with a glowing splash Instant Health II potion.
+#
+# permission:      the permission node a player must hold to run /potfill. Leave
+#                  it as the default op-gated node, or point it at a rank node
+#                  (e.g. "server.kit.pots") to grant it to a group. A player
+#                  without it is refused with a message; the default is
+#                  "mental.pots.fill".
+# cost-per-potion: the price charged PER potion filled, through Vault (a soft,
+#                  optional dependency — Mental never hard-depends on it).
+#                    0    → free; no economy plugin is needed at all (the
+#                           default).
+#                    > 0  → each filled potion costs this much. The fill is a
+#                           PARTIAL fill capped at what you can afford, and you
+#                           are charged for exactly what was filled. With a cost
+#                           set but no Vault economy installed, the command
+#                           refuses honestly (it never fills for free) and one
+#                           line is logged at enable.
+#pot-fill:
+#  permission: "mental.pots.fill"
+#  cost-per-potion: 0.0
+
+# Fast pots, active when modules.fast-pots is true. Redirects a steeply-thrown
+# splash potion at your own feet at a multiplied speed.
+#
+# angle-degrees:    how far below the horizon your throw must aim before the
+#                   redirect kicks in, as a Bukkit pitch threshold (pitch is 0
+#                   at the horizon and +90 looking straight down). The redirect
+#                   fires when your pitch is GREATER than this value; shallower
+#                   throws are left completely untouched. Clamped to [0, 90].
+#                   Default 35.0.
+#
+#                        horizon ── 0° ───────────────  (never redirected)
+#                                    \
+#                                     \   throws in this
+#                                      \  band are left alone
+#                          angle ──── 35° ─ ─ ─ ─ ─ ─ ─  ← threshold
+#                                        \
+#                                         \ steeper throws are
+#                                          \ re-aimed at your feet
+#                        straight down ── 90°
+#
+# speed-multiplier: the factor applied to the potion's normal launch speed for
+#                   the redirected throw. Higher = the potion reaches your feet
+#                   sooner. Clamped to [1.0, 5.0] (never slower than vanilla,
+#                   capped so it cannot outrun its own splash). Default 3.0.
+#fast-pots:
+#  angle-degrees: 35.0
+#  speed-multiplier: 3.0
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

@@ -70,9 +70,10 @@ public final class ViewBuilder {
      * victim's measured per-tick velocity (the drift signal, frozen at the SAME
      * publish as the ledger residual so their difference is coherent), the published
      * yaw and pose-aware eye height (the dynamic target's facing and geometry,
-     * packetless-safe where the connection-domain yaw wire is absent), and the
-     * consecutive grounded-tick count. The pre-precision overload defaults them to
-     * era-exact no-ops, so a view built without them degrades to the base solve.
+     * packetless-safe where the connection-domain yaw wire is absent), the
+     * consecutive grounded-tick count, and the measured yaw rate (the V2 turn
+     * term's divisor — target-v2 repair #4). The pre-precision overload defaults
+     * them to era-exact no-ops, so a view built without them degrades to the base solve.
      */
     public PlayerView build(
             UUID id, int entityId,
@@ -83,12 +84,13 @@ public final class ViewBuilder {
             double knockbackResistance, boolean ocmOwnsMeleeKnockback,
             KnockbackProfile profile, int pingMillis,
             KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId,
-            double measuredVx, double measuredVz, float yaw, double eyeHeight, int groundedTicks) {
+            double measuredVx, double measuredVz, float yaw, double eyeHeight, int groundedTicks,
+            double yawRateDegPerTick) {
         return new PlayerView(
                 id, entityId, clock.current(), motion, grounded, slipperiness,
                 gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
                 noDamageTicks, maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback,
                 profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
-                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks);
+                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick);
     }
 }

@@ -100,9 +100,24 @@ public final class ArmourStrengthUnit implements FeatureUnit, Listener {
         scope.listen(this);
     }
 
-    @SuppressWarnings("deprecation")
     @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onEntityDamage(@NotNull EntityDamageEvent event) {
+        applyEraCascade(event);
+    }
+
+    /**
+     * The whole era defensive cascade over {@code event}'s CURRENT modifier state,
+     * guards included — extracted so it can be re-run by a later BASE writer.
+     * Idempotent ({@link #setIfChanged}) and a function of the event's present
+     * values, so running it twice in one pass, or once from each of two listeners
+     * in either order, converges on the same result. {@code CritFallbackUnit}
+     * re-invokes it after its ×1.5 BASE raise (interaction audit: within one
+     * Bukkit priority bucket the two units run in registration order, which the
+     * reconciler derives from Feature declaration order and a GUI re-enable
+     * silently reorders — the era crit-then-armour result must not depend on it).
+     */
+    @SuppressWarnings("deprecation")
+    static void applyEraCascade(@NotNull EntityDamageEvent event) {
         if (!(event.getEntity() instanceof LivingEntity victim)) {
             return;
         }

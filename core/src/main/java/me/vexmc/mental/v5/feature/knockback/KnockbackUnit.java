@@ -18,6 +18,7 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
+import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -39,6 +40,7 @@ import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.delivery.HitIds;
+import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
@@ -51,7 +53,6 @@ import me.vexmc.mental.v5.session.SessionService;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
-import org.bukkit.SoundCategory;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -90,6 +91,20 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private final TickClock clock;
     private final VelocityValve valve;
     private final DebugLog.Scoped debug;
+    private final ComboEvents comboEvents;
+
+    /**
+     * The sword-block decoration service — read-only here, and ONLY to ask "is
+     * this victim blocking with Mental's own injected temp shield?" (audit C1).
+     * On the off-hand tier (≤1.20.6) that shield is a real {@code SHIELD}, so
+     * vanilla FULL-blocks a raised frontal hit; the {@code shieldBlockingCancels}
+     * withdraw must never fire for it — the era sword-block contract is half
+     * damage + FULL knock, the exact inverse of the modern-shield semantics the
+     * cancel encodes. With SWORD_BLOCKING off the service tracks nobody, so the
+     * query is constant-false and the cancel behaves exactly as before
+     * (zero-touch).
+     */
+    private final EphemeralDecoration swordBlock;
 
     /**
      * The burst sender reused for the blocked-hit hurt presentation (ships
@@ -102,7 +117,8 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     public KnockbackUnit(
             SessionService sessions, ConnectionDomains domains, OcmBinding ocmBinding,
             LatencyModel latency, Scheduling scheduling, Supplier<Snapshot> snapshot,
-            HitIds ids, TickClock clock, VelocityValve valve, DebugLog.Scoped debug) {
+            HitIds ids, TickClock clock, VelocityValve valve, DebugLog.Scoped debug,
+            ComboEvents comboEvents, EphemeralDecoration swordBlock) {
         this.sessions = sessions;
         this.domains = domains;
         this.ocmBinding = ocmBinding;
@@ -113,6 +129,8 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         this.clock = clock;
         this.valve = valve;
         this.debug = debug;
+        this.comboEvents = comboEvents;
+        this.swordBlock = swordBlock;
     }
 
     @Override
@@ -165,11 +183,22 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackProfile profile = profileFor(session, victim);
         boolean blockModifier = event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
                 && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0;
+        // A block by Mental's OWN injected temp shield (the ≤1.20.6 sword-block
+        // off-hand tier, audit C1). Vanilla treats it as a real raised shield —
+        // full-blocks the damage and skips markHurt — but the feature it decorates
+        // is the 1.7 SWORD block, whose era contract is half damage + FULL knock.
+        // Such a hit is exempt from the full-block cancel below and routes through
+        // the blocked-knock redelivery instead (normally the SwordBlockingUnit has
+        // already rewritten the BLOCKING modifier to the era value at HIGH, so the
+        // hit reads as a partial block; this exemption is the belt for the raw
+        // full-negate arriving here unrewritten).
+        boolean mentalTempShieldBlock = blockModifier && swordBlock.isBlockingWithTempShield(victim);
         // Era rule: blocking shaped DAMAGE only (knockBack ran first), so a
         // blocking victim was knocked in FULL — cancel only for a FULL block
         // (final damage zero, the modern shield vanilla itself never knocks
         // through); a partial reduction knocks like the era.
-        if (profile.shieldBlockingCancels() && blockModifier && event.getFinalDamage() <= 0.0) {
+        if (profile.shieldBlockingCancels() && blockModifier && !mentalTempShieldBlock
+                && event.getFinalDamage() <= 0.0) {
             desk.withdraw(tx.context().id());
             return;
         }
@@ -182,20 +211,25 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
 
         boolean sprinting = attackerSprinting(source, tx, attacker);
         // A PARTIAL native block (a negative BLOCKING modifier that still lands
-        // damage — the BLOCKS_ATTACKS component tier on 1.21.5+). Vanilla runs its
-        // blocked-damage pipeline but SKIPS markHurt, so no ENTITY_VELOCITY is
-        // broadcast and no PlayerVelocityEvent fires — the desk's await would be
-        // swept as "no-velocity-event" and the era knock lost. The era knocks a
-        // partial block in FULL, so deliver the vector directly. Only a FRESH hit
-        // (not a mid-invulnerability difference hit) knocks: the difference branch
-        // is era-silent and must stay so (compendium: stronger mid-invuln hit deals
-        // difference damage with NO knock and no flinch).
-        boolean freshPartialBlock = blockModifier && event.getFinalDamage() > 0.0
+        // damage — the BLOCKS_ATTACKS component tier on 1.21.5+, or the off-hand
+        // tier after the SwordBlockingUnit rewrote a temp-shield full block to the
+        // era value). Vanilla runs its blocked-damage pipeline but SKIPS markHurt,
+        // so no ENTITY_VELOCITY is broadcast and no PlayerVelocityEvent fires — the
+        // desk's await would be swept as "no-velocity-event" and the era knock
+        // lost. The era knocks a blocked hit in FULL, so deliver the vector
+        // directly; a temp-shield full block that arrived UNREWRITTEN (final still
+        // zero) is included — the era knock must ship even when vanilla zeroed the
+        // damage (audit C1). Only a FRESH hit (not a mid-invulnerability
+        // difference hit) knocks: the difference branch is era-silent and must
+        // stay so (compendium: stronger mid-invuln hit deals difference damage
+        // with NO knock and no flinch).
+        boolean freshBlockedKnock = blockModifier
+                && (event.getFinalDamage() > 0.0 || mentalTempShieldBlock)
                 && !victimImmune(session, victim);
 
         HitTransaction.State state = tx.state();
         if (state == HitTransaction.State.PRE_SENT || state == HitTransaction.State.PINNED) {
-            if (freshPartialBlock) {
+            if (freshBlockedKnock) {
                 deliverBlockedKnock(
                         session, victim, attacker, source, tx, tx.carried(),
                         state == HitTransaction.State.PRE_SENT, sprinting, tx.paceFactor(),
@@ -234,15 +268,24 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
-        // The dynamic target and full solve to the DEBUG sink (not the journal).
-        if (servo.active() && debug.active()) {
+        // The V2 dynamic-target smoothing memory commits whenever the DYNAMIC
+        // target is live — never gated behind the diagnostics sink (interaction
+        // audit; see the pre-send site for the full why). The debug LINE alone
+        // rides the sink gate.
+        boolean dynamicTarget = servo.active() && servo.targetMode() == TargetMode.DYNAMIC;
+        if (servo.active() && (dynamicTarget || debug.active())) {
             PocketServo.Solution solution = KnockbackEngine.explainServo(
                     attackerState, victimState, profile, compensationY, freshSprint, servo, inputs);
-            debug.log(() -> ComboPredictor.debugLine(
-                    victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
+            if (dynamicTarget) {
+                ComboPredictor.remember(victim.getUniqueId(), solution);
+            }
+            if (debug.active()) {
+                debug.log(() -> ComboPredictor.debugLine(
+                        victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
+            }
         }
 
-        if (freshPartialBlock) {
+        if (freshBlockedKnock) {
             deliverBlockedKnock(session, victim, attacker, source, tx, vector, false, sprinting,
                     tx.paceFactor(), tx.comboFactor());
             return;
@@ -322,7 +365,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // own session (same region as the victim for melee), so it stamps the
         // right tracker regardless of whether the hit carried a sprint bonus.
         if (attackerSession != null && attackerSession.comboTracker() != null) {
-            ComboEvents.fire(player, attackerSession.comboTracker().onOwnHitLanded(clock.current()));
+            comboEvents.fire(player, attackerSession.comboTracker().onOwnHitLanded(clock.current()));
         }
         boolean bonus = sprinting || heldKnockbackLevel(player) > 0;
         if (!bonus) {
@@ -378,9 +421,12 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * no-op {@code onBlocked} (blockSound empty) — so the one missing audience is
      * the victim (F4; the 2.4.0 record wrongly assumed vanilla still served it).
      * Mental's HURT_ANIMATION burst is soundless by design. A world broadcast
-     * would double the sound for the bystanders vanilla already served. This path
-     * only triggers on the BLOCKS_ATTACKS tier (1.21.5+), so the direct Bukkit
-     * constant needs no legacy-name fallback (the ToolWear precedent).</p>
+     * would double the sound for the bystanders vanilla already served. Since the
+     * temp-shield exemption (audit C1) this path also fires on the off-hand tier
+     * (1.9.4–1.20.6): {@code Sound.ENTITY_PLAYER_HURT} is spelled identically
+     * across that whole range (the ToolWear precedent), and the four-arg
+     * {@code playSound} is used because the {@code SoundCategory} overload only
+     * exists from API 1.11.</p>
      */
     private void deliverBlockedKnock(
             CombatSession session, Player victim, LivingEntity attacker, HitSource source,
@@ -431,7 +477,9 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             // mirrors vanilla LivingEntity.handleDamageEvent (1 + (r1 − r2) × 0.2).
             float pitch = 1.0f + (ThreadLocalRandom.current().nextFloat()
                     - ThreadLocalRandom.current().nextFloat()) * 0.2f;
-            victim.playSound(victim.getLocation(), Sound.ENTITY_PLAYER_HURT, SoundCategory.PLAYERS, 1.0f, pitch);
+            // Four-arg overload: the SoundCategory form floors at API 1.11, and this
+            // path now runs down to 1.9.4 (the off-hand temp-shield exemption).
+            victim.playSound(victim.getLocation(), Sound.ENTITY_PLAYER_HURT, 1.0f, pitch);
             // The authoritative motion: overwrites vanilla's blocked deltaMovement,
             // triggers the velocity event (→ desk SHIP journal), and moves the server
             // entity (server-authoritative for anticheats and clientless fakes).

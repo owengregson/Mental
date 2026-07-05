@@ -12,10 +12,12 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
+import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
@@ -68,7 +70,13 @@ class SnapshotTest {
         assertEquals(ProjectileKnockbackSettings.DEFAULTS, settings(snapshot, Feature.PROJECTILE_KNOCKBACK));
         assertEquals(CraftingSettings.DEFAULTS, settings(snapshot, Feature.CRAFTING));
         assertEquals(OffhandSettings.DEFAULTS, settings(snapshot, Feature.OFFHAND));
-        assertEquals(ComboSettings.DEFAULTS, settings(snapshot, Feature.COMBO_HOLD));
+        ComboSettings combo = settings(snapshot, Feature.COMBO_HOLD);
+        assertEquals(ComboSettings.DEFAULTS, combo);
+        // target-v2 data-backed anchor retune: the shipped default is 2.85 (the lab's
+        // held-separation equilibrium), not the old reach-triangle 2.75.
+        assertEquals(2.85, combo.target(), 0.0, "parse-empty combo target is the retuned 2.85 anchor");
+        assertEquals(PotFillSettings.DEFAULTS, settings(snapshot, Feature.POT_FILL));
+        assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -139,6 +147,95 @@ class SnapshotTest {
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
         assertTrue(result.issues().get(0).contains("max-cps"));
         assertTrue(result.issues().get(0).contains("hit-registration.yml"));
+    }
+
+    @Test
+    void comboReachHandicapReadsEnabledAndScaleFromTheNestedSection() throws Exception {
+        SnapshotParser.Result result = parse("""
+                combo-hold:
+                  reach-handicap:
+                    enabled: true
+                    reach-scale: 0.7
+                """, "", "", "");
+
+        ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
+        assertTrue(combo.reachHandicap().enabled(), "the nested enabled flag flips");
+        assertEquals(0.7, combo.reachHandicap().scale(), "the in-range scale is stored verbatim");
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+    }
+
+    @Test
+    void comboReachHandicapDefaultsOffWhenTheSubSectionIsAbsent() throws Exception {
+        // The module knobs present but no reach-handicap block: the sub-feature stays
+        // the era-exact no-op (OFF, 0.8) — opt-in inside the opt-in module.
+        ComboSettings combo = settings(parse("""
+                combo-hold:
+                  min-hits: 4
+                """, "", "", "").snapshot(), Feature.COMBO_HOLD);
+        assertEquals(ComboSettings.ReachHandicap.DEFAULTS, combo.reachHandicap());
+    }
+
+    @Test
+    void comboReachScaleOutOfRangeWarnsOnceAndFallsBack() throws Exception {
+        // 1.4 would INFLATE reach — a handicap never does; it warns and the default 0.8 stands.
+        SnapshotParser.Result result = parse("""
+                combo-hold:
+                  reach-handicap:
+                    enabled: true
+                    reach-scale: 1.4
+                """, "", "", "");
+
+        ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
+        assertEquals(ComboSettings.ReachHandicap.DEFAULTS.scale(), combo.reachHandicap().scale(),
+                "out-of-range scale fell back to the default");
+        assertTrue(combo.reachHandicap().enabled(), "the enabled flag still applied");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("reach-scale"));
+        assertTrue(result.issues().get(0).contains("combo-hold.reach-handicap"));
+    }
+
+    @Test
+    void potsSettingsReadFromTheConfig() throws Exception {
+        SnapshotParser.Result result = parse("""
+                pot-fill:
+                  permission: "server.vip.pots"
+                  cost-per-potion: 5.0
+                fast-pots:
+                  angle-degrees: 50.0
+                  speed-multiplier: 2.5
+                """, "", "", "");
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+
+        PotFillSettings potFill = settings(result.snapshot(), Feature.POT_FILL);
+        assertEquals("server.vip.pots", potFill.permission());
+        assertEquals(5.0, potFill.costPerPotion());
+
+        FastPotsSettings fastPots = settings(result.snapshot(), Feature.FAST_POTS);
+        assertEquals(50.0, fastPots.angleDegrees());
+        assertEquals(2.5, fastPots.speedMultiplier());
+    }
+
+    @Test
+    void fastPotsKnobsAreParseClampedToTheirBounds() throws Exception {
+        // Angle above 90 and multiplier above 5 clamp to the nearest bound, each with one warn.
+        SnapshotParser.Result high = parse("""
+                fast-pots:
+                  angle-degrees: 120.0
+                  speed-multiplier: 9.0
+                """, "", "", "");
+        FastPotsSettings clampedHigh = settings(high.snapshot(), Feature.FAST_POTS);
+        assertEquals(FastPotsSettings.MAX_ANGLE, clampedHigh.angleDegrees());
+        assertEquals(FastPotsSettings.MAX_MULTIPLIER, clampedHigh.speedMultiplier());
+        assertEquals(2, high.issues().size(), () -> "issues: " + high.issues());
+
+        // A multiplier below 1.0 clamps up to the floor (never slower than vanilla).
+        SnapshotParser.Result low = parse("""
+                fast-pots:
+                  speed-multiplier: 0.2
+                """, "", "", "");
+        FastPotsSettings clampedLow = settings(low.snapshot(), Feature.FAST_POTS);
+        assertEquals(FastPotsSettings.MIN_MULTIPLIER, clampedLow.speedMultiplier());
+        assertEquals(1, low.issues().size(), () -> "issues: " + low.issues());
     }
 
     @Test

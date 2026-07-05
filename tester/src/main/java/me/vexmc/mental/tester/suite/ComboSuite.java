@@ -15,6 +15,8 @@ import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.LatencyModel;
+import me.vexmc.mental.platform.AttributeModifiers;
+import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.MentalPluginV5;
@@ -22,6 +24,7 @@ import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.platform.AttackRangeAdapter;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
@@ -29,9 +32,15 @@ import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerItemHeldEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -91,7 +100,15 @@ public final class ComboSuite {
                 new TestCase("combo: ZERO-TOUCH — module off ships every knock at comboFactor 1.0, era-identical",
                         context -> runZeroTouchScenario(mental, tester, context)),
                 new TestCase("combo: the api start/end events fire with reasons",
-                        context -> runApiEventScenario(mental, tester, context)));
+                        context -> runApiEventScenario(mental, tester, context)),
+                new TestCase("combo: reach-handicap shortens interaction range for a held combo, restored on end (1.20.5+)",
+                        context -> runReachHandicapScenario(mental, tester, context)),
+                new TestCase("combo: reach-handicap join-sweep clears a crash-leaked modifier (1.20.5+)",
+                        context -> runReachSweepScenario(mental, tester, context)),
+                new TestCase("combo: reach-handicap OFF leaves interaction range untouched through a combo (1.20.5+)",
+                        context -> runReachZeroTouchScenario(mental, tester, context)),
+                new TestCase("combo: reach-handicap wins over the HITBOX ATTACK_RANGE weapon component (1.21.5+)",
+                        context -> runReachHandicapComponentScenario(mental, tester, context)));
     }
 
     /* --------------------------- scenario 1: the chain --------------------------- */
@@ -365,9 +382,287 @@ public final class ComboSuite {
         }
     }
 
+    /* ------------------- scenario 6: reach-handicap apply/restore ------------------ */
+
+    /**
+     * The reach handicap (design §1): while a combo is held the victim's
+     * interaction-range attribute is scaled by {@code reach-scale} (0.8) via an
+     * additive modifier, applied on combo start and removed on EVERY end reason.
+     * 1.20.5+ ONLY — below that the attribute is absent and the sub-feature is a
+     * documented no-op, so the case skips with that note (the platform-probe
+     * doctrine). Removal is reason-agnostic (one {@code removeMatching} for every
+     * end), so pinning two representative ends — RETALIATION and the module DISABLE
+     * (leg 3) — proves the whole family restores exactly.
+     */
+    private static void runReachHandicapScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!reachAttributeSupported()) {
+            context.skip("entity-interaction-range attribute absent (below 1.20.5) — reach handicap is a "
+                    + "documented no-op here");
+            return;
+        }
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            setUpReach(mental, context, attacker, victim, /*handicap=*/ true);
+            double base = reachValue(context, victim);
+            context.expect(base > 0, "interaction-range must read a positive base before any combo");
+
+            // Apply on start: a held combo scales the reach by 0.8.
+            buildActiveCombo(mental, context, attacker, victim);
+            context.awaitTicks(3); // the apply is scheduled on the owning thread
+            context.expectNear(base * 0.8, reachValue(context, victim), 1e-6,
+                    "a held combo must scale the victim's interaction range by reach-scale (0.8)");
+
+            // Restore on RETALIATION.
+            context.syncRun(() -> {
+                attacker.player().setNoDamageTicks(0);
+                victim.attack(attacker.player());
+            });
+            context.awaitTicks(5);
+            context.expectNear(base, reachValue(context, victim), 1e-9,
+                    "the RETALIATION end must restore the interaction range exactly");
+
+            // Re-apply, then restore on the module DISABLE mid-combo (leg 3).
+            buildActiveCombo(mental, context, attacker, victim);
+            context.awaitTicks(3);
+            context.expectNear(base * 0.8, reachValue(context, victim), 1e-6,
+                    "the handicap must re-apply on a fresh combo");
+            context.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", false);
+                mental.reloadAll();
+            });
+            context.awaitTicks(3);
+            context.expectNear(base, reachValue(context, victim), 1e-9,
+                    "disabling the module mid-combo must restore the interaction range (leg 3)");
+        } finally {
+            teardownReach(mental, context, attacker, victim);
+        }
+    }
+
+    /* ------------------- scenario 7: the crash-leak join sweep --------------------- */
+
+    /**
+     * Player attribute modifiers persist to NBT, so a crash mid-combo could leak the
+     * handicap into the save. The join-sweep (leg 2) strips any {@code
+     * mental:combo-reach} modifier on sight — this plants one synthetically (the
+     * crash-leak stand-in) and fires the join event, then asserts it is gone.
+     * Reason-agnostic and enabled-agnostic: the sweep clears a leak whether or not a
+     * combo is live.
+     */
+    private static void runReachSweepScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!reachAttributeSupported()) {
+            context.skip("entity-interaction-range attribute absent (below 1.20.5) — reach handicap is a "
+                    + "documented no-op here");
+            return;
+        }
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            setUpReach(mental, context, attacker, victim, /*handicap=*/ true);
+            double base = reachValue(context, victim);
+
+            // Plant a stale modifier straight onto the live attribute (the crash-leak
+            // stand-in), on the owning thread, and confirm it took effect.
+            context.syncRun(() -> {
+                Attribute attr = Attributes.entityInteractionRange();
+                AttributeInstance instance = victim.player().getAttribute(attr);
+                instance.addModifier(AttributeModifiers.comboReach(0.5));
+            });
+            context.expectNear(base * 0.5, reachValue(context, victim), 1e-6,
+                    "the planted stale modifier must shorten the reach before the sweep");
+
+            // Fire the join event — the handicap's onJoin listener sweeps the leak.
+            fireJoin(context, victim);
+            context.awaitTicks(5); // the sweep is scheduled on the owning thread
+            context.expectNear(base, reachValue(context, victim), 1e-9,
+                    "the join-sweep must strip the stale modifier and restore the reach exactly");
+        } finally {
+            teardownReach(mental, context, attacker, victim);
+        }
+    }
+
+    /* ------------------- scenario 8: reach-handicap zero-touch --------------------- */
+
+    /**
+     * Zero-touch: with the sub-feature OFF (its default), no modifier is ever
+     * constructed, so the interaction range is byte-identical through a full combo —
+     * the module can be on and the servo shaping knocks while the reach lever stays
+     * inert.
+     */
+    private static void runReachZeroTouchScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!reachAttributeSupported()) {
+            context.skip("entity-interaction-range attribute absent (below 1.20.5) — reach handicap is a "
+                    + "documented no-op here");
+            return;
+        }
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            // Module ON, reach-handicap OFF (the sub-feature default).
+            setUpReach(mental, context, attacker, victim, /*handicap=*/ false);
+            double base = reachValue(context, victim);
+
+            buildActiveCombo(mental, context, attacker, victim);
+            context.awaitTicks(3);
+            context.expectNear(base, reachValue(context, victim), 1e-9,
+                    "with the sub-feature off a held combo must NOT touch the interaction range");
+            // Drive a few more hits and keep checking — no modifier ever appears.
+            for (int hit = 0; hit < 3; hit++) {
+                driveHitFactor(mental, context, attacker, victim);
+                context.awaitTicks(CADENCE_TICKS);
+            }
+            context.expectNear(base, reachValue(context, victim), 1e-9,
+                    "reach must stay untouched across the whole combo (zero-touch)");
+        } finally {
+            teardownReach(mental, context, attacker, victim);
+        }
+    }
+
+    /* --------------- scenario 9: handicap vs the ATTACK_RANGE component ------------ */
+
+    /**
+     * The interaction-audit conflict: on 1.21.5+ the HITBOX unit stamps every held
+     * weapon with the explicit era {@code ATTACK_RANGE} component, and an explicit
+     * component supplies the WHOLE attack window — the handicap's shortened
+     * {@code ENTITY_INTERACTION_RANGE} attribute is then consulted by nothing, so
+     * the sub-feature was silently void for any armed victim. The fix strips the
+     * comboed victim's held weapon on combo START (the window falls back to the
+     * attribute-honouring default) and re-stamps it on the end. This asserts the
+     * component is absent exactly for the combo's span while the synced attribute
+     * carries the 0.8 handicap — the server-side window truth an armed victim's
+     * swing is gated by.
+     */
+    private static void runReachHandicapComponentScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!reachAttributeSupported()) {
+            context.skip("entity-interaction-range attribute absent (below 1.20.5) — reach handicap is a "
+                    + "documented no-op here");
+            return;
+        }
+        AttackRangeAdapter component = mental.platformProfile().attackRange();
+        if (!component.supported()) {
+            context.skip("ATTACK_RANGE component absent (below 1.21.5) — the component tier cannot "
+                    + "override the handicapped attribute here");
+            return;
+        }
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            setUpReach(mental, context, attacker, victim, /*handicap=*/ true);
+            context.syncRun(() -> {
+                mental.overlaySet("modules.old-hitboxes", true);
+                mental.reloadAll();
+                context.expect(mental.featureActive(Feature.HITBOX), "old-hitboxes must be active");
+                victim.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+                // The enable pass ran before the sword landed in the hand — fire the
+                // held-change reconcile the unit listens to, exactly as a client would.
+                Bukkit.getPluginManager().callEvent(new PlayerItemHeldEvent(victim.player(), 0, 0));
+            });
+            context.awaitTicks(3);
+            boolean stamped = context.sync(() ->
+                    component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(stamped,
+                    "HITBOX must stamp the held weapon with the era ATTACK_RANGE component pre-combo");
+            double base = reachValue(context, victim);
+
+            // A held combo: the component must yield (stripped) and the synced
+            // attribute must carry the handicap — the armed victim's real window.
+            buildActiveCombo(mental, context, attacker, victim);
+            context.awaitTicks(3);
+            context.expectNear(base * 0.8, reachValue(context, victim), 1e-6,
+                    "a held combo must scale the armed victim's interaction range by reach-scale (0.8)");
+            boolean strippedMidCombo = context.sync(() ->
+                    !component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(strippedMidCombo,
+                    "the held weapon must NOT carry the ATTACK_RANGE component mid-combo — an explicit "
+                            + "component supplies the whole window and would void the handicap");
+
+            // A mid-combo held-change reconcile must not re-stamp the override.
+            context.syncRun(() -> Bukkit.getPluginManager().callEvent(
+                    new PlayerItemHeldEvent(victim.player(), 0, 0)));
+            context.awaitTicks(2);
+            boolean stillStripped = context.sync(() ->
+                    !component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(stillStripped,
+                    "a mid-combo held-change reconcile re-stamped the component — the handicap gate on "
+                            + "applyToHeld must hold for the combo's whole span");
+
+            // End by retaliation: the attribute restores AND the component returns.
+            context.syncRun(() -> {
+                attacker.player().setNoDamageTicks(0);
+                victim.attack(attacker.player());
+            });
+            context.awaitTicks(5);
+            context.expectNear(base, reachValue(context, victim), 1e-9,
+                    "the RETALIATION end must restore the interaction range exactly");
+            boolean restamped = context.sync(() ->
+                    component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(restamped,
+                    "the combo end must re-stamp the era ATTACK_RANGE component on the held weapon");
+        } finally {
+            context.syncRun(() -> {
+                mental.overlaySet("modules.old-hitboxes", false);
+                mental.reloadAll();
+            });
+            teardownReach(mental, context, attacker, victim);
+        }
+    }
+
     /* ------------------------------------------------------------------ */
     /*  Helpers                                                            */
     /* ------------------------------------------------------------------ */
+
+    /** Whether this server exposes the interaction-range attribute lever (1.20.5+). */
+    private static boolean reachAttributeSupported() {
+        return Attributes.entityInteractionRange() != null && AttributeModifiers.supported();
+    }
+
+    /** The victim's live interaction-range attribute VALUE (base × modifiers), read on the owning thread. */
+    private static double reachValue(TestContext context, FakePlayer victim) throws Exception {
+        return context.sync(() -> {
+            Attribute attr = Attributes.entityInteractionRange();
+            AttributeInstance instance = victim.player().getAttribute(attr);
+            return instance == null ? Double.NaN : instance.getValue();
+        });
+    }
+
+    /** setUp (module + widened chain) plus the reach-handicap sub-feature toggled + scale pinned to 0.8. */
+    private static void setUpReach(
+            MentalPluginV5 mental, TestContext context, FakePlayer attacker, FakePlayer victim,
+            boolean handicap) throws Exception {
+        setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+        context.syncRun(() -> {
+            mental.overlaySet("combo-hold.reach-handicap.enabled", handicap);
+            mental.overlaySet("combo-hold.reach-handicap.reach-scale", 0.8);
+            mental.reloadAll();
+        });
+        context.awaitTicks(3);
+    }
+
+    /** Restores every reach-handicap + combo overlay and removes the pair. */
+    private static void teardownReach(
+            MentalPluginV5 mental, TestContext context, FakePlayer attacker, FakePlayer victim) throws Exception {
+        context.syncRun(() -> {
+            mental.overlaySet("combo-hold.reach-handicap.enabled", false);
+            mental.overlaySet("modules.combo-hold", false);
+            mental.overlaySet("combo-hold.grounded-run-ticks", 10);
+            mental.overlaySet("combo-hold.max-gap-ticks", 20);
+            mental.reloadAll();
+            mental.management().setGlobalProfile(DEFAULT_PROFILE);
+            attacker.remove();
+            victim.remove();
+        });
+    }
+
+    /** Fires the fake's join event so the handicap's onJoin sweep runs (the FakePlayer.spawn form). */
+    @SuppressWarnings("deprecation") // the (Player, String) ctor is the cross-version-stable form
+    private static void fireJoin(TestContext context, FakePlayer victim) throws Exception {
+        context.syncRun(() ->
+                Bukkit.getPluginManager().callEvent(new PlayerJoinEvent(victim.player(), "")));
+    }
 
     /** Spawns the pair, selects signature, enables combo-hold (widening the chain-hold rules when asked). */
     private static void setUp(

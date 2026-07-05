@@ -54,11 +54,23 @@ package me.vexmc.mental.kernel.math;
  * @param victimYawVsAxisDeg      the victim's facing offset from the axis-to-attacker,
  *                                in [0, 180]; {@link Double#NaN} ⇒ the dynamic target
  *                                falls back to the anchor.
- * @param victimYawRateDegPerTick the victim's recent yaw slew rate (deg/tick) —
- *                                gates the turn-cost floors (a flicking player gets 0).
+ * @param victimYawRateDegPerTick the victim's recent measured yaw slew rate
+ *                                (deg/tick, mean |Δyaw| over the last ~3 ticks) — the
+ *                                V2 continuous {@code turn} term's divisor; a faster
+ *                                flick earns a smaller cost. {@link Double#NaN} ⇒ the
+ *                                conservative 30°/tick floor (target-v2 repair #4).
  * @param groundedTicks           consecutive grounded ticks the victim has held
  *                                (published context; carried for the debug sink and
  *                                launch-state coherence, never a solve lever on its own).
+ * @param priorChaseEma           the per-combo chase EMA carried from the victim's
+ *                                previous hit ({@link Double#NaN} on the first) — the
+ *                                V2 dynamic-target path smooths the noisy chase
+ *                                estimate through it (target-v2 repair #2). Never
+ *                                touches the σ* placement solve.
+ * @param priorDynamicTarget      the emitted dynamic target from the previous hit
+ *                                ({@link Double#NaN} on the first) — the V2 target is
+ *                                slew-limited to ±0.05 of it, killing the cliff
+ *                                coin-flip (target-v2 repair #2).
  */
 public record PredictorInputs(
         boolean launchGrounded,
@@ -74,7 +86,26 @@ public record PredictorInputs(
         double victimEyeHeight,
         double victimYawVsAxisDeg,
         double victimYawRateDegPerTick,
-        int groundedTicks) {
+        int groundedTicks,
+        double priorChaseEma,
+        double priorDynamicTarget) {
+
+    /**
+     * The pre-V2 arity (combo-hold §3.2b): every per-hit geometry input, with NO
+     * per-combo servo memory ({@code priorChaseEma}/{@code priorDynamicTarget}
+     * default to {@link Double#NaN} ⇒ the V2 EMA seeds to the instantaneous chase
+     * and the slew passes through — a first-hit / memoryless solve). Keeps every
+     * caller and pin that predates the target-v2 round compiling unchanged.
+     */
+    public PredictorInputs(
+            boolean launchGrounded, double launchSlip, double landingSlip, double launchHeight,
+            double driftAlongAxis, double chaseAlongAxis, double victimNormalizedSpeed,
+            int attackerRttMillis, int victimRttMillis, double attackerHeadY, double victimEyeHeight,
+            double victimYawVsAxisDeg, double victimYawRateDegPerTick, int groundedTicks) {
+        this(launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
+                victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, Double.NaN, Double.NaN);
+    }
 
     /**
      * The base-correctness inputs (precision-derivation §6 row 1): the mandatory

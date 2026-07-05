@@ -97,13 +97,22 @@ public final class AttackChargeReset {
         }
     }
 
-    /** Restores {@code player}'s captured original base (if any) and forgets it. */
+    /**
+     * Restores {@code player}'s captured original base (if any) and forgets it.
+     * INLINE when the calling thread owns the player ({@link Scheduling#ensureOn})
+     * — the one call site is the quit listener, where a deferred {@code runOn}
+     * dies at the next-tick validity gate AFTER the disconnect has already saved
+     * the spoofed {@code 1024.0} base into the player's NBT (audit quit-path
+     * conflict: a combat-log would keep no-cooldown permanently once the feature
+     * is later disabled). The pre-save inline write is the
+     * {@code EphemeralDecoration.onQuit} shape.
+     */
     public void restore(@NotNull Player player) {
         Double original = originalBase.remove(player.getUniqueId());
         if (original == null) {
             return;
         }
-        scheduling.runOn(player, () -> restoreNow(player, original), () -> {});
+        scheduling.ensureOn(player, () -> restoreNow(player, original), () -> {});
     }
 
     private void restoreNow(@NotNull Player player, double original) {

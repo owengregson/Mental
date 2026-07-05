@@ -394,6 +394,22 @@ constants instead — §5.
 
 ## 3. The dynamic target
 
+> **Superseded by target-v2 (2026-07-04).** The single-instant relaxation below
+> (§3.3, `relaxed = safeNeed − tAllow·closing`) shipped as journal-only and was
+> the mechanism the forensics traced the bimodal `{2.75, 2.95}` saturation to
+> (the `closing ≤ 0` early-exit → anchor on 69.6% of hits; the σ=1 terminal-Δ
+> degeneracy; a discrete `{0,1,2}` turn ladder with a dead ping term and a
+> hard-NaN flick gate). `TargetMode.DYNAMIC` now names the **V2 exposure-budget
+> min-selection** (`PocketServo.dynamicTarget`): `min{T ∈ [anchor, capEff] :
+> e(T) ≤ tAllow}` over the terminal-window exposure integral `e(T)`, with the
+> continuous `tAllow = tPing + turn` (§4 / §3.2 refined), `capEff = 3.0 −
+> 0.5·chaseEMA − 0.17` clamped to `[anchor, hitCap]`, `closing ≤ 0 → the anchor`
+> (pull-in posture), and a per-combo chase EMA + ≤0.05/hit target slew that kills
+> the noise-driven cliff. The geometry (§3.1) and the exposure formulation (§3.2)
+> are unchanged and carried through. The anchor default was retuned **2.75 →
+> 2.85** (the lab's held-separation equilibrium; 2.75 was unreachable at
+> signature scale). The §3.3 pseudocode is kept below as the derivation of record.
+
 ### 3.1 Exact geometry
 
 Era constants: reach `r = 3.0` eye→nearest-AABB-point [K-Reach], player
