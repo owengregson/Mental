@@ -648,7 +648,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // port the era flat armour reduction and Unbreaking skip.
         reconciler.register(new ArmourStrengthUnit());
         reconciler.register(new ArmourDurabilityUnit());
-        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
+        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot, sessions));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
         reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration));

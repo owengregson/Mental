@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.UUID;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
+import me.vexmc.mental.v5.session.SessionService;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -104,7 +105,10 @@ class CritArmourCompositionTest {
                   fast-path:
                     enabled: false
                 """);
-        return new CritFallbackUnit(new DamageOwnership((token, id) -> true), () -> snapshot);
+        // A bare SessionService: sessionFor answers null, so the per-hit gate reads
+        // every staged event as a vanilla-landing melee (the audit scenario).
+        return new CritFallbackUnit(new DamageOwnership((token, id) -> true), () -> snapshot,
+                new SessionService(null, null, null, null, null, null, null, null, null));
     }
 
     private static Snapshot parse(String main, String hitReg) throws Exception {

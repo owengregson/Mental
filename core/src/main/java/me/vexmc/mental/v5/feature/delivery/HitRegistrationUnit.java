@@ -36,6 +36,7 @@ import me.vexmc.mental.kernel.wire.CpsLimiter;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.kernel.wire.ReachValidator;
+import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
@@ -393,7 +394,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
                         () -> retract(victim, tx));
             } else {
                 scheduling.runOn(damageable,
-                        () -> applyNonPlayer(attackerId, targetId),
+                        () -> applyNonPlayer(attackerId, targetId, tx),
                         () -> {});
             }
         }
@@ -589,7 +590,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
         }
     }
 
-    private void applyNonPlayer(UUID attackerUuid, int targetEntityId) {
+    private void applyNonPlayer(UUID attackerUuid, int targetEntityId, HitTransaction tx) {
         Player attacker = Bukkit.getPlayer(attackerUuid);
         if (attacker == null || !attacker.isOnline() || attacker.getGameMode() == GameMode.SPECTATOR) {
             return;
@@ -600,15 +601,33 @@ public final class HitRegistrationUnit implements FeatureUnit {
             return;
         }
         // A non-player LivingEntity is legacy-composed like a player victim (no
-        // transaction, so ownership resolves from the attacker); a non-living
-        // Damageable takes the retired HitApplier's flat 1.0.
+        // transaction passed to the shaper, so ownership resolves from the
+        // attacker); a non-living Damageable takes the retired HitApplier's flat 1.0.
         double amount = target instanceof LivingEntity ? composedAmount(attacker, null) : 1.0;
-        target.damage(amount, attacker);
+        // Bracket the ATTACKER's session with the minted Melee transaction (a mob
+        // victim has no session of its own) so the per-hit crit gate can tell this
+        // fast-path-composed damage apart from a genuine Player#attack landing
+        // (audit C2 — CritFallback must not double-crit Paper mob hits). This path
+        // never runs on Folia (non-player targets fall through to vanilla there),
+        // so the attacker's owning thread is the current one. A nested event this
+        // damage triggers against a PLAYER (thorns-back) is re-established by the
+        // DamageRouter per event and is cause-gated out of every melee consumer.
+        CombatSession attackerSession = sessions.sessionFor(attackerUuid);
+        if (attackerSession != null) {
+            attackerSession.activeInbound(tx);
+        }
+        try {
+            target.damage(amount, attacker);
+        } finally {
+            if (attackerSession != null) {
+                attackerSession.clearActiveInbound();
+            }
+        }
         applyToolWear(attacker);
     }
 
     private void damageWithSlot(Player attacker, Player victim, UUID victimUuid, HitTransaction tx) {
-        me.vexmc.mental.v5.CombatSession session = sessions.sessionFor(victimUuid);
+        CombatSession session = sessions.sessionFor(victimUuid);
         if (session != null) {
             session.activeInbound(tx);
         }
@@ -622,7 +641,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
     }
 
     private void retract(UUID victimUuid, HitTransaction tx) {
-        me.vexmc.mental.v5.CombatSession session = sessions.sessionFor(victimUuid);
+        CombatSession session = sessions.sessionFor(victimUuid);
         if (session != null) {
             session.desk().withdraw(tx.context().id());
         }
