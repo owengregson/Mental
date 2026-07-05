@@ -8,6 +8,7 @@ import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.kernel.math.OffhandPolicy;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
+import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
@@ -70,9 +71,25 @@ public final class OffhandUnit implements FeatureUnit, Listener {
     private final Supplier<Snapshot> snapshot;
     private final Scheduling scheduling;
 
-    public OffhandUnit(@NotNull Supplier<Snapshot> snapshot, @NotNull Scheduling scheduling) {
+    /**
+     * The sword-block decoration service — consulted read-only so the strip never
+     * eats Mental's OWN injected temp shield (interaction audit: SWORD_BLOCKING ×
+     * OFFHAND). The enable/reload pass runs over every online player; a mid-block
+     * player's off-hand holds the PDC-marked temp shield while their REAL off-hand
+     * item sits in the decoration's in-memory store — stripping the shield to
+     * storage makes the release poll find nothing to revert and silently discard
+     * the stored original (permanent item loss + a conjured marked shield). The
+     * decoration's own exit web reverts the slot; the off-hand policy then applies
+     * to the RESTORED item on its next join/world-change pass.
+     */
+    private final EphemeralDecoration swordBlock;
+
+    public OffhandUnit(
+            @NotNull Supplier<Snapshot> snapshot, @NotNull Scheduling scheduling,
+            @NotNull EphemeralDecoration swordBlock) {
         this.snapshot = snapshot;
         this.scheduling = scheduling;
+        this.swordBlock = swordBlock;
     }
 
     @Override
@@ -238,6 +255,12 @@ public final class OffhandUnit implements FeatureUnit, Listener {
      * <b>Must run on the player's owning region thread.</b>
      */
     private void stripOffhandIfDisallowed(@NotNull Player player) {
+        // Mental's own temp shield is always allowed (see the field javadoc): the
+        // decoration owns that slot for the block's duration and reverts it on
+        // every exit path — stripping it here would orphan the stored original.
+        if (swordBlock.isBlockingWithTempShield(player)) {
+            return;
+        }
         PlayerInventory inventory = player.getInventory();
         ItemStack offhand = inventory.getItemInOffHand();
         if (offhand.getType() == Material.AIR || !isItemDisallowed(offhand)) {

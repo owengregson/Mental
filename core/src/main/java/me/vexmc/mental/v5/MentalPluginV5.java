@@ -677,7 +677,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // component (1.21.5+, boot-probed on the PlatformProfile) — a documented no-op
         // where neither exists (the client picks the melee target).
         reconciler.register(new CraftingUnit(this::snapshot));
-        reconciler.register(new OffhandUnit(this::snapshot, scheduling));
+        // Off-hand consults the sword-block decoration (observation only) so its
+        // enable/reload strip pass never eats Mental's own temp shield mid-block
+        // (audit: permanent loss of the stored original + a conjured marked shield).
+        reconciler.register(new OffhandUnit(this::snapshot, scheduling, swordBlockDecoration));
         // Hitbox coordinates with the combo reach handicap (audit): on 1.21.5+ its
         // ATTACK_RANGE component would override the handicap-shortened attribute,
         // so the unit strips a comboed victim's held weapon for the combo's span.
