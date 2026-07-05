@@ -38,6 +38,7 @@ import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.kernel.wire.ReachValidator;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -507,12 +508,51 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 (long) attackerView.pingMillis() + reach.interpolationOffsetMillis(),
                 reach.rewindCapMillis());
         long instantNanos = System.nanoTime() - rewindMillis * 1_000_000L;
+        // The combo reach handicap's server-side backstop (interaction audit): when
+        // the ATTACKER of this swing is themselves a combo VICTIM (someone holds a
+        // combo against them, read off their own frozen view) and the handicap is
+        // live, vanilla's melee gate would enforce the SHORTENED attribute — but
+        // the fast path cancelled that gate. Clamp the validation window by the
+        // same scale so a dishonest/attribute-blind client cannot answer a combo
+        // beyond what vanilla would have allowed. Null when the handicap is off,
+        // unsupported, or no combo is held against this attacker.
+        double maxReach = reach.maxReach();
+        Double handicapScale = comboReachHandicapScale(attackerView);
+        if (handicapScale != null) {
+            maxReach *= handicapScale;
+        }
         ReachValidator.Verdict verdict = ReachValidator.validate(
                 attackerPos.x(), attackerPos.y() + ReachValidator.EYE_HEIGHT, attackerPos.z(),
                 sessions.positions().samplesAround(victimId, instantNanos, 75_000_000L),
                 victimPos.x(), victimPos.y(), victimPos.z(),
-                reach.maxReach(), reach.leniency());
+                maxReach, reach.leniency());
         return verdict.valid();
+    }
+
+    /**
+     * The active reach-handicap scale for a swing by the player whose frozen view
+     * is {@code attackerView}, or null when the handicap does not shorten their
+     * reach: no combo held against them, COMBO_HOLD off, the sub-feature off, or
+     * the attribute lever absent (below 1.20.5, where vanilla's gate could not
+     * enforce it either). Netty-safe: one frozen view read, one snapshot read,
+     * and the class-load-constant lever probe.
+     */
+    @SuppressWarnings("unchecked")
+    private Double comboReachHandicapScale(PlayerView attackerView) {
+        if (attackerView.comboAttackerId() == null) {
+            return null;
+        }
+        Snapshot current = snapshot.get();
+        if (!current.enabled(Feature.COMBO_HOLD)) {
+            return null;
+        }
+        ComboSettings.ReachHandicap handicap = current.settings(
+                (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey())
+                .reachHandicap();
+        if (!handicap.enabled() || !ComboReachHandicap.leverSupported()) {
+            return null;
+        }
+        return handicap.scale();
     }
 
     /* ---------------------------- owning-thread appliers ---------------------------- */

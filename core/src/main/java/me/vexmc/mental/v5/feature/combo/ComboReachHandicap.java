@@ -89,6 +89,18 @@ public final class ComboReachHandicap implements Listener {
 
     /** Whether this server exposes the interaction-range attribute (1.20.5+). */
     public boolean supported() {
+        return leverSupported();
+    }
+
+    /**
+     * The static half of {@link #supported()} — netty-safe (both probes are
+     * class-load-time constants) so the fast path's reach validation can consult
+     * the handicap without holding this instance. The attribute probe runs FIRST:
+     * on a sub-1.20.5 server it is null and short-circuits before
+     * {@link AttributeModifiers} would ever class-load (whose {@code NamespacedKey}
+     * constant must not link below 1.12).
+     */
+    public static boolean leverSupported() {
         return Attributes.entityInteractionRange() != null && AttributeModifiers.supported();
     }
 
