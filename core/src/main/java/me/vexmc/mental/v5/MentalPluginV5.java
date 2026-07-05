@@ -152,6 +152,8 @@ public final class MentalPluginV5 extends JavaPlugin {
     private OcmBinding ocmBinding;
     private BukkitRegistrar registrar;
     private Reconciler reconciler;
+    /** The always-on OCM coordination unit — held so a reload can re-derive the warnings. */
+    private OcmCompatUnit ocmCompat;
 
     private VelocityValve valve;
     private ViewBuilder viewBuilder;
@@ -439,11 +441,19 @@ public final class MentalPluginV5 extends JavaPlugin {
      * warn-and-fallback issues for the invoking sender.
      */
     public @NotNull List<String> reloadAll() {
+        Set<MechanicToken> tokensBefore = enabledTokens();
         configStore.ensureDefaultFiles();
         this.overlay = new Overlay(configStore.overridesFile());
         this.snapshot = parseSnapshot();
         applyDebug(snapshot.debug());
         reconciler.converge(snapshot);
+        // Re-derive the OCM coexistence warnings whenever this converge CHANGED
+        // the enabled-token set (interaction audit: the double-apply warning was
+        // startup-only, so a GUI toggle of a ported rule feature against a live
+        // OCM module double-applied silently). Value-only reloads stay quiet.
+        if (ocmCompat != null && !tokensBefore.equals(enabledTokens())) {
+            ocmCompat.rewarn("reload: enabled features changed");
+        }
         return parseIssues;
     }
 
@@ -622,8 +632,9 @@ public final class MentalPluginV5 extends JavaPlugin {
         // Live OCM arbiter binding — keeps the OcmBinding current (service API
         // per-player, else config-conservative), the driver the routers' frozen
         // ownership reads and the coexistence warnings depend on.
-        reconciler.register(new OcmCompatUnit(
-                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message)));
+        this.ocmCompat = new OcmCompatUnit(
+                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message));
+        reconciler.register(ocmCompat);
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
         // The knockback unit reads the sword-block decoration (observation only) so
