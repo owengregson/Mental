@@ -22,6 +22,7 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
+import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -327,16 +328,24 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 vector = paced.vector();
                 tx.paceFactor(paced.paceFactor()); // journal the factors the pre-send applied (D-6)
                 tx.comboFactor(paced.comboFactor());
-                // The dynamic target and the full solve go to the DEBUG sink (not the
-                // journal) so the lab round can calibrate before the default flips.
-                if (servo.active() && debug.active()) {
+                // The V2 dynamic-target smoothing memory (target-v2 repair #2) commits
+                // whenever the DYNAMIC target is live — a gameplay-shaping input must
+                // never be gated behind the diagnostics sink (interaction audit: with
+                // target-mode: dynamic and debug off, the memory stayed NaN and every
+                // hit re-solved memoryless, the exact knife-edge the EMA/slew exists
+                // to kill; flipping debug on changed combat). The debug LINE alone
+                // stays under the sink gate; under the shipped ANCHOR default the
+                // dynamic value is journaled-not-used, so no solve runs debug-off.
+                boolean dynamicTarget = servo.active() && servo.targetMode() == TargetMode.DYNAMIC;
+                if (servo.active() && (dynamicTarget || debug.active())) {
                     PocketServo.Solution solution = KnockbackEngine.explainServo(
                             preAttacker, preVictim, profile, compensationY, freshSprint, servo, inputs);
-                    debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
-                    // Commit the V2 dynamic-target smoothing memory (target-v2 repair #2)
-                    // so the victim's next hit relaxes from this one — inert under the
-                    // shipped ANCHOR default (the dynamic value is journaled, not used).
-                    ComboPredictor.remember(victimId, solution);
+                    if (dynamicTarget) {
+                        ComboPredictor.remember(victimId, solution);
+                    }
+                    if (debug.active()) {
+                        debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
+                    }
                 }
             }
 

@@ -18,6 +18,7 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
+import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -267,15 +268,21 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
-        // The dynamic target and full solve to the DEBUG sink (not the journal).
-        if (servo.active() && debug.active()) {
+        // The V2 dynamic-target smoothing memory commits whenever the DYNAMIC
+        // target is live — never gated behind the diagnostics sink (interaction
+        // audit; see the pre-send site for the full why). The debug LINE alone
+        // rides the sink gate.
+        boolean dynamicTarget = servo.active() && servo.targetMode() == TargetMode.DYNAMIC;
+        if (servo.active() && (dynamicTarget || debug.active())) {
             PocketServo.Solution solution = KnockbackEngine.explainServo(
                     attackerState, victimState, profile, compensationY, freshSprint, servo, inputs);
-            debug.log(() -> ComboPredictor.debugLine(
-                    victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
-            // Commit the V2 dynamic-target smoothing memory (target-v2 repair #2) so
-            // the next hit relaxes from this one — inert under the ANCHOR default.
-            ComboPredictor.remember(victim.getUniqueId(), solution);
+            if (dynamicTarget) {
+                ComboPredictor.remember(victim.getUniqueId(), solution);
+            }
+            if (debug.active()) {
+                debug.log(() -> ComboPredictor.debugLine(
+                        victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
+            }
         }
 
         if (freshBlockedKnock) {
