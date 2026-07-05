@@ -92,6 +92,18 @@ public final class ComboReachHandicap implements Listener {
         return Attributes.entityInteractionRange() != null && AttributeModifiers.supported();
     }
 
+    /**
+     * Whether the handicap will actually shorten a combo victim's reach on this
+     * server under the LIVE config — the sub-feature is on AND the attribute
+     * lever exists. The {@code HitboxUnit} keys its ATTACK_RANGE-component strip
+     * on this (audit: on 1.21.5+ a held weapon's explicit component supplies the
+     * attack window and the attribute is consulted by nothing, so the component
+     * must yield to the handicap for the combo's duration).
+     */
+    public boolean engaged() {
+        return supported() && config().enabled();
+    }
+
     /* ----------------------------- transition legs ----------------------------- */
 
     /**

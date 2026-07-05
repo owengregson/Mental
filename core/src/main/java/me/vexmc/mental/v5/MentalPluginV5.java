@@ -678,7 +678,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         // where neither exists (the client picks the melee target).
         reconciler.register(new CraftingUnit(this::snapshot));
         reconciler.register(new OffhandUnit(this::snapshot, scheduling));
-        reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange()));
+        // Hitbox coordinates with the combo reach handicap (audit): on 1.21.5+ its
+        // ATTACK_RANGE component would override the handicap-shortened attribute,
+        // so the unit strips a comboed victim's held weapon for the combo's span.
+        reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange(),
+                comboReachHandicap));
 
         // The combo family (2.5.0). The pocket servo lives entirely session-side:
         // the unit's scope opens/closes combo tracking on the SessionService; every
