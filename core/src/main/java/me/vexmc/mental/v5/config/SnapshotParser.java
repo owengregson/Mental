@@ -193,7 +193,17 @@ public final class SnapshotParser {
                 reader.numberAtLeast("max-factor", d.maxFactor(), 0.0),
                 reader.intAtLeast("window-ticks", d.windowTicks(), 1),
                 reader.oneOf("target-mode", d.targetMode(), TargetMode.class),
-                reader.numberAtLeast("hit-cap", d.hitCap(), 0.5));
+                reader.numberAtLeast("hit-cap", d.hitCap(), 0.5),
+                parseReachHandicap(reader.sub("reach-handicap")));
+    }
+
+    private static ComboSettings.ReachHandicap parseReachHandicap(ConfigReader reader) {
+        ComboSettings.ReachHandicap d = ComboSettings.ReachHandicap.DEFAULTS;
+        return new ComboSettings.ReachHandicap(
+                reader.flag("enabled", d.enabled()),
+                // A handicap only ever shortens reach, so the scale is confined to
+                // [0.5, 1.0]; anything outside warns and the default stands.
+                reader.numberInRange("reach-scale", d.scale(), 0.5, 1.0));
     }
 
     private static OffhandSettings parseOffhand(ConfigReader reader) {

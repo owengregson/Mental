@@ -69,7 +69,9 @@ import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
@@ -152,6 +154,9 @@ public final class MentalPluginV5 extends JavaPlugin {
     private ViewBuilder viewBuilder;
     private SessionService sessions;
     private ConnectionDomains domains;
+    /** The combo-hold reach handicap (design §1) and the transition dispatcher that drives it. */
+    private ComboReachHandicap comboReachHandicap;
+    private ComboEvents comboEvents;
     private LatencyModel latency;
     private LatencyCompensationUnit latencyCompensation;
     /** The effective latency-probe transport for this server version, resolved at parse. */
@@ -265,8 +270,16 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.valve = new VelocityValve();
         this.viewBuilder = new ViewBuilder(clock);
         this.positions = new PositionRing();
+        // The combo-hold reach handicap (design §1) and the transition dispatcher that
+        // drives it: every combo START/END funnels through ComboEvents, so the handicap
+        // apply/remove rides the SAME point that fires the api events, on the owning
+        // thread. Constructed before the session/delivery routers so all three
+        // transition-firing sites share the one dispatcher instance.
+        this.comboReachHandicap = new ComboReachHandicap(this, scheduling, this::snapshot);
+        this.comboEvents = new ComboEvents(comboReachHandicap);
         this.sessions = new SessionService(
-                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions, domains);
+                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions, domains,
+                comboEvents);
         sessions.start(this);
 
         // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —
@@ -296,7 +309,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The delivery routers (spec §3.4–§3.6): the desk's sole PlayerVelocityEvent
         // writer, the damage-pass router, and the capability-gated knockback-event
         // mirror. Always-on infra, inert while nothing submits to a desk (all of 4A1).
-        getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve, clock), this);
+        getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve, clock, comboEvents), this);
         getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock, hitIds), this);
         if (capabilities.knockbackEvent()) {
             new MirrorListener(sessions).register(this);
@@ -611,7 +624,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
         reconciler.register(new KnockbackUnit(
                 sessions, domains, ocmBinding, latency, scheduling, this::snapshot,
-                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK)));
+                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK), comboEvents));
         reconciler.register(latencyCompensation);
         reconciler.register(new FishingKnockbackUnit(
                 sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));
@@ -665,7 +678,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // sweep), the view publish, and the servo application at the engine seam are
         // already wired into the session/delivery/knockback code. Zero-touch when the
         // scope is closed (no tracker, no sweep work).
-        reconciler.register(new ComboHoldUnit(sessions));
+        reconciler.register(new ComboHoldUnit(sessions, comboReachHandicap));
     }
 
     private Snapshot parseSnapshot() {
