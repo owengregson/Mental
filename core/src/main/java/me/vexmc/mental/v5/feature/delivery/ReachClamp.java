@@ -20,8 +20,9 @@ import me.vexmc.mental.kernel.wire.PositionRing;
  *       non-handicap path is unchanged.</li>
  *   <li><b>Combo reach-handicap backstop</b> ({@code handicapScale != null}) —
  *       when a combo is held against THIS attacker and the handicap lever is
- *       live, scale BOTH the reach and the leniency by the handicap AND measure
- *       eye-to-<em>centre</em>.</li>
+ *       live, accept on EITHER the scaled eye-to-<em>centre</em> threshold
+ *       {@code scale·(maxReach + leniency)} OR the honest eye-to-<em>box</em>
+ *       floor {@code scale·maxReach}.</li>
  * </ul>
  *
  * <h2>Why the handicap branch scales the leniency AND switches to eye-to-centre</h2>
@@ -48,13 +49,23 @@ import me.vexmc.mental.kernel.wire.PositionRing;
  *       maxReach = 3.0}) is denied too.</li>
  * </ol>
  *
- * <p>An honest handicapped client is unaffected either way: its raycast shortens
- * client-side to {@code scale·maxReach} ({@code 2.4}), so it self-limits below the
- * backstop and its answers (eye-to-centre {@code ≤ 2.4 ≤ 2.72}) are always
- * accepted, a comfortable {@code 0.32}-block margin. The backstop only ever
- * judges the attribute-blind clients it was built for. At {@code scale 0.6} the
- * threshold is {@code 0.6·3.4 = 2.04} eye-to-centre — well inside the blind
- * client's {@code 3.0}-centre envelope, so it bites hard (S2x's regime).</p>
+ * <h2>The honest-client floor (2.4.4 — the false-reject the centre shape alone left)</h2>
+ *
+ * <p>An honest handicapped client's raycast shortens client-side so its picked HIT
+ * POINT (a box-<em>surface</em> point) sits at eye-to-box {@code ≤ scale·maxReach}
+ * ({@code 2.4} at {@code scale 0.8}). The centre distance is NOT bounded by that: it
+ * exceeds the surface distance by up to the box half-diagonal ({@code ≈ 0.995}) on a
+ * steep ray (a launched victim answered downward — a near-collinear ray onto the top
+ * face, centre {@code ~0.9} below). So an honest steep-angle answer can read eye-to-
+ * centre {@code 2.7–3.3} and the centre-only clamp ({@code 2.72}) would false-reject
+ * it — the exact swing the handicap is documented to still allow. The fix adds the
+ * OR-pass floor: a send within {@code scale·maxReach} eye-to-box always passes,
+ * regardless of the centre distance. The floor keeps the blind-client bite intact —
+ * at its own gate edge (eye-to-centre {@code = maxReach}) a blind client's eye-to-box
+ * is {@code ≈ 2.6–2.7 > 2.4}, so it never reaches the floor and the centre threshold
+ * still denies it. At {@code scale 0.6} the centre threshold is {@code 0.6·3.4 = 2.04}
+ * and the floor {@code 0.6·3.0 = 1.8} — both well inside the blind client's {@code 3.0}
+ * envelope, so it bites hard (S2x's regime).</p>
  */
 public final class ReachClamp {
 
@@ -70,34 +81,69 @@ public final class ReachClamp {
     private ReachClamp() {}
 
     /**
-     * Whether the swing passes the reach window: the closest candidate (the live
-     * victim position plus every rewound history sample) sits within the clamp.
-     * {@code handicapScale == null} is the plain eye-to-box window with the full
-     * unscaled leniency (byte-identical to the pre-backstop behaviour); a non-null
-     * scale is the combo backstop — {@code scale·(maxReach + leniency)}, eye-to-centre.
+     * Whether the swing passes the reach window: SOME candidate (the live victim
+     * position or a rewound history sample) sits within the clamp — the allow-biased
+     * closest-candidate rule the ClubSpigot-lite gate keeps.
+     *
+     * <p>{@code handicapScale == null} is the plain eye-to-box window with the full
+     * unscaled leniency, byte-identical to the pre-backstop behaviour. A non-null
+     * scale is the combo backstop, which accepts a candidate on EITHER of two bounds:</p>
+     * <ol>
+     *   <li>the scaled eye-to-<em>centre</em> threshold {@code scale·(maxReach +
+     *       leniency)} — the shape the attribute-blind client's own gate uses, so its
+     *       over-reach is judged in the same coordinate; OR</li>
+     *   <li>the honest eye-to-<em>box</em> floor {@code scale·maxReach} — the hit-point
+     *       envelope an honest handicapped client's own shortened raycast can reach. A
+     *       send inside it is definitionally an honest handicapped answer, so a
+     *       steep-angle ray whose centre distance inflates past bound (1) is never
+     *       false-rejected (the 2.4.4 honest-client floor).</li>
+     * </ol>
      */
     public static boolean passes(
             double eyeX, double eyeY, double eyeZ,
             List<PositionRing.Sample> history,
             double liveX, double liveY, double liveZ,
             double maxReach, double leniency, Double handicapScale) {
-        boolean centered = handicapScale != null;
-        double threshold = centered
-                ? handicapScale * (maxReach + leniency) // scale BOTH terms
-                : maxReach + leniency;                  // plain: full leniency, unscaled
-        double best = distance(centered, eyeX, eyeY, eyeZ, liveX, liveY, liveZ);
-        for (PositionRing.Sample sample : history) {
-            best = Math.min(best,
-                    distance(centered, eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z()));
+        if (handicapScale == null) {
+            // Plain window: full unscaled leniency, eye-to-box — the pre-backstop shape.
+            double threshold = maxReach + leniency;
+            if (distanceToBox(eyeX, eyeY, eyeZ, liveX, liveY, liveZ) <= threshold) {
+                return true;
+            }
+            for (PositionRing.Sample sample : history) {
+                if (distanceToBox(eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z()) <= threshold) {
+                    return true;
+                }
+            }
+            return false;
         }
-        return best <= threshold;
+        double centreThreshold = handicapScale * (maxReach + leniency); // scale BOTH terms
+        double boxFloor = handicapScale * maxReach;                     // the honest self-limit
+        if (handicappedCandidatePasses(centreThreshold, boxFloor, eyeX, eyeY, eyeZ, liveX, liveY, liveZ)) {
+            return true;
+        }
+        for (PositionRing.Sample sample : history) {
+            if (handicappedCandidatePasses(
+                    centreThreshold, boxFloor, eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z())) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    private static double distance(
-            boolean centered, double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
-        return centered
-                ? distanceToCenter(eyeX, eyeY, eyeZ, x, y, z)
-                : distanceToBox(eyeX, eyeY, eyeZ, x, y, z);
+    /**
+     * A single candidate passes the handicap backstop on EITHER the scaled centre
+     * threshold OR the honest eye-to-box floor (see {@link #passes}). The floor never
+     * admits a blind client's over-reach: at its own (unshortened) gate edge the blind
+     * client's eye-to-box exceeds {@code scale·maxReach}, so only the centre threshold
+     * judges it — while an honest handicapped answer, always within {@code scale·maxReach}
+     * eye-to-box by construction, passes the floor regardless of its centre inflation.
+     */
+    private static boolean handicappedCandidatePasses(
+            double centreThreshold, double boxFloor,
+            double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
+        return distanceToCenter(eyeX, eyeY, eyeZ, x, y, z) <= centreThreshold
+                || distanceToBox(eyeX, eyeY, eyeZ, x, y, z) <= boxFloor;
     }
 
     /**

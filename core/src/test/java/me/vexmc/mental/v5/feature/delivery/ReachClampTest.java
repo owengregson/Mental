@@ -64,31 +64,59 @@ class ReachClampTest {
     /* ----------------------- the handicap window (the backstop) -------------------- */
 
     @Test
-    void handicapWindowScalesBothTermsAndMeasuresEyeToCentre() {
-        // scale 0.8 → threshold = 0.8 * (3.0 + 0.4) = 2.72 eye-to-centre.
-        // Eye at chest-centre height so the centre distance is the raw z; 2.71 inside,
-        // 2.73 outside brackets the 2.72 threshold.
+    void handicapCentreThresholdBindsWhenTheBoxFloorIsInside() {
+        // scale 0.8 → centre threshold 0.8*(3.0+0.4)=2.72, box floor 0.8*3.0=2.4.
+        // Eye at chest-centre height, horizontal ray, so box = z - 0.3: at z past 2.72
+        // the box (2.42) already sits past the 2.4 floor, so the CENTRE threshold is the
+        // binding bound — 2.71 passes (centre 2.71<=2.72), 2.73 is rejected (centre
+        // 2.73>2.72 AND box 2.43>2.4).
         assertTrue(ReachClamp.passes(0, CENTER, 2.71, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8));
         assertFalse(ReachClamp.passes(0, CENTER, 2.73, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8));
+    }
 
-        // scale 0.6 → threshold = 0.6 * 3.4 = 2.04 eye-to-centre; 2.03 inside, 2.05 outside.
-        assertTrue(ReachClamp.passes(0, CENTER, 2.03, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.6));
-        assertFalse(ReachClamp.passes(0, CENTER, 2.05, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.6));
+    @Test
+    void handicapBoxFloorIsTheLooserBoundWhenItExceedsTheCentreThreshold() {
+        // scale 0.6 → centre threshold 0.6*3.4=2.04, box floor 0.6*3.0=1.8. For the same
+        // chest-height horizontal ray (box = z - 0.3) the honest box floor is the LOOSER
+        // (outer) bound: box reaches 1.8 at z=2.1, past the 2.04 centre — so the FLOOR
+        // decides. z=2.09 passes (box 1.79<=1.8), z=2.11 is rejected (box 1.81>1.8 AND
+        // centre 2.11>2.04). (The pre-floor centre-only clamp wrongly rejected z in
+        // (2.04, 2.10] — honest handicapped answers inside the 1.8 hit-point envelope.)
+        assertTrue(ReachClamp.passes(0, CENTER, 2.09, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.6));
+        assertFalse(ReachClamp.passes(0, CENTER, 2.11, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.6));
+    }
+
+    @Test
+    void handicapHonestBoxFloorPassesASteepAnswerDespiteInflatedCentre() {
+        // The 2.4.4 fix. A STEEP honest answer: attacker eye 4.0 directly above the
+        // victim column. eye-to-box (to the 1.8 top face) = 2.2, INSIDE the honest floor
+        // scale*maxReach = 2.4; but eye-to-centre = 4.0 - 0.9 = 3.1, well past 2.72. The
+        // centre-only backstop FALSE-REJECTED this honest handicapped answer (the exact
+        // swing the handicap is documented to still allow); the OR-pass box floor accepts it.
+        assertEquals(2.2, ReachClamp.distanceToBox(0, 4.0, 0, 0, 0, 0), 1.0e-9);
+        assertEquals(3.1, ReachClamp.distanceToCenter(0, 4.0, 0, 0, 0, 0), 1.0e-9);
+        assertTrue(ReachClamp.passes(0, 4.0, 0, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8),
+                "a steep honest answer inside the box floor (2.2<=2.4) must pass despite centre 3.1>2.72");
     }
 
     @Test
     void handicapAcceptsTheHonestCapAndRejectsTheBlindOverReach() {
-        // The honest handicapped client's raycast shortens client-side to
-        // scale*maxReach = 2.4 eye-to-centre — accepted, a comfortable 0.32 margin.
+        // The honest handicapped cap at eye height (centre = scale*maxReach = 2.4) —
+        // accepted on the centre threshold (2.4<=2.72); its box distance 1.99 also clears
+        // the 2.4 floor, so both bounds agree.
         double honestZ = Math.sqrt(0.8 * MAX_REACH * (0.8 * MAX_REACH) - V_GAP * V_GAP);
         assertEquals(0.8 * MAX_REACH,
                 ReachClamp.distanceToCenter(0, EYE, honestZ, 0, 0, 0), 1.0e-9);
         assertTrue(ReachClamp.passes(0, EYE, honestZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8),
                 "the honest handicapped cap (centre = scale*maxReach) must pass");
 
-        // The attribute-blind client's OWN gate edge (eye->chest-centre = maxReach = 3.0).
+        // The attribute-blind client's OWN gate edge (eye->chest-centre = maxReach = 3.0):
+        // centre 3.0>2.72 AND its eye-to-box there (2.6124) exceeds the 2.4 floor, so the
+        // floor does NOT rescue it and it is denied — the bite is intact.
         double blindZ = Math.sqrt(MAX_REACH * MAX_REACH - V_GAP * V_GAP);
         assertEquals(MAX_REACH, ReachClamp.distanceToCenter(0, EYE, blindZ, 0, 0, 0), 1.0e-9);
+        assertTrue(ReachClamp.distanceToBox(0, EYE, blindZ, 0, 0, 0) > 0.8 * MAX_REACH,
+                "the blind edge's eye-to-box must exceed the honest floor (so the floor cannot rescue it)");
         assertFalse(ReachClamp.passes(0, EYE, blindZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8),
                 "the blind client's own reach edge (centre = maxReach) must be denied when handicapped");
     }
