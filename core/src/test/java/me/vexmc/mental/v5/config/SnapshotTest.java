@@ -68,7 +68,11 @@ class SnapshotTest {
         assertEquals(ProjectileKnockbackSettings.DEFAULTS, settings(snapshot, Feature.PROJECTILE_KNOCKBACK));
         assertEquals(CraftingSettings.DEFAULTS, settings(snapshot, Feature.CRAFTING));
         assertEquals(OffhandSettings.DEFAULTS, settings(snapshot, Feature.OFFHAND));
-        assertEquals(ComboSettings.DEFAULTS, settings(snapshot, Feature.COMBO_HOLD));
+        ComboSettings combo = settings(snapshot, Feature.COMBO_HOLD);
+        assertEquals(ComboSettings.DEFAULTS, combo);
+        // target-v2 data-backed anchor retune: the shipped default is 2.85 (the lab's
+        // held-separation equilibrium), not the old reach-triangle 2.75.
+        assertEquals(2.85, combo.target(), 0.0, "parse-empty combo target is the retuned 2.85 anchor");
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {

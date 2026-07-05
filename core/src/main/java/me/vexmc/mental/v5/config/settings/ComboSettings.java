@@ -12,9 +12,12 @@ import me.vexmc.mental.kernel.math.TargetMode;
  *
  * <p>Every default is the design's, and the whole record is a byte-identical
  * no-op contract only because the MODULE defaults OFF (strictly server-opt-in,
- * owner decision §6): {@code target 2.75} comes from the reach-triangle (§2, not
- * tuned), and the clamps {@code [0.8, 1.2]} are the honesty boundary — past them
- * the pocket is honestly lost and era physics wins.</p>
+ * owner decision §6): {@code target 2.85} is the data-backed anchor (the lab's
+ * 71-combo round — every one of the five longest combos held 2.81–2.86, the
+ * [2.8, 2.92) band broke combos 1.3%/hit vs 5.9% at the cap edge, and the old
+ * 2.75 was unreachable at signature scale so it was never a regulated
+ * equilibrium), and the clamps {@code [0.8, 1.2]} are the honesty boundary —
+ * past them the pocket is honestly lost and era physics wins.</p>
  *
  * <p><b>Precision-round knobs (§3.2b).</b> {@code targetMode} is {@code ANCHOR}
  * by default — the exposure-budget dynamic target is computed and pushed to the
@@ -35,9 +38,10 @@ public record ComboSettings(
         TargetMode targetMode,
         double hitCap) {
 
-    /** The design defaults (§3.1/§3.2/§3.2b). The MODULE toggle — not this record — is what makes it a no-op. */
+    /** The design defaults (§3.1/§3.2/§3.2b; target 2.85 per the target-v2 retune).
+     *  The MODULE toggle — not this record — is what makes it a no-op. */
     public static final ComboSettings DEFAULTS =
-            new ComboSettings(3, 20, 10, 6.0, 2.75, 1.0, 0.8, 1.2, 10,
+            new ComboSettings(3, 20, 10, 6.0, 2.85, 1.0, 0.8, 1.2, 10,
                     TargetMode.ANCHOR, PocketServoConfig.DEFAULT_HIT_CAP);
 
     /** The detector thresholds the {@code ComboTracker} reads. */

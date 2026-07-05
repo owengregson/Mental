@@ -21,10 +21,36 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                          KinematicState kinematics, double moveSpeedAttr,
                          UUID comboAttackerId,
                          double measuredVx, double measuredVz, float yaw,
-                         double eyeHeight, int groundedTicks) {
+                         double eyeHeight, int groundedTicks,
+                         double yawRateDegPerTick) {
 
     /** The standing eye height above feet — the pocket-servo precision default (ReachValidator.EYE_HEIGHT). */
     private static final double DEFAULT_EYE_HEIGHT = 1.62;
+
+    /**
+     * The pre-target-v2 precision arity: carries the five §3.2b inputs but no
+     * measured yaw rate. {@code yawRateDegPerTick} defaults to {@link Double#NaN}
+     * (no source ⇒ the dynamic target's continuous turn term degrades to the
+     * conservative 30°/tick floor — target-v2 repair #4), so a view built without
+     * the yaw window is byte-identical to the pre-v2 solve.
+     */
+    public PlayerView(UUID id, int entityId, TickStamp at,
+                      Decay.Motion motion, boolean grounded, double slipperiness,
+                      double gravity, double jumpImpulse, int jumpBoostAmplifier,
+                      boolean sprinting, boolean creative, boolean pvpAllowed,
+                      int noDamageTicks, int maxNoDamageTicks,
+                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      KnockbackProfile profile, int pingMillis,
+                      KinematicState kinematics, double moveSpeedAttr,
+                      UUID comboAttackerId,
+                      double measuredVx, double measuredVz, float yaw,
+                      double eyeHeight, int groundedTicks) {
+        this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
+                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, Double.NaN);
+    }
 
     /**
      * The pre-precision-round arity (combo-hold §3.2): carries the {@code
