@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.feature.combo;
 
+import java.util.List;
 import java.util.UUID;
 import me.vexmc.mental.api.event.ComboEndEvent;
 import me.vexmc.mental.api.event.ComboStartEvent;
@@ -36,6 +37,16 @@ public final class ComboEvents {
 
     public ComboEvents(ComboReachHandicap reachHandicap) {
         this.reachHandicap = reachHandicap;
+    }
+
+    /**
+     * Fires every transition in order (the balanced END-then-START pair a
+     * {@code minHits == 1} restart produces, or a single transition, or none).
+     */
+    public void fire(Player victim, List<ComboTransition> transitions) {
+        for (ComboTransition transition : transitions) {
+            fire(victim, transition);
+        }
     }
 
     /** Fires the matching api event for {@code transition}, or nothing for {@link ComboTransition#NONE}. */
