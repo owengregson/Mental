@@ -1,0 +1,117 @@
+package me.vexmc.mental.v5.feature.pots;
+
+import java.util.function.Supplier;
+import me.vexmc.mental.v5.config.Snapshot;
+import me.vexmc.mental.v5.config.settings.FastPotsSettings;
+import me.vexmc.mental.v5.feature.Feature;
+import me.vexmc.mental.v5.feature.FeatureUnit;
+import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.SettingsKey;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.ThrownPotion;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.Vector;
+import org.jetbrains.annotations.NotNull;
+
+/**
+ * Redirects a steeply-thrown splash potion at the thrower's own predicted feet at
+ * a multiplied speed — the classic "fast pot" self-heal, made reliable (POTS
+ * family, owner directive 2026-07-04).
+ *
+ * <p>When a {@link ThrownPotion} whose item is a splash potion is launched by a
+ * player looking down more steeply than {@code angle-degrees} (Bukkit pitch >
+ * threshold), the launch velocity is re-aimed by {@link PotsAim} to land on the
+ * thrower's feet — extrapolated over the short flight from the thrower's current
+ * per-tick velocity — at {@code speed-multiplier ×} the vanilla launch speed.
+ * Shallower throws are left byte-for-byte untouched (zero-touch outside the band),
+ * and LINGERING potions are excluded (their item is {@code LINGERING_POTION}, not
+ * {@code SPLASH_POTION}) — this aids the instant splash self-heal, not the ground
+ * cloud.</p>
+ *
+ * <p>Threading: {@link ProjectileLaunchEvent} fires on the owning region thread,
+ * so the velocity write is inline and Folia-safe with no cross-region read. The
+ * thrower's measured velocity is {@link Player#getVelocity()} — an owning-thread
+ * read; the published session view would be marginally fresher but is not worth
+ * the coupling for a short-flight aim aid (documented simplification).</p>
+ */
+public final class FastPotsUnit implements FeatureUnit, Listener {
+
+    /** The splash-potion item name — resolved by string so no Material constant is hard-linked. */
+    private static final String SPLASH_POTION = "SPLASH_POTION";
+
+    /** Below this launch speed there is no vanilla velocity to scale — leave it alone. */
+    private static final double DEGENERATE_SPEED = 1.0e-6;
+
+    private final Supplier<Snapshot> snapshot;
+
+    public FastPotsUnit(@NotNull Supplier<Snapshot> snapshot) {
+        this.snapshot = snapshot;
+    }
+
+    @Override
+    public Feature descriptor() {
+        return Feature.FAST_POTS;
+    }
+
+    @Override
+    public void assemble(Scope scope, Snapshot ignored) {
+        scope.listen(this);
+    }
+
+    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    public void onLaunch(@NotNull ProjectileLaunchEvent event) {
+        if (!(event.getEntity() instanceof ThrownPotion potion)) {
+            return;
+        }
+        ItemStack item = potion.getItem();
+        if (item == null || !SPLASH_POTION.equals(item.getType().name())) {
+            return; // not a splash potion (a lingering potion or a water bottle) — untouched
+        }
+        if (!(potion.getShooter() instanceof Player thrower)) {
+            return; // dispenser / non-player source — untouched
+        }
+
+        FastPotsSettings settings = settings();
+        // Bukkit pitch: positive is downward. Only a throw steeper than the threshold is redirected.
+        if (thrower.getLocation().getPitch() <= settings.angleDegrees()) {
+            return; // shallow — zero-touch outside the angle band
+        }
+
+        double vanillaSpeed = potion.getVelocity().length();
+        if (vanillaSpeed < DEGENERATE_SPEED) {
+            return; // no launch speed to scale
+        }
+        potion.setVelocity(redirect(potion.getLocation(), thrower, vanillaSpeed, settings));
+    }
+
+    /**
+     * The redirected launch velocity for a fast pot — public and production-derived
+     * so the integration suite asserts against exactly this, not a re-derivation.
+     * The target speed is {@code multiplier × vanillaSpeed}; the direction is
+     * {@link PotsAim}'s aim at the thrower's predicted feet.
+     */
+    public static @NotNull Vector redirect(
+            @NotNull Location launch, @NotNull Player thrower, double vanillaSpeed,
+            @NotNull FastPotsSettings settings) {
+        Location feet = thrower.getLocation();
+        Vector throwerVelocity = thrower.getVelocity();
+        double targetSpeed = vanillaSpeed * settings.speedMultiplier();
+        PotsAim.Aim aim = PotsAim.aim(
+                launch.getX(), launch.getY(), launch.getZ(),
+                feet.getX(), feet.getY(), feet.getZ(),
+                throwerVelocity.getX(), throwerVelocity.getY(), throwerVelocity.getZ(),
+                targetSpeed);
+        return new Vector(aim.x(), aim.y(), aim.z());
+    }
+
+    @SuppressWarnings("unchecked")
+    private FastPotsSettings settings() {
+        return snapshot.get().settings(
+                (SettingsKey<FastPotsSettings>) Feature.FAST_POTS.settingsKey());
+    }
+}
