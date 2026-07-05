@@ -42,7 +42,12 @@ import org.jetbrains.annotations.Nullable;
  *       a zero cost fills every empty slot;</li>
  *   <li><b>fast-pots</b> — a steep (50°) throw is redirected to the predicted feet
  *       at multiplier × the vanilla speed (asserted against the production aim
- *       helper); a shallow (20°) throw and a lingering potion are untouched.</li>
+ *       helper), staged BOTH as a real tagged heal pot ({@link HealPotItems}, the
+ *       production seam) and as a tagless splash stack — the latter reads back as
+ *       AIR on 1.16.x–1.20.4, where the server stores a ThrownPotion's item only
+ *       when it differs from the entity default or carries a tag, so it live-pins
+ *       the production empty-item fallback exactly where the raw read is
+ *       dishonest; a shallow (20°) throw and a lingering potion are untouched.</li>
  * </ol>
  *
  * <p>The economy is stubbed directly (no Vault on the gate), and the pot-fill
@@ -268,19 +273,33 @@ public final class PotsSuite {
             Vector launch = new Vector(0.15, -0.45, 0.05); // an off-vertical vanilla throw
             double vanillaSpeed = launch.length();
 
-            Object[] observed = throwSplashObserving(context, thrower, 50.0f, "SPLASH_POTION", launch, settings);
-            if (observed == null) {
+            // A real fast pot carries a potion payload (its NBT tag). That matters on
+            // 1.16.x–1.20.4: the server stores a ThrownPotion's item ONLY when it
+            // differs from the entity default or has a tag, and the Bukkit getItem
+            // read has no empty→default fallback there — a tagless staged stack reads
+            // back as AIR (the 2026-07-04 1.16.5 gate failure). The representative
+            // staging is therefore the tagged heal pot every player actually throws,
+            // built through the production seam.
+            ItemStack healPot = new HealPotItems().createSplashHealPotion();
+            Object[] tagged = throwSplashObserving(context, thrower, 50.0f,
+                    healPot != null ? healPot : plainPotion("SPLASH_POTION"), launch, settings);
+            if (tagged == null) {
                 context.note("this version cannot stage a ThrownPotion launch — fast-pots logic unit-pinned");
                 return;
             }
-            Vector expected = (Vector) observed[0];
-            Vector applied = (Vector) observed[1];
+            assertRedirected(context, tagged, vanillaSpeed, settings, "tagged heal pot");
 
-            context.expectNear(expected.getX(), applied.getX(), 1.0e-4, "fast-pot redirect x (predicted feet)");
-            context.expectNear(expected.getY(), applied.getY(), 1.0e-4, "fast-pot redirect y (predicted feet)");
-            context.expectNear(expected.getZ(), applied.getZ(), 1.0e-4, "fast-pot redirect z (predicted feet)");
-            context.expectNear(vanillaSpeed * settings.speedMultiplier(), applied.length(), 1.0e-4,
-                    "fast-pot magnitude is multiplier × vanilla launch speed");
+            // The same throw with a tagless splash stack must redirect identically —
+            // on the 1.16.x–1.20.4 band it reads back as AIR and exercises the
+            // production empty-item fallback; honest tiers read SPLASH_POTION and
+            // take the plain path, so the assertion is version-uniform.
+            Object[] tagless = throwSplashObserving(context, thrower, 50.0f,
+                    plainPotion("SPLASH_POTION"), launch, settings);
+            if (tagless == null) {
+                context.note("tagless splash not stageable here — the AIR fallback is unit-pinned");
+                return;
+            }
+            assertRedirected(context, tagless, vanillaSpeed, settings, "tagless splash, AIR read band");
         } finally {
             setModule(context, Feature.FAST_POTS, false);
             context.syncRun(thrower::remove);
@@ -338,7 +357,7 @@ public final class PotsSuite {
             TestContext context, FakePlayer thrower, float pitch, String potionMaterialName, Vector launch)
             throws Exception {
         return context.sync(() -> {
-            ThrownPotion potion = stagePotion(thrower, pitch, potionMaterialName, launch);
+            ThrownPotion potion = stagePotion(thrower, pitch, plainPotion(potionMaterialName), launch);
             if (potion == null) {
                 return null;
             }
@@ -356,16 +375,18 @@ public final class PotsSuite {
     }
 
     /**
-     * As {@link #throwSplash} but also computes the EXPECTED redirect through the
-     * production aim helper ({@link FastPotsUnit#redirect}) at the moment of the
-     * launch, so the assertion is against the same code the feature runs, never a
-     * re-derivation. Returns {@code [expected, applied]}.
+     * As {@link #throwSplash} but takes the exact potion {@link ItemStack} to stage
+     * (tagged vs tagless matters on the 1.16.x–1.20.4 datawatcher-skip band) and
+     * also computes the EXPECTED redirect through the production aim helper
+     * ({@link FastPotsUnit#redirect}) at the moment of the launch, so the assertion
+     * is against the same code the feature runs, never a re-derivation. Returns
+     * {@code [expected, applied]}.
      */
     private static @Nullable Object[] throwSplashObserving(
-            TestContext context, FakePlayer thrower, float pitch, String potionMaterialName,
+            TestContext context, FakePlayer thrower, float pitch, @Nullable ItemStack potionItem,
             Vector launch, FastPotsSettings settings) throws Exception {
         return context.sync(() -> {
-            ThrownPotion potion = stagePotion(thrower, pitch, potionMaterialName, launch);
+            ThrownPotion potion = stagePotion(thrower, pitch, potionItem, launch);
             if (potion == null) {
                 return null;
             }
@@ -387,12 +408,11 @@ public final class PotsSuite {
 
     /** Spawns and configures a splash/lingering {@link ThrownPotion}, or {@code null} on failure. */
     private static @Nullable ThrownPotion stagePotion(
-            FakePlayer thrower, float pitch, String potionMaterialName, Vector launch) {
+            FakePlayer thrower, float pitch, @Nullable ItemStack potionItem, Vector launch) {
+        if (potionItem == null) {
+            return null;
+        }
         try {
-            Material potionMaterial = Material.getMaterial(potionMaterialName);
-            if (potionMaterial == null) {
-                return null;
-            }
             Player player = thrower.player();
             Location at = player.getLocation();
             at.setPitch(pitch);
@@ -400,13 +420,39 @@ public final class PotsSuite {
 
             Location spawnAt = player.getLocation().add(0, 1.5, 0); // roughly the eye
             ThrownPotion potion = spawnAt.getWorld().spawn(spawnAt, ThrownPotion.class);
-            potion.setItem(new ItemStack(potionMaterial));
+            potion.setItem(potionItem);
             potion.setShooter(player);
             potion.setVelocity(launch.clone());
             return potion;
         } catch (Throwable unsupported) {
             return null;
         }
+    }
+
+    /** A plain, tagless potion stack resolved by name — {@code null} when the material is absent. */
+    private static @Nullable ItemStack plainPotion(String materialName) {
+        Material material = Material.getMaterial(materialName);
+        return material == null ? null : new ItemStack(material);
+    }
+
+    /**
+     * The four redirect assertions for one observed throw — expected vs applied on
+     * each axis at the production tolerance, plus the magnitude invariant. The
+     * staging tag names WHICH item form failed (tagged pot vs the AIR-read band).
+     */
+    private static void assertRedirected(
+            TestContext context, Object[] observed, double vanillaSpeed,
+            FastPotsSettings settings, String staging) {
+        Vector expected = (Vector) observed[0];
+        Vector applied = (Vector) observed[1];
+        context.expectNear(expected.getX(), applied.getX(), 1.0e-4,
+                "fast-pot redirect x (predicted feet; " + staging + ")");
+        context.expectNear(expected.getY(), applied.getY(), 1.0e-4,
+                "fast-pot redirect y (predicted feet; " + staging + ")");
+        context.expectNear(expected.getZ(), applied.getZ(), 1.0e-4,
+                "fast-pot redirect z (predicted feet; " + staging + ")");
+        context.expectNear(vanillaSpeed * settings.speedMultiplier(), applied.length(), 1.0e-4,
+                "fast-pot magnitude is multiplier × vanilla launch speed (" + staging + ")");
     }
 
     private static int countHealPotions(HealPotItems items, PlayerInventory inventory) {
