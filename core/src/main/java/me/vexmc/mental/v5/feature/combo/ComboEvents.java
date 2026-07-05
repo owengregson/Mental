@@ -60,6 +60,13 @@ public final class ComboEvents {
             reachHandicap.onComboStart(victim);
         } else {
             reachHandicap.onComboEnd(victim);
+            // Clear the pocket-servo memory at the combo END so the NEXT combo (a
+            // different attacker, or a re-engaged chain) starts memoryless as designed
+            // — never seeding the V2 dynamic target's cross-hit smoothing from a prior
+            // combo's/attacker's closing state. Forget on END, never START: within a
+            // combo the memory must persist hit-to-hit. Idempotent and empty under the
+            // shipped ANCHOR default (the memory is unwritten there).
+            ComboPredictor.forget(victim.getUniqueId());
         }
         LivingEntity attacker = resolve(transition.attacker());
         if (transition.started()) {
