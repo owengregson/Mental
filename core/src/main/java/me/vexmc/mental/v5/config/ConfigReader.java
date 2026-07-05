@@ -76,6 +76,23 @@ public record ConfigReader(ConfigurationSection section, String prefix, ConfigIs
         return value;
     }
 
+    /**
+     * A number confined to {@code [minimum, maximum]} — warn-and-fallback when out
+     * of range (the established contract: an out-of-band value warns once and the
+     * DEFAULT stands, never a silent clamp to the boundary, so the operator sees
+     * exactly what took effect). Used by the combo-hold reach handicap, whose scale
+     * is meaningful only inside {@code [0.5, 1.0]} (a handicap never inflates reach).
+     */
+    public double numberInRange(String key, double fallback, double minimum, double maximum) {
+        double value = number(key, fallback);
+        if (value < minimum || value > maximum) {
+            issues.warn(path(key),
+                    "must be within [" + minimum + ", " + maximum + "], found " + value, fallback);
+            return fallback;
+        }
+        return value;
+    }
+
     public String text(String key, String fallback) {
         if (section == null || !section.isSet(key)) {
             return fallback;

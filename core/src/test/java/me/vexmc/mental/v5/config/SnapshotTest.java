@@ -142,6 +142,51 @@ class SnapshotTest {
     }
 
     @Test
+    void comboReachHandicapReadsEnabledAndScaleFromTheNestedSection() throws Exception {
+        SnapshotParser.Result result = parse("""
+                combo-hold:
+                  reach-handicap:
+                    enabled: true
+                    reach-scale: 0.7
+                """, "", "", "");
+
+        ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
+        assertTrue(combo.reachHandicap().enabled(), "the nested enabled flag flips");
+        assertEquals(0.7, combo.reachHandicap().scale(), "the in-range scale is stored verbatim");
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+    }
+
+    @Test
+    void comboReachHandicapDefaultsOffWhenTheSubSectionIsAbsent() throws Exception {
+        // The module knobs present but no reach-handicap block: the sub-feature stays
+        // the era-exact no-op (OFF, 0.8) — opt-in inside the opt-in module.
+        ComboSettings combo = settings(parse("""
+                combo-hold:
+                  min-hits: 4
+                """, "", "", "").snapshot(), Feature.COMBO_HOLD);
+        assertEquals(ComboSettings.ReachHandicap.DEFAULTS, combo.reachHandicap());
+    }
+
+    @Test
+    void comboReachScaleOutOfRangeWarnsOnceAndFallsBack() throws Exception {
+        // 1.4 would INFLATE reach — a handicap never does; it warns and the default 0.8 stands.
+        SnapshotParser.Result result = parse("""
+                combo-hold:
+                  reach-handicap:
+                    enabled: true
+                    reach-scale: 1.4
+                """, "", "", "");
+
+        ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
+        assertEquals(ComboSettings.ReachHandicap.DEFAULTS.scale(), combo.reachHandicap().scale(),
+                "out-of-range scale fell back to the default");
+        assertTrue(combo.reachHandicap().enabled(), "the enabled flag still applied");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("reach-scale"));
+        assertTrue(result.issues().get(0).contains("combo-hold.reach-handicap"));
+    }
+
+    @Test
     void probeStrategyIsStoredRawSoTheParserStaysVersionBlind() throws Exception {
         // The parser no longer resolves the transport — that is version-aware and happens
         // at the boot seam (ProbeStrategy.resolveEffective, pinned in ProbeStrategyTest).
