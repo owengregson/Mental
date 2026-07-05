@@ -59,11 +59,20 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p>Zero-touch: with the sub-feature off {@link #onComboStart} constructs no
  * modifier and pays no probe (a single boolean read gates it); removal on end stays
- * unconditional so any lingering modifier self-heals. Every attribute write during
- * normal operation runs inside {@link Scheduling#runOn} (Folia-correct); the scope
- * close restores INLINE on the disabling thread, where the scheduler may already be
- * stopping and synchronous attribute access is safe (the {@code EraReachAttribute}
- * precedent).</p>
+ * unconditional so any lingering modifier self-heals. The transition legs run
+ * through {@link Scheduling#ensureOn} — INLINE, because {@code ComboEvents.fire}
+ * always runs on the victim's owning thread. Inline is load-bearing on the quit
+ * path (audit quit-path conflict): the RETIRED end fires during
+ * {@code PlayerQuitEvent}, and a deferred {@code runOn} dies at the next-tick
+ * validity gate AFTER the disconnect already saved the modifier into the player's
+ * NBT — a combat-log then persists the {@code mental:combo-reach} handicap, and
+ * permanently so if the feature is off at their next join (no sweep runs). The
+ * inline remove lands before the save, the same pre-save shape
+ * {@code EphemeralDecoration.onQuit} established. The lifecycle sweeps
+ * ({@link #enable}/{@link #onJoin}) stay deferred {@link Scheduling#runOn} (their
+ * players are alive and staying); the scope close restores INLINE on the disabling
+ * thread, where the scheduler may already be stopping and synchronous attribute
+ * access is safe (the {@code EraReachAttribute} precedent).</p>
  */
 public final class ComboReachHandicap implements Listener {
 
@@ -80,7 +89,31 @@ public final class ComboReachHandicap implements Listener {
 
     /** Whether this server exposes the interaction-range attribute (1.20.5+). */
     public boolean supported() {
+        return leverSupported();
+    }
+
+    /**
+     * The static half of {@link #supported()} — netty-safe (both probes are
+     * class-load-time constants) so the fast path's reach validation can consult
+     * the handicap without holding this instance. The attribute probe runs FIRST:
+     * on a sub-1.20.5 server it is null and short-circuits before
+     * {@link AttributeModifiers} would ever class-load (whose {@code NamespacedKey}
+     * constant must not link below 1.12).
+     */
+    public static boolean leverSupported() {
         return Attributes.entityInteractionRange() != null && AttributeModifiers.supported();
+    }
+
+    /**
+     * Whether the handicap will actually shorten a combo victim's reach on this
+     * server under the LIVE config — the sub-feature is on AND the attribute
+     * lever exists. The {@code HitboxUnit} keys its ATTACK_RANGE-component strip
+     * on this (audit: on 1.21.5+ a held weapon's explicit component supplies the
+     * attack window and the attribute is consulted by nothing, so the component
+     * must yield to the handicap for the combo's duration).
+     */
+    public boolean engaged() {
+        return supported() && config().enabled();
     }
 
     /* ----------------------------- transition legs ----------------------------- */
@@ -99,20 +132,25 @@ public final class ComboReachHandicap implements Listener {
             return; // sub-feature off ⇒ zero-touch, no modifier ever constructed
         }
         double scale = config.scale();
-        scheduling.runOn(victim, () -> applyNow(victim, scale), () -> {});
+        // ensureOn: ComboEvents.fire is on the victim's owning thread, so this is
+        // inline — and MUST match the end leg's inline shape, or a same-tick
+        // start+end pair would apply (deferred) AFTER it removed (inline).
+        scheduling.ensureOn(victim, () -> applyNow(victim, scale), () -> {});
     }
 
     /**
      * Leg 1 remove — the combo ended (any reason), so restore the victim's reach.
      * Unconditional (gated only on the attribute's presence): removal is idempotent
      * by identity, so a modifier applied under a since-disabled sub-feature is still
-     * cleared here.
+     * cleared here. INLINE via {@link Scheduling#ensureOn} — the quit path's
+     * RETIRED end must strip the modifier before the disconnect save (see the
+     * class javadoc; a deferred remove is dead on arrival for a quitting player).
      */
     public void onComboEnd(@NotNull Player victim) {
         if (!supported()) {
             return;
         }
-        scheduling.runOn(victim, () -> removeNow(victim), () -> {});
+        scheduling.ensureOn(victim, () -> removeNow(victim), () -> {});
     }
 
     /* ------------------------------ lifecycle legs ----------------------------- */

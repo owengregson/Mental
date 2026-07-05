@@ -152,6 +152,8 @@ public final class MentalPluginV5 extends JavaPlugin {
     private OcmBinding ocmBinding;
     private BukkitRegistrar registrar;
     private Reconciler reconciler;
+    /** The always-on OCM coordination unit — held so a reload can re-derive the warnings. */
+    private OcmCompatUnit ocmCompat;
 
     private VelocityValve valve;
     private ViewBuilder viewBuilder;
@@ -439,11 +441,19 @@ public final class MentalPluginV5 extends JavaPlugin {
      * warn-and-fallback issues for the invoking sender.
      */
     public @NotNull List<String> reloadAll() {
+        Set<MechanicToken> tokensBefore = enabledTokens();
         configStore.ensureDefaultFiles();
         this.overlay = new Overlay(configStore.overridesFile());
         this.snapshot = parseSnapshot();
         applyDebug(snapshot.debug());
         reconciler.converge(snapshot);
+        // Re-derive the OCM coexistence warnings whenever this converge CHANGED
+        // the enabled-token set (interaction audit: the double-apply warning was
+        // startup-only, so a GUI toggle of a ported rule feature against a live
+        // OCM module double-applied silently). Value-only reloads stay quiet.
+        if (ocmCompat != null && !tokensBefore.equals(enabledTokens())) {
+            ocmCompat.rewarn("reload: enabled features changed");
+        }
         return parseIssues;
     }
 
@@ -622,13 +632,18 @@ public final class MentalPluginV5 extends JavaPlugin {
         // Live OCM arbiter binding — keeps the OcmBinding current (service API
         // per-player, else config-conservative), the driver the routers' frozen
         // ownership reads and the coexistence warnings depend on.
-        reconciler.register(new OcmCompatUnit(
-                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message)));
+        this.ocmCompat = new OcmCompatUnit(
+                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message));
+        reconciler.register(ocmCompat);
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
+        // The knockback unit reads the sword-block decoration (observation only) so
+        // Mental's own injected temp shield is never mistaken for a real modern
+        // shield by the full-block cancel (audit C1 — era: half damage, FULL knock).
         reconciler.register(new KnockbackUnit(
                 sessions, domains, ocmBinding, latency, scheduling, this::snapshot,
-                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK), comboEvents));
+                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK), comboEvents,
+                swordBlockDecoration));
         reconciler.register(latencyCompensation);
         reconciler.register(new FishingKnockbackUnit(
                 sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));
@@ -644,10 +659,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // port the era flat armour reduction and Unbreaking skip.
         reconciler.register(new ArmourStrengthUnit());
         reconciler.register(new ArmourDurabilityUnit());
-        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot));
+        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot, sessions));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
-        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration));
+        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration, this::snapshot));
 
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);
@@ -673,8 +688,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         // component (1.21.5+, boot-probed on the PlatformProfile) — a documented no-op
         // where neither exists (the client picks the melee target).
         reconciler.register(new CraftingUnit(this::snapshot));
-        reconciler.register(new OffhandUnit(this::snapshot, scheduling));
-        reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange()));
+        // Off-hand consults the sword-block decoration (observation only) so its
+        // enable/reload strip pass never eats Mental's own temp shield mid-block
+        // (audit: permanent loss of the stored original + a conjured marked shield).
+        reconciler.register(new OffhandUnit(this::snapshot, scheduling, swordBlockDecoration));
+        // Hitbox coordinates with the combo reach handicap (audit): on 1.21.5+ its
+        // ATTACK_RANGE component would override the handicap-shortened attribute,
+        // so the unit strips a comboed victim's held weapon for the combo's span.
+        reconciler.register(new HitboxUnit(this, scheduling, platformProfile.attackRange(),
+                comboReachHandicap));
 
         // The combo family (2.5.0). The pocket servo lives entirely session-side:
         // the unit's scope opens/closes combo tracking on the SessionService; every

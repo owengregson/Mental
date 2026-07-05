@@ -1,10 +1,16 @@
 package me.vexmc.mental.v5.feature.loadout;
 
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.api.event.ComboEndEvent;
+import me.vexmc.mental.api.event.ComboStartEvent;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.platform.AttackRangeAdapter;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
@@ -62,7 +68,11 @@ import org.jetbrains.annotations.NotNull;
  *   <li><b>1.21.5+</b> — additionally the {@code ATTACK_RANGE} item component (era
  *       {@code max_reach=3.0}, {@code hitbox_margin=0.1}) on the held weapon,
  *       reconciled on join / hotbar / swap / world change and stripped on
- *       drop / death / world / quit / disable.</li>
+ *       drop / death / world / quit / disable. The component YIELDS to the
+ *       combo-hold reach handicap for a combo's duration (audit): an explicit
+ *       component supplies the whole attack window, so a comboed victim's held
+ *       weapon is stripped on combo START and re-stamped on the end — otherwise
+ *       the handicap's shortened attribute would be consulted by nothing.</li>
  * </ul>
  *
  * <h2>No NMS surface (version-safe by construction)</h2>
@@ -85,13 +95,31 @@ public final class HitboxUnit implements FeatureUnit, Listener {
     private final Scheduling scheduling;
     private final AttackRangeAdapter component;
     private final EraReachAttribute attribute;
+    private final ComboReachHandicap reachHandicap;
+
+    /**
+     * Victims whose held weapon this unit stripped for the duration of an active
+     * combo (audit: HITBOX component × COMBO_HOLD reach handicap). On 1.21.5+ an
+     * item carrying the explicit {@code ATTACK_RANGE} component takes its attack
+     * window from the component's fixed min/max — the handicap's shortened
+     * {@code ENTITY_INTERACTION_RANGE} attribute is then consulted by nothing, so
+     * the whole sub-feature would be silently void whenever the comboed victim
+     * holds a weapon. While a member is in this set, {@link #applyToHeld} strips
+     * instead of stamping (a mid-combo hotbar/swap/world reconcile must not
+     * restore the override), and the combo end re-stamps the held weapon. Written
+     * only on the victim's owning thread (the combo events and this unit's
+     * handlers); concurrent because the enable/disable pass reads it globally.
+     */
+    private final Set<UUID> comboStripped = ConcurrentHashMap.newKeySet();
 
     public HitboxUnit(
-            @NotNull Plugin plugin, @NotNull Scheduling scheduling, @NotNull AttackRangeAdapter component) {
+            @NotNull Plugin plugin, @NotNull Scheduling scheduling, @NotNull AttackRangeAdapter component,
+            @NotNull ComboReachHandicap reachHandicap) {
         this.plugin = plugin;
         this.scheduling = scheduling;
         this.component = component;
         this.attribute = new EraReachAttribute(plugin, scheduling);
+        this.reachHandicap = reachHandicap;
     }
 
     @Override
@@ -115,8 +143,58 @@ public final class HitboxUnit implements FeatureUnit, Listener {
                 for (Player player : Bukkit.getOnlinePlayers()) {
                     stripHands(player);
                 }
+                // The scope owns the combo-strip state: with HITBOX off no weapon
+                // carries the component, so there is nothing left to coordinate.
+                comboStripped.clear();
             };
         });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Combo reach-handicap coordination (1.21.5+ component tier)         */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Combo START with the reach handicap engaged: strip the era component from
+     * the victim's held weapon so their attack window falls back to
+     * {@code AttackRange.defaultFor()} — which honours the handicap-shortened
+     * attribute (margin 0, stricter than era) — instead of the component's fixed
+     * 3.0 + 0.1 window that would void the handicap for the combo's duration.
+     * Inline: {@code ComboEvents} fires on the victim's owning thread.
+     *
+     * <p>Known edge (documented): enabling HITBOX mid-combo re-stamps the victim
+     * on the enable pass — the strip only rides the START transition, so that one
+     * combo keeps the component window until it ends.</p>
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onComboStart(@NotNull ComboStartEvent event) {
+        if (!component.supported() || !reachHandicap.engaged()) {
+            return;
+        }
+        Player victim = event.getVictim();
+        comboStripped.add(victim.getUniqueId());
+        PlayerInventory inventory = victim.getInventory();
+        ItemStack main = inventory.getItemInMainHand();
+        if (component.strip(main)) {
+            inventory.setItemInMainHand(main);
+        }
+    }
+
+    /**
+     * Combo end (any reason): re-stamp the held weapon the START stripped. A
+     * RETIRED end is the quit path — the quit strip owns that cleanup, and
+     * re-stamping a quitting player would race the inventory save.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onComboEnd(@NotNull ComboEndEvent event) {
+        Player victim = event.getVictim();
+        if (!comboStripped.remove(victim.getUniqueId())) {
+            return;
+        }
+        if (event.getReason() == ComboEndEvent.Reason.RETIRED) {
+            return;
+        }
+        applyToHeld(victim);
     }
 
     /* ------------------------------------------------------------------ */
@@ -201,7 +279,10 @@ public final class HitboxUnit implements FeatureUnit, Listener {
     public void onQuit(@NotNull PlayerQuitEvent event) {
         Player player = event.getPlayer();
         // Restore the attribute base and strip the component so a saved inventory
-        // never persists a Mental-modified weapon.
+        // never persists a Mental-modified weapon. Belt for the combo-strip set:
+        // the RETIRED combo end normally clears it first (SessionService registers
+        // before this unit), but the strip must never outlive the session.
+        comboStripped.remove(player.getUniqueId());
         attribute.restore(player);
         stripHands(player);
     }
@@ -218,6 +299,16 @@ public final class HitboxUnit implements FeatureUnit, Listener {
         PlayerInventory inventory = player.getInventory();
         ItemStack main = inventory.getItemInMainHand();
         if (main.getType() == Material.AIR) {
+            return;
+        }
+        // Mid-combo with the reach handicap engaged, the held weapon must NOT
+        // carry the component (its explicit window would override the shortened
+        // attribute) — a hotbar change / swap / world reconcile strips instead,
+        // covering a previously-stamped sword switched to during the combo.
+        if (comboStripped.contains(player.getUniqueId())) {
+            if (component.strip(main)) {
+                inventory.setItemInMainHand(main);
+            }
             return;
         }
         if (AttackRangeAdapter.isWeapon(main.getType())) {

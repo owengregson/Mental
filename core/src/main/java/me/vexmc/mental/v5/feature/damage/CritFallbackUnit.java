@@ -2,12 +2,14 @@ package me.vexmc.mental.v5.feature.damage;
 
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.CritPosture;
+import me.vexmc.mental.kernel.delivery.HitTransaction;
+import me.vexmc.mental.kernel.model.HitSource;
+import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.config.Snapshot;
-import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
-import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.session.SessionService;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -18,11 +20,15 @@ import org.bukkit.event.entity.EntityDamageEvent;
 
 /**
  * The 1.8 critical-hit rule for hits the fast path does NOT compose (the retired
- * {@code module.damage.CritFallbackModule} on the v5 seams). When the fast path
- * is on, its {@link DamageShaper} already injects the era crit inline (so this
- * unit returns immediately); when it is off, a player's falling melee should
- * still crit for ×1.5 with no sprint/cooldown gate (era rule), which vanilla's
- * 1.9 crit (sprint-excluded, cooldown-gated) would otherwise deny.
+ * {@code module.damage.CritFallbackModule} on the v5 seams). A hit the fast path
+ * MINTED already carries the era crit — its {@link DamageShaper} composed it
+ * inline — so this unit yields to exactly those hits, PER HIT (interaction audit
+ * C2: the old global fast-path-enabled read also skipped every vanilla-landing
+ * melee while the knob was on — Folia mob combat, stale/absent-view victims,
+ * packetless attackers — leaving vanilla's sprint-excluded, cooldown-gated 1.9
+ * crit in charge with this feature explicitly enabled). Any melee that reaches
+ * the vanilla {@code Player#attack} path gets the era ×1.5 fold here, whether
+ * the fast path is globally on or not.
  *
  * <p>Crit/tool-damage ownership resolves through the SAME {@link DamageOwnership}
  * the fast path holds (mandate §4.6): the forgotten-gate bug — the retired
@@ -34,10 +40,12 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
 
     private final DamageOwnership ownership;
     private final Supplier<Snapshot> snapshot;
+    private final SessionService sessions;
 
-    public CritFallbackUnit(DamageOwnership ownership, Supplier<Snapshot> snapshot) {
+    public CritFallbackUnit(DamageOwnership ownership, Supplier<Snapshot> snapshot, SessionService sessions) {
         this.ownership = ownership;
         this.snapshot = snapshot;
+        this.sessions = sessions;
     }
 
     /** The shared crit/tool-damage verdict source — identical instance to the fast-path shaper. */
@@ -63,9 +71,12 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
                 || !(event.getEntity() instanceof LivingEntity)) {
             return;
         }
-        // Fast-path-OFF scope only: the fast path's DamageShaper already composed
-        // the era crit inline on hits it registered.
-        if (fastPathEnabled()) {
+        // Per-hit fast-path gate (audit C2): yield ONLY when THIS event is a hit
+        // the fast path minted (DamageShaper composed it, era crit included). The
+        // truth is the session transaction slots the fast path brackets its
+        // damage() calls with — never the global config knob, whose coverage is
+        // per-hit in reality.
+        if (fastPathMinted(event, attacker)) {
             return;
         }
         // The shared verdict: OCM owns crits for this attacker → yield entirely.
@@ -87,16 +98,41 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
         }
         double base = event.getDamage(EntityDamageEvent.DamageModifier.BASE);
         event.setDamage(EntityDamageEvent.DamageModifier.BASE, base * 1.5);
+        // Order-independence with the era armour cascade (interaction audit): both
+        // units share the LOWEST bucket, whose intra-priority order is registration
+        // order — Feature declaration order on first boot, silently REORDERED by a
+        // GUI toggle (unregisterAll + re-append). If ArmourStrengthUnit already ran,
+        // its defensive modifiers were sized against the un-critted BASE and the
+        // era rule is crit BEFORE armour (1.8 EntityHuman.attack multiplies before
+        // damageEntity's armour) — so re-run the cascade over the raised BASE here.
+        // Idempotent: when this unit ran first, the armour listener recomputes the
+        // identical values afterwards. Gated on the feature so a crit with
+        // old-armour-strength OFF composes with vanilla's model exactly as before.
+        Snapshot current = snapshot.get();
+        if (current != null && current.enabled(Feature.ARMOUR_STRENGTH)) {
+            ArmourStrengthUnit.applyEraCascade(event);
+        }
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean fastPathEnabled() {
-        Snapshot current = snapshot.get();
-        if (current == null) {
-            return true; // no snapshot ⇒ assume the fast path owns crits (the safe default)
+    /**
+     * Whether THIS event's damage was minted by the fast path (a {@link
+     * HitSource.Melee} transaction). Player victims: the {@code DamageRouter}
+     * (LOWEST, registered before every feature unit) has already established the
+     * event's transaction from the victim session's {@code activeInbound} bracket
+     * — a packetless/NPC melee arrives as {@code Vanilla(ENTITY_ATTACK)} and
+     * falls through to the era fold. Non-player victims have no session, so the
+     * fast path brackets the ATTACKER's session around its {@code damage()} call
+     * (Paper mob hits are fast-path-composed too); no bracket ⇒ a genuine
+     * vanilla {@code Player#attack} landing ⇒ the era crit applies.
+     */
+    private boolean fastPathMinted(EntityDamageByEntityEvent event, Player attacker) {
+        if (event.getEntity() instanceof Player victim) {
+            CombatSession session = sessions.sessionFor(victim.getUniqueId());
+            HitTransaction tx = session == null ? null : session.currentEventTransaction();
+            return tx != null && tx.context().source() instanceof HitSource.Melee;
         }
-        HitRegSettings hitReg = current.settings(
-                (SettingsKey<HitRegSettings>) Feature.HIT_REGISTRATION.settingsKey());
-        return current.enabled(Feature.HIT_REGISTRATION) && hitReg.fastPath();
+        CombatSession attackerSession = sessions.sessionFor(attacker.getUniqueId());
+        HitTransaction inbound = attackerSession == null ? null : attackerSession.activeInbound();
+        return inbound != null && inbound.context().source() instanceof HitSource.Melee;
     }
 }

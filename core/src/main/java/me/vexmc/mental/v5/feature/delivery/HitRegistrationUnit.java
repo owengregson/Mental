@@ -22,6 +22,7 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
+import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -36,8 +37,10 @@ import me.vexmc.mental.kernel.wire.CpsLimiter;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.kernel.wire.ReachValidator;
+import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -325,16 +328,24 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 vector = paced.vector();
                 tx.paceFactor(paced.paceFactor()); // journal the factors the pre-send applied (D-6)
                 tx.comboFactor(paced.comboFactor());
-                // The dynamic target and the full solve go to the DEBUG sink (not the
-                // journal) so the lab round can calibrate before the default flips.
-                if (servo.active() && debug.active()) {
+                // The V2 dynamic-target smoothing memory (target-v2 repair #2) commits
+                // whenever the DYNAMIC target is live — a gameplay-shaping input must
+                // never be gated behind the diagnostics sink (interaction audit: with
+                // target-mode: dynamic and debug off, the memory stayed NaN and every
+                // hit re-solved memoryless, the exact knife-edge the EMA/slew exists
+                // to kill; flipping debug on changed combat). The debug LINE alone
+                // stays under the sink gate; under the shipped ANCHOR default the
+                // dynamic value is journaled-not-used, so no solve runs debug-off.
+                boolean dynamicTarget = servo.active() && servo.targetMode() == TargetMode.DYNAMIC;
+                if (servo.active() && (dynamicTarget || debug.active())) {
                     PocketServo.Solution solution = KnockbackEngine.explainServo(
                             preAttacker, preVictim, profile, compensationY, freshSprint, servo, inputs);
-                    debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
-                    // Commit the V2 dynamic-target smoothing memory (target-v2 repair #2)
-                    // so the victim's next hit relaxes from this one — inert under the
-                    // shipped ANCHOR default (the dynamic value is journaled, not used).
-                    ComboPredictor.remember(victimId, solution);
+                    if (dynamicTarget) {
+                        ComboPredictor.remember(victimId, solution);
+                    }
+                    if (debug.active()) {
+                        debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
+                    }
                 }
             }
 
@@ -392,7 +403,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
                         () -> retract(victim, tx));
             } else {
                 scheduling.runOn(damageable,
-                        () -> applyNonPlayer(attackerId, targetId),
+                        () -> applyNonPlayer(attackerId, targetId, tx),
                         () -> {});
             }
         }
@@ -507,12 +518,51 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 (long) attackerView.pingMillis() + reach.interpolationOffsetMillis(),
                 reach.rewindCapMillis());
         long instantNanos = System.nanoTime() - rewindMillis * 1_000_000L;
+        // The combo reach handicap's server-side backstop (interaction audit): when
+        // the ATTACKER of this swing is themselves a combo VICTIM (someone holds a
+        // combo against them, read off their own frozen view) and the handicap is
+        // live, vanilla's melee gate would enforce the SHORTENED attribute — but
+        // the fast path cancelled that gate. Clamp the validation window by the
+        // same scale so a dishonest/attribute-blind client cannot answer a combo
+        // beyond what vanilla would have allowed. Null when the handicap is off,
+        // unsupported, or no combo is held against this attacker.
+        double maxReach = reach.maxReach();
+        Double handicapScale = comboReachHandicapScale(attackerView);
+        if (handicapScale != null) {
+            maxReach *= handicapScale;
+        }
         ReachValidator.Verdict verdict = ReachValidator.validate(
                 attackerPos.x(), attackerPos.y() + ReachValidator.EYE_HEIGHT, attackerPos.z(),
                 sessions.positions().samplesAround(victimId, instantNanos, 75_000_000L),
                 victimPos.x(), victimPos.y(), victimPos.z(),
-                reach.maxReach(), reach.leniency());
+                maxReach, reach.leniency());
         return verdict.valid();
+    }
+
+    /**
+     * The active reach-handicap scale for a swing by the player whose frozen view
+     * is {@code attackerView}, or null when the handicap does not shorten their
+     * reach: no combo held against them, COMBO_HOLD off, the sub-feature off, or
+     * the attribute lever absent (below 1.20.5, where vanilla's gate could not
+     * enforce it either). Netty-safe: one frozen view read, one snapshot read,
+     * and the class-load-constant lever probe.
+     */
+    @SuppressWarnings("unchecked")
+    private Double comboReachHandicapScale(PlayerView attackerView) {
+        if (attackerView.comboAttackerId() == null) {
+            return null;
+        }
+        Snapshot current = snapshot.get();
+        if (!current.enabled(Feature.COMBO_HOLD)) {
+            return null;
+        }
+        ComboSettings.ReachHandicap handicap = current.settings(
+                (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey())
+                .reachHandicap();
+        if (!handicap.enabled() || !ComboReachHandicap.leverSupported()) {
+            return null;
+        }
+        return handicap.scale();
     }
 
     /* ---------------------------- owning-thread appliers ---------------------------- */
@@ -549,7 +599,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
         }
     }
 
-    private void applyNonPlayer(UUID attackerUuid, int targetEntityId) {
+    private void applyNonPlayer(UUID attackerUuid, int targetEntityId, HitTransaction tx) {
         Player attacker = Bukkit.getPlayer(attackerUuid);
         if (attacker == null || !attacker.isOnline() || attacker.getGameMode() == GameMode.SPECTATOR) {
             return;
@@ -560,15 +610,33 @@ public final class HitRegistrationUnit implements FeatureUnit {
             return;
         }
         // A non-player LivingEntity is legacy-composed like a player victim (no
-        // transaction, so ownership resolves from the attacker); a non-living
-        // Damageable takes the retired HitApplier's flat 1.0.
+        // transaction passed to the shaper, so ownership resolves from the
+        // attacker); a non-living Damageable takes the retired HitApplier's flat 1.0.
         double amount = target instanceof LivingEntity ? composedAmount(attacker, null) : 1.0;
-        target.damage(amount, attacker);
+        // Bracket the ATTACKER's session with the minted Melee transaction (a mob
+        // victim has no session of its own) so the per-hit crit gate can tell this
+        // fast-path-composed damage apart from a genuine Player#attack landing
+        // (audit C2 — CritFallback must not double-crit Paper mob hits). This path
+        // never runs on Folia (non-player targets fall through to vanilla there),
+        // so the attacker's owning thread is the current one. A nested event this
+        // damage triggers against a PLAYER (thorns-back) is re-established by the
+        // DamageRouter per event and is cause-gated out of every melee consumer.
+        CombatSession attackerSession = sessions.sessionFor(attackerUuid);
+        if (attackerSession != null) {
+            attackerSession.activeInbound(tx);
+        }
+        try {
+            target.damage(amount, attacker);
+        } finally {
+            if (attackerSession != null) {
+                attackerSession.clearActiveInbound();
+            }
+        }
         applyToolWear(attacker);
     }
 
     private void damageWithSlot(Player attacker, Player victim, UUID victimUuid, HitTransaction tx) {
-        me.vexmc.mental.v5.CombatSession session = sessions.sessionFor(victimUuid);
+        CombatSession session = sessions.sessionFor(victimUuid);
         if (session != null) {
             session.activeInbound(tx);
         }
@@ -582,7 +650,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
     }
 
     private void retract(UUID victimUuid, HitTransaction tx) {
-        me.vexmc.mental.v5.CombatSession session = sessions.sessionFor(victimUuid);
+        CombatSession session = sessions.sessionFor(victimUuid);
         if (session != null) {
             session.desk().withdraw(tx.context().id());
         }

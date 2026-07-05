@@ -11,6 +11,7 @@ import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitId;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.SprintVerdict;
+import me.vexmc.mental.v5.session.SessionService;
 import me.vexmc.mental.kernel.model.TickStamp;
 import org.junit.jupiter.api.Test;
 
@@ -89,8 +90,17 @@ class DamageShaperTest {
         // and the crit fallback (vanilla path) are constructed from ONE instance.
         DamageOwnership source = new DamageOwnership((token, id) -> true);
         DamageShaper shaper = new DamageShaper(source);
-        CritFallbackUnit fallback = new CritFallbackUnit(source, () -> null);
+        CritFallbackUnit fallback = new CritFallbackUnit(source, () -> null, emptySessions());
         assertSame(shaper.ownership(), fallback.ownership(),
                 "both damage paths must resolve ownership through the SAME DamageOwnership");
+    }
+
+    /**
+     * A bare SessionService (deps unused before start()): sessionFor over the
+     * empty map answers null, which the per-hit crit gate reads as "not a
+     * fast-path hit" — the vanilla-landing default.
+     */
+    private static SessionService emptySessions() {
+        return new SessionService(null, null, null, null, null, null, null, null, null);
     }
 }

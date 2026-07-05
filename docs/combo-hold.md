@@ -184,3 +184,10 @@ derivation's §7.2 protocol) can calibrate the exposure-budget geometry before t
 default flips. The tick-sim grid, drift-estimator recovery, ping-shift, ground-tail
 and dynamic-target functions are all kernel-pinned to 1e-9 against an independent
 era fold.
+
+## Known / unproven interactions (2026-07-04 interaction audit — deferred, not fixed)
+
+- **Compensation × the gap-13–20 servo window** (low): a compensated-landed hit inside a still-active combo (gap ≥ 13, airborne victim within RTT of touchdown at ≥ ~100 ms) ships a grounded-equilibrium vertical the solve models as an AIR launch — σ* under-solves ~proportionally to the grounded-launch drag branch and the victim lands inside the pocket; bounded by the [0.8, 1.2] clamps and self-correcting on the next hit's re-solve.
+- **Servo `VICTIM_REACH` 2.9 vs the HITBOX `hitbox_margin` 0.1** (low, lab): on 1.21.5+ with `old-hitboxes` on, the victim's practical answer edge grows ~+0.1 beyond the exposure model's lab-calibrated 2.9 ring, so retaliation-ended combos can modestly exceed the calibration — a T1 lab-round recalibration item, not a code defect.
+- **CADENCE `attack_speed` spoof × the handicap's UPDATE_ATTRIBUTES sync** (unproven): whether the cooldown spoof's packet-local attribute re-encode and the combo-reach modifier's client sync interleave cleanly on the same UPDATE_ATTRIBUTES stream has not been proven either way.
+- **FAST_POTS 3×-speed self-projectile × anticheat posture** (unproven): whether movement/projectile anticheats flag the multiplied launch speed (and whether `ANTICHEAT_COMPAT` needs to know) is unmeasured.

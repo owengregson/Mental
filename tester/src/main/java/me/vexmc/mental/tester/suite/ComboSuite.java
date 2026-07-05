@@ -24,6 +24,7 @@ import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.platform.AttackRangeAdapter;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
@@ -31,11 +32,14 @@ import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.jetbrains.annotations.NotNull;
 
@@ -102,7 +106,9 @@ public final class ComboSuite {
                 new TestCase("combo: reach-handicap join-sweep clears a crash-leaked modifier (1.20.5+)",
                         context -> runReachSweepScenario(mental, tester, context)),
                 new TestCase("combo: reach-handicap OFF leaves interaction range untouched through a combo (1.20.5+)",
-                        context -> runReachZeroTouchScenario(mental, tester, context)));
+                        context -> runReachZeroTouchScenario(mental, tester, context)),
+                new TestCase("combo: reach-handicap wins over the HITBOX ATTACK_RANGE weapon component (1.21.5+)",
+                        context -> runReachHandicapComponentScenario(mental, tester, context)));
     }
 
     /* --------------------------- scenario 1: the chain --------------------------- */
@@ -511,6 +517,96 @@ public final class ComboSuite {
             context.expectNear(base, reachValue(context, victim), 1e-9,
                     "reach must stay untouched across the whole combo (zero-touch)");
         } finally {
+            teardownReach(mental, context, attacker, victim);
+        }
+    }
+
+    /* --------------- scenario 9: handicap vs the ATTACK_RANGE component ------------ */
+
+    /**
+     * The interaction-audit conflict: on 1.21.5+ the HITBOX unit stamps every held
+     * weapon with the explicit era {@code ATTACK_RANGE} component, and an explicit
+     * component supplies the WHOLE attack window — the handicap's shortened
+     * {@code ENTITY_INTERACTION_RANGE} attribute is then consulted by nothing, so
+     * the sub-feature was silently void for any armed victim. The fix strips the
+     * comboed victim's held weapon on combo START (the window falls back to the
+     * attribute-honouring default) and re-stamps it on the end. This asserts the
+     * component is absent exactly for the combo's span while the synced attribute
+     * carries the 0.8 handicap — the server-side window truth an armed victim's
+     * swing is gated by.
+     */
+    private static void runReachHandicapComponentScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!reachAttributeSupported()) {
+            context.skip("entity-interaction-range attribute absent (below 1.20.5) — reach handicap is a "
+                    + "documented no-op here");
+            return;
+        }
+        AttackRangeAdapter component = mental.platformProfile().attackRange();
+        if (!component.supported()) {
+            context.skip("ATTACK_RANGE component absent (below 1.21.5) — the component tier cannot "
+                    + "override the handicapped attribute here");
+            return;
+        }
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            setUpReach(mental, context, attacker, victim, /*handicap=*/ true);
+            context.syncRun(() -> {
+                mental.overlaySet("modules.old-hitboxes", true);
+                mental.reloadAll();
+                context.expect(mental.featureActive(Feature.HITBOX), "old-hitboxes must be active");
+                victim.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+                // The enable pass ran before the sword landed in the hand — fire the
+                // held-change reconcile the unit listens to, exactly as a client would.
+                Bukkit.getPluginManager().callEvent(new PlayerItemHeldEvent(victim.player(), 0, 0));
+            });
+            context.awaitTicks(3);
+            boolean stamped = context.sync(() ->
+                    component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(stamped,
+                    "HITBOX must stamp the held weapon with the era ATTACK_RANGE component pre-combo");
+            double base = reachValue(context, victim);
+
+            // A held combo: the component must yield (stripped) and the synced
+            // attribute must carry the handicap — the armed victim's real window.
+            buildActiveCombo(mental, context, attacker, victim);
+            context.awaitTicks(3);
+            context.expectNear(base * 0.8, reachValue(context, victim), 1e-6,
+                    "a held combo must scale the armed victim's interaction range by reach-scale (0.8)");
+            boolean strippedMidCombo = context.sync(() ->
+                    !component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(strippedMidCombo,
+                    "the held weapon must NOT carry the ATTACK_RANGE component mid-combo — an explicit "
+                            + "component supplies the whole window and would void the handicap");
+
+            // A mid-combo held-change reconcile must not re-stamp the override.
+            context.syncRun(() -> Bukkit.getPluginManager().callEvent(
+                    new PlayerItemHeldEvent(victim.player(), 0, 0)));
+            context.awaitTicks(2);
+            boolean stillStripped = context.sync(() ->
+                    !component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(stillStripped,
+                    "a mid-combo held-change reconcile re-stamped the component — the handicap gate on "
+                            + "applyToHeld must hold for the combo's whole span");
+
+            // End by retaliation: the attribute restores AND the component returns.
+            context.syncRun(() -> {
+                attacker.player().setNoDamageTicks(0);
+                victim.attack(attacker.player());
+            });
+            context.awaitTicks(5);
+            context.expectNear(base, reachValue(context, victim), 1e-9,
+                    "the RETALIATION end must restore the interaction range exactly");
+            boolean restamped = context.sync(() ->
+                    component.carries(victim.player().getInventory().getItemInMainHand()));
+            context.expect(restamped,
+                    "the combo end must re-stamp the era ATTACK_RANGE component on the held weapon");
+        } finally {
+            context.syncRun(() -> {
+                mental.overlaySet("modules.old-hitboxes", false);
+                mental.reloadAll();
+            });
             teardownReach(mental, context, attacker, victim);
         }
     }
