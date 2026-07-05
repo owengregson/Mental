@@ -90,6 +90,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private final TickClock clock;
     private final VelocityValve valve;
     private final DebugLog.Scoped debug;
+    private final ComboEvents comboEvents;
 
     /**
      * The burst sender reused for the blocked-hit hurt presentation (ships
@@ -102,7 +103,8 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     public KnockbackUnit(
             SessionService sessions, ConnectionDomains domains, OcmBinding ocmBinding,
             LatencyModel latency, Scheduling scheduling, Supplier<Snapshot> snapshot,
-            HitIds ids, TickClock clock, VelocityValve valve, DebugLog.Scoped debug) {
+            HitIds ids, TickClock clock, VelocityValve valve, DebugLog.Scoped debug,
+            ComboEvents comboEvents) {
         this.sessions = sessions;
         this.domains = domains;
         this.ocmBinding = ocmBinding;
@@ -113,6 +115,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         this.clock = clock;
         this.valve = valve;
         this.debug = debug;
+        this.comboEvents = comboEvents;
     }
 
     @Override
@@ -322,7 +325,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // own session (same region as the victim for melee), so it stamps the
         // right tracker regardless of whether the hit carried a sprint bonus.
         if (attackerSession != null && attackerSession.comboTracker() != null) {
-            ComboEvents.fire(player, attackerSession.comboTracker().onOwnHitLanded(clock.current()));
+            comboEvents.fire(player, attackerSession.comboTracker().onOwnHitLanded(clock.current()));
         }
         boolean bonus = sprinting || heldKnockbackLevel(player) > 0;
         if (!bonus) {

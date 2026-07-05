@@ -77,6 +77,7 @@ public final class SessionService implements Listener, SessionAccess {
     private final Supplier<Snapshot> snapshot;
     private final PositionRing positions;
     private final ConnectionDomains domains;
+    private final ComboEvents comboEvents;
 
     private final ConcurrentHashMap<UUID, CombatSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Integer> entityIdByPlayer = new ConcurrentHashMap<>();
@@ -108,7 +109,7 @@ public final class SessionService implements Listener, SessionAccess {
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
             VelocityValve valve, OcmBinding ocmBinding, Supplier<Snapshot> snapshot,
-            PositionRing positions, ConnectionDomains domains) {
+            PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
@@ -117,6 +118,7 @@ public final class SessionService implements Listener, SessionAccess {
         this.snapshot = snapshot;
         this.positions = positions;
         this.domains = domains;
+        this.comboEvents = comboEvents;
     }
 
     /** The per-player position ring the fast path rewinds through (reach) and reads latest (pre-send). */
@@ -199,7 +201,7 @@ public final class SessionService implements Listener, SessionAccess {
         // balanced; the session (and its tracker) is then discarded by forget.
         CombatSession session = sessions.get(event.getPlayer().getUniqueId());
         if (session != null && session.comboTracker() != null) {
-            ComboEvents.fire(event.getPlayer(), session.comboTracker().reset(ComboEndReason.RETIRED));
+            comboEvents.fire(event.getPlayer(), session.comboTracker().reset(ComboEndReason.RETIRED));
         }
         forget(event.getPlayer().getUniqueId());
     }
@@ -402,7 +404,7 @@ public final class SessionService implements Listener, SessionAccess {
         ComboTracker tracker = session.comboTracker();
         if (!comboEnabled) {
             if (tracker != null) {
-                ComboEvents.fire(player, tracker.reset(ComboEndReason.DISABLED));
+                comboEvents.fire(player, tracker.reset(ComboEndReason.DISABLED));
                 session.clearComboTracker();
             }
             return;
@@ -413,7 +415,7 @@ public final class SessionService implements Listener, SessionAccess {
         } else if (!tracker.rules().equals(rules)) {
             // A reload changed the detector thresholds: end any active combo cleanly
             // and rebuild with the new rules (rare — a deliberate admin action).
-            ComboEvents.fire(player, tracker.reset(ComboEndReason.RETIRED));
+            comboEvents.fire(player, tracker.reset(ComboEndReason.RETIRED));
             tracker = session.installComboTracker(rules);
         }
         // The grounded-run end reads the combat grounded truth (the packetless
@@ -421,7 +423,7 @@ public final class SessionService implements Listener, SessionAccess {
         // packetless victim's flag lies airborne forever on the 1.9/1.10 NMS, so
         // the run never accumulated and a held combo never released.
         double separation = separationTo(player.getUniqueId(), tracker.activeAttacker());
-        ComboEvents.fire(player, tracker.onTick(clock.current(), combatGrounded, separation));
+        comboEvents.fire(player, tracker.onTick(clock.current(), combatGrounded, separation));
     }
 
     /**

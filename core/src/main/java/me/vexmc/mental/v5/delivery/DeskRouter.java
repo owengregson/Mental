@@ -41,11 +41,13 @@ public final class DeskRouter implements Listener {
     private final SessionService sessions;
     private final VelocityValve valve;
     private final TickClock clock;
+    private final ComboEvents comboEvents;
 
-    public DeskRouter(SessionService sessions, VelocityValve valve, TickClock clock) {
+    public DeskRouter(SessionService sessions, VelocityValve valve, TickClock clock, ComboEvents comboEvents) {
         this.sessions = sessions;
         this.valve = valve;
         this.clock = clock;
+        this.comboEvents = comboEvents;
     }
 
     @EventHandler(priority = EventPriority.HIGH)
@@ -95,7 +97,7 @@ public final class DeskRouter implements Listener {
         if (!isMelee(context.source()) || context.attackerId() == null) {
             return; // rods/projectiles/self-launches never form combos
         }
-        ComboEvents.fire(victim, tracker.onKnockShipped(context.attackerId(), clock.current()));
+        comboEvents.fire(victim, tracker.onKnockShipped(context.attackerId(), clock.current()));
     }
 
     private static boolean isMelee(HitSource source) {
