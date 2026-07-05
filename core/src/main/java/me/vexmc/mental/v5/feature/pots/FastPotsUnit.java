@@ -31,7 +31,8 @@ import org.jetbrains.annotations.NotNull;
  * Shallower throws are left byte-for-byte untouched (zero-touch outside the band),
  * and LINGERING potions are excluded (their item is {@code LINGERING_POTION}, not
  * {@code SPLASH_POTION}) — this aids the instant splash self-heal, not the ground
- * cloud.</p>
+ * cloud. What counts as a splash potion is {@link #splashItem(String)} — including
+ * the 1.16.x–1.20.4 empty-item read of a tagless splash pot.</p>
  *
  * <p>Threading: {@link ProjectileLaunchEvent} fires on the owning region thread,
  * so the velocity write is inline and Folia-safe with no cross-region read. The
@@ -69,7 +70,7 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
             return;
         }
         ItemStack item = potion.getItem();
-        if (item == null || !SPLASH_POTION.equals(item.getType().name())) {
+        if (item == null || !splashItem(item.getType().name())) {
             return; // not a splash potion (a lingering potion or a water bottle) — untouched
         }
         if (!(potion.getShooter() instanceof Player thrower)) {
@@ -87,6 +88,26 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
             return; // no launch speed to scale
         }
         potion.setVelocity(redirect(potion.getLocation(), thrower, vanillaSpeed, settings));
+    }
+
+    /**
+     * Whether the material name read off a {@link ThrownPotion}'s item identifies a
+     * splash potion. {@code AIR} is accepted as splash: on 1.16.x–1.20.4 the server
+     * stores the projectile's item only when it differs from the entity's default
+     * item or carries an NBT tag (javap, {@code EntityProjectileThrowable#setItem}),
+     * while {@code CraftThrownPotion#getItem} reads the raw datawatcher without the
+     * empty→default fallback (that lives in {@code getSuppliedItem}) — so a tagless
+     * splash potion (e.g. a bare {@code /give}) reads back as AIR on exactly that
+     * band. An empty item on a ThrownPotion can only mean the unstored default, and
+     * {@code EntityPotion}'s default item IS the splash potion — the server's own
+     * splash logic treats it so, and CraftBukkit ≤1.15.2 even coerces a missing item
+     * to a splash stack ("ThrownPotion entity has no item?!"). Below 1.16 the store
+     * is unconditional and from 1.20.5 the item-component rework made it so again,
+     * so the AIR branch is dead everywhere the read is honest. Exactly {@code AIR}:
+     * near-misses like {@code CAVE_AIR} never come off a ThrownPotion's item.
+     */
+    static boolean splashItem(@NotNull String materialName) {
+        return SPLASH_POTION.equals(materialName) || "AIR".equals(materialName);
     }
 
     /**
