@@ -16,6 +16,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -40,7 +41,11 @@ import org.jetbrains.annotations.NotNull;
  * {@link EventPriority#HIGH}, while knockback is left FULL — the event is never
  * cancelled and velocity is never touched, so a blocked hit knocks full (era
  * truth; Mental owns knockback). The native BLOCKS_ATTACKS tier reduces the hit
- * itself, so software reduction is skipped there (never double-reduce).
+ * itself, so software reduction is skipped there (never double-reduce). On the
+ * off-hand tier a raised temp shield vanilla-FULL-blocks (it is a real
+ * {@code SHIELD}); that hit's negative BLOCKING modifier is rewritten to the era
+ * value so the half damage lands instead of vanilla's zero (audit C1) — the
+ * matching knock exemption lives in the {@code KnockbackUnit}.
  *
  * <p>The one server-side reconstruction the era needs (era-accuracy skill): the
  * block-hit sprint reset. Starting a block dropped the attacker's sprint in
@@ -105,6 +110,7 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     /* ------------------------------------------------------------------ */
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @SuppressWarnings("deprecation") // the granular BLOCKING setter is the only un-zero lever Bukkit has
     public void onDamage(@NotNull EntityDamageByEntityEvent event) {
         if (decoration.nativeReduction()) {
             return; // native reduction — never double-reduce
@@ -114,6 +120,22 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
         }
         double incoming = event.getDamage();
         double reduction = SwordBlockReduction.blockedDamage(incoming);
+        // The off-hand tier's injected shield is a REAL vanilla shield, so a raised
+        // frontal hit arrives already vanilla-FULL-blocked: a negative BLOCKING
+        // modifier negating the whole hit. The total setter cannot un-zero it —
+        // Bukkit's setDamage(double) re-applies the stored BLOCKING function, which
+        // negates whatever base it is given (interaction audit C1) — so the era
+        // half-damage is written straight into the BLOCKING modifier instead:
+        // final = incoming − (incoming−1)×0.5, the 1.8 sword-block value. When the
+        // era reduction is 0 (incoming ≤ 1.0) the write clears the full negate so
+        // the era-full damage still lands. Never cancelled — the era knock ships
+        // through the KnockbackUnit's blocked-knock redelivery.
+        boolean vanillaBlocked = event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)
+                && event.getDamage(EntityDamageEvent.DamageModifier.BLOCKING) < 0.0;
+        if (vanillaBlocked) {
+            event.setDamage(EntityDamageEvent.DamageModifier.BLOCKING, -reduction);
+            return;
+        }
         if (reduction <= 0.0) {
             return;
         }

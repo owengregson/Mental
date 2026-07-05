@@ -626,9 +626,13 @@ public final class MentalPluginV5 extends JavaPlugin {
                 ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message)));
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
+        // The knockback unit reads the sword-block decoration (observation only) so
+        // Mental's own injected temp shield is never mistaken for a real modern
+        // shield by the full-block cancel (audit C1 — era: half damage, FULL knock).
         reconciler.register(new KnockbackUnit(
                 sessions, domains, ocmBinding, latency, scheduling, this::snapshot,
-                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK), comboEvents));
+                hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK), comboEvents,
+                swordBlockDecoration));
         reconciler.register(latencyCompensation);
         reconciler.register(new FishingKnockbackUnit(
                 sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));
