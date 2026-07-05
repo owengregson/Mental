@@ -17,6 +17,7 @@ import me.vexmc.mental.tester.suite.HitboxSuite;
 import me.vexmc.mental.tester.suite.InventoryRulesSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
 import me.vexmc.mental.tester.suite.OcmCoexistenceSuite;
+import me.vexmc.mental.tester.suite.PotsSuite;
 import me.vexmc.mental.tester.suite.ProfileSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
 import me.vexmc.mental.tester.suite.ReloadSuite;
@@ -34,8 +35,8 @@ import org.bukkit.plugin.java.JavaPlugin;
  *
  * <p>4E restores the FULL suite list. On a plain server the active list is
  * {@code Boot, Knockback, Profile, Fishing, Projectile, EraParity, DamageRules,
- * Blocking, ConsumableRules, CosmeticSmoke, Hitbox, InventoryRules, Command,
- * Reload, ZeroTouch}; with OldCombatMechanics installed it is {@code Boot +
+ * Blocking, ConsumableRules, CosmeticSmoke, Hitbox, InventoryRules, Pots,
+ * Command, Reload, ZeroTouch}; with OldCombatMechanics installed it is {@code Boot +
  * OcmCoexistence} (the coexistence suite asserts the ownership split the era
  * suites cannot, since OCM contests ownership).</p>
  */
@@ -101,6 +102,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(CosmeticSmokeSuite.tests(mental, this));
                 suite.addAll(HitboxSuite.tests(mental, this));
                 suite.addAll(InventoryRulesSuite.tests(mental, this));
+                suite.addAll(PotsSuite.tests(mental, this));
                 suite.addAll(CommandSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
