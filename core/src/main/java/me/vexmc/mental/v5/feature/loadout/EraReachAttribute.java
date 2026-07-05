@@ -35,8 +35,9 @@ import org.jetbrains.annotations.NotNull;
  * a hardcoded ~6 blocks with no safe per-player lever).</p>
  *
  * <h2>Threading (Folia)</h2>
- * <p>Every attribute write runs inside {@link Scheduling#runOn} on the player's
- * region thread. Per-player captured bases live in a {@link ConcurrentHashMap}
+ * <p>Every attribute write runs on the player's region thread — {@link
+ * Scheduling#runOn} for the apply, {@link Scheduling#ensureOn} (inline pre-save)
+ * for the quit-path restore. Per-player captured bases live in a {@link ConcurrentHashMap}
  * keyed by UUID; on disable every captured base is restored inline (the scheduler
  * may already be stopping, so a deferred write could never run — the disable path
  * runs on the main / global thread where synchronous attribute access is safe).</p>
@@ -89,13 +90,21 @@ final class EraReachAttribute {
         }
     }
 
-    /** Restores {@code player}'s original base (if captured) and forgets the player. Idempotent. */
+    /**
+     * Restores {@code player}'s original base (if captured) and forgets the player.
+     * Idempotent. INLINE when the calling thread owns the player
+     * ({@link Scheduling#ensureOn}) — the call site is the quit listener, where a
+     * deferred {@code runOn} dies at the next-tick validity gate after the
+     * disconnect save (audit quit-path conflict). Benign when the original equals
+     * the era 3.0 vanilla default, wrong for a third-party-inflated base — the
+     * inline write restores that base exactly, pre-save.
+     */
     void restore(@NotNull Player player) {
         Double original = originalBase.remove(player.getUniqueId());
         if (original == null) {
             return;
         }
-        scheduling.runOn(player, () -> restoreNow(player, original), () -> {});
+        scheduling.ensureOn(player, () -> restoreNow(player, original), () -> {});
     }
 
     private void restoreNow(@NotNull Player player, double original) {
