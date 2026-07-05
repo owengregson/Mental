@@ -67,10 +67,12 @@ pocket is honestly lost and era physics wins — the servo never forces a non-er
 knock. It composes cleanly with speed-conformal pace scaling (`fresh = base ×
 pace × combo`) and with the static `range-reduction` taper (taper first).
 
-**It never** changes reach, hit-delay, the vertical, or the victim's input; it
-does nothing to any pair not in an active combo; and it does **nothing at all**
+**The servo never** changes reach, hit-delay, the vertical, or the victim's input;
+it does nothing to any pair not in an active combo; and it does **nothing at all**
 when the module is off (zero-touch). A false positive mid-scrap is the worst case
 and costs only a single clamped knock nudge — graceful degradation by design.
+(Reach *is* touched by the optional, default-off **reach handicap** sub-feature
+below — a separate lever, 1.20.5+ only; the servo itself never touches it.)
 
 ## When a combo is "active"
 
@@ -98,6 +100,43 @@ All optional; an absent section uses the defaults shown.
 | `window-ticks` | `10` | the cadence horizon the flight is projected over (ping-shifted per hit) |
 | `target-mode` | `anchor` | `anchor` steers to `target`; `dynamic` uses the facing-/ping-aware exposure-budget target (computed and logged either way — flip only after a lab round) |
 | `hit-cap` | `2.95` | the dynamic target's upper clamp (the practical hittable edge); only consulted under `target-mode: dynamic` |
+| `reach-handicap.enabled` | `false` | the reach handicap sub-feature (see below); off inside the opt-in module |
+| `reach-handicap.reach-scale` | `0.8` | the interaction-range multiplier while a combo is held, in `[0.5, 1.0]` (`0.8` → era 3.0 becomes 2.4) |
+
+## The reach handicap (1.20.5+, opt-in within the opt-in)
+
+The servo shapes **spacing** — where the victim lands. The **reach handicap** is a
+separate, secondary lever that tightens **retaliation** directly: while a victim is
+held in a combo, their `entity-interaction-range` attribute is scaled down (default
+`0.8`, so the era 3.0 reach becomes 2.4 blocks) with an **additive** modifier
+(`mental:combo-reach`, `MULTIPLY_SCALAR_1`), never a base rewrite — so it composes
+with any third-party reach base. It is applied the moment the combo goes active and
+removed the moment it ends **by any reason** (`EXPIRED` / `RETALIATION` / `GROUNDED`
+/ `BLOWOUT` / `RETIRED` / `DISABLED`), on the victim's owning region thread.
+
+**The servo stays the primary mechanism.** The pocket is a *geometric* property of
+the era launch (the `Δ²` reach-triangle margin, above); the servo holds it by
+shaping the knock, which is era-faithful and works on every version. The reach
+handicap only shortens the answer window on top — a directer but blunter lever.
+Leave it off unless you specifically want retaliation tightened during a hold.
+
+**1.20.5+ only.** The interaction-range attribute is client-synced from 1.20.5, so
+shortening it makes the client's **own** raycast shorten — no phantom misses where
+the client thinks it hit but the server refuses. Below 1.20.5 the attribute does not
+exist; the sub-feature is a **documented no-op** and logs one loud line if you
+enable it there (the platform-probe doctrine — never a silent degrade).
+
+**ViaVersion caveat.** A legacy client connected through ViaVersion **ignores** the
+synced attribute — the server cannot make its raycast shorter. This is a client-side
+limit with no server-side fix; the handicap simply has no effect for those players
+(the servo, which shapes server-side motion, still holds their pocket).
+
+**Reversibility (leak-safe).** Player attribute modifiers persist to the save file,
+so a crash mid-combo could otherwise leave a shortened reach in a profile. The
+modifier is therefore swept by fixed identity on player **join**, on module
+**enable** (every online player), and on module **disable / reload-off** (restored
+inline for every online player) — idempotent, so a leaked modifier is cleared on
+sight even if this session never applied it.
 
 ## Integration surface
 

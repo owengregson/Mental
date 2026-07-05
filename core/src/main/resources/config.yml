@@ -336,6 +336,27 @@ modules:
 #                the default. Leave it `anchor` until a lab round validates dynamic.
 #   hit-cap      the dynamic target's upper clamp — the practical hittable edge
 #                (2.95). Only consulted under `target-mode: dynamic`.
+#
+# ── Reach handicap (opt-in WITHIN this opt-in module) ──────────────────────
+# While a victim is held in a combo, scale DOWN their entity-interaction-range
+# attribute so their own client raycast shortens and they cannot answer. This is
+# a SECONDARY lever: the servo (above) steers SPACING, the reach handicap tightens
+# RETALIATION. Applied the moment a combo goes active, removed the moment it ends
+# by ANY reason — fully reversible, and swept clean on join / enable / disable so a
+# crash never leaves a shortened reach in a saved profile.
+#
+#   1.20.5+ ONLY. The interaction-range attribute is client-synced from 1.20.5, so
+#   shortening it makes the client's OWN raycast shorten (no phantom misses). Below
+#   1.20.5 the attribute does not exist and this sub-feature is a documented no-op
+#   (one loud line is logged if you enable it there). NOTE: ViaVersion legacy
+#   clients ignore the synced attribute even on a 1.20.5+ server — the server
+#   cannot shorten their reach; there is no server-side fix for those clients.
+#
+#   enabled      default false — off inside the opt-in module (leave it off unless
+#                you specifically want reach tightened during a hold).
+#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.8 → 2.4
+#                blocks; an out-of-range value warns on reload and 0.8 stands. It
+#                only ever SHORTENS reach (a handicap never inflates it).
 #combo-hold:
 #  min-hits: 3
 #  max-gap-ticks: 20
@@ -348,6 +369,9 @@ modules:
 #  window-ticks: 10
 #  target-mode: anchor
 #  hit-cap: 2.95
+#  reach-handicap:
+#    enabled: false
+#    reach-scale: 0.8
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.
