@@ -22,6 +22,7 @@ import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.delivery.ReachClamp;
@@ -559,18 +560,18 @@ public final class ComboSuite {
             return;
         }
         try {
-            // Handicap on at 0.8 AND reach-validation enabled, through the real overlay.
+            // Handicap module on at 0.8 AND reach-validation enabled, through the real overlay.
             context.syncRun(() -> {
                 mental.overlaySet("modules.combo-hold", true);
-                mental.overlaySet("combo-hold.reach-handicap.enabled", true);
-                mental.overlaySet("combo-hold.reach-handicap.reach-scale", 0.8);
+                mental.overlaySet("modules.combo-reach-handicap", true);
+                mental.overlaySet("combo-reach-handicap.reach-scale", 0.8);
                 mental.overlaySet("hit-registration.reach-validation.enabled", true);
                 mental.reloadAll();
             });
             context.awaitTicks(3);
 
             // The live config the production clamp consults — the values under test.
-            double scale = context.sync(() -> comboSettings(mental).reachHandicap().scale());
+            double scale = context.sync(() -> reachHandicapSettings(mental).scale());
             HitRegSettings.ReachValidation reach = context.sync(() -> hitReg(mental).reachValidation());
             context.expect(reach.enabled(), "reach-validation must be live for the backstop pin");
             double maxReach = reach.maxReach();
@@ -599,7 +600,7 @@ public final class ComboSuite {
                             + "(centre = scale*maxReach = " + (scale * maxReach) + ")");
         } finally {
             context.syncRun(() -> {
-                mental.overlaySet("combo-hold.reach-handicap.enabled", false);
+                mental.overlaySet("modules.combo-reach-handicap", false);
                 mental.overlaySet("modules.combo-hold", false);
                 mental.overlaySet("hit-registration.reach-validation.enabled", false);
                 mental.reloadAll();
@@ -721,8 +722,8 @@ public final class ComboSuite {
             boolean handicap) throws Exception {
         setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
         context.syncRun(() -> {
-            mental.overlaySet("combo-hold.reach-handicap.enabled", handicap);
-            mental.overlaySet("combo-hold.reach-handicap.reach-scale", 0.8);
+            mental.overlaySet("modules.combo-reach-handicap", handicap);
+            mental.overlaySet("combo-reach-handicap.reach-scale", 0.8);
             mental.reloadAll();
         });
         context.awaitTicks(3);
@@ -732,7 +733,7 @@ public final class ComboSuite {
     private static void teardownReach(
             MentalPluginV5 mental, TestContext context, FakePlayer attacker, FakePlayer victim) throws Exception {
         context.syncRun(() -> {
-            mental.overlaySet("combo-hold.reach-handicap.enabled", false);
+            mental.overlaySet("modules.combo-reach-handicap", false);
             mental.overlaySet("modules.combo-hold", false);
             mental.overlaySet("combo-hold.grounded-run-ticks", 10);
             mental.overlaySet("combo-hold.max-gap-ticks", 20);
@@ -828,6 +829,12 @@ public final class ComboSuite {
     private static ComboSettings comboSettings(MentalPluginV5 mental) {
         return mental.snapshot().settings(
                 (SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ReachHandicapSettings reachHandicapSettings(MentalPluginV5 mental) {
+        return mental.snapshot().settings(
+                (SettingsKey<ReachHandicapSettings>) Feature.COMBO_REACH_HANDICAP.settingsKey());
     }
 
     @SuppressWarnings("unchecked")

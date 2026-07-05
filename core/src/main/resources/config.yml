@@ -275,6 +275,19 @@ modules:
   # server-opt-in: it defaults OFF and no bundled config pre-enables it. Field-judge
   # the feel before trusting it in production. Default OFF (era-exact no-op).
   combo-hold: false
+  # combo-reach-handicap: while a victim is held in a combo, scale DOWN their
+  # entity-interaction-range attribute so their own client raycast shortens and they
+  # cannot answer. It DEPENDS on combo-hold (it only engages while a combo is held —
+  # enabling it alone warns on reload and does nothing) and is a SECONDARY lever: the
+  # servo steers spacing, this tightens retaliation. 1.20.5+ ONLY (the attribute is
+  # client-synced there). For the SERVER-SIDE enforcement leg against attribute-blind
+  # clients you must ALSO enable hit-registration.reach-validation. Tuned in the
+  # combo-reach-handicap section below. Default OFF (era-exact no-op).
+  #
+  # (Moved in 2.4.4: this was the nested combo-hold.reach-handicap.enabled sub-knob.
+  # An upgraded config with the old nested key still works for one release — it is
+  # honoured with a loud reload notice — but move it here.)
+  combo-reach-handicap: false
   # POTS family — two independent splash-potion utilities. These are PvP-server
   # conveniences, not a 1.7/1.8 restoration; both default OFF and touch nothing
   # while disabled.
@@ -358,26 +371,11 @@ modules:
 #   hit-cap      the dynamic target's upper clamp — the practical hittable edge
 #                (2.95). Only consulted under `target-mode: dynamic`.
 #
-# ── Reach handicap (opt-in WITHIN this opt-in module) ──────────────────────
-# While a victim is held in a combo, scale DOWN their entity-interaction-range
-# attribute so their own client raycast shortens and they cannot answer. This is
-# a SECONDARY lever: the servo (above) steers SPACING, the reach handicap tightens
-# RETALIATION. Applied the moment a combo goes active, removed the moment it ends
-# by ANY reason — fully reversible, and swept clean on join / enable / disable so a
-# crash never leaves a shortened reach in a saved profile.
-#
-#   1.20.5+ ONLY. The interaction-range attribute is client-synced from 1.20.5, so
-#   shortening it makes the client's OWN raycast shorten (no phantom misses). Below
-#   1.20.5 the attribute does not exist and this sub-feature is a documented no-op
-#   (one loud line is logged if you enable it there). NOTE: ViaVersion legacy
-#   clients ignore the synced attribute even on a 1.20.5+ server — the server
-#   cannot shorten their reach; there is no server-side fix for those clients.
-#
-#   enabled      default false — off inside the opt-in module (leave it off unless
-#                you specifically want reach tightened during a hold).
-#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.8 → 2.4
-#                blocks; an out-of-range value warns on reload and 0.8 stands. It
-#                only ever SHORTENS reach (a handicap never inflates it).
+# ── Reach handicap ─────────────────────────────────────────────────────────
+# The reach handicap moved to its OWN module in 2.4.4 — modules.combo-reach-handicap
+# above, tuned in the combo-reach-handicap section below. (It used to live here as a
+# nested combo-hold.reach-handicap block; an upgraded config with that old block still
+# works for one release — honoured with a loud reload notice — but move it.)
 #combo-hold:
 #  min-hits: 3
 #  max-gap-ticks: 20
@@ -390,9 +388,35 @@ modules:
 #  window-ticks: 10
 #  target-mode: anchor
 #  hit-cap: 2.95
-#  reach-handicap:
-#    enabled: false
-#    reach-scale: 0.8
+
+# Combo reach handicap, active when modules.combo-reach-handicap is true.
+# While a victim is held in a combo, scale DOWN their entity-interaction-range
+# attribute so their own client raycast shortens and they cannot answer. This is a
+# SECONDARY lever: the combo-hold servo steers SPACING, this tightens RETALIATION.
+# Applied the moment a combo goes active, removed the moment it ends by ANY reason —
+# fully reversible, and swept clean on join / enable / disable so a crash never leaves
+# a shortened reach in a saved profile.
+#
+#   DEPENDS ON combo-hold. It only engages while a combo is held, so with combo-hold
+#   off it never applies (enabling it alone warns on reload).
+#
+#   1.20.5+ ONLY. The interaction-range attribute is client-synced from 1.20.5, so
+#   shortening it makes the client's OWN raycast shorten (no phantom misses). Below
+#   1.20.5 the attribute does not exist and this module is a documented no-op (one
+#   loud line is logged if you enable it there). NOTE: ViaVersion legacy clients ignore
+#   the synced attribute even on a 1.20.5+ server — the server cannot shorten their
+#   reach; there is no server-side fix for those clients.
+#
+#   SERVER-SIDE enforcement (against attribute-blind clients that ignore the synced
+#   value) rides the reach validator's backstop — it requires
+#   hit-registration.reach-validation.enabled: true. With reach-validation off, the
+#   handicap is purely the client-synced attribute shrink (honest clients only).
+#
+#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.8 → 2.4
+#                blocks; an out-of-range value warns on reload and 0.8 stands. It
+#                only ever SHORTENS reach (a handicap never inflates it).
+#combo-reach-handicap:
+#  reach-scale: 0.8
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.

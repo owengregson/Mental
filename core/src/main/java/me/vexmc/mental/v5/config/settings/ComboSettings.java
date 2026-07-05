@@ -25,13 +25,12 @@ import me.vexmc.mental.kernel.math.TargetMode;
  * before flipping it to {@code DYNAMIC}; {@code hitCap} (2.95) is the dynamic
  * target's upper clamp (the practical hittable edge).</p>
  *
- * <p><b>Reach handicap (§1, the deferred sub-feature).</b> An OPT-IN-within-the-
- * opt-in lever that scales DOWN the interaction-range attribute of a victim while
- * their combo is active, so a launched victim's raycast can no longer answer.
- * 1.20.5+ only (the attribute is client-synced there); the servo remains the
- * PRIMARY mechanism — it steers spacing, the handicap only tightens retaliation.
- * {@link ReachHandicap} defaults OFF so the whole record is still a byte-identical
- * no-op contract under the module toggle.</p>
+ * <p><b>Reach handicap.</b> The reach handicap moved OUT of this record in 2.4.4:
+ * it is now its own {@code modules.combo-reach-handicap} feature carrying a flat
+ * {@link me.vexmc.mental.v5.config.settings.ReachHandicapSettings} (just the scale;
+ * the enable dissolved into the module toggle), so it appears and toggles in the
+ * GUI like every other feature. It still rides the combo transitions — it only
+ * engages while a combo is held — so it depends on COMBO_HOLD being on.</p>
  */
 public record ComboSettings(
         int minHits,
@@ -44,28 +43,13 @@ public record ComboSettings(
         double maxFactor,
         int windowTicks,
         TargetMode targetMode,
-        double hitCap,
-        ReachHandicap reachHandicap) {
-
-    /**
-     * The combo-hold reach-handicap sub-feature (§1). While a combo is active the
-     * victim's entity-interaction-range attribute is scaled by {@link #scale()}
-     * through an additive modifier (never a base rewrite), applied on combo start
-     * and removed on every end reason. {@code enabled} defaults FALSE — opt-in
-     * inside the opt-in module — and {@code scale} lives in {@code [0.5, 1.0]}
-     * (a handicap only ever shortens reach; {@code 0.8} takes the era 3.0 to 2.4).
-     */
-    public record ReachHandicap(boolean enabled, double scale) {
-
-        /** OFF, era-3.0-to-2.4 when switched on — the sub-feature is a no-op by default. */
-        public static final ReachHandicap DEFAULTS = new ReachHandicap(false, 0.8);
-    }
+        double hitCap) {
 
     /** The design defaults (§3.1/§3.2/§3.2b; target 2.85 per the target-v2 retune).
      *  The MODULE toggle — not this record — is what makes it a no-op. */
     public static final ComboSettings DEFAULTS =
             new ComboSettings(3, 20, 10, 6.0, 2.85, 1.0, 0.8, 1.2, 10,
-                    TargetMode.ANCHOR, PocketServoConfig.DEFAULT_HIT_CAP, ReachHandicap.DEFAULTS);
+                    TargetMode.ANCHOR, PocketServoConfig.DEFAULT_HIT_CAP);
 
     /** The detector thresholds the {@code ComboTracker} reads. */
     public ComboRules rules() {

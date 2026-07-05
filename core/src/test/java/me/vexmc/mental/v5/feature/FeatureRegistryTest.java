@@ -48,6 +48,7 @@ class FeatureRegistryTest {
             "sword-blocking",
             "old-hitboxes",
             "combo-hold",
+            "combo-reach-handicap",
             "pot-fill",
             "fast-pots");
 

@@ -12,6 +12,7 @@ import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 
 /**
  * The single enumerable feature registry (spec §7). One constant per feature,
@@ -294,6 +295,20 @@ public enum Feature {
                     Facets.none("no damage contribution"),
                     Facets.none("no damage contribution")),
             new SettingsKey<>("combo-hold", ComboSettings.class)),
+
+    COMBO_REACH_HANDICAP("combo-reach-handicap", Family.COMBO, "Combo Reach Handicap",
+            "Shorten a juggled victim's reach while their combo is held, so a launched victim can't"
+                    + " answer. Requires Combo Hold; 1.20.5+.",
+            "TRIPWIRE_HOOK", false, Set.of(),
+            new Facets(
+                    // The attribute lever IS a server-side rule (applied on combo transitions).
+                    Facets.handled(),
+                    // The entity-interaction-range attribute is client-synced from 1.20.5 — the
+                    // client's own raycast shortens, which is precisely the mechanic (no phantoms).
+                    Facets.handled(),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("combo-reach-handicap", ReachHandicapSettings.class)),
 
     /* --------------------------------- POTS --------------------------------- */
 

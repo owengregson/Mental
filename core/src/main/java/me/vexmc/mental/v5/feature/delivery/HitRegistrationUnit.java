@@ -42,10 +42,12 @@ import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.rim.BurstSender;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
@@ -565,18 +567,14 @@ public final class HitRegistrationUnit implements FeatureUnit {
     @SuppressWarnings("unchecked")
     private Double comboReachHandicapScale(PlayerView attackerView) {
         if (attackerView.comboAttackerId() == null) {
-            return null;
+            return null; // no combo is held against this attacker (implies COMBO_HOLD on)
         }
         Snapshot current = snapshot.get();
-        if (!current.enabled(Feature.COMBO_HOLD)) {
-            return null;
+        if (!current.enabled(Feature.COMBO_REACH_HANDICAP) || !ComboReachHandicap.leverSupported()) {
+            return null; // the promoted module off, or below 1.20.5 (vanilla's gate could not enforce it)
         }
-        ComboSettings.ReachHandicap handicap = current.settings(
-                (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey())
-                .reachHandicap();
-        if (!handicap.enabled() || !ComboReachHandicap.leverSupported()) {
-            return null;
-        }
+        ReachHandicapSettings handicap = current.settings(
+                (SettingsKey<ReachHandicapSettings>) Feature.COMBO_REACH_HANDICAP.settingsKey());
         return handicap.scale();
     }
 
