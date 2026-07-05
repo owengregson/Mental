@@ -87,6 +87,20 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
         }
         double base = event.getDamage(EntityDamageEvent.DamageModifier.BASE);
         event.setDamage(EntityDamageEvent.DamageModifier.BASE, base * 1.5);
+        // Order-independence with the era armour cascade (interaction audit): both
+        // units share the LOWEST bucket, whose intra-priority order is registration
+        // order — Feature declaration order on first boot, silently REORDERED by a
+        // GUI toggle (unregisterAll + re-append). If ArmourStrengthUnit already ran,
+        // its defensive modifiers were sized against the un-critted BASE and the
+        // era rule is crit BEFORE armour (1.8 EntityHuman.attack multiplies before
+        // damageEntity's armour) — so re-run the cascade over the raised BASE here.
+        // Idempotent: when this unit ran first, the armour listener recomputes the
+        // identical values afterwards. Gated on the feature so a crit with
+        // old-armour-strength OFF composes with vanilla's model exactly as before.
+        Snapshot current = snapshot.get();
+        if (current != null && current.enabled(Feature.ARMOUR_STRENGTH)) {
+            ArmourStrengthUnit.applyEraCascade(event);
+        }
     }
 
     @SuppressWarnings("unchecked")
