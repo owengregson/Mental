@@ -11,10 +11,12 @@ import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DebugSettings;
+import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
+import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.v5.feature.Feature;
@@ -94,6 +96,8 @@ public final class SnapshotParser {
             case CRAFTING -> parseCrafting(reader(main, "disable-crafting", "config.yml", issues));
             case OFFHAND -> parseOffhand(reader(main, "disable-offhand", "config.yml", issues));
             case COMBO_HOLD -> parseCombo(reader(main, "combo-hold", "config.yml", issues));
+            case POT_FILL -> parsePotFill(reader(main, "pot-fill", "config.yml", issues));
+            case FAST_POTS -> parseFastPots(reader(main, "fast-pots", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
         };
     }
@@ -204,6 +208,24 @@ public final class SnapshotParser {
                 // A handicap only ever shortens reach, so the scale is confined to
                 // [0.5, 1.0]; anything outside warns and the default stands.
                 reader.numberInRange("reach-scale", d.scale(), 0.5, 1.0));
+    }
+
+    private static PotFillSettings parsePotFill(ConfigReader reader) {
+        PotFillSettings d = PotFillSettings.DEFAULTS;
+        // A blank permission would open the command to everyone; text() already
+        // keeps the fallback (and warns) on a blank/non-string value.
+        return new PotFillSettings(
+                reader.text("permission", d.permission()),
+                reader.numberAtLeast("cost-per-potion", d.costPerPotion(), 0.0));
+    }
+
+    private static FastPotsSettings parseFastPots(ConfigReader reader) {
+        FastPotsSettings d = FastPotsSettings.DEFAULTS;
+        return new FastPotsSettings(
+                reader.numberClamped("angle-degrees", d.angleDegrees(),
+                        FastPotsSettings.MIN_ANGLE, FastPotsSettings.MAX_ANGLE),
+                reader.numberClamped("speed-multiplier", d.speedMultiplier(),
+                        FastPotsSettings.MIN_MULTIPLIER, FastPotsSettings.MAX_MULTIPLIER));
     }
 
     private static OffhandSettings parseOffhand(ConfigReader reader) {

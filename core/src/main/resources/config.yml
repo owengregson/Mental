@@ -275,6 +275,26 @@ modules:
   # server-opt-in: it defaults OFF and no bundled config pre-enables it. Field-judge
   # the feel before trusting it in production. Default OFF (era-exact no-op).
   combo-hold: false
+  # POTS family — two independent splash-potion utilities. These are PvP-server
+  # conveniences, not a 1.7/1.8 restoration; both default OFF and touch nothing
+  # while disabled.
+  #
+  # pot-fill: registers the /potfill command (aliases /pots, /pf) — fills every
+  # empty slot of your main inventory (the 36 main + hotbar slots; armour and
+  # off-hand are never touched) with a glowing splash Instant Health II potion.
+  # The command is registered on enable and REMOVED on disable, so a disabled
+  # module leaves no command or tab-completion behind. Permission and an optional
+  # per-potion economy cost are configured in the pot-fill section below.
+  # Default OFF.
+  pot-fill: false
+  # fast-pots: the classic "fast pot" self-heal, made reliable. When you throw a
+  # splash potion while looking down more steeply than fast-pots.angle-degrees,
+  # Mental re-aims it at your own feet (predicting where they will be by the time
+  # it lands) and multiplies its speed, so the splash lands on you instantly.
+  # Throws shallower than the angle are left completely untouched, and LINGERING
+  # potions are never redirected (this aids the instant splash, not the cloud).
+  # Tuned in the fast-pots section below. Default OFF.
+  fast-pots: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
@@ -382,6 +402,56 @@ modules:
 # reload and are skipped — the rest of the list still applies.
 #disable-crafting:
 #  items: [SHIELD]
+
+# The /potfill command, active when modules.pot-fill is true. Fills every empty
+# main-inventory slot with a glowing splash Instant Health II potion.
+#
+# permission:      the permission node a player must hold to run /potfill. Leave
+#                  it as the default op-gated node, or point it at a rank node
+#                  (e.g. "server.kit.pots") to grant it to a group. A player
+#                  without it is refused with a message; the default is
+#                  "mental.pots.fill".
+# cost-per-potion: the price charged PER potion filled, through Vault (a soft,
+#                  optional dependency — Mental never hard-depends on it).
+#                    0    → free; no economy plugin is needed at all (the
+#                           default).
+#                    > 0  → each filled potion costs this much. The fill is a
+#                           PARTIAL fill capped at what you can afford, and you
+#                           are charged for exactly what was filled. With a cost
+#                           set but no Vault economy installed, the command
+#                           refuses honestly (it never fills for free) and one
+#                           line is logged at enable.
+#pot-fill:
+#  permission: "mental.pots.fill"
+#  cost-per-potion: 0.0
+
+# Fast pots, active when modules.fast-pots is true. Redirects a steeply-thrown
+# splash potion at your own feet at a multiplied speed.
+#
+# angle-degrees:    how far below the horizon your throw must aim before the
+#                   redirect kicks in, as a Bukkit pitch threshold (pitch is 0
+#                   at the horizon and +90 looking straight down). The redirect
+#                   fires when your pitch is GREATER than this value; shallower
+#                   throws are left completely untouched. Clamped to [0, 90].
+#                   Default 35.0.
+#
+#                        horizon ── 0° ───────────────  (never redirected)
+#                                    \
+#                                     \   throws in this
+#                                      \  band are left alone
+#                          angle ──── 35° ─ ─ ─ ─ ─ ─ ─  ← threshold
+#                                        \
+#                                         \ steeper throws are
+#                                          \ re-aimed at your feet
+#                        straight down ── 90°
+#
+# speed-multiplier: the factor applied to the potion's normal launch speed for
+#                   the redirected throw. Higher = the potion reaches your feet
+#                   sooner. Clamped to [1.0, 5.0] (never slower than vanilla,
+#                   capped so it cannot outrun its own splash). Default 3.0.
+#fast-pots:
+#  angle-degrees: 35.0
+#  speed-multiplier: 3.0
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

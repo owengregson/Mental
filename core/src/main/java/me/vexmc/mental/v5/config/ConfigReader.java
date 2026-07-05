@@ -93,6 +93,26 @@ public record ConfigReader(ConfigurationSection section, String prefix, ConfigIs
         return value;
     }
 
+    /**
+     * A number CLAMPED to {@code [minimum, maximum]}. Unlike {@link #numberAtLeast}
+     * an out-of-range value is not dropped to the fallback but pulled to the nearest
+     * bound (the caller asked for a clamp, so the nearest legal value is the honest
+     * result) with one warn. A wrong-typed value still falls back through
+     * {@link #number}, and an absent key returns the (in-range) fallback silently.
+     */
+    public double numberClamped(String key, double fallback, double minimum, double maximum) {
+        double value = number(key, fallback);
+        if (value < minimum) {
+            issues.warn(path(key), "must be at least " + minimum + " — clamped from " + value, minimum);
+            return minimum;
+        }
+        if (value > maximum) {
+            issues.warn(path(key), "must be at most " + maximum + " — clamped from " + value, maximum);
+            return maximum;
+        }
+        return value;
+    }
+
     public String text(String key, String fallback) {
         if (section == null || !section.isSet(key)) {
             return fallback;

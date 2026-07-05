@@ -80,6 +80,8 @@ import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
 import me.vexmc.mental.v5.feature.loadout.HitboxUnit;
 import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
+import me.vexmc.mental.v5.feature.pots.FastPotsUnit;
+import me.vexmc.mental.v5.feature.pots.PotFillUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProfile;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
@@ -681,6 +683,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         // already wired into the session/delivery/knockback code. Zero-touch when the
         // scope is closed (no tracker, no sweep work).
         reconciler.register(new ComboHoldUnit(sessions, comboReachHandicap));
+        // The POTS family (owner directive 2026-07-04) — two independently-toggled
+        // splash-potion utilities, both default OFF. Pot-fill dynamically registers
+        // /potfill on the command map on enable and strips it whole on disable
+        // (zero-touch: no command-map or tab-complete trace when off); fast-pots
+        // redirects a steeply-thrown splash potion at the thrower's own predicted
+        // feet at a multiplied launch speed. Neither is OCM-arbitrated.
+        reconciler.register(new PotFillUnit(this, this::snapshot, scheduling,
+                message -> getLogger().info(message)));
+        reconciler.register(new FastPotsUnit(this::snapshot));
     }
 
     private Snapshot parseSnapshot() {
