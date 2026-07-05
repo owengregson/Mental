@@ -164,7 +164,12 @@ fun failOnJvmdgWarnings(jar: Jar) {
         val file = logSink.get().asFile
         file.parentFile.mkdirs()
         file.writeText(text)
+        // JDK-24+ JEP-498 sun.misc.Unsafe deprecation notes from PARALLEL test JVMs leak
+        // into this global console capture (same scope caveat as the japicmp banner —
+        // see mustRunAfter above) and are not jvmdg output: filter them, keep the rest.
+        val jvmNoise = Regex("sun\\.misc\\.Unsafe|Please consider reporting this to the maintainers")
         val warnings = text.lines().filter { line -> Regex("(?i)\\b(warn|warning|error)\\b").containsMatchIn(line) }
+                .filterNot { line -> jvmNoise.containsMatchIn(line) }
         if (warnings.isNotEmpty()) {
             throw GradleException("jvmdowngrader emitted ${warnings.size} warning/error line(s) during '${jar.name}' " +
                     "(full-range campaign: warnings are build failures). First:\n" +
