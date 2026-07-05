@@ -15,13 +15,16 @@ import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.LatencyModel;
+import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.AttributeModifiers;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
+import me.vexmc.mental.v5.feature.delivery.ReachClamp;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.platform.AttackRangeAdapter;
@@ -107,6 +110,8 @@ public final class ComboSuite {
                         context -> runReachSweepScenario(mental, tester, context)),
                 new TestCase("combo: reach-handicap OFF leaves interaction range untouched through a combo (1.20.5+)",
                         context -> runReachZeroTouchScenario(mental, tester, context)),
+                new TestCase("combo: reach-handicap backstop rejects a comboed victim's over-reach answer, accepts the honest cap (1.20.5+)",
+                        context -> runReachBackstopScenario(mental, tester, context)),
                 new TestCase("combo: reach-handicap wins over the HITBOX ATTACK_RANGE weapon component (1.21.5+)",
                         context -> runReachHandicapComponentScenario(mental, tester, context)));
     }
@@ -521,6 +526,87 @@ public final class ComboSuite {
         }
     }
 
+    /* --------------- scenario 8b: the reach-validation backstop bite --------------- */
+
+    /**
+     * The server-side backstop (servo-lab 243 S2): while a combo is held against a
+     * victim AND {@code hit-registration.reach-validation} is enabled, that victim's
+     * OWN swings (they are the attacker of this hit) must be clamped to the handicap —
+     * the fast path cancelled vanilla's melee gate, so it re-enforces the shortened
+     * reach itself. The audit's first cut clamped eye-to-BOX at {@code scale·maxReach +
+     * leniency} ({@code 2.8} at scale 0.8), which sat ABOVE everything an
+     * attribute-blind (center-gated) client could send — nil margin. The fix scales
+     * BOTH the reach and the leniency and measures eye-to-CENTRE.
+     *
+     * <p>This pins the production decision ({@link ReachClamp#passes}) against the
+     * LIVE shipped config on a real server. It does not drive a fake melee: a
+     * clientless {@code FakePlayer} attacks through NMS {@code Player#attack}, which
+     * never traverses the PacketEvents INTERACT_ENTITY path where {@code passesReach}
+     * lives — so the backstop can only be exercised honestly at its pure seam, fed the
+     * config the reconciler actually resolved (handicap scale, reach window). The two
+     * staged separations are derived from the same geometry helper production uses
+     * ({@code ReachClamp.distanceToCenter}) at config-derived centre targets — no bare
+     * distance literals: the attribute-blind client's OWN gate edge (centre =
+     * {@code maxReach}) is denied, the honest handicapped cap (centre =
+     * {@code scale·maxReach}) is accepted, and the same over-reach passes plainly with
+     * the handicap off. 1.20.5+ only (the handicap lever is a documented no-op below).</p>
+     */
+    private static void runReachBackstopScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!reachAttributeSupported()) {
+            context.skip("entity-interaction-range attribute absent (below 1.20.5) — reach handicap is a "
+                    + "documented no-op here");
+            return;
+        }
+        try {
+            // Handicap on at 0.8 AND reach-validation enabled, through the real overlay.
+            context.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", true);
+                mental.overlaySet("combo-hold.reach-handicap.enabled", true);
+                mental.overlaySet("combo-hold.reach-handicap.reach-scale", 0.8);
+                mental.overlaySet("hit-registration.reach-validation.enabled", true);
+                mental.reloadAll();
+            });
+            context.awaitTicks(3);
+
+            // The live config the production clamp consults — the values under test.
+            double scale = context.sync(() -> comboSettings(mental).reachHandicap().scale());
+            HitRegSettings.ReachValidation reach = context.sync(() -> hitReg(mental).reachValidation());
+            context.expect(reach.enabled(), "reach-validation must be live for the backstop pin");
+            double maxReach = reach.maxReach();
+            double leniency = reach.leniency();
+
+            // Stage head-on along +z on flat ground; place the attacker eye at a
+            // config-derived eye-to-CENTRE target via the production geometry helper.
+            double vGap = ReachClamp.EYE_HEIGHT - ReachClamp.CENTER_HEIGHT;
+            double farZ = Math.sqrt(maxReach * maxReach - vGap * vGap);              // centre = maxReach (blind client's own edge)
+            double nearZ = Math.sqrt(scale * maxReach * (scale * maxReach) - vGap * vGap); // centre = scale·maxReach (honest cap)
+            List<PositionRing.Sample> none = List.of();
+
+            // FAR, handicap ON → rejected: the backstop denies the over-reach.
+            context.expect(
+                    !ReachClamp.passes(0, ReachClamp.EYE_HEIGHT, farZ, none, 0, 0, 0, maxReach, leniency, scale),
+                    "the handicapped backstop must reject an answer at the blind client's reach edge "
+                            + "(centre = maxReach = " + maxReach + ")");
+            // FAR, handicap OFF → accepted: the plain eye-to-box window is byte-identical.
+            context.expect(
+                    ReachClamp.passes(0, ReachClamp.EYE_HEIGHT, farZ, none, 0, 0, 0, maxReach, leniency, null),
+                    "the same over-reach must pass with the handicap off (the plain window is unchanged)");
+            // NEAR, handicap ON → accepted: the honest handicapped cap, comfortable margin.
+            context.expect(
+                    ReachClamp.passes(0, ReachClamp.EYE_HEIGHT, nearZ, none, 0, 0, 0, maxReach, leniency, scale),
+                    "the handicapped backstop must accept the honest handicapped cap "
+                            + "(centre = scale*maxReach = " + (scale * maxReach) + ")");
+        } finally {
+            context.syncRun(() -> {
+                mental.overlaySet("combo-hold.reach-handicap.enabled", false);
+                mental.overlaySet("modules.combo-hold", false);
+                mental.overlaySet("hit-registration.reach-validation.enabled", false);
+                mental.reloadAll();
+            });
+        }
+    }
+
     /* --------------- scenario 9: handicap vs the ATTACK_RANGE component ------------ */
 
     /**
@@ -742,6 +828,12 @@ public final class ComboSuite {
     private static ComboSettings comboSettings(MentalPluginV5 mental) {
         return mental.snapshot().settings(
                 (SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static HitRegSettings hitReg(MentalPluginV5 mental) {
+        return mental.snapshot().settings(
+                (SettingsKey<HitRegSettings>) Feature.HIT_REGISTRATION.settingsKey());
     }
 
     private static int countShips(MentalPluginV5 mental, FakePlayer victim) {
