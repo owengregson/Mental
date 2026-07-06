@@ -237,11 +237,52 @@ public final class SessionService implements Listener, SessionAccess {
         entityIdByPlayer.put(id, entityId);
         playerIdByEntityId.put(entityId, id);
         samplers.put(id, new GroundFsm(clock));
-        TaskHandle handle = scheduling.repeatOn(player, 1L, 1L, () -> tick(player), () -> forget(id));
+        scheduleTick(player, id);
+    }
+
+    /**
+     * (Re)arm the per-player session tick on the player's owning region thread.
+     *
+     * <p>{@link Scheduling#repeatOn} retires the task when the scheduler can no
+     * longer run it. On Folia the entity scheduler fires that retirement only on a
+     * genuine removal; the Bukkit emulation, though, fires it on ANY tick where
+     * {@link org.bukkit.entity.Entity#isValid()} is false — and that flag is
+     * transiently false for a sub-tick right after a player is added to the world
+     * (and for several ticks across a respawn or a chunk reload). Coupling the
+     * session's whole lifetime to that per-tick flag is a race: if the first
+     * scheduled tick lands inside the just-added window, the task retires and the
+     * session is forgotten forever (there is no re-create outside {@code join}),
+     * so every later hit on that player is un-owned — the packetless victim's
+     * knock is journalled as no SHIP and the captor sees vanilla velocity. The
+     * {@link #onDeath} reset handler already documents the intent: a session
+     * SURVIVES transient invalidity. So {@link #retire} re-arms while the player
+     * is still online and only forgets once they are genuinely gone (the
+     * {@link #onQuit} path forgets that case too, idempotently).</p>
+     */
+    private void scheduleTick(Player player, UUID id) {
+        TaskHandle handle =
+                scheduling.repeatOn(player, 1L, 1L, () -> tick(player), () -> retire(player, id));
         TaskHandle prior = handles.put(id, handle);
         if (prior != null) {
             prior.cancel();
         }
+    }
+
+    /**
+     * The session tick's retirement seam. A still-online player is only transiently
+     * invalid (post-add sub-tick, respawn, chunk reload): keep the session and
+     * re-arm the tick so it resumes once the entity is valid again. A genuinely
+     * departed player is forgotten (the quit listener covers that path too).
+     */
+    private void retire(Player player, UUID id) {
+        if (!sessions.containsKey(id)) {
+            return; // already forgotten (a real quit already ran) — idempotent
+        }
+        if (player.isOnline()) {
+            scheduleTick(player, id);
+            return;
+        }
+        forget(id);
     }
 
     void forget(UUID id) {
