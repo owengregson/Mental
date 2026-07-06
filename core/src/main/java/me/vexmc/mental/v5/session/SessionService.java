@@ -324,10 +324,11 @@ public final class SessionService implements Listener, SessionAccess {
      * skipped, its velocity event owns delivery), only a still-LIVE REGISTERED melee
      * decision that is genuinely awaiting delivery ({@link DeliveryDesk#awaitingDeliveryFor}
      * — a fast-path/pinned/blocked hit or a resolved one is already gone, and an
-     * era-silent mid-invulnerability difference hit was submitted UNARMED so it is
-     * excluded: vanilla knocks nothing there and the era stays silent), and only once
-     * it is as old as the sweep's own drop threshold. A hit that resolved in time
-     * left nothing pending, so nothing fires.</p>
+     * era-silent BLOCKED difference hit (partially blocked, landing
+     * mid-invulnerability) was submitted UNARMED so it is excluded: vanilla knocks
+     * nothing there and the era stays silent), and only once it is as old as the
+     * sweep's own drop threshold. A hit that resolved in time left nothing pending,
+     * so nothing fires.</p>
      */
     private void ensureStrandedPacketlessMelee(Player player, CombatSession session, TickStamp now) {
         if (domains.has(player.getUniqueId())) {
@@ -346,11 +347,11 @@ public final class SessionService implements Listener, SessionAccess {
             // Only ensure a decision genuinely submitted-for-delivery AND awaiting its
             // velocity event (the exact F1 stranding). Skip a resolved/withdrawn one
             // (the velocity event shipped it) AND — critically — an era-silent
-            // mid-invulnerability difference hit: the knockback unit submits its
-            // vector but leaves the await UNARMED because vanilla knocks nothing and
-            // fires no velocity event for it. Fabricating a knock there would break
-            // the era difference-branch silence (no knock, no flinch); leave it for
-            // the sweep to drop.
+            // BLOCKED difference hit (partially blocked, mid-invulnerability): the
+            // knockback unit submits its vector but leaves the await UNARMED because
+            // vanilla knocks nothing and fires no velocity event for it. Fabricating
+            // a knock there would break the era difference-branch silence (no knock,
+            // no flinch); leave it for the sweep to drop.
             return;
         }
         Directive directive = desk.ensure(pending.id());

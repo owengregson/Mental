@@ -433,6 +433,38 @@ class DeliveryDeskTest {
                 "the superseded decision is no longer the pending");
     }
 
+    @Test
+    void unexpectedVelocityEventAtAnUnarmedPendingPassesThroughAndLeavesItForTheSweep() {
+        DeliveryDesk desk = desk();
+        HitTransaction silent = new HitTransaction(ctx(1, new HitSource.Melee(), 5));
+        desk.submit(silent, VECTOR); // era-silent blocked difference hit: submitted, never armed
+
+        // A velocity event the desk never expected (a third-party setVelocity while
+        // the era-silent decision sits): an unarmed pending means NO event is owed to
+        // this decision, so the desk treats it as foreign — pass it through exactly
+        // as it stands. It must never CANCEL (that would zero a velocity Mental does
+        // not own) and never SHIP the submitted vector (that would deliver the very
+        // knock the era withholds).
+        Directive foreign = desk.resolve(0.1, 0.2, 0.3);
+        assertEquals(Action.PASS_THROUGH, foreign.action(),
+                "an unarmed pending never hijacks a foreign velocity event");
+        assertNull(foreign.ship(), "pass-through ships nothing of Mental's");
+        assertTrue(desk.journal().isEmpty(), "a foreign velocity is never journaled");
+
+        // The decision itself is undisturbed — still pending, still unarmed, still
+        // carrying its vector — so the sweep remains its one owner and closes it as
+        // the era-silent drop.
+        assertEquals(VECTOR, desk.pendingVectorFor(new HitId(1)),
+                "the pass-through leaves the unarmed decision pending");
+        assertTrue(!desk.awaitingDeliveryFor(new HitId(1)),
+                "the pass-through never arms the decision");
+        desk.sweep(new TickStamp(7));
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(1, journal.size());
+        assertNull(journal.get(0).shipped(), "the era-silent decision ships nothing");
+        assertEquals("no-velocity-event", journal.get(0).suppressReason());
+    }
+
     /* ── mirror + pending-formula views ────────────────────────────────── */
 
     @Test

@@ -146,11 +146,15 @@ public final class DeliveryDesk {
      * session's {@code ensureStrandedPacketlessMelee}): a FRESH melee submits its
      * vector and arms the await, so a still-stranded one reads {@code true} and the
      * net ships the era knock a packetless victim's late/absent velocity event never
-     * did. A mid-invulnerability difference hit is era-SILENT — vanilla applies no
-     * knockback and fires no velocity event for it — so the knockback unit submits
-     * its vector but deliberately leaves the await UNARMED; it reads {@code false}
-     * here and the net leaves it for the sweep to drop, so the era knock stays
-     * withheld (no knock, no flinch). Distinct from {@link #pendingVectorFor}, which
+     * did. An era-silent BLOCKED difference hit (a partially-blocked hit landing
+     * mid-invulnerability) fires no vanilla velocity event and must ship nothing, so
+     * the knockback unit submits its vector but deliberately leaves the await
+     * UNARMED; it reads {@code false} here and the net leaves it for the sweep to
+     * drop, so the era knock stays withheld (no knock, no flinch). That is the ONLY
+     * unarmed melee class — a hit whose frozen immune read merely LOOKS mid-invuln
+     * (a legal boundary combo hit) is armed like any fresh hit, because vanilla's
+     * live counter accepts it and its genuine velocity event must resolve to the
+     * submitted stamp. Distinct from {@link #pendingVectorFor}, which
      * a submitted-but-unarmed decision (a rod self-launch that ensures itself inline)
      * still answers non-null. Also {@code false} once the decision resolved, was
      * withdrawn/superseded, or is not this desk's pending. Non-consuming.

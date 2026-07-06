@@ -225,12 +225,30 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // with NO knock and no flinch).
         // Mid-invulnerability at hit time: vanilla deals only the difference damage
         // and applies NO knockback (no velocity event) — the era-silent difference
-        // branch (compendium: no knock, no flinch). Read once; it gates both the
-        // fresh-blocked-knock direct delivery and the region-path await-arm below.
+        // branch (compendium: no knock, no flinch). Read once; it splits the
+        // blocked-knock shape into its fresh and era-silent halves below.
         boolean immune = victimImmune(session, victim);
-        boolean freshBlockedKnock = blockModifier
-                && (event.getFinalDamage() > 0.0 || mentalTempShieldBlock)
-                && !immune;
+        // The blocked-knock event shape: a partial native block still landing
+        // damage, or an unrewritten temp-shield full block (audit C1). Vanilla
+        // SKIPS markHurt for it, so no velocity event ever resolves it — the two
+        // branches below decide whether the era knock ships anyway (fresh) or the
+        // era withholds it (mid-invuln difference).
+        boolean blockedKnockShape = blockModifier
+                && (event.getFinalDamage() > 0.0 || mentalTempShieldBlock);
+        boolean freshBlockedKnock = blockedKnockShape && !immune;
+        // The era-silent blocked difference hit — freshBlockedKnock's exact
+        // inverse within the blocked shape (the 2.4.0 difference-branch contract:
+        // no knock, no flinch). This, and ONLY this, is the class the region-path
+        // submit below leaves UNARMED: it is the one class where the frozen
+        // immune read is corroborated by the event shape vanilla actually took.
+        // The bare frozen read is NOT a discriminator on its own — it is a
+        // boundary read (end of the previous tick, +1 staleness allowance) and
+        // classifies a legal boundary combo hit as immune too, while vanilla, on
+        // its LIVE counter, knocks that hit in full and fires its velocity event
+        // (the 1.9.4 second-regression: unarming on the bare read left the combo
+        // second hit's genuine event to pass through a packetless victim's zeroed
+        // vanilla motion — applied 0,0,0 instead of the ledger-stacked stamp).
+        boolean eraSilentBlockedHit = blockedKnockShape && immune;
 
         HitTransaction.State state = tx.state();
         if (state == HitTransaction.State.PRE_SENT || state == HitTransaction.State.PINNED) {
@@ -297,16 +315,20 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         }
 
         desk.submit(tx, vector);
-        if (!immune) {
-            // A fresh hit: vanilla applies the knock and fires the victim's
-            // PlayerVelocityEvent — arm the desk to swap it (and, for a packetless
-            // victim whose event lands late or never, let the region-path net ship
-            // the stranded decision, F1). A mid-invulnerability difference hit is
-            // era-SILENT: vanilla applies no knockback and fires no velocity event
-            // for it, so leave the decision UNARMED. The sweep then drops it and the
-            // net's awaitingDeliveryFor gate never fabricates a knock the era
-            // withholds — the submitted vector still feeds the mirror/journal exactly
-            // as before, so only the (never-firing) velocity-event arm changes.
+        if (!eraSilentBlockedHit) {
+            // Arm the desk for the victim's PlayerVelocityEvent — vanilla knocks
+            // this hit and fires it (and, for a packetless victim whose event lands
+            // late or never, the armed decision lets the region-path net ship the
+            // stranding, F1). This deliberately includes hits whose FROZEN immune
+            // read says mid-invuln: that read is a boundary snapshot and flags legal
+            // boundary combo hits too, whose genuine velocity event must resolve to
+            // the ledger-stacked stamp exactly as it always did (arming here is the
+            // pre-F1-net behavior for every non-blocked hit). Only the era-silent
+            // blocked difference hit stays UNARMED: vanilla applies no knockback and
+            // fires no velocity event for it, so the sweep drops it and the net's
+            // awaitingDeliveryFor gate never fabricates a knock the era withholds —
+            // the submitted vector still feeds the mirror/journal exactly as before,
+            // so only the (never-firing) velocity-event arm changes.
             desk.awaitVelocityEvent(tx);
         }
         applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
@@ -529,7 +551,15 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         return fresh;
     }
 
-    /** True when the victim was mid-invulnerability at hit time (the era-silent difference branch). */
+    /**
+     * True when the victim reads mid-invulnerability off the FROZEN boundary view
+     * (end of the previous tick, +1 staleness allowance). This is an approximation
+     * of vanilla's live counter, not a truth about the branch vanilla took: a legal
+     * boundary combo hit — accepted and knocked in full by vanilla's LIVE read —
+     * can still read immune here. It is therefore only ever a discriminator when
+     * CORROBORATED by the blocked event shape (the era-silent blocked difference
+     * hit); never gate a non-blocked hit's delivery on it alone.
+     */
     private boolean victimImmune(CombatSession session, Player victim) {
         PlayerView view = session.view();
         if (view != null) {
