@@ -322,9 +322,12 @@ public final class SessionService implements Listener, SessionAccess {
      * gate is tight and provably zero-touch elsewhere: only a victim with NO live
      * connection domain ({@link ConnectionDomains#has} false — a real client is
      * skipped, its velocity event owns delivery), only a still-LIVE REGISTERED melee
-     * decision (a fast-path/pinned/blocked hit or a resolved one is already gone),
-     * and only once it is as old as the sweep's own drop threshold. A hit that
-     * resolved in time left nothing pending, so nothing fires.</p>
+     * decision that is genuinely awaiting delivery ({@link DeliveryDesk#awaitingDeliveryFor}
+     * — a fast-path/pinned/blocked hit or a resolved one is already gone, and an
+     * era-silent mid-invulnerability difference hit was submitted UNARMED so it is
+     * excluded: vanilla knocks nothing there and the era stays silent), and only once
+     * it is as old as the sweep's own drop threshold. A hit that resolved in time
+     * left nothing pending, so nothing fires.</p>
      */
     private void ensureStrandedPacketlessMelee(Player player, CombatSession session, TickStamp now) {
         if (domains.has(player.getUniqueId())) {
@@ -339,8 +342,16 @@ public final class SessionService implements Listener, SessionAccess {
         if (!registeredAt.known() || !now.known() || now.value() - registeredAt.value() < 2) {
             return; // give the (possibly late) velocity event the exact window the sweep does
         }
-        if (desk.pendingVectorFor(pending.id()) == null) {
-            return; // already resolved — the velocity event shipped it (or it was withdrawn)
+        if (!desk.awaitingDeliveryFor(pending.id())) {
+            // Only ensure a decision genuinely submitted-for-delivery AND awaiting its
+            // velocity event (the exact F1 stranding). Skip a resolved/withdrawn one
+            // (the velocity event shipped it) AND — critically — an era-silent
+            // mid-invulnerability difference hit: the knockback unit submits its
+            // vector but leaves the await UNARMED because vanilla knocks nothing and
+            // fires no velocity event for it. Fabricating a knock there would break
+            // the era difference-branch silence (no knock, no flinch); leave it for
+            // the sweep to drop.
+            return;
         }
         Directive directive = desk.ensure(pending.id());
         KnockbackVector shipped = directive.ship();

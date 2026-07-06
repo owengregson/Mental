@@ -138,6 +138,32 @@ public final class DeliveryDesk {
         return null;
     }
 
+    /**
+     * True only when the pending decision is exactly {@code id}, still LIVE, carries
+     * a submitted vector, AND has been armed for the victim's velocity event
+     * ({@link #submit} followed by {@link #awaitVelocityEvent}) — a decision genuinely
+     * awaiting delivery. This is the region-path no-velocity-event net's gate (the
+     * session's {@code ensureStrandedPacketlessMelee}): a FRESH melee submits its
+     * vector and arms the await, so a still-stranded one reads {@code true} and the
+     * net ships the era knock a packetless victim's late/absent velocity event never
+     * did. A mid-invulnerability difference hit is era-SILENT — vanilla applies no
+     * knockback and fires no velocity event for it — so the knockback unit submits
+     * its vector but deliberately leaves the await UNARMED; it reads {@code false}
+     * here and the net leaves it for the sweep to drop, so the era knock stays
+     * withheld (no knock, no flinch). Distinct from {@link #pendingVectorFor}, which
+     * a submitted-but-unarmed decision (a rod self-launch that ensures itself inline)
+     * still answers non-null. Also {@code false} once the decision resolved, was
+     * withdrawn/superseded, or is not this desk's pending. Non-consuming.
+     */
+    public boolean awaitingDeliveryFor(HitId id) {
+        drainWire();
+        return awaiting
+                && pending != null
+                && pending.context().id().equals(id)
+                && LIVE.contains(pending.state())
+                && vectorSubmitted;
+    }
+
     /** Resolve at PlayerVelocityEvent time with the post-listener api velocity. */
     public Directive resolve(double apiX, double apiY, double apiZ) {
         drainWire();
@@ -267,6 +293,13 @@ public final class DeliveryDesk {
         pending = tx;
         pendingVector = vector;
         vectorSubmitted = true;
+        // A fresh submission has NOT been armed for its velocity event yet — its
+        // caller arms it explicitly right after (a fresh melee) or intentionally
+        // leaves it unarmed (an era-silent difference hit / a rod self-launch that
+        // ensures inline). Clearing the flag here keeps `awaiting` a truth about the
+        // CURRENT pending, so awaitingDeliveryFor never reads a superseded decision's
+        // stale arm — every submit that expects a velocity event re-arms next.
+        awaiting = false;
     }
 
     private void clearDecision() {

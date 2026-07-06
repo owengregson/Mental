@@ -223,9 +223,14 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // difference hit) knocks: the difference branch is era-silent and must
         // stay so (compendium: stronger mid-invuln hit deals difference damage
         // with NO knock and no flinch).
+        // Mid-invulnerability at hit time: vanilla deals only the difference damage
+        // and applies NO knockback (no velocity event) — the era-silent difference
+        // branch (compendium: no knock, no flinch). Read once; it gates both the
+        // fresh-blocked-knock direct delivery and the region-path await-arm below.
+        boolean immune = victimImmune(session, victim);
         boolean freshBlockedKnock = blockModifier
                 && (event.getFinalDamage() > 0.0 || mentalTempShieldBlock)
-                && !victimImmune(session, victim);
+                && !immune;
 
         HitTransaction.State state = tx.state();
         if (state == HitTransaction.State.PRE_SENT || state == HitTransaction.State.PINNED) {
@@ -292,7 +297,18 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         }
 
         desk.submit(tx, vector);
-        desk.awaitVelocityEvent(tx);
+        if (!immune) {
+            // A fresh hit: vanilla applies the knock and fires the victim's
+            // PlayerVelocityEvent — arm the desk to swap it (and, for a packetless
+            // victim whose event lands late or never, let the region-path net ship
+            // the stranded decision, F1). A mid-invulnerability difference hit is
+            // era-SILENT: vanilla applies no knockback and fires no velocity event
+            // for it, so leave the decision UNARMED. The sweep then drops it and the
+            // net's awaitingDeliveryFor gate never fabricates a knock the era
+            // withholds — the submitted vector still feeds the mirror/journal exactly
+            // as before, so only the (never-firing) velocity-event arm changes.
+            desk.awaitVelocityEvent(tx);
+        }
         applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
     }
 
