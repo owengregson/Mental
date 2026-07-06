@@ -5,7 +5,7 @@ import me.vexmc.mental.platform.AttributeModifiers;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.v5.config.Snapshot;
-import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import org.bukkit.Bukkit;
@@ -21,11 +21,13 @@ import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * The combo-hold reach handicap (design §1) — the deferred sub-feature that scales
- * DOWN a victim's interaction range WHILE their combo is active, so a launched
- * victim's own raycast shortens and cannot answer. Driven by the combo transition
- * point that fires the api events ({@link ComboEvents}): applied on combo START,
- * removed on EVERY end reason, both on the victim's owning region thread.
+ * The combo reach handicap (design §1) — its own {@code modules.combo-reach-handicap}
+ * feature (2.4.4; it appears and toggles in the GUI like every other feature) that
+ * scales DOWN a victim's interaction range WHILE their combo is active, so a launched
+ * victim's own raycast shortens and cannot answer. It depends on COMBO_HOLD: it rides
+ * the combo transition point that fires the api events ({@link ComboEvents}) — applied
+ * on combo START, removed on EVERY end reason, both on the victim's owning region
+ * thread — so with no combos held it never engages.
  *
  * <h2>Version tier (1.20.5+ only)</h2>
  * <p>The {@code ENTITY_INTERACTION_RANGE} attribute is client-synced from 1.20.5,
@@ -113,7 +115,7 @@ public final class ComboReachHandicap implements Listener {
      * must yield to the handicap for the combo's duration).
      */
     public boolean engaged() {
-        return supported() && config().enabled();
+        return supported() && enabled();
     }
 
     /* ----------------------------- transition legs ----------------------------- */
@@ -127,11 +129,10 @@ public final class ComboReachHandicap implements Listener {
         if (!supported()) {
             return;
         }
-        ComboSettings.ReachHandicap config = config();
-        if (!config.enabled()) {
-            return; // sub-feature off ⇒ zero-touch, no modifier ever constructed
+        if (!enabled()) {
+            return; // module off ⇒ zero-touch, no modifier ever constructed
         }
-        double scale = config.scale();
+        double scale = scale();
         // ensureOn: ComboEvents.fire is on the victim's owning thread, so this is
         // inline — and MUST match the end leg's inline shape, or a same-tick
         // start+end pair would apply (deferred) AFTER it removed (inline).
@@ -162,11 +163,10 @@ public final class ComboReachHandicap implements Listener {
      * 1.20.5). Runs on the enabling thread; the per-player sweep is scheduled.
      */
     public void enable() {
-        ComboSettings.ReachHandicap config = config();
-        if (config.enabled() && !supported()) {
+        if (enabled() && !supported()) {
             plugin.getLogger().warning(
-                    "combo-hold reach-handicap is enabled but this server has no "
-                    + "entity-interaction-range attribute (below 1.20.5) — the sub-feature is a "
+                    "combo-reach-handicap is enabled but this server has no "
+                    + "entity-interaction-range attribute (below 1.20.5) — the module is a "
                     + "no-op here. (Note: ViaVersion legacy clients ignore the synced attribute "
                     + "even on 1.20.5+; the server cannot shorten their reach.)");
             return;
@@ -242,10 +242,19 @@ public final class ComboReachHandicap implements Listener {
         }
     }
 
+    /** Whether the promoted {@code modules.combo-reach-handicap} feature is live. */
+    private boolean enabled() {
+        return snapshot.get().enabled(Feature.COMBO_REACH_HANDICAP);
+    }
+
+    /** The configured reach scale (the module toggle, not this value, gates the feature). */
+    private double scale() {
+        return settings().scale();
+    }
+
     @SuppressWarnings("unchecked")
-    private ComboSettings.ReachHandicap config() {
-        ComboSettings settings = snapshot.get().settings(
-                (SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
-        return settings.reachHandicap();
+    private ReachHandicapSettings settings() {
+        return snapshot.get().settings(
+                (SettingsKey<ReachHandicapSettings>) Feature.COMBO_REACH_HANDICAP.settingsKey());
     }
 }

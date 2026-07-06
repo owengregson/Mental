@@ -1,5 +1,6 @@
 package me.vexmc.mental.kernel.combo;
 
+import java.util.List;
 import java.util.UUID;
 import me.vexmc.mental.kernel.model.TickStamp;
 
@@ -20,10 +21,12 @@ import me.vexmc.mental.kernel.model.TickStamp;
  * explicit {@link #reset} (retire/disable). A hit from a DIFFERENT attacker
  * abandons the old chain and restarts on the new one.</p>
  *
- * <p>Each mutation returns a {@link ComboTransition} so the core can fire the
- * balanced api start/end events without inspecting internals. A false positive
- * is the design's worst case and costs only a clamped KB nudge, so the
- * thresholds are deliberately conservative.</p>
+ * <p>Each mutation returns the {@link ComboTransition}(s) it produced so the core
+ * can fire the balanced api start/end events without inspecting internals — a single
+ * transition for the time-driven ends, and up to a balanced END-then-START pair for
+ * {@link #onKnockShipped} (a restart at {@code minHits == 1} does both at once). A
+ * false positive is the design's worst case and costs only a clamped KB nudge, so
+ * the thresholds are deliberately conservative.</p>
  */
 public final class ComboTracker {
 
@@ -73,12 +76,21 @@ public final class ComboTracker {
      * (fed from the delivery fold). Continues the chain when the attacker is the
      * same and the gap holds; a different attacker or an expired gap abandons the
      * old chain (an END if it was active) and starts a fresh one on {@code
-     * attacker}. Returns the STARTED transition when this hit makes the chain
-     * active, or the ENDED transition for the abandoned old combo, else NONE.
+     * attacker}. Returns the transitions this hit produced, in fire order: the
+     * abandoned combo's END first (if any), then the fresh chain's START (if this
+     * hit activated it) — zero, one, or (at {@code minHits == 1}) two.
+     *
+     * <p>The two-transition case IS reachable: at {@code minHits == 1} a single hit
+     * that switches attacker (or restarts after gap expiry) both ends the old active
+     * combo AND immediately activates the new one. Returning only the END there (the
+     * old behaviour) swallowed the START — the new combo then ran with no
+     * {@code ComboStartEvent} fired and the reach handicap never re-applied. The core
+     * fires {@link ComboEvents} per transition, so a balanced END-then-START pair
+     * keeps the api events balanced and re-applies the handicap.</p>
      */
-    public ComboTransition onKnockShipped(UUID attacker, TickStamp tick) {
+    public List<ComboTransition> onKnockShipped(UUID attacker, TickStamp tick) {
         if (attacker == null) {
-            return ComboTransition.NONE;
+            return List.of();
         }
         ComboEndReason abandonedReason = null;
         UUID abandonedAttacker = attackerId;
@@ -101,18 +113,19 @@ public final class ComboTracker {
         hits++;
         lastHitTick = tick;
         groundedRun = 0; // a fresh knock re-launches the victim
-        ComboTransition start = ComboTransition.NONE;
+        boolean started = false;
         if (!active && hits >= rules.minHits()) {
             active = true;
             activeSince = tick;
-            start = ComboTransition.started(attackerId, hits);
+            started = true;
         }
-        // A single hit cannot both end an old active combo AND re-activate a new
-        // one (the new chain is at one hit), so report at most one transition.
-        if (abandonedReason != null) {
-            return ComboTransition.ended(abandonedAttacker, abandonedReason);
+        if (abandonedReason == null) {
+            return started ? List.of(ComboTransition.started(attackerId, hits)) : List.of();
         }
-        return start;
+        ComboTransition end = ComboTransition.ended(abandonedAttacker, abandonedReason);
+        return started
+                ? List.of(end, ComboTransition.started(attackerId, hits))
+                : List.of(end);
     }
 
     /**

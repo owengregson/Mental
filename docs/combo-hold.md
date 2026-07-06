@@ -77,7 +77,7 @@ pace × combo`) and with the static `range-reduction` taper (taper first).
 it does nothing to any pair not in an active combo; and it does **nothing at all**
 when the module is off (zero-touch). A false positive mid-scrap is the worst case
 and costs only a single clamped knock nudge — graceful degradation by design.
-(Reach *is* touched by the optional, default-off **reach handicap** sub-feature
+(Reach *is* touched by the optional, default-off **reach handicap** module
 below — a separate lever, 1.20.5+ only; the servo itself never touches it.)
 
 ## When a combo is "active"
@@ -106,19 +106,46 @@ All optional; an absent section uses the defaults shown.
 | `window-ticks` | `10` | the cadence horizon the flight is projected over (ping-shifted per hit) |
 | `target-mode` | `anchor` | `anchor` steers to `target`; `dynamic` uses the V2 exposure-budget target — the least-aggressive separation whose terminal exposure integral stays within the victim's continuous retaliation budget (`tPing + turn`), an out-drifting victim keeps the anchor, chase EMA-smoothed and target slew-limited (computed and logged either way — flip only after a lab round) |
 | `hit-cap` | `2.95` | the dynamic target's upper clamp (the practical hittable edge); only consulted under `target-mode: dynamic` |
-| `reach-handicap.enabled` | `false` | the reach handicap sub-feature (see below); off inside the opt-in module |
-| `reach-handicap.reach-scale` | `0.8` | the interaction-range multiplier while a combo is held, in `[0.5, 1.0]` (`0.8` → era 3.0 becomes 2.4) |
 
-## The reach handicap (1.20.5+, opt-in within the opt-in)
+The reach handicap is **its own module** (`modules.combo-reach-handicap`) since 2.4.4
+— see below — not a `combo-hold` sub-knob.
+
+## The reach handicap — its own module (`modules.combo-reach-handicap`, 1.20.5+)
 
 The servo shapes **spacing** — where the victim lands. The **reach handicap** is a
 separate, secondary lever that tightens **retaliation** directly: while a victim is
-held in a combo, their `entity-interaction-range` attribute is scaled down (default
-`0.8`, so the era 3.0 reach becomes 2.4 blocks) with an **additive** modifier
-(`mental:combo-reach`, `MULTIPLY_SCALAR_1`), never a base rewrite — so it composes
-with any third-party reach base. It is applied the moment the combo goes active and
-removed the moment it ends **by any reason** (`EXPIRED` / `RETALIATION` / `GROUNDED`
-/ `BLOWOUT` / `RETIRED` / `DISABLED`), on the victim's owning region thread.
+held in a combo, their `entity-interaction-range` attribute is scaled down
+(`combo-reach-handicap.reach-scale`, default `0.8`, in `[0.5, 1.0]`, so the era 3.0
+reach becomes 2.4 blocks) with an **additive** modifier (`mental:combo-reach`,
+`MULTIPLY_SCALAR_1`), never a base rewrite — so it composes with any third-party
+reach base. It is applied the moment the combo goes active and removed the moment it
+ends **by any reason** (`EXPIRED` / `RETALIATION` / `GROUNDED` / `BLOWOUT` /
+`RETIRED` / `DISABLED`), on the victim's owning region thread.
+
+**Its own GUI-visible module.** Promoted from a `combo-hold` sub-record to
+`modules.combo-reach-handicap` in 2.4.4 so it appears and toggles in the management
+GUI like every other feature (it was previously invisible and only hand-editable). It
+**depends on `combo-hold`** — it only engages while a combo is held — so enabling it
+with `combo-hold` off does nothing and the parser warns loudly on reload. Its one knob
+is `combo-reach-handicap.reach-scale`; the old `enabled` boolean dissolved into the
+module toggle.
+
+**Upgrading from ≤2.4.3-beta (loud migration).** A config that still carries the old
+nested `combo-hold.reach-handicap.enabled: true` / `.reach-scale` keeps working for
+one release: the parser honours it (module treated as enabled, the nested scale
+carried over) and prints one loud reload notice naming both the old and new keys.
+Move the toggle to `modules.combo-reach-handicap` and the scale to a top-level
+`combo-reach-handicap.reach-scale` block. An explicit `modules.combo-reach-handicap`
+key always wins over the legacy nested one.
+
+**Server-side enforcement needs `reach-validation`.** The client-synced attribute
+shrink covers honest clients (their own raycast shortens). Against an
+**attribute-blind** client (a legacy client via ViaVersion, or a client ignoring the
+synced value), the shrink is enforced server-side by the hit-registration reach
+backstop — which is only live when **`hit-registration.reach-validation.enabled:
+true`** (default OFF). With reach-validation off, the handicap is purely the
+client-synced attribute shrink and does nothing to attribute-blind clients on a
+fast-path server.
 
 **The servo stays the primary mechanism.** The pocket is a *geometric* property of
 the era launch (the `Δ²` reach-triangle margin, above); the servo holds it by
@@ -129,7 +156,7 @@ Leave it off unless you specifically want retaliation tightened during a hold.
 **1.20.5+ only.** The interaction-range attribute is client-synced from 1.20.5, so
 shortening it makes the client's **own** raycast shorten — no phantom misses where
 the client thinks it hit but the server refuses. Below 1.20.5 the attribute does not
-exist; the sub-feature is a **documented no-op** and logs one loud line if you
+exist; the module is a **documented no-op** and logs one loud line if you
 enable it there (the platform-probe doctrine — never a silent degrade).
 
 **ViaVersion caveat.** A legacy client connected through ViaVersion **ignores** the

@@ -36,17 +36,18 @@ import me.vexmc.mental.kernel.wire.CompensationQuery;
 import me.vexmc.mental.kernel.wire.CpsLimiter;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
-import me.vexmc.mental.kernel.wire.ReachValidator;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.rim.BurstSender;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
@@ -376,7 +377,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     attackerView == null ? 0 : positionX(attackerId),
                     attackerView == null ? 0 : positionZ(attackerId),
                     positionX(victimId), positionZ(victimId),
-                    domains.domainFor(victimId).lastYaw());
+                    lastYaw(victimId));
             // The wire burst ships whenever the victim has a wire and the hit is
             // NOT an eligible-but-gated velocity: the velocity when it passed the
             // gate (shipped != null), else a hurt-only burst — which is gated by
@@ -418,7 +419,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             // movement packet, enchant is corrected on the authoritative pass.
             // The movement-speed attribute rides the published view so the
             // pre-sent knock's pace scaling matches the tick path (one truth).
-            return new EntityState(x, y, z, domains.domainFor(attackerId).lastYaw(),
+            return new EntityState(x, y, z, lastYaw(attackerId),
                     0, 0, 0, view.grounded(), verdict.sprinting(), 0, view.knockbackResistance(),
                     view.moveSpeedAttr());
         }
@@ -441,6 +442,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
         private double positionZ(UUID id) {
             PositionRing.Sample sample = sessions.positions().latest(id);
             return sample == null ? 0 : sample.z();
+        }
+
+        /**
+         * The connection's last movement-packet yaw, resolved through a NON-creating
+         * {@link ConnectionDomains#peek}. A packetless party (synthetic player /
+         * in-process bot) has no domain and falls back to 0 — never {@code domainFor},
+         * which would spuriously create the domain and poison the ledger feed (the
+         * 2.4.4 domain-poisoning bug).
+         */
+        private float lastYaw(UUID id) {
+            ConnectionDomains.Domain domain = domains.peek(id);
+            return domain == null ? 0f : domain.lastYaw();
         }
     }
 
@@ -470,7 +483,13 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
     private SprintVerdict sprintVerdict(UUID attackerId) {
         if (wtapConsultWire.get()) {
-            return domains.domainFor(attackerId).sprint().verdictAt(clock.current());
+            // NON-creating peek: a packetless attacker has no wire, so it falls
+            // through to the published-view sprint rather than materialising a
+            // domain here and poisoning its own ledger feed (the 2.4.4 bug).
+            ConnectionDomains.Domain domain = domains.peek(attackerId);
+            if (domain != null) {
+                return domain.sprint().verdictAt(clock.current());
+            }
         }
         PlayerView view = sessions.viewOf(attackerId);
         return new SprintVerdict(view != null && view.sprinting(), null, clock.current());
@@ -518,25 +537,23 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 (long) attackerView.pingMillis() + reach.interpolationOffsetMillis(),
                 reach.rewindCapMillis());
         long instantNanos = System.nanoTime() - rewindMillis * 1_000_000L;
-        // The combo reach handicap's server-side backstop (interaction audit): when
-        // the ATTACKER of this swing is themselves a combo VICTIM (someone holds a
-        // combo against them, read off their own frozen view) and the handicap is
-        // live, vanilla's melee gate would enforce the SHORTENED attribute — but
-        // the fast path cancelled that gate. Clamp the validation window by the
-        // same scale so a dishonest/attribute-blind client cannot answer a combo
-        // beyond what vanilla would have allowed. Null when the handicap is off,
-        // unsupported, or no combo is held against this attacker.
-        double maxReach = reach.maxReach();
+        // The combo reach handicap's server-side backstop (interaction audit; the
+        // servo-lab 243 S2 correction): when the ATTACKER of this swing is themselves
+        // a combo VICTIM (someone holds a combo against them, read off their own
+        // frozen view) and the handicap is live, vanilla's melee gate would enforce
+        // the SHORTENED attribute — but the fast path cancelled that gate. A non-null
+        // scale makes ReachClamp scale BOTH the reach and the leniency by the handicap
+        // AND measure eye-to-CENTRE, so the window bites below an attribute-blind
+        // client's own send envelope (the audit's eye-to-box scale·reach+full-leniency
+        // clamp sat above everything such a client could attempt — nil margin at 0.8).
+        // Null when the handicap is off, unsupported, or no combo is held against this
+        // attacker — then ReachClamp is the byte-identical plain eye-to-box window.
         Double handicapScale = comboReachHandicapScale(attackerView);
-        if (handicapScale != null) {
-            maxReach *= handicapScale;
-        }
-        ReachValidator.Verdict verdict = ReachValidator.validate(
-                attackerPos.x(), attackerPos.y() + ReachValidator.EYE_HEIGHT, attackerPos.z(),
+        return ReachClamp.passes(
+                attackerPos.x(), attackerPos.y() + ReachClamp.EYE_HEIGHT, attackerPos.z(),
                 sessions.positions().samplesAround(victimId, instantNanos, 75_000_000L),
                 victimPos.x(), victimPos.y(), victimPos.z(),
-                maxReach, reach.leniency());
-        return verdict.valid();
+                reach.maxReach(), reach.leniency(), handicapScale);
     }
 
     /**
@@ -550,18 +567,14 @@ public final class HitRegistrationUnit implements FeatureUnit {
     @SuppressWarnings("unchecked")
     private Double comboReachHandicapScale(PlayerView attackerView) {
         if (attackerView.comboAttackerId() == null) {
-            return null;
+            return null; // no combo is held against this attacker (implies COMBO_HOLD on)
         }
         Snapshot current = snapshot.get();
-        if (!current.enabled(Feature.COMBO_HOLD)) {
-            return null;
+        if (!current.enabled(Feature.COMBO_REACH_HANDICAP) || !ComboReachHandicap.leverSupported()) {
+            return null; // the promoted module off, or below 1.20.5 (vanilla's gate could not enforce it)
         }
-        ComboSettings.ReachHandicap handicap = current.settings(
-                (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey())
-                .reachHandicap();
-        if (!handicap.enabled() || !ComboReachHandicap.leverSupported()) {
-            return null;
-        }
+        ReachHandicapSettings handicap = current.settings(
+                (SettingsKey<ReachHandicapSettings>) Feature.COMBO_REACH_HANDICAP.settingsKey());
         return handicap.scale();
     }
 

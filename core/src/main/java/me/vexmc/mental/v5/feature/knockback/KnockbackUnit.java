@@ -223,9 +223,32 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // difference hit) knocks: the difference branch is era-silent and must
         // stay so (compendium: stronger mid-invuln hit deals difference damage
         // with NO knock and no flinch).
-        boolean freshBlockedKnock = blockModifier
-                && (event.getFinalDamage() > 0.0 || mentalTempShieldBlock)
-                && !victimImmune(session, victim);
+        // Mid-invulnerability at hit time: vanilla deals only the difference damage
+        // and applies NO knockback (no velocity event) — the era-silent difference
+        // branch (compendium: no knock, no flinch). Read once; it splits the
+        // blocked-knock shape into its fresh and era-silent halves below.
+        boolean immune = victimImmune(session, victim);
+        // The blocked-knock event shape: a partial native block still landing
+        // damage, or an unrewritten temp-shield full block (audit C1). Vanilla
+        // SKIPS markHurt for it, so no velocity event ever resolves it — the two
+        // branches below decide whether the era knock ships anyway (fresh) or the
+        // era withholds it (mid-invuln difference).
+        boolean blockedKnockShape = blockModifier
+                && (event.getFinalDamage() > 0.0 || mentalTempShieldBlock);
+        boolean freshBlockedKnock = blockedKnockShape && !immune;
+        // The era-silent blocked difference hit — freshBlockedKnock's exact
+        // inverse within the blocked shape (the 2.4.0 difference-branch contract:
+        // no knock, no flinch). This, and ONLY this, is the class the region-path
+        // submit below leaves UNARMED: it is the one class where the frozen
+        // immune read is corroborated by the event shape vanilla actually took.
+        // The bare frozen read is NOT a discriminator on its own — it is a
+        // boundary read (end of the previous tick, +1 staleness allowance) and
+        // classifies a legal boundary combo hit as immune too, while vanilla, on
+        // its LIVE counter, knocks that hit in full and fires its velocity event
+        // (the 1.9.4 second-regression: unarming on the bare read left the combo
+        // second hit's genuine event to pass through a packetless victim's zeroed
+        // vanilla motion — applied 0,0,0 instead of the ledger-stacked stamp).
+        boolean eraSilentBlockedHit = blockedKnockShape && immune;
 
         HitTransaction.State state = tx.state();
         if (state == HitTransaction.State.PRE_SENT || state == HitTransaction.State.PINNED) {
@@ -292,7 +315,22 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         }
 
         desk.submit(tx, vector);
-        desk.awaitVelocityEvent(tx);
+        if (!eraSilentBlockedHit) {
+            // Arm the desk for the victim's PlayerVelocityEvent — vanilla knocks
+            // this hit and fires it (and, for a packetless victim whose event lands
+            // late or never, the armed decision lets the region-path net ship the
+            // stranding, F1). This deliberately includes hits whose FROZEN immune
+            // read says mid-invuln: that read is a boundary snapshot and flags legal
+            // boundary combo hits too, whose genuine velocity event must resolve to
+            // the ledger-stacked stamp exactly as it always did (arming here is the
+            // pre-F1-net behavior for every non-blocked hit). Only the era-silent
+            // blocked difference hit stays UNARMED: vanilla applies no knockback and
+            // fires no velocity event for it, so the sweep drops it and the net's
+            // awaitingDeliveryFor gate never fabricates a knock the era withholds —
+            // the submitted vector still feeds the mirror/journal exactly as before,
+            // so only the (never-firing) velocity-event arm changes.
+            desk.awaitVelocityEvent(tx);
+        }
         applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
     }
 
@@ -374,13 +412,25 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (attackerSession != null) {
             attackerSession.ledger().scaleHorizontal(0.6);
         }
-        domains.domainFor(attackerId).sprint().onServerClear(asOf);
+        // Mirror vanilla's in-attack sprint clear onto the wire — but ONLY when a
+        // real connection domain already exists to clear. A packetless attacker
+        // (synthetic player / in-process bot) has no SprintWire the rim ever fed,
+        // and creating one here (domainFor is computeIfAbsent) would make it look
+        // connected — permanently standing its ground sampler down and free-falling
+        // its ledger to a zero vertical (the 2.4.4 domain-poisoning bug; the
+        // SwordBlockingUnit:259 non-creating idiom is the precedent).
+        if (domains.has(attackerId)) {
+            domains.domainFor(attackerId).sprint().onServerClear(asOf);
+        }
         if (player.isSprinting()) {
             scheduling.runOn(player, () -> {
                 // At execution time (the attacker's own thread), skip the clear when
                 // the wire re-armed to sprinting after the hit — a re-engage newer
                 // than asOf that vanilla's synchronous clear would never have eaten.
-                if (domains.domainFor(attackerId).sprint().verdictAt(clock.current()).sprinting()) {
+                // With no wire (a packetless attacker) there is nothing to consult,
+                // so mirror vanilla's unconditional clear directly.
+                if (domains.has(attackerId)
+                        && domains.domainFor(attackerId).sprint().verdictAt(clock.current()).sprinting()) {
                     return;
                 }
                 player.setSprinting(false);
@@ -501,7 +551,15 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         return fresh;
     }
 
-    /** True when the victim was mid-invulnerability at hit time (the era-silent difference branch). */
+    /**
+     * True when the victim reads mid-invulnerability off the FROZEN boundary view
+     * (end of the previous tick, +1 staleness allowance). This is an approximation
+     * of vanilla's live counter, not a truth about the branch vanilla took: a legal
+     * boundary combo hit — accepted and knocked in full by vanilla's LIVE read —
+     * can still read immune here. It is therefore only ever a discriminator when
+     * CORROBORATED by the blocked event shape (the era-silent blocked difference
+     * hit); never gate a non-blocked hit's delivery on it alone.
+     */
     private boolean victimImmune(CombatSession session, Player victim) {
         PlayerView view = session.view();
         if (view != null) {

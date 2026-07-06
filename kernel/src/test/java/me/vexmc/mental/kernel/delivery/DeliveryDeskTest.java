@@ -386,6 +386,85 @@ class DeliveryDeskTest {
         assertEquals(1, desk.journal().size());
     }
 
+    /* ── awaitingDeliveryFor: the region-path net's arm gate (F1 vs era-silent) ── */
+
+    @Test
+    void awaitingDeliveryForDiscriminatesAnArmedDecisionFromAnUnarmedOne() {
+        DeliveryDesk desk = desk();
+        HitTransaction tx = new HitTransaction(ctx(1, new HitSource.Melee(), 5));
+
+        // Submitted but NOT armed for a velocity event — the era-silent
+        // mid-invulnerability path (vanilla knocks nothing, fires no event). The net
+        // must NOT ship this. A submitted-but-unarmed decision still carries a vector
+        // (pendingVectorFor is non-null), so the two queries are deliberately distinct.
+        desk.submit(tx, VECTOR);
+        assertEquals(VECTOR, desk.pendingVectorFor(new HitId(1)),
+                "a submitted decision still carries its vector");
+        assertTrue(!desk.awaitingDeliveryFor(new HitId(1)),
+                "submitted but unarmed is NOT awaiting delivery — the era-silent gate");
+
+        // Arming it (a fresh hit expecting the victim's PlayerVelocityEvent) flips it
+        // to awaiting-delivery — the exact F1 stranding the net ships.
+        desk.awaitVelocityEvent(tx);
+        assertTrue(desk.awaitingDeliveryFor(new HitId(1)),
+                "submitted + armed IS awaiting delivery — the F1 net's fire condition");
+        assertTrue(!desk.awaitingDeliveryFor(new HitId(2)), "a different id never matches");
+
+        // Once resolved it no longer awaits (idempotent, non-fabricating).
+        desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+        assertTrue(!desk.awaitingDeliveryFor(new HitId(1)),
+                "a resolved decision is no longer awaiting delivery");
+    }
+
+    @Test
+    void awaitingDeliveryForDoesNotInheritASupersededDecisionsArm() {
+        DeliveryDesk desk = desk();
+        HitTransaction armed = new HitTransaction(ctx(1, new HitSource.Melee(), 5));
+        desk.submit(armed, VECTOR);
+        desk.awaitVelocityEvent(armed); // decision 1 is armed
+
+        // A fresh decision supersedes it (same-tick double region hit). The await arm
+        // must NOT carry over — the new pending was submitted, not yet armed.
+        HitTransaction fresh = new HitTransaction(ctx(2, new HitSource.Melee(), 5));
+        desk.submit(fresh, VECTOR);
+        assertTrue(!desk.awaitingDeliveryFor(new HitId(2)),
+                "superseding resets the arm — the fresh pending is not yet awaiting delivery");
+        assertTrue(!desk.awaitingDeliveryFor(new HitId(1)),
+                "the superseded decision is no longer the pending");
+    }
+
+    @Test
+    void unexpectedVelocityEventAtAnUnarmedPendingPassesThroughAndLeavesItForTheSweep() {
+        DeliveryDesk desk = desk();
+        HitTransaction silent = new HitTransaction(ctx(1, new HitSource.Melee(), 5));
+        desk.submit(silent, VECTOR); // era-silent blocked difference hit: submitted, never armed
+
+        // A velocity event the desk never expected (a third-party setVelocity while
+        // the era-silent decision sits): an unarmed pending means NO event is owed to
+        // this decision, so the desk treats it as foreign — pass it through exactly
+        // as it stands. It must never CANCEL (that would zero a velocity Mental does
+        // not own) and never SHIP the submitted vector (that would deliver the very
+        // knock the era withholds).
+        Directive foreign = desk.resolve(0.1, 0.2, 0.3);
+        assertEquals(Action.PASS_THROUGH, foreign.action(),
+                "an unarmed pending never hijacks a foreign velocity event");
+        assertNull(foreign.ship(), "pass-through ships nothing of Mental's");
+        assertTrue(desk.journal().isEmpty(), "a foreign velocity is never journaled");
+
+        // The decision itself is undisturbed — still pending, still unarmed, still
+        // carrying its vector — so the sweep remains its one owner and closes it as
+        // the era-silent drop.
+        assertEquals(VECTOR, desk.pendingVectorFor(new HitId(1)),
+                "the pass-through leaves the unarmed decision pending");
+        assertTrue(!desk.awaitingDeliveryFor(new HitId(1)),
+                "the pass-through never arms the decision");
+        desk.sweep(new TickStamp(7));
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(1, journal.size());
+        assertNull(journal.get(0).shipped(), "the era-silent decision ships nothing");
+        assertEquals("no-velocity-event", journal.get(0).suppressReason());
+    }
+
     /* ── mirror + pending-formula views ────────────────────────────────── */
 
     @Test

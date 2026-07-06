@@ -12,11 +12,17 @@ import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.combo.ComboEndReason;
 import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
+import me.vexmc.mental.kernel.delivery.DeliveryDesk;
+import me.vexmc.mental.kernel.delivery.Directive;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
+import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KinematicState;
+import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.LedgerEvent;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.GroundFsm;
@@ -24,6 +30,7 @@ import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
+import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
@@ -230,11 +237,52 @@ public final class SessionService implements Listener, SessionAccess {
         entityIdByPlayer.put(id, entityId);
         playerIdByEntityId.put(entityId, id);
         samplers.put(id, new GroundFsm(clock));
-        TaskHandle handle = scheduling.repeatOn(player, 1L, 1L, () -> tick(player), () -> forget(id));
+        scheduleTick(player, id);
+    }
+
+    /**
+     * (Re)arm the per-player session tick on the player's owning region thread.
+     *
+     * <p>{@link Scheduling#repeatOn} retires the task when the scheduler can no
+     * longer run it. On Folia the entity scheduler fires that retirement only on a
+     * genuine removal; the Bukkit emulation, though, fires it on ANY tick where
+     * {@link org.bukkit.entity.Entity#isValid()} is false — and that flag is
+     * transiently false for a sub-tick right after a player is added to the world
+     * (and for several ticks across a respawn or a chunk reload). Coupling the
+     * session's whole lifetime to that per-tick flag is a race: if the first
+     * scheduled tick lands inside the just-added window, the task retires and the
+     * session is forgotten forever (there is no re-create outside {@code join}),
+     * so every later hit on that player is un-owned — the packetless victim's
+     * knock is journalled as no SHIP and the captor sees vanilla velocity. The
+     * {@link #onDeath} reset handler already documents the intent: a session
+     * SURVIVES transient invalidity. So {@link #retire} re-arms while the player
+     * is still online and only forgets once they are genuinely gone (the
+     * {@link #onQuit} path forgets that case too, idempotently).</p>
+     */
+    private void scheduleTick(Player player, UUID id) {
+        TaskHandle handle =
+                scheduling.repeatOn(player, 1L, 1L, () -> tick(player), () -> retire(player, id));
         TaskHandle prior = handles.put(id, handle);
         if (prior != null) {
             prior.cancel();
         }
+    }
+
+    /**
+     * The session tick's retirement seam. A still-online player is only transiently
+     * invalid (post-add sub-tick, respawn, chunk reload): keep the session and
+     * re-arm the tick so it resumes once the entity is valid again. A genuinely
+     * departed player is forgotten (the quit listener covers that path too).
+     */
+    private void retire(Player player, UUID id) {
+        if (!sessions.containsKey(id)) {
+            return; // already forgotten (a real quit already ran) — idempotent
+        }
+        if (player.isOnline()) {
+            scheduleTick(player, id);
+            return;
+        }
+        forget(id);
     }
 
     void forget(UUID id) {
@@ -275,6 +323,12 @@ public final class SessionService implements Listener, SessionAccess {
         // this tick's combo state (and its time-driven ends have already fired).
         driveCombo(player, session, combatGrounded);
         PlayerView view = buildView(player, session, combatGrounded);
+        // Deliver a PACKETLESS victim's region-path melee knock that no velocity
+        // event resolved before the desk's sweep would drop it (below, in tickStep).
+        // Run with the SAME `now` the sweep uses, immediately ahead of it, so a hit
+        // that DID resolve in time is already gone (zero-touch) and only a genuinely
+        // stranded one is ensured.
+        ensureStrandedPacketlessMelee(player, session, view.at());
         session.tickStep(view);
         valve.clearStale(player.getUniqueId());
         // One owning-thread position sample per tick — the fast path's reach
@@ -283,6 +337,75 @@ public final class SessionService implements Listener, SessionAccess {
         Location location = player.getLocation();
         positions.record(player.getUniqueId(),
                 location.getX(), location.getY(), location.getZ(), System.nanoTime());
+    }
+
+    /**
+     * The region-path melee safety net for PACKETLESS victims. The vanilla-melee
+     * (REGISTERED) path is the one delivery path with no no-velocity-event fallback
+     * of its own: unlike a fast-path pre-send, a blocked knock, or a thrown
+     * projectile, it relies ENTIRELY on the victim's {@code PlayerVelocityEvent}
+     * resolving the pending decision. That event is server-authoritative and prompt
+     * for a real client, but for a packetless player (a synthetic test player /
+     * in-process bot) it can be published late — on 1.20.6 the whole knock is
+     * routed through the synchronous {@code Player.attack} restore block that resets
+     * {@code hurtMarked}, so the victim's velocity event can land a tick or more
+     * behind the desk's two-tick sweep. When it does, the desk drops the decision as
+     * {@code no-velocity-event} and the era knock is lost — the boxer never takes it,
+     * and the delivery journal records no SHIP (the F1 regression: the base-speed
+     * server-sprint hit journalled nothing on 1.20.6 alone, the sole tested build in
+     * the [1.20.5, 1.21) band).
+     *
+     * <p>So, one tick before the sweep would drop it (same {@code now}, so the
+     * two-tick grace is identical), give the stranded decision the same directed
+     * ensure the thrown-projectile path uses: journal the SHIP and apply the era
+     * vector with {@code setVelocity} (which the packetless entity needs anyway to
+     * actually move, and which lets any observer's captor still see the knock). The
+     * gate is tight and provably zero-touch elsewhere: only a victim with NO live
+     * connection domain ({@link ConnectionDomains#has} false — a real client is
+     * skipped, its velocity event owns delivery), only a still-LIVE REGISTERED melee
+     * decision that is genuinely awaiting delivery ({@link DeliveryDesk#awaitingDeliveryFor}
+     * — a fast-path/pinned/blocked hit or a resolved one is already gone, and an
+     * era-silent BLOCKED difference hit (partially blocked, landing
+     * mid-invulnerability) was submitted UNARMED so it is excluded: vanilla knocks
+     * nothing there and the era stays silent), and only once it is as old as the
+     * sweep's own drop threshold. A hit that resolved in time left nothing pending,
+     * so nothing fires.</p>
+     */
+    private void ensureStrandedPacketlessMelee(Player player, CombatSession session, TickStamp now) {
+        if (domains.has(player.getUniqueId())) {
+            return; // a real connection — its own velocity event (and the era mirror) delivers
+        }
+        DeliveryDesk desk = session.desk();
+        HitContext pending = desk.pendingContext();
+        if (pending == null || !isRegionMelee(pending.source())) {
+            return; // nothing pending, or a non-melee/typed source that owns its own ensure
+        }
+        TickStamp registeredAt = pending.registeredAt();
+        if (!registeredAt.known() || !now.known() || now.value() - registeredAt.value() < 2) {
+            return; // give the (possibly late) velocity event the exact window the sweep does
+        }
+        if (!desk.awaitingDeliveryFor(pending.id())) {
+            // Only ensure a decision genuinely submitted-for-delivery AND awaiting its
+            // velocity event (the exact F1 stranding). Skip a resolved/withdrawn one
+            // (the velocity event shipped it) AND — critically — an era-silent
+            // BLOCKED difference hit (partially blocked, mid-invulnerability): the
+            // knockback unit submits its vector but leaves the await UNARMED because
+            // vanilla knocks nothing and fires no velocity event for it. Fabricating
+            // a knock there would break the era difference-branch silence (no knock,
+            // no flinch); leave it for the sweep to drop.
+            return;
+        }
+        Directive directive = desk.ensure(pending.id());
+        KnockbackVector shipped = directive.ship();
+        if (shipped != null) {
+            player.setVelocity(Vectors.toBukkit(shipped));
+        }
+    }
+
+    /** A region-path vanilla melee ({@code ENTITY_ATTACK}) or an adopted fast-path melee. */
+    private static boolean isRegionMelee(HitSource source) {
+        return source instanceof HitSource.Melee
+                || (source instanceof HitSource.Vanilla vanilla && "ENTITY_ATTACK".equals(vanilla.damageCause()));
     }
 
     /**
@@ -299,9 +422,14 @@ public final class SessionService implements Listener, SessionAccess {
     @SuppressWarnings("deprecation") // Player#isOnGround — the transition-relevant client flag
     private void sampleGround(Player player, CombatSession session) {
         UUID id = player.getUniqueId();
-        if (domains.has(id)) {
-            return; // real connection — the packet FSM feeds the ledger
+        ConnectionDomains.Domain domain = domains.peek(id);
+        if (domain != null && domain.ground().hasSeenMovement()) {
+            return; // real connection — the packet FSM is actively feeding the ledger
         }
+        // Defense in depth (2.4.4): key the stand-down on packets ACTUALLY seen, not
+        // on mere domain existence. A domain spuriously created by a read (the
+        // poisoning bug's shape) has an unfed GroundFsm (hasSeenMovement()==false),
+        // so the sampler stays live and the packetless ledger feed is never silenced.
         GroundFsm sampler = samplers.get(id);
         if (sampler == null) {
             return;

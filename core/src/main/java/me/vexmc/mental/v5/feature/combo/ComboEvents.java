@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.feature.combo;
 
+import java.util.List;
 import java.util.UUID;
 import me.vexmc.mental.api.event.ComboEndEvent;
 import me.vexmc.mental.api.event.ComboStartEvent;
@@ -38,6 +39,16 @@ public final class ComboEvents {
         this.reachHandicap = reachHandicap;
     }
 
+    /**
+     * Fires every transition in order (the balanced END-then-START pair a
+     * {@code minHits == 1} restart produces, or a single transition, or none).
+     */
+    public void fire(Player victim, List<ComboTransition> transitions) {
+        for (ComboTransition transition : transitions) {
+            fire(victim, transition);
+        }
+    }
+
     /** Fires the matching api event for {@code transition}, or nothing for {@link ComboTransition#NONE}. */
     public void fire(Player victim, ComboTransition transition) {
         if (transition == null || transition.kind() == ComboTransition.Kind.NONE) {
@@ -49,6 +60,13 @@ public final class ComboEvents {
             reachHandicap.onComboStart(victim);
         } else {
             reachHandicap.onComboEnd(victim);
+            // Clear the pocket-servo memory at the combo END so the NEXT combo (a
+            // different attacker, or a re-engaged chain) starts memoryless as designed
+            // — never seeding the V2 dynamic target's cross-hit smoothing from a prior
+            // combo's/attacker's closing state. Forget on END, never START: within a
+            // combo the memory must persist hit-to-hit. Idempotent and empty under the
+            // shipped ANCHOR default (the memory is unwritten there).
+            ComboPredictor.forget(victim.getUniqueId());
         }
         LivingEntity attacker = resolve(transition.attacker());
         if (transition.started()) {

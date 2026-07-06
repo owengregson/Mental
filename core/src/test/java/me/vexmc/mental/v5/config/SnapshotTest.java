@@ -19,6 +19,7 @@ import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import org.bukkit.configuration.Configuration;
@@ -150,48 +151,129 @@ class SnapshotTest {
     }
 
     @Test
-    void comboReachHandicapReadsEnabledAndScaleFromTheNestedSection() throws Exception {
+    void comboReachHandicapEnablesFromItsOwnModuleAndReadsTheTopLevelScale() throws Exception {
+        // The 2.4.4 promotion: the reach handicap is its own module with a flat
+        // top-level scale (the enable dissolved into the module toggle).
         SnapshotParser.Result result = parse("""
-                combo-hold:
-                  reach-handicap:
-                    enabled: true
-                    reach-scale: 0.7
+                modules:
+                  combo-hold: true
+                  combo-reach-handicap: true
+                combo-reach-handicap:
+                  reach-scale: 0.7
                 """, "", "", "");
 
-        ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
-        assertTrue(combo.reachHandicap().enabled(), "the nested enabled flag flips");
-        assertEquals(0.7, combo.reachHandicap().scale(), "the in-range scale is stored verbatim");
+        Snapshot snapshot = result.snapshot();
+        assertTrue(snapshot.enabled(Feature.COMBO_REACH_HANDICAP), "the module toggle flips it on");
+        ReachHandicapSettings handicap = settings(snapshot, Feature.COMBO_REACH_HANDICAP);
+        assertEquals(0.7, handicap.scale(), "the in-range top-level scale is stored verbatim");
         assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
     }
 
     @Test
-    void comboReachHandicapDefaultsOffWhenTheSubSectionIsAbsent() throws Exception {
-        // The module knobs present but no reach-handicap block: the sub-feature stays
-        // the era-exact no-op (OFF, 0.8) — opt-in inside the opt-in module.
-        ComboSettings combo = settings(parse("""
-                combo-hold:
-                  min-hits: 4
-                """, "", "", "").snapshot(), Feature.COMBO_HOLD);
-        assertEquals(ComboSettings.ReachHandicap.DEFAULTS, combo.reachHandicap());
+    void comboReachHandicapDefaultsOffAndToItsScaleDefaultWhenAbsent() throws Exception {
+        // No module key and no block: OFF and 0.8 — the era-exact no-op.
+        Snapshot snapshot = parse("", "", "", "").snapshot();
+        assertFalse(snapshot.enabled(Feature.COMBO_REACH_HANDICAP), "default OFF (era-exact no-op)");
+        assertEquals(ReachHandicapSettings.DEFAULTS, settings(snapshot, Feature.COMBO_REACH_HANDICAP));
     }
 
     @Test
     void comboReachScaleOutOfRangeWarnsOnceAndFallsBack() throws Exception {
         // 1.4 would INFLATE reach — a handicap never does; it warns and the default 0.8 stands.
         SnapshotParser.Result result = parse("""
+                modules:
+                  combo-hold: true
+                  combo-reach-handicap: true
+                combo-reach-handicap:
+                  reach-scale: 1.4
+                """, "", "", "");
+
+        Snapshot snapshot = result.snapshot();
+        ReachHandicapSettings handicap = settings(snapshot, Feature.COMBO_REACH_HANDICAP);
+        assertEquals(ReachHandicapSettings.DEFAULTS.scale(), handicap.scale(),
+                "out-of-range scale fell back to the default");
+        assertTrue(snapshot.enabled(Feature.COMBO_REACH_HANDICAP), "the module still enabled it");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("reach-scale"));
+        assertTrue(result.issues().get(0).contains("combo-reach-handicap"));
+    }
+
+    @Test
+    void legacyNestedReachHandicapMigratesLoudlyToTheModule() throws Exception {
+        // In-place upgrade from 2.4.3-beta: the old nested combo-hold.reach-handicap
+        // block with NO new module key. The parser honours it (enabled) and carries its
+        // tuned scale, and warns once naming BOTH keys — never silently ignored.
+        SnapshotParser.Result result = parse("""
+                modules:
+                  combo-hold: true
                 combo-hold:
                   reach-handicap:
                     enabled: true
-                    reach-scale: 1.4
+                    reach-scale: 0.7
+                """, "", "", "");
+
+        Snapshot snapshot = result.snapshot();
+        assertTrue(snapshot.enabled(Feature.COMBO_REACH_HANDICAP),
+                "the legacy nested enable migrates to the module enabled bit");
+        ReachHandicapSettings handicap = settings(snapshot, Feature.COMBO_REACH_HANDICAP);
+        assertEquals(0.7, handicap.scale(),
+                "the legacy nested reach-scale carries over for one release window");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("combo-reach-handicap"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("combo-hold.reach-handicap"), () -> result.issues().get(0));
+    }
+
+    @Test
+    void anExplicitReachHandicapModuleKeyWinsOverTheLegacyNestedEnable() throws Exception {
+        // Once the operator has set the new module key, the legacy nested enable is
+        // ignored (no migration, no warn) — the module key is the single source.
+        SnapshotParser.Result result = parse("""
+                modules:
+                  combo-hold: true
+                  combo-reach-handicap: false
+                combo-hold:
+                  reach-handicap:
+                    enabled: true
+                """, "", "", "");
+
+        Snapshot snapshot = result.snapshot();
+        assertFalse(snapshot.enabled(Feature.COMBO_REACH_HANDICAP),
+                "the explicit module key (false) wins over the legacy nested enable");
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+    }
+
+    @Test
+    void comboReachHandicapEnabledWithoutComboHoldWarnsItWillNeverEngage() throws Exception {
+        // The handicap only applies while a combo is held, so on-without-combo-hold is
+        // a dormant lever — the parser says so loudly rather than silently.
+        SnapshotParser.Result result = parse("""
+                modules:
+                  combo-hold: false
+                  combo-reach-handicap: true
+                """, "", "", "");
+
+        assertTrue(result.snapshot().enabled(Feature.COMBO_REACH_HANDICAP));
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("combo-hold"), () -> result.issues().get(0));
+    }
+
+    @Test
+    void servoClampWithMinFactorAboveMaxFactorWarnsAndFallsBackToDefaults() throws Exception {
+        // A transposed pair (min > max) would pin sigma to min-factor on every combo
+        // hit through the clamp's Math.max(min, ...) — a constant amplifier. The parser
+        // must warn and fall BOTH back to the defaults, not accept it silently.
+        SnapshotParser.Result result = parse("""
+                combo-hold:
+                  min-factor: 1.2
+                  max-factor: 0.8
                 """, "", "", "");
 
         ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
-        assertEquals(ComboSettings.ReachHandicap.DEFAULTS.scale(), combo.reachHandicap().scale(),
-                "out-of-range scale fell back to the default");
-        assertTrue(combo.reachHandicap().enabled(), "the enabled flag still applied");
+        assertEquals(ComboSettings.DEFAULTS.minFactor(), combo.minFactor(), "min-factor fell back");
+        assertEquals(ComboSettings.DEFAULTS.maxFactor(), combo.maxFactor(), "max-factor fell back");
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
-        assertTrue(result.issues().get(0).contains("reach-scale"));
-        assertTrue(result.issues().get(0).contains("combo-hold.reach-handicap"));
+        assertTrue(result.issues().get(0).contains("min-factor"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("max-factor"), () -> result.issues().get(0));
     }
 
     @Test

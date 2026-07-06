@@ -73,6 +73,7 @@ import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicapUnit;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
@@ -491,6 +492,15 @@ public final class MentalPluginV5 extends JavaPlugin {
         return sessions;
     }
 
+    /**
+     * The D1 connection domains (per-player sprint + ground FSM, keyed by UUID).
+     * Exposed for the tester's domain-poisoning regression pin: a packetless
+     * attacker must never gain a domain as a side effect of landing a hit.
+     */
+    public @NotNull ConnectionDomains domains() {
+        return domains;
+    }
+
     /** The velocity valve — armed by the desk, consumed by the rim's outbound listener. */
     public @NotNull VelocityValve valve() {
         return valve;
@@ -704,7 +714,12 @@ public final class MentalPluginV5 extends JavaPlugin {
         // sweep), the view publish, and the servo application at the engine seam are
         // already wired into the session/delivery/knockback code. Zero-touch when the
         // scope is closed (no tracker, no sweep work).
-        reconciler.register(new ComboHoldUnit(sessions, comboReachHandicap));
+        reconciler.register(new ComboHoldUnit(sessions));
+        // The reach handicap is its own GUI-visible module (2.4.4, field report 2): it
+        // owns the ComboReachHandicap lifecycle (join-sweep + enable/disable restore),
+        // while the per-combo apply/remove rides the combo transitions via ComboEvents.
+        // It depends on combo-hold (the parser warns loudly when on without it).
+        reconciler.register(new ComboReachHandicapUnit(comboReachHandicap));
         // The POTS family (owner directive 2026-07-04) — two independently-toggled
         // splash-potion utilities, both default OFF. Pot-fill dynamically registers
         // /potfill on the command map on enable and strips it whole on disable

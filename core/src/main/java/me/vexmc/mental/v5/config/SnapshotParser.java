@@ -18,6 +18,7 @@ import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Material;
@@ -52,14 +53,36 @@ public final class SnapshotParser {
         ConfigReader modules = new ConfigReader(
                 main.getConfigurationSection("modules"), "config.yml: modules", issues);
 
+        // The combo reach handicap was promoted to its own module in 2.4.4; its
+        // enablement carries a loud legacy-key migration, so it is resolved once here
+        // and the loop below reuses it (COMBO_HOLD likewise, to avoid a double read).
+        boolean comboHoldOn =
+                modules.flag(Feature.COMBO_HOLD.yamlKey(), Feature.COMBO_HOLD.defaultEnabled());
+        boolean reachHandicapOn = resolveReachHandicapEnabled(modules, main, issues);
+
         Snapshot.Builder builder = new Snapshot.Builder();
         for (Feature feature : Feature.values()) {
-            boolean on = feature.infrastructure()
-                    ? feature.defaultEnabled()
-                    : modules.flag(feature.yamlKey(), feature.defaultEnabled());
+            boolean on;
+            if (feature.infrastructure()) {
+                on = feature.defaultEnabled();
+            } else if (feature == Feature.COMBO_HOLD) {
+                on = comboHoldOn;
+            } else if (feature == Feature.COMBO_REACH_HANDICAP) {
+                on = reachHandicapOn;
+            } else {
+                on = modules.flag(feature.yamlKey(), feature.defaultEnabled());
+            }
             builder.enable(feature, on);
             builder.put(feature.settingsKey(),
                     settingsFor(feature, main, knockback, hitReg, compensation, issues));
+        }
+        // Loud dependency warning: the handicap only ever engages while a combo is
+        // held, so enabling it without combo-hold ships a dormant lever — never
+        // silently, per the zero-touch contract's honesty rule.
+        if (reachHandicapOn && !comboHoldOn) {
+            issues.add("config.yml: modules.combo-reach-handicap is enabled but modules.combo-hold "
+                    + "is off — the reach handicap only applies while a combo is held, so it will "
+                    + "never engage. Enable combo-hold too, or turn combo-reach-handicap off.");
         }
 
         builder.profiles(ProfileParser.parseSection(
@@ -96,6 +119,9 @@ public final class SnapshotParser {
             case CRAFTING -> parseCrafting(reader(main, "disable-crafting", "config.yml", issues));
             case OFFHAND -> parseOffhand(reader(main, "disable-offhand", "config.yml", issues));
             case COMBO_HOLD -> parseCombo(reader(main, "combo-hold", "config.yml", issues));
+            case COMBO_REACH_HANDICAP -> parseReachHandicap(
+                    reader(main, "combo-reach-handicap", "config.yml", issues),
+                    reader(main, "combo-hold", "config.yml", issues).sub("reach-handicap"));
             case POT_FILL -> parsePotFill(reader(main, "pot-fill", "config.yml", issues));
             case FAST_POTS -> parseFastPots(reader(main, "fast-pots", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
@@ -186,6 +212,20 @@ public final class SnapshotParser {
 
     private static ComboSettings parseCombo(ConfigReader reader) {
         ComboSettings d = ComboSettings.DEFAULTS;
+        double minFactor = reader.numberAtLeast("min-factor", d.minFactor(), 0.0);
+        double maxFactor = reader.numberAtLeast("max-factor", d.maxFactor(), 0.0);
+        // Cross-field sanity: a transposed pair (min > max) turns the servo's
+        // Math.max(min, Math.min(max, blended)) clamp into a constant min-factor
+        // amplifier with no per-field parse noise — a non-era knock on every combo
+        // hit. Warn and fall BOTH back to the defaults (the warn-and-fallback contract).
+        if (minFactor > maxFactor) {
+            reader.issues().warn(reader.prefix() + ".min-factor/max-factor",
+                    "min-factor " + minFactor + " exceeds max-factor " + maxFactor
+                            + " (the clamp would pin every combo hit to min-factor)",
+                    "defaults " + d.minFactor() + "/" + d.maxFactor());
+            minFactor = d.minFactor();
+            maxFactor = d.maxFactor();
+        }
         return new ComboSettings(
                 reader.intAtLeast("min-hits", d.minHits(), 1),
                 reader.intAtLeast("max-gap-ticks", d.maxGapTicks(), 1),
@@ -193,21 +233,54 @@ public final class SnapshotParser {
                 reader.numberAtLeast("blowout-blocks", d.blowoutBlocks(), 0.0),
                 reader.numberAtLeast("target", d.target(), 0.5),
                 reader.numberAtLeast("gain", d.gain(), 0.0),
-                reader.numberAtLeast("min-factor", d.minFactor(), 0.0),
-                reader.numberAtLeast("max-factor", d.maxFactor(), 0.0),
+                minFactor,
+                maxFactor,
                 reader.intAtLeast("window-ticks", d.windowTicks(), 1),
                 reader.oneOf("target-mode", d.targetMode(), TargetMode.class),
-                reader.numberAtLeast("hit-cap", d.hitCap(), 0.5),
-                parseReachHandicap(reader.sub("reach-handicap")));
+                reader.numberAtLeast("hit-cap", d.hitCap(), 0.5));
     }
 
-    private static ComboSettings.ReachHandicap parseReachHandicap(ConfigReader reader) {
-        ComboSettings.ReachHandicap d = ComboSettings.ReachHandicap.DEFAULTS;
-        return new ComboSettings.ReachHandicap(
-                reader.flag("enabled", d.enabled()),
-                // A handicap only ever shortens reach, so the scale is confined to
-                // [0.5, 1.0]; anything outside warns and the default stands.
-                reader.numberInRange("reach-scale", d.scale(), 0.5, 1.0));
+    /**
+     * The promoted combo reach-handicap scale (2.4.4). Reads the top-level
+     * {@code combo-reach-handicap.reach-scale}; on an in-place upgrade whose config
+     * predates the promotion it falls back to the legacy nested
+     * {@code combo-hold.reach-handicap.reach-scale} for one release window, so a
+     * tuned value is never silently lost. A handicap only ever shortens reach, so
+     * the scale is confined to {@code [0.5, 1.0]}; anything outside warns and 0.8
+     * stands.
+     */
+    private static ReachHandicapSettings parseReachHandicap(ConfigReader reader, ConfigReader legacy) {
+        ReachHandicapSettings d = ReachHandicapSettings.DEFAULTS;
+        boolean topLevelSet = reader.section() != null && reader.section().isSet("reach-scale");
+        ConfigReader source = topLevelSet ? reader : legacy;
+        return new ReachHandicapSettings(source.numberInRange("reach-scale", d.scale(), 0.5, 1.0));
+    }
+
+    /**
+     * Resolve whether the promoted {@code modules.combo-reach-handicap} feature is
+     * on, honouring the 2.4.3-beta legacy shape. When the new module key is unset but
+     * the old nested {@code combo-hold.reach-handicap.enabled} reads true, the module
+     * is treated as enabled and a loud migration line is emitted naming both keys —
+     * never silently ignored. An explicit new module key always wins.
+     */
+    private static boolean resolveReachHandicapEnabled(
+            ConfigReader modules, Configuration main, ConfigIssues issues) {
+        boolean moduleKeySet = modules.section() != null
+                && modules.section().isSet(Feature.COMBO_REACH_HANDICAP.yamlKey());
+        if (moduleKeySet) {
+            return modules.flag(Feature.COMBO_REACH_HANDICAP.yamlKey(),
+                    Feature.COMBO_REACH_HANDICAP.defaultEnabled());
+        }
+        ConfigReader legacy = reader(main, "combo-hold", "config.yml", issues).sub("reach-handicap");
+        if (legacy.flag("enabled", false)) {
+            issues.add("config.yml: the reach handicap moved to its own module in 2.4.4 — "
+                    + "modules.combo-reach-handicap is unset, but the legacy "
+                    + "combo-hold.reach-handicap.enabled reads true, so it is honoured (enabled) for "
+                    + "this release. Set modules.combo-reach-handicap: true and move reach-scale to a "
+                    + "top-level combo-reach-handicap block; the nested block is deprecated.");
+            return true;
+        }
+        return false;
     }
 
     private static PotFillSettings parsePotFill(ConfigReader reader) {
