@@ -12,11 +12,17 @@ import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.combo.ComboEndReason;
 import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
+import me.vexmc.mental.kernel.delivery.DeliveryDesk;
+import me.vexmc.mental.kernel.delivery.Directive;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
+import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KinematicState;
+import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.LedgerEvent;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.GroundFsm;
@@ -24,6 +30,7 @@ import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
+import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
@@ -275,6 +282,12 @@ public final class SessionService implements Listener, SessionAccess {
         // this tick's combo state (and its time-driven ends have already fired).
         driveCombo(player, session, combatGrounded);
         PlayerView view = buildView(player, session, combatGrounded);
+        // Deliver a PACKETLESS victim's region-path melee knock that no velocity
+        // event resolved before the desk's sweep would drop it (below, in tickStep).
+        // Run with the SAME `now` the sweep uses, immediately ahead of it, so a hit
+        // that DID resolve in time is already gone (zero-touch) and only a genuinely
+        // stranded one is ensured.
+        ensureStrandedPacketlessMelee(player, session, view.at());
         session.tickStep(view);
         valve.clearStale(player.getUniqueId());
         // One owning-thread position sample per tick — the fast path's reach
@@ -283,6 +296,63 @@ public final class SessionService implements Listener, SessionAccess {
         Location location = player.getLocation();
         positions.record(player.getUniqueId(),
                 location.getX(), location.getY(), location.getZ(), System.nanoTime());
+    }
+
+    /**
+     * The region-path melee safety net for PACKETLESS victims. The vanilla-melee
+     * (REGISTERED) path is the one delivery path with no no-velocity-event fallback
+     * of its own: unlike a fast-path pre-send, a blocked knock, or a thrown
+     * projectile, it relies ENTIRELY on the victim's {@code PlayerVelocityEvent}
+     * resolving the pending decision. That event is server-authoritative and prompt
+     * for a real client, but for a packetless player (a synthetic test player /
+     * in-process bot) it can be published late — on 1.20.6 the whole knock is
+     * routed through the synchronous {@code Player.attack} restore block that resets
+     * {@code hurtMarked}, so the victim's velocity event can land a tick or more
+     * behind the desk's two-tick sweep. When it does, the desk drops the decision as
+     * {@code no-velocity-event} and the era knock is lost — the boxer never takes it,
+     * and the delivery journal records no SHIP (the F1 regression: the base-speed
+     * server-sprint hit journalled nothing on 1.20.6 alone, the sole tested build in
+     * the [1.20.5, 1.21) band).
+     *
+     * <p>So, one tick before the sweep would drop it (same {@code now}, so the
+     * two-tick grace is identical), give the stranded decision the same directed
+     * ensure the thrown-projectile path uses: journal the SHIP and apply the era
+     * vector with {@code setVelocity} (which the packetless entity needs anyway to
+     * actually move, and which lets any observer's captor still see the knock). The
+     * gate is tight and provably zero-touch elsewhere: only a victim with NO live
+     * connection domain ({@link ConnectionDomains#has} false — a real client is
+     * skipped, its velocity event owns delivery), only a still-LIVE REGISTERED melee
+     * decision (a fast-path/pinned/blocked hit or a resolved one is already gone),
+     * and only once it is as old as the sweep's own drop threshold. A hit that
+     * resolved in time left nothing pending, so nothing fires.</p>
+     */
+    private void ensureStrandedPacketlessMelee(Player player, CombatSession session, TickStamp now) {
+        if (domains.has(player.getUniqueId())) {
+            return; // a real connection — its own velocity event (and the era mirror) delivers
+        }
+        DeliveryDesk desk = session.desk();
+        HitContext pending = desk.pendingContext();
+        if (pending == null || !isRegionMelee(pending.source())) {
+            return; // nothing pending, or a non-melee/typed source that owns its own ensure
+        }
+        TickStamp registeredAt = pending.registeredAt();
+        if (!registeredAt.known() || !now.known() || now.value() - registeredAt.value() < 2) {
+            return; // give the (possibly late) velocity event the exact window the sweep does
+        }
+        if (desk.pendingVectorFor(pending.id()) == null) {
+            return; // already resolved — the velocity event shipped it (or it was withdrawn)
+        }
+        Directive directive = desk.ensure(pending.id());
+        KnockbackVector shipped = directive.ship();
+        if (shipped != null) {
+            player.setVelocity(Vectors.toBukkit(shipped));
+        }
+    }
+
+    /** A region-path vanilla melee ({@code ENTITY_ATTACK}) or an adopted fast-path melee. */
+    private static boolean isRegionMelee(HitSource source) {
+        return source instanceof HitSource.Melee
+                || (source instanceof HitSource.Vanilla vanilla && "ENTITY_ATTACK".equals(vanilla.damageCause()));
     }
 
     /**

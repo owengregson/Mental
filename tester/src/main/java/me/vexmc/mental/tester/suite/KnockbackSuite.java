@@ -7,6 +7,7 @@ import me.vexmc.mental.kernel.ledger.MotionLedger;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.EntityState;
+import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.CombatSession;
@@ -58,7 +59,98 @@ public final class KnockbackSuite {
                 new TestCase("knockback: second hit stacks the ledger residual (1.7.10 combos)", context ->
                         runComboScenario(mental, tester, context)),
                 new TestCase("knockback: a packetless attacker's sprint hit never poisons its ledger feed",
-                        context -> runDomainPoisonScenario(mental, tester, context)));
+                        context -> runDomainPoisonScenario(mental, tester, context)),
+                new TestCase("knockback: a packetless victim's server-side melee always journals a SHIP",
+                        context -> runPacketlessMeleeJournalScenario(mental, tester, context)));
+    }
+
+    /**
+     * The region-path no-velocity-event net (F1 regression pin). The vanilla-melee
+     * (REGISTERED) delivery path relies wholly on the victim's {@code
+     * PlayerVelocityEvent} resolving the desk decision. A packetless victim (every
+     * tester {@link FakePlayer}) can have that event published LATE — on 1.20.6 the
+     * knock routes through {@code Player.attack}'s synchronous restore block, which
+     * resets {@code hurtMarked} and can land the velocity event a tick behind the
+     * desk's two-tick sweep — and the era knock is then dropped as {@code
+     * no-velocity-event} with NO journal SHIP. This is the exact shape of the F1
+     * failure ("the server-sprinting hit journalled no SHIP", 1.20.6 only, the sole
+     * tested build in the [1.20.5, 1.21) band). The
+     * {@code SessionService.ensureStrandedPacketlessMelee} net delivers the stranded
+     * knock a tick before the sweep would drop it, so the invariant here is
+     * unconditional and version-blind: a packetless victim's server-side melee hit
+     * ALWAYS journals a SHIP. Where the velocity event is prompt the net never fires
+     * (the desk decision is already resolved) and the SHIP comes from it instead —
+     * the assertion holds either way.
+     */
+    private static void runPacketlessMeleeJournalScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5); // land and settle; spawn invulnerability clears at spawn
+            int shipsBefore = context.sync(() -> countShips(mental, victim));
+            context.syncRun(() -> {
+                attacker.player().setSprinting(true);
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player()); // server-side NMS melee — the region path
+            });
+            JournalEntry ship = awaitNewShip(context, mental, victim, shipsBefore);
+            context.expect(ship != null && ship.shipped() != null,
+                    "a packetless victim's server-side melee hit journalled no SHIP — the region-path"
+                            + " no-velocity-event net regressed (F1)");
+        } finally {
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+        }
+    }
+
+    /** SHIP entries (a delivered vector) currently in the victim's desk journal. */
+    private static int countShips(MentalPluginV5 mental, FakePlayer victim) {
+        CombatSession session = mental.sessions().sessionFor(victim.uuid());
+        if (session == null) {
+            return 0;
+        }
+        int ships = 0;
+        for (JournalEntry entry : session.desk().journal()) {
+            if (entry.shipped() != null) {
+                ships++;
+            }
+        }
+        return ships;
+    }
+
+    /** Polls the victim's desk journal for a NEW SHIP beyond {@code shipsBefore} (well past the 2-tick sweep). */
+    private static JournalEntry awaitNewShip(
+            TestContext context, MentalPluginV5 mental, FakePlayer victim, int shipsBefore) throws Exception {
+        for (int round = 0; round < 12; round++) {
+            JournalEntry ship = context.sync(() -> {
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                if (session == null) {
+                    return null;
+                }
+                int ships = 0;
+                JournalEntry lastShip = null;
+                for (JournalEntry entry : session.desk().journal()) {
+                    if (entry.shipped() != null) {
+                        ships++;
+                        lastShip = entry;
+                    }
+                }
+                return ships > shipsBefore ? lastShip : null;
+            });
+            if (ship != null) {
+                return ship;
+            }
+            context.awaitTicks(2);
+        }
+        return null;
     }
 
     /**
