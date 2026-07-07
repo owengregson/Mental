@@ -399,7 +399,7 @@ public final class ComboSuite {
             buildActiveCombo(mental, context, attacker, victim);
             context.awaitUntil(() -> !captor.starts.isEmpty(), 40, "a ComboStartEvent");
             context.expect(!captor.starts.isEmpty(), "no ComboStartEvent fired for an active combo");
-            context.expect(captor.starts.get(0).getHits() >= 3, "the start event must carry the chain length");
+            context.expect(captor.starts.get(0).getHits() >= 2, "the start event must carry the chain length (minHits 2, the 2.4.5 retune)");
             context.expect(victim.uuid().equals(captor.starts.get(0).getVictim().getUniqueId()),
                     "the start event names the victim");
 
@@ -465,12 +465,14 @@ public final class ComboSuite {
             context.expectNear(base * 0.8, reachValue(context, victim), 1e-6,
                     "the handicap must re-apply on a fresh combo");
             context.syncRun(() -> {
-                mental.overlaySet("modules.combo-hold", false);
+                // Disable the reach-handicap's OWN module — it is standalone since the
+                // 2.4.5 detection/servo split (892da05), so combo-hold no longer owns it.
+                mental.overlaySet("modules.combo-reach-handicap", false);
                 mental.reloadAll();
             });
             context.awaitTicks(3);
             context.expectNear(base, reachValue(context, victim), 1e-9,
-                    "disabling the module mid-combo must restore the interaction range (leg 3)");
+                    "disabling the reach-handicap module mid-combo must restore the interaction range (leg 3)");
         } finally {
             teardownReach(mental, context, attacker, victim);
         }
