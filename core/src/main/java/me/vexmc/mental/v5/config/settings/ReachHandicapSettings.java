@@ -10,11 +10,12 @@ package me.vexmc.mental.v5.config.settings;
  * toggles, and the GUI derives its catalog from the enum), so the enable dissolves
  * INTO the module toggle — exactly like the POTS features — and this record holds
  * only the scale. {@code scale} lives in {@code [0.5, 1.0]}: a handicap only ever
- * SHORTENS reach, and {@code 0.8} takes the era 3.0 to 2.4. The whole feature is a
- * byte-identical no-op because the MODULE defaults OFF.</p>
+ * SHORTENS reach, and {@code 0.87} takes the era 3.0 to 2.61 (the 2.4.5 retune —
+ * the owner judged the previous {@code 0.8}/2.4-block floor too severe). The whole
+ * feature is a byte-identical no-op because the MODULE defaults OFF.</p>
  */
 public record ReachHandicapSettings(double scale) {
 
-    /** Era-3.0-to-2.4 when the module is switched on; a no-op while the module is off. */
-    public static final ReachHandicapSettings DEFAULTS = new ReachHandicapSettings(0.8);
+    /** Era-3.0-to-2.61 when the module is switched on; a no-op while the module is off. */
+    public static final ReachHandicapSettings DEFAULTS = new ReachHandicapSettings(0.87);
 }

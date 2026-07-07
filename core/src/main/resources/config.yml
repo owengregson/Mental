@@ -413,11 +413,12 @@ modules:
 #   hit-registration.reach-validation.enabled: true. With reach-validation off, the
 #   handicap is purely the client-synced attribute shrink (honest clients only).
 #
-#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.8 → 2.4
-#                blocks; an out-of-range value warns on reload and 0.8 stands. It
-#                only ever SHORTENS reach (a handicap never inflates it).
+#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.87 → 2.61
+#                blocks; an out-of-range value warns on reload and 0.87 stands. It
+#                only ever SHORTENS reach (a handicap never inflates it). (The 2.4.5
+#                retune lifted the floor from 0.8/2.4 — that bottom end was too severe.)
 #combo-reach-handicap:
-#  reach-scale: 0.8
+#  reach-scale: 0.87
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.

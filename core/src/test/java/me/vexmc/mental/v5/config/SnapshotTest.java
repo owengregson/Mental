@@ -171,7 +171,7 @@ class SnapshotTest {
 
     @Test
     void comboReachHandicapDefaultsOffAndToItsScaleDefaultWhenAbsent() throws Exception {
-        // No module key and no block: OFF and 0.8 — the era-exact no-op.
+        // No module key and no block: OFF and 0.87 — the era-exact no-op.
         Snapshot snapshot = parse("", "", "", "").snapshot();
         assertFalse(snapshot.enabled(Feature.COMBO_REACH_HANDICAP), "default OFF (era-exact no-op)");
         assertEquals(ReachHandicapSettings.DEFAULTS, settings(snapshot, Feature.COMBO_REACH_HANDICAP));
@@ -179,7 +179,7 @@ class SnapshotTest {
 
     @Test
     void comboReachScaleOutOfRangeWarnsOnceAndFallsBack() throws Exception {
-        // 1.4 would INFLATE reach — a handicap never does; it warns and the default 0.8 stands.
+        // 1.4 would INFLATE reach — a handicap never does; it warns and the default 0.87 stands.
         SnapshotParser.Result result = parse("""
                 modules:
                   combo-hold: true

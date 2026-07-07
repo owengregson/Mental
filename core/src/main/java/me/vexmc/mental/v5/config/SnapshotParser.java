@@ -246,7 +246,7 @@ public final class SnapshotParser {
      * predates the promotion it falls back to the legacy nested
      * {@code combo-hold.reach-handicap.reach-scale} for one release window, so a
      * tuned value is never silently lost. A handicap only ever shortens reach, so
-     * the scale is confined to {@code [0.5, 1.0]}; anything outside warns and 0.8
+     * the scale is confined to {@code [0.5, 1.0]}; anything outside warns and 0.87
      * stands.
      */
     private static ReachHandicapSettings parseReachHandicap(ConfigReader reader, ConfigReader legacy) {

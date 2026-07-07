@@ -115,8 +115,8 @@ The reach handicap is **its own module** (`modules.combo-reach-handicap`) since 
 The servo shapes **spacing** — where the victim lands. The **reach handicap** is a
 separate, secondary lever that tightens **retaliation** directly: while a victim is
 held in a combo, their `entity-interaction-range` attribute is scaled down
-(`combo-reach-handicap.reach-scale`, default `0.8`, in `[0.5, 1.0]`, so the era 3.0
-reach becomes 2.4 blocks) with an **additive** modifier (`mental:combo-reach`,
+(`combo-reach-handicap.reach-scale`, default `0.87`, in `[0.5, 1.0]`, so the era 3.0
+reach becomes 2.61 blocks) with an **additive** modifier (`mental:combo-reach`,
 `MULTIPLY_SCALAR_1`), never a base rewrite — so it composes with any third-party
 reach base. It is applied the moment the combo goes active and removed the moment it
 ends **by any reason** (`EXPIRED` / `RETALIATION` / `GROUNDED` / `BLOWOUT` /

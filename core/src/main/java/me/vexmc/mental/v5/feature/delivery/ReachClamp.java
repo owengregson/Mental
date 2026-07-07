@@ -28,8 +28,11 @@ import me.vexmc.mental.kernel.wire.PositionRing;
  * <h2>Why the handicap branch scales the leniency AND switches to eye-to-centre</h2>
  *
  * <p>The interaction-audit fix (#6) clamped the window at {@code scale·maxReach +
- * leniency}, eye-to-BOX — at the shipped default ({@code scale 0.8}, {@code
- * maxReach 3.0}, {@code leniency 0.4}) that is {@code 2.8} eye-to-box. The
+ * leniency}, eye-to-BOX — at the 2.4.4 default the fix was measured against
+ * ({@code scale 0.8}, {@code maxReach 3.0}, {@code leniency 0.4}) that is {@code 2.8}
+ * eye-to-box (2.4.5 lifted the shipped default to {@code scale 0.87} → the same shapes
+ * scale up: centre threshold {@code 0.87·3.4 = 2.958}, box floor {@code 0.87·3.0 =
+ * 2.61}). The
  * clients the backstop exists for are <em>attribute-blind</em>: their own attack
  * gate is a fixed eye→chest-CENTRE distance {@code ≤ maxReach} (they never read
  * the shortened {@code ENTITY_INTERACTION_RANGE}), which is only {@code ≈ 2.6–2.7}

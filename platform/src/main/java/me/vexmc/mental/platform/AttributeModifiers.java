@@ -30,7 +30,8 @@ import org.jetbrains.annotations.Nullable;
  * <p>The modifier is {@link AttributeModifier.Operation#MULTIPLY_SCALAR_1} — the
  * multiply-TOTAL operation — with amount {@code scale − 1}, so the effective range
  * is {@code base × scale} regardless of any third-party base (an additive modifier,
- * never a base rewrite). At {@code scale 0.8} the era 3.0 reach becomes 2.4.</p>
+ * never a base rewrite). At the shipped default {@code scale 0.87} the era 3.0 reach
+ * becomes 2.61.</p>
  *
  * <h2>Idempotent by identity</h2>
  * <p>The identity is fixed (a deterministic UUID/name on the legacy shape, a
