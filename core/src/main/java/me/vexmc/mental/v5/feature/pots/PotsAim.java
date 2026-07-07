@@ -1,121 +1,157 @@
 package me.vexmc.mental.v5.feature.pots;
 
 /**
- * The pure ballistic aim for {@code fast-pots} (POTS family, owner directive
- * 2026-07-04): given where a splash potion is launched from, where the thrower's
- * feet are now, and how fast the thrower is moving, compute the launch velocity
- * that makes the potion land on the thrower's <em>predicted</em> feet at a fixed
- * target speed.
+ * The exact-ballistic aim for {@code fast-pots} (POTS family; exact-ballistic
+ * redesign, owner directive 2026-07-07): given where a splash potion is launched
+ * from, where the thrower's feet are now, and how fast the thrower is moving,
+ * compute the launch velocity that makes the potion's burst land <em>on</em> the
+ * thrower's predicted feet — solving the real discrete potion flight, not a
+ * continuous approximation.
  *
  * <p>Bukkit-free plain doubles, so it is exhaustively unit-pinnable off the
  * server (the {@code FastPotsUnit} converts to/from {@code Vector}). Core-level,
  * not kernel: it is combat-adjacent gameplay math, not part of the frozen
  * delivery core.</p>
  *
- * <h2>The ballistic model (deliberately simplified)</h2>
+ * <h2>The ballistic model (exact discrete flight)</h2>
  *
- * A thrown splash potion in Minecraft falls under gravity {@code 0.05} blocks/tick
- * and loses {@code 1%} of its speed to drag each tick ({@code ×0.99}). At the
- * {@code fast-pots} speeds (≥ vanilla ×1) the flight from eye to feet is one to a
- * few ticks, so:
+ * A thrown splash potion integrates each tick as {@code vy -= 0.05} (gravity —
+ * {@code AbstractThrownPotion.getDefaultGravity()}, which overrides the {@code
+ * 0.03} throwable base), then {@code v *= 0.99} (drag/inertia), then {@code pos +=
+ * v} — the modern {@code ThrowableProjectile.tick()} order (gravity, drag, move).
+ * Summing that recurrence over {@code N} ticks is closed-form: with
  *
- * <ul>
- *   <li><b>Drag is neglected.</b> Over ~2 ticks it removes &lt; 2% of the speed —
- *       below the splash radius tolerance — and modelling it would not change
- *       which block the cloud centres on.</li>
- *   <li><b>Gravity is compensated to first order.</b> Over a flight of {@code T}
- *       ticks a projectile drops about {@code ½·g·T²}; we raise the aim's target
- *       Y by that amount so the potion arrives <em>at</em> the feet rather than
- *       short of them. The dominant term is still the straight aim at the
- *       predicted feet — for a near-vertical self-throw the correction is a few
- *       centimetres.</li>
- * </ul>
+ * <pre>
+ *   H(N) = d·(1 - d^N)/(1 - d)         // horizontal range per unit launch velocity
+ *   G(N) = (d·g/(1 - d))·(N - H(N))    // total gravity drop over N ticks
+ * </pre>
  *
- * <p>{@code T} and the aim are a mutual fixed point (the flight time depends on
- * the aim distance, which depends on the predicted feet, which depend on the
- * flight time); {@link #ITERATIONS} passes settle it — flight is short, so it
- * converges in two.</p>
+ * a launch {@code v0} from spawn {@code L} lands, after {@code N} ticks, at
+ * {@code x = L.x + v0.x·H(N)}, {@code z = L.z + v0.z·H(N)}, and
+ * {@code y = L.y + v0.y·H(N) - G(N)}. Inverting for the launch that reaches a
+ * target {@code (xt, yt, zt)} at tick {@code N}:
  *
- * <p><b>Magnitude invariant:</b> the returned velocity always has length exactly
- * {@code targetSpeed} (the direction is normalised, then scaled), so "magnitude =
- * multiplier × vanilla launch speed" holds by construction — the caller passes
- * {@code targetSpeed = multiplier × vanillaSpeed}.</p>
+ * <pre>
+ *   v0.x = (xt - L.x) / H(N)
+ *   v0.z = (zt - L.z) / H(N)
+ *   v0.y = (yt - L.y + G(N)) / H(N)
+ * </pre>
+ *
+ * <p>The target is the thrower's <em>predicted</em> feet at impact —
+ * {@code feet + throwerVel·N} on every axis (a grounded thrower has {@code
+ * vel.y ≈ 0}, so the target y is the feet's ground level, which is where the
+ * self-thrown potion bursts: it cannot hit its own thrower, so it breaks on the
+ * ground below).</p>
+ *
+ * <h2>Speed is a budget, not a target (owner 2026-07-07)</h2>
+ *
+ * The magnitude is a free variable. Iterating {@code N = 1 … }{@link #NMAX}, the
+ * aim returns the <b>smallest N whose required launch speed does not exceed the
+ * cap</b> — the promptest exact-on-feet landing within the {@code speedCap =
+ * multiplier × vanilla} budget. Every feasible {@code N} lands exactly on the
+ * predicted feet by construction; a smaller {@code N} throws harder (up to the
+ * cap) and bursts sooner, so it drifts least from the prediction. If no {@code N}
+ * is feasible (the thrower is outrunning the potion at the cap), the
+ * minimum-required-speed candidate is scaled to the cap — the closest reachable
+ * throw toward the predicted lead. A grounded target is always below the spawn, so
+ * a feasible {@code N} normally exists (in the limit the potion is simply dropped).
+ *
+ * <p><b>Cross-version:</b> {@code g = 0.05} and {@code d = 0.99} are
+ * potion-universal across the range; only the pre-1.13 tick order (move before
+ * drag/gravity, a ≈1% range difference — sub-centimetre over a 1–3-tick flight)
+ * differs, a documented bounded approximation of the modern order modelled here.</p>
  */
 public final class PotsAim {
 
-    /** Splash-potion gravity, blocks/tick — the vertical drop the aim compensates for. */
+    /** Splash-potion gravity, blocks/tick — {@code AbstractThrownPotion.getDefaultGravity()}. */
     public static final double GRAVITY = 0.05;
 
-    /** Fixed-point passes over the flight-time/aim pair; two settle a short flight. */
-    public static final int ITERATIONS = 3;
+    /** Air drag/inertia per tick — {@code ThrowableProjectile.applyInertia()} (0.99, not in water). */
+    public static final double DRAG = 0.99;
 
-    /** Below this the launch/feet points coincide and the aim degenerates — go straight down. */
+    /** The impact-tick search horizon (1 s). Realistic flights settle in ≤ 6 ticks. */
+    public static final int NMAX = 20;
+
+    /** Below this the launch degenerates — no speed budget to aim anything. */
     private static final double DEGENERATE = 1.0e-9;
 
     private PotsAim() {}
 
-    /** An immutable aimed launch velocity. */
-    public record Aim(double x, double y, double z) {
-        /** Euclidean length — the magnitude invariant equals the requested target speed. */
+    /** An immutable aimed launch velocity plus the impact tick it was solved for. */
+    public record Aim(double x, double y, double z, int ticks) {
+        /** Euclidean length — the solved launch speed (always {@code ≤} the requested cap). */
         public double magnitude() {
             return Math.sqrt(x * x + y * y + z * z);
         }
     }
 
     /**
-     * The launch velocity that lands a potion on the thrower's predicted feet at
-     * {@code targetSpeed}.
+     * The launch velocity that lands a potion's burst on the thrower's predicted
+     * feet, spending the least speed up to {@code speedCap}.
      *
-     * @param lx,ly,lz  the launch point (the potion's spawn — roughly the eye)
+     * @param lx,ly,lz  the launch point (the potion's spawn — {@code (x, eyeY-0.1, z)})
      * @param fx,fy,fz  the thrower's feet position <em>now</em>
      * @param vx,vy,vz  the thrower's per-tick velocity (their displacement/tick)
-     * @param targetSpeed the final launch speed (= multiplier × vanilla launch speed)
+     * @param speedCap  the launch-speed ceiling (= multiplier × vanilla launch speed)
      */
     public static Aim aim(
             double lx, double ly, double lz,
             double fx, double fy, double fz,
             double vx, double vy, double vz,
-            double targetSpeed) {
+            double speedCap) {
 
-        if (targetSpeed <= DEGENERATE) {
-            return new Aim(0.0, 0.0, 0.0);
+        if (speedCap <= DEGENERATE) {
+            return new Aim(0.0, 0.0, 0.0, 0);
         }
 
-        // Seed the flight time from the straight-line distance to the feet now.
-        double t = distance(lx, ly, lz, fx, fy, fz) / targetSpeed;
+        double bestSpeed = Double.POSITIVE_INFINITY;
+        double bestX = 0.0;
+        double bestY = -speedCap; // a straight-down drop is the safe worst-case default
+        double bestZ = 0.0;
+        int bestTicks = NMAX;
 
-        double dx = 0.0;
-        double dy = 0.0;
-        double dz = 0.0;
-        for (int pass = 0; pass < ITERATIONS; pass++) {
-            // Where the feet will be when the potion arrives.
-            double px = fx + vx * t;
-            double py = fy + vy * t;
-            double pz = fz + vz * t;
-            // Raise the aim by the gravity drop so it arrives at the feet, not short.
-            double dropCompensation = 0.5 * GRAVITY * t * t;
-            dx = px - lx;
-            dy = (py + dropCompensation) - ly;
-            dz = pz - lz;
-            double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            t = length / targetSpeed;
+        for (int n = 1; n <= NMAX; n++) {
+            double h = rangeCoefficient(n);
+            double drop = gravityDrop(n);
+            // The predicted feet at the moment the potion arrives.
+            double px = fx + vx * n;
+            double py = fy + vy * n;
+            double pz = fz + vz * n;
+            // The exact launch that lands there at tick n (closed-form inverse).
+            double v0x = (px - lx) / h;
+            double v0z = (pz - lz) / h;
+            double v0y = (py - ly + drop) / h;
+            double speed = Math.sqrt(v0x * v0x + v0y * v0y + v0z * v0z);
+            if (speed <= speedCap) {
+                // Smallest feasible N — the promptest exact-on-feet landing.
+                return new Aim(v0x, v0y, v0z, n);
+            }
+            if (speed < bestSpeed) {
+                bestSpeed = speed;
+                bestX = v0x;
+                bestY = v0y;
+                bestZ = v0z;
+                bestTicks = n;
+            }
         }
 
-        double length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (length <= DEGENERATE) {
-            // Launch and (compensated) feet coincide — a self-throw with no lever to
-            // aim along. Straight down at speed is the sane fast-pot default.
-            return new Aim(0.0, -targetSpeed, 0.0);
+        // No feasible N within the cap: scale the least-speed candidate down to the
+        // cap so the throw still points at the predicted lead as far as the budget
+        // reaches (the thrower is outrunning the potion — a rare, documented edge).
+        if (bestSpeed <= DEGENERATE || Double.isInfinite(bestSpeed)) {
+            return new Aim(0.0, -speedCap, 0.0, bestTicks);
         }
-        double scale = targetSpeed / length;
-        return new Aim(dx * scale, dy * scale, dz * scale);
+        double scale = speedCap / bestSpeed;
+        return new Aim(bestX * scale, bestY * scale, bestZ * scale, bestTicks);
     }
 
-    private static double distance(
-            double ax, double ay, double az, double bx, double by, double bz) {
-        double dx = bx - ax;
-        double dy = by - ay;
-        double dz = bz - az;
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    /** {@code H(N) = d·(1 - d^N)/(1 - d)} — total horizontal travel per unit launch velocity over N ticks. */
+    static double rangeCoefficient(int n) {
+        return DRAG * (1.0 - Math.pow(DRAG, n)) / (1.0 - DRAG);
+    }
+
+    /** {@code G(N) = (d·g/(1 - d))·(N - H(N))} — total vertical drop from gravity over N ticks. */
+    static double gravityDrop(int n) {
+        return (DRAG * GRAVITY / (1.0 - DRAG)) * (n - rangeCoefficient(n));
     }
 }

@@ -451,8 +451,16 @@ public final class PotsSuite {
                 "fast-pot redirect y (predicted feet; " + staging + ")");
         context.expectNear(expected.getZ(), applied.getZ(), 1.0e-4,
                 "fast-pot redirect z (predicted feet; " + staging + ")");
-        context.expectNear(vanillaSpeed * settings.speedMultiplier(), applied.length(), 1.0e-4,
-                "fast-pot magnitude is multiplier × vanilla launch speed (" + staging + ")");
+        // Speed is a budget, not a target (exact-ballistic redesign 2026-07-07):
+        // the aim spends the least speed that lands the burst on the predicted
+        // feet, bounded by multiplier × vanilla. The landing accuracy itself is
+        // exhaustively pinned off-server in PotsAimTest; here we assert the wiring
+        // (x/y/z == the production redirect) and the cap semantics.
+        double cap = vanillaSpeed * settings.speedMultiplier();
+        context.expect(applied.length() <= cap + 1.0e-4,
+                "fast-pot magnitude within the multiplier × vanilla cap (" + staging + ")");
+        context.expect(applied.length() > 1.0e-6,
+                "fast-pot redirect produced a launch (" + staging + ")");
     }
 
     private static int countHealPotions(HealPotItems items, PlayerInventory inventory) {
