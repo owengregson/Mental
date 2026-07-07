@@ -339,7 +339,12 @@ public final class SessionService implements Listener, SessionAccess {
         // that DID resolve in time is already gone (zero-touch) and only a genuinely
         // stranded one is ensured.
         ensureStrandedPacketlessMelee(player, session, view.at());
-        session.tickStep(view);
+        // A CONNECTED victim (a real client with a netty connection domain) has an
+        // authoritative PlayerVelocityEvent that may be region-late; the sweep must
+        // NOT time-drop its still-awaiting melee, or vanilla's own (airborne =
+        // downward) velocity infiltrates on the late resolve — the exact inverse of
+        // the packetless-net gate above (2.4.6 vanilla-knockback leak fix).
+        session.tickStep(view, domains.has(player.getUniqueId()));
         valve.clearStale(player.getUniqueId());
         // One owning-thread position sample per tick — the fast path's reach
         // rewind source and its off-region-safe pre-send position source (the

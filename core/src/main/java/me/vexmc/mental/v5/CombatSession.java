@@ -212,12 +212,22 @@ public final class CombatSession {
         return d;
     }
 
+    /** The pre-connected-gate arity: treats the victim as packetless (the pin surface). */
+    public void tickStep(PlayerView freshlyBuilt) {
+        tickStep(freshlyBuilt, false);
+    }
+
     /**
      * One session tick: drain the inbox (events applied BEFORE the decay), tick
      * the ledger, publish the freshly-built view (AFTER), then sweep the desk —
      * all on the owning thread, using {@code freshlyBuilt.at()} as the tick.
+     *
+     * <p>{@code victimConnected} rides into the sweep so a CONNECTED victim's still-
+     * awaiting melee is never time-dropped (its genuine, possibly region-late
+     * PlayerVelocityEvent is the sole delivery authority — the 2.4.6 vanilla-knockback
+     * leak fix); a packetless victim is dropped as before.</p>
      */
-    public void tickStep(PlayerView freshlyBuilt) {
+    public void tickStep(PlayerView freshlyBuilt, boolean victimConnected) {
         LedgerEvent event;
         while ((event = inbox.poll()) != null) {
             apply(event);
@@ -225,7 +235,7 @@ public final class CombatSession {
         TickStamp now = freshlyBuilt.at();
         ledger.tick(now);
         published.set(freshlyBuilt);
-        desk.sweep(now);
+        desk.sweep(now, victimConnected);
     }
 
     private void apply(LedgerEvent event) {

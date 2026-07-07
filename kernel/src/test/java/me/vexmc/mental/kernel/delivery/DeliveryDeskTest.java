@@ -327,6 +327,30 @@ class DeliveryDeskTest {
     }
 
     @Test
+    void sweepNeverTimeDropsAConnectedVictimsMelee() {
+        // The 2.4.6 vanilla-knockback leak: a connected victim's PlayerVelocityEvent
+        // is the authoritative delivery but can land region-late. Time-dropping its
+        // still-awaiting melee let the late resolve PASS_THROUGH vanilla's OWN
+        // velocity — for an airborne combo hit, vanilla's kept falling-y (DOWNWARD).
+        DeliveryDesk desk = desk();
+        HitTransaction tx = preSent(1, VECTOR, 5);
+        desk.submit(tx, VECTOR);
+        desk.awaitVelocityEvent(tx);
+
+        // Age 2 and beyond, but the victim is CONNECTED — the pending is HELD.
+        desk.sweep(new TickStamp(7), true);
+        desk.sweep(new TickStamp(20), true);
+        assertTrue(desk.journal().isEmpty(), "a connected victim's late melee is never time-dropped");
+        assertEquals(HitTransaction.State.PRE_SENT, tx.state(), "still awaiting the authoritative event");
+
+        // The late velocity event now finds the pending and ships Mental's era vector,
+        // overriding vanilla instead of leaving vanilla's downward velocity to stand.
+        assertEquals(Action.SHIP_AND_ARM_VALVE,
+                desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z()).action(),
+                "Mental's vector ships on the late resolve — vanilla never infiltrates");
+    }
+
+    @Test
     void resolveOnARecordedPendingPassesThroughWithoutThrowing() {
         DeliveryDesk desk = desk();
         HitTransaction tx = preSent(1, VECTOR, 5);
