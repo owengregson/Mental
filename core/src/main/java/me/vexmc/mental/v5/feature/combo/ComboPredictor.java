@@ -179,7 +179,11 @@ public final class ComboPredictor {
                 yawVsAxis,
                 victimView.yawRateDegPerTick(),   // the measured yaw slew — the V2 turn divisor (target-v2 repair #4)
                 victimView.groundedTicks(),
-                priorChaseEma, priorDynamicTarget);
+                priorChaseEma, priorDynamicTarget,
+                // The boundary-read vertical motion — the touchdown-aware launch
+                // branch's trigger (servo-lab 2.4.5): a descending capture whose
+                // remaining height is under one fall tick reprices as grounded.
+                victimView.motion().vy());
     }
 
     /**
@@ -312,6 +316,7 @@ public final class ComboPredictor {
                 + " victim=" + victimId + " attacker=" + attackerId
                 + " d0=" + fmt(s.d0()) + " R=" + fmt(s.residualCarry()) + " F=" + fmt(s.freshEra())
                 + " V0=" + fmt(s.verticalStamp()) + " launchGrounded=" + s.launchGrounded()
+                + " launchRepriced=" + s.launchRepriced() + " vyLaunch=" + fmt(inputs.launchVerticalVelocity())
                 + " slip=" + fmt(s.launchSlip()) + " launchHeight=" + fmt(inputs.launchHeight())
                 + " wPrime=" + s.windowTicks() + " tStar=" + s.horizonTicks()
                 + " shiftV=" + s.shiftVictimTicks() + " airTime=" + s.airTicks()

@@ -71,6 +71,15 @@ package me.vexmc.mental.kernel.math;
  *                                ({@link Double#NaN} on the first) — the V2 target is
  *                                slew-limited to ±0.05 of it, killing the cliff
  *                                coin-flip (target-v2 repair #2).
+ * @param launchVerticalVelocity  the victim's per-tick vertical motion at the
+ *                                boundary read (the same end-of-previous-tick view
+ *                                the residual rides). The touchdown-aware launch
+ *                                branch (servo-lab 2.4.5): a descending victim whose
+ *                                remaining height is below one fall tick grounds on
+ *                                the client BEFORE the stamp applies, so the solve
+ *                                reprices the flight as a GROUNDED ground-level
+ *                                launch. {@link Double#NaN} ⇒ no repricing (the
+ *                                pre-2.4.5 behaviour, byte-identical).
  */
 public record PredictorInputs(
         boolean launchGrounded,
@@ -88,7 +97,26 @@ public record PredictorInputs(
         double victimYawRateDegPerTick,
         int groundedTicks,
         double priorChaseEma,
-        double priorDynamicTarget) {
+        double priorDynamicTarget,
+        double launchVerticalVelocity) {
+
+    /**
+     * The pre-2.4.5 arity (the target-v2 round): no boundary-read vertical motion,
+     * so the touchdown-aware launch branch never fires ({@link Double#NaN} ⇒ the
+     * launch state is taken exactly as captured). Keeps every caller and pin that
+     * predates the servo-solve round compiling — and solving — unchanged.
+     */
+    public PredictorInputs(
+            boolean launchGrounded, double launchSlip, double landingSlip, double launchHeight,
+            double driftAlongAxis, double chaseAlongAxis, double victimNormalizedSpeed,
+            int attackerRttMillis, int victimRttMillis, double attackerHeadY, double victimEyeHeight,
+            double victimYawVsAxisDeg, double victimYawRateDegPerTick, int groundedTicks,
+            double priorChaseEma, double priorDynamicTarget) {
+        this(launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
+                victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
+                Double.NaN);
+    }
 
     /**
      * The pre-V2 arity (combo-hold §3.2b): every per-hit geometry input, with NO
@@ -105,6 +133,22 @@ public record PredictorInputs(
         this(launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
                 victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
                 victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, Double.NaN, Double.NaN);
+    }
+
+    /**
+     * This hit repriced as a grounded, ground-level launch — the touchdown-aware
+     * launch branch's view (servo-lab 2.4.5). The launch slip doubles as the drag
+     * under the victim's feet at the repriced launch (flat-arena equality with the
+     * landing slip, the same convention the captured inputs already carry); the
+     * vertical motion is spent by the touchdown, so it clears to {@link Double#NaN}.
+     */
+    public PredictorInputs asGroundedLaunch() {
+        return new PredictorInputs(
+                true, launchSlip, landingSlip, 0.0,
+                driftAlongAxis, chaseAlongAxis, victimNormalizedSpeed,
+                attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks,
+                priorChaseEma, priorDynamicTarget, Double.NaN);
     }
 
     /**

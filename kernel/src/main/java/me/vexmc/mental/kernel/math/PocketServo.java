@@ -238,6 +238,9 @@ public final class PocketServo {
      * debug sink logs for the lab round (§7.2). Directional quantities are
      * axis-projected. {@code predictedDNext} is where the solve expects the victim
      * to land at the next swing (== {@code target} for an unclamped hit).
+     * {@code launchGrounded} is the EFFECTIVE launch state the solve priced;
+     * {@code launchRepriced} marks the touchdown-aware branch having promoted a
+     * descending boundary capture to a grounded launch (servo-lab 2.4.5).
      */
     public record Solution(
             double sigma, double sigmaStar,
@@ -247,7 +250,26 @@ public final class PocketServo {
             double d0, double residualCarry, double freshEra, double verticalStamp,
             boolean launchGrounded, double launchSlip, boolean declined,
             double predictedDNext,
-            double chaseEma, double tAllow, double turn, double closingEnd) {
+            double chaseEma, double tAllow, double turn, double closingEnd,
+            boolean launchRepriced) {
+
+        /** The pre-2.4.5 arity — no touchdown repricing flag (never repriced). */
+        public Solution(
+                double sigma, double sigmaStar,
+                double target, double dynamicTarget, double anchor,
+                int windowTicks, int horizonTicks, int shiftVictimTicks, int airTicks, int landTick,
+                double dragSum, double driftTravel, double chaseTravel, double chaseRate, boolean chaseMeasured,
+                double d0, double residualCarry, double freshEra, double verticalStamp,
+                boolean launchGrounded, double launchSlip, boolean declined,
+                double predictedDNext,
+                double chaseEma, double tAllow, double turn, double closingEnd) {
+            this(sigma, sigmaStar, target, dynamicTarget, anchor,
+                    windowTicks, horizonTicks, shiftVictimTicks, airTicks, landTick,
+                    dragSum, driftTravel, chaseTravel, chaseRate, chaseMeasured,
+                    d0, residualCarry, freshEra, verticalStamp,
+                    launchGrounded, launchSlip, declined, predictedDNext,
+                    chaseEma, tAllow, turn, closingEnd, false);
+        }
     }
 
     /**
@@ -302,8 +324,8 @@ public final class PocketServo {
                 fold.wPrime, fold.tStar, fold.shiftV, fold.airTime, fold.tLand,
                 fold.dragSum, fold.driftTravel, fold.chaseTravel, fold.chaseRate, fold.chaseMeasured,
                 d0, residualCarry, freshEra, verticalStampShipped,
-                inputs.launchGrounded(), inputs.launchSlip(), false, predictedDNext,
-                fold.chaseEma, fold.tAllow, fold.turn, fold.closingEnd);
+                fold.launchGrounded, inputs.launchSlip(), false, predictedDNext,
+                fold.chaseEma, fold.tAllow, fold.turn, fold.closingEnd, fold.launchRepriced);
     }
 
     /**
@@ -329,13 +351,33 @@ public final class PocketServo {
             boolean declined, int wPrime, int tStar, int shiftV, int airTime, int tLand,
             double dragSum, double driftTravel, double chaseRate, double chaseTravel, boolean chaseMeasured,
             double target, double dynamicTarget, double constant,
-            double chaseEma, double tAllow, double turn, double closingEnd) {
+            double chaseEma, double tAllow, double turn, double closingEnd,
+            boolean launchGrounded, boolean launchRepriced) {
     }
 
     private static Fold simulate(
             PocketServoConfig config, PredictorInputs inputs,
             double d0, double residualCarry, double freshEra,
             double verticalStampShipped, double attackerNormalizedSpeed) {
+
+        // The touchdown-aware launch branch (servo-lab 2.4.5). The era ordering
+        // reads the END-of-previous-tick view, so a descending boundary hit
+        // captures the victim airborne — but the victim's client moves by its
+        // current vy BEFORE the stamp can apply, so when the remaining height is
+        // below that one fall tick (launchHeight + vy ≤ 0) the actual flight is a
+        // GROUNDED ground-level launch. Pricing it airborne is the lab's measured
+        // 40%-class travel overestimate (grounded 1.162 measured = 1.162 modeled
+        // vs the airborne-modeled 1.764 at the same shipped stamp) — the false-low
+        // σ* mode (0.33–0.73) that pinned the min clamp. Only the flight PRICING
+        // is repriced; the shipped stamp (air multipliers, vertical) is the era
+        // composition and stays exactly what the engine extracted.
+        boolean launchRepriced = !inputs.launchGrounded()
+                && !Double.isNaN(inputs.launchVerticalVelocity())
+                && inputs.launchVerticalVelocity() < 0.0
+                && inputs.launchHeight() + inputs.launchVerticalVelocity() <= 0.0;
+        if (launchRepriced) {
+            inputs = inputs.asGroundedLaunch();
+        }
 
         double anchor = config.target();
         int cadence = config.windowTicks();
@@ -355,7 +397,8 @@ public final class PocketServo {
                 || inputs.landingSlip() > ICE_DECLINE_SLIP) {
             return new Fold(true, Math.max(0, tStar), tStar, shiftV, airTime,
                     shiftV + airTime, 0.0, 0.0, 0.0, 0.0, false, anchor, anchor, d0,
-                    Double.NaN, 0.0, 0.0, 0.0);
+                    Double.NaN, 0.0, 0.0, 0.0,
+                    inputs.launchGrounded(), launchRepriced);
         }
         int wPrime = tStar;
         int tLand = shiftV + airTime;
@@ -420,7 +463,8 @@ public final class PocketServo {
         return new Fold(false, wPrime, tStar, shiftV, airTime, tLand,
                 dragSum, driftTravel + tail, chaseRate, chaseTravel, chaseMeasured,
                 target, dyn.target(), constant,
-                dyn.chaseEma(), dyn.tAllow(), dyn.turn(), dyn.closingEnd());
+                dyn.chaseEma(), dyn.tAllow(), dyn.turn(), dyn.closingEnd(),
+                inputs.launchGrounded(), launchRepriced);
     }
 
     /**

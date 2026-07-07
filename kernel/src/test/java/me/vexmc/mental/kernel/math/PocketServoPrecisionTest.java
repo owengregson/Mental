@@ -92,6 +92,93 @@ class PocketServoPrecisionTest {
         assertEquals(600, checked, "the full 2×5×5×4×3 cross exercised");
     }
 
+    /* ── the touchdown-aware launch branch (servo-lab 2.4.5) ───────────────── */
+
+    /** The SHIPPED anchor (2.85, the target-v2 retune) — the lab pins below derive against it. */
+    private static final PocketServoConfig SHIPPED_ANCHOR = PocketServoConfig.of(2.85, 1.0, 0.8, 1.2, 10);
+
+    @Test
+    void touchdownBoundaryHitRepricesAsAGroundedLaunch() {
+        // The era ordering captures the END of the previous tick, so a descending
+        // boundary hit reads airborne (+0.30, vy −0.35) — but the client moves by
+        // vy BEFORE the stamp applies: 0.30 − 0.35 ≤ 0 grounds it, so the flight
+        // must be priced as a grounded ground-level launch.
+        PocketServo.Solution s = PocketServo.solve(
+                SHIPPED_ANCHOR, touchdown(0.30, -0.35, 0.116), 2.55, 0.02, 0.325, 0.35716, 0.10);
+        assertTrue(s.launchRepriced(), "the descending boundary capture reprices");
+        assertTrue(s.launchGrounded(), "the effective launch state is grounded");
+        assertEquals(10, s.airTicks(),
+                "repriced airTime is the ground-level fold (0.35716 → 10t), not the +0.30 launch's 11t");
+        assertEquals(PocketServo.groundedLaunchDragSum(10, 0.6 * Q), s.dragSum(), EPSILON,
+                "the drag schedule takes the grounded launch branch: D_g(10) = 1 + 0.546·geo(9)");
+        // Hand pin, the lab's counterfactual: d0 2.55, R 0.02, F 0.325 (plain
+        // stance), measured chase 0.116 b/t, target 2.85, w' 10.
+        //   σ* = (2.85 − (2.55 − 1.16) − 4.470559213·0.02) / (0.325·4.470559213)
+        //      = 1.370588824 / 1.452931744 = 0.943326362 — interior, ≈ 1 (the σ=1
+        //        counterfactual the lab measured settling in the pocket).
+        assertEquals(0.943326362, s.sigmaStar(), 1.0e-9);
+        assertEquals(s.sigmaStar(), s.sigma(), EPSILON, "interior: the clamp does not bind");
+        // And the repriced σ* lands exactly on target through the independent fold.
+        double landed = independentLanding(
+                touchdown(0.30, -0.35, 0.116).asGroundedLaunch(),
+                2.55, 0.02, 0.325, s.sigmaStar(), 0.35716, 0.10, 10);
+        assertEquals(s.target(), landed, EPSILON);
+    }
+
+    @Test
+    void withoutTheRepriceTheAirborneModelManufacturesTheFalseLowMode() {
+        // The SAME hit priced with no boundary vy (the pre-round arity): the solve
+        // takes the airborne branch — D_a(10) = geo(10) = 6.784265354, a 52%
+        // overtravel per unit shipped speed — and σ* collapses into the lab's
+        // false-low min-clamp mode:
+        //   σ* = (2.85 − 1.39 − 6.784265354·0.02) / (0.325·6.784265354)
+        //      = 1.324314693 / 2.204886240 = 0.600627220 → pinned at 0.8.
+        PredictorInputs blind = new PredictorInputs(
+                false, 0.6, 0.6, 0.30, 0.0, 0.116, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
+        PocketServo.Solution s = PocketServo.solve(SHIPPED_ANCHOR, blind, 2.55, 0.02, 0.325, 0.35716, 0.10);
+        assertFalse(s.launchRepriced(), "no boundary vy — the branch cannot fire (byte-identical pre-round)");
+        assertEquals(PocketServo.airborneLaunchDragSum(10), s.dragSum(), EPSILON);
+        assertEquals(0.600627220, s.sigmaStar(), 1.0e-9);
+        assertEquals(0.8, s.sigma(), EPSILON, "the false-low mode pins the min clamp");
+        // The lab's own travel validation at the As plain-stance stamp |H| = 0.26:
+        // grounded 0.26·D_g(10) = 1.1623 (measured 1.162 — exact); the airborne
+        // mispricing models 0.26·D_a(10) = 1.7639 (the lab's 1.764 model row).
+        assertEquals(1.162, 0.26 * PocketServo.groundedLaunchDragSum(10, 0.6 * Q), 1.0e-3,
+                "grounded model == the lab's measured flight");
+        assertEquals(1.764, 0.26 * PocketServo.airborneLaunchDragSum(10), 1.0e-3,
+                "the airborne mispricing == the lab's overestimated model row");
+    }
+
+    @Test
+    void repriceFiresOnlyBelowOneRemainingFallTick() {
+        // One more airborne tick to go (0.50 − 0.35 > 0): no reprice.
+        assertFalse(PocketServo.solve(SHIPPED_ANCHOR, touchdown(0.50, -0.35, Double.NaN),
+                2.55, 0.02, 0.325, 0.35716, 0.10).launchRepriced());
+        // Exactly one fall tick (0.35 − 0.35 == 0): the client grounds — reprice.
+        assertTrue(PocketServo.solve(SHIPPED_ANCHOR, touchdown(0.35, -0.35, Double.NaN),
+                2.55, 0.02, 0.325, 0.35716, 0.10).launchRepriced());
+        // Rising: never (the arc is still ascending; touchdown is not next tick).
+        assertFalse(PocketServo.solve(SHIPPED_ANCHOR, touchdown(0.10, 0.20, Double.NaN),
+                2.55, 0.02, 0.325, 0.35716, 0.10).launchRepriced());
+        // Already grounded at capture: the grounded branch is the capture's own —
+        // nothing was repriced.
+        PredictorInputs grounded = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0,
+                Double.NaN, Double.NaN, -0.0784);
+        assertFalse(PocketServo.solve(SHIPPED_ANCHOR, grounded,
+                2.55, 0.02, 0.325, 0.35716, 0.10).launchRepriced());
+    }
+
+    /** An airborne descending boundary capture: height above ground, boundary vy, measured chase. */
+    private static PredictorInputs touchdown(double launchHeight, double vy, double chase) {
+        return new PredictorInputs(
+                false, 0.6, 0.6, launchHeight, 0.0, chase, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0,
+                Double.NaN, Double.NaN, vy);
+    }
+
     @Test
     void groundedLaunchTravelsLessThanAirborne() {
         // The mandatory launch-state branch: a grounded launch takes one ground-drag
