@@ -18,6 +18,8 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
+import me.vexmc.mental.kernel.math.VerticalTrim;
+import me.vexmc.mental.kernel.math.VerticalTrimConfig;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -39,6 +41,7 @@ import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
+import me.vexmc.mental.v5.config.settings.VerticalTrimSettings;
 import me.vexmc.mental.v5.delivery.HitIds;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.feature.Feature;
@@ -275,14 +278,22 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // the victim's active combo, read from the victim's frozen view — one truth
         // shared with the netty pre-send. INACTIVE ⇒ σ = 1.0 (byte-identical).
         PocketServoConfig servo = comboServoFor(session.view(), attacker.getUniqueId());
+        // The vertical trim (COMBO_VERTICAL): active only when THIS attacker holds the
+        // victim's active combo (the SAME one-frozen-truth gate the servo uses). It
+        // composes with the servo — the trim fixes the shipped vertical the servo then
+        // reads for its elevation prediction. INACTIVE ⇒ shipped vertical is the era
+        // stamp (byte-identical).
+        VerticalTrimConfig verticalTrim = comboVerticalTrimFor(session.view(), attacker.getUniqueId());
         // The precision predictor inputs (combo-hold §3.2b) — built from the frozen
         // views + ring + latency, with the live capture positions as the axis source.
+        // Built whenever EITHER combo keeper is active: the vertical trim needs the real
+        // launch height for its apex solve, which the degraded inputs zero out.
         PlayerView victimView = session.view();
         PlayerView attackerView = sessions.viewOf(attacker.getUniqueId());
         // One tick read serves the build AND the window commit below — the post-hit
         // chase window's gap arithmetic needs both on the same clock instant.
         TickStamp servoNow = clock.current();
-        PredictorInputs inputs = servo.active() && victimView != null
+        PredictorInputs inputs = (servo.active() || verticalTrim.active()) && victimView != null
                 ? ComboPredictor.build(attacker.getUniqueId(), victim.getUniqueId(),
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
                         victimView, attackerView, sessions.positions(), latency, servoNow)
@@ -291,7 +302,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                         victimState.moveSpeedAttr());
         KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                 attackerState, victimState, profile, compensationY,
-                ThreadLocalRandom.current(), freshSprint, servo, inputs);
+                ThreadLocalRandom.current(), freshSprint, servo, inputs, verticalTrim);
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
@@ -313,6 +324,15 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                     attackerState, victimState, profile, compensationY, freshSprint, servo, inputs);
             debug.log(() -> ComboPredictor.debugLine(
                     victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
+        }
+        // The vertical trim's observability: a debug line (with the saturation flag)
+        // whenever the shaper is live and the KNOCKBACK debug category is on — the
+        // "shaper wanted more than the bound allows" signal is surfaced here.
+        if (verticalTrim.active() && debug.active()) {
+            VerticalTrim.Result trimResult = KnockbackEngine.explainVerticalTrim(
+                    attackerState, victimState, profile, compensationY, freshSprint, verticalTrim, inputs);
+            debug.log(() -> ComboPredictor.verticalTrimLine(
+                    victim.getUniqueId(), attacker.getUniqueId(), trimResult));
         }
 
         if (freshBlockedKnock) {
@@ -645,6 +665,27 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             return base * handicap.scale();
         }
         return base;
+    }
+
+    /**
+     * The vertical-trim config for a hit from {@code attackerId} to the victim whose
+     * frozen {@code view} is given (COMBO_VERTICAL). Active only when the module is on
+     * AND this attacker holds the victim's active combo — the SAME one-frozen-truth gate
+     * {@link #comboServoFor} uses (so an adopted pre-send and a recompute agree), and
+     * independent of COMBO_HOLD so a vertical-only config still shapes. Otherwise
+     * {@link VerticalTrimConfig#INACTIVE} (the shipped vertical is the era stamp).
+     */
+    @SuppressWarnings("unchecked")
+    private VerticalTrimConfig comboVerticalTrimFor(PlayerView view, UUID attackerId) {
+        if (view == null || attackerId == null || !snapshot.get().enabled(Feature.COMBO_VERTICAL)) {
+            return VerticalTrimConfig.INACTIVE;
+        }
+        if (!attackerId.equals(view.comboAttackerId())) {
+            return VerticalTrimConfig.INACTIVE;
+        }
+        VerticalTrimSettings settings = snapshot.get().settings(
+                (SettingsKey<VerticalTrimSettings>) Feature.COMBO_VERTICAL.settingsKey());
+        return settings.trim();
     }
 
     private static int heldKnockbackLevel(Player player) {
