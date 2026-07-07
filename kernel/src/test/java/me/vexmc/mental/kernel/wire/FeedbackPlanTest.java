@@ -43,7 +43,7 @@ class FeedbackPlanTest {
 
     @Test
     void suppressedVelocityNeverProducesASinglePacketBundle() {
-        // Anticheat gate, OCM ownership, or a pending resistance roll drop
+        // Anticheat gate or a pending resistance roll drop
         // the velocity; the hurt still ships, bare on every protocol.
         for (boolean bundleWanted : new boolean[] {true, false}) {
             for (boolean bundleCapable : new boolean[] {true, false}) {

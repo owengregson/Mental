@@ -49,7 +49,6 @@ traps that each cost a debugging round to discover:
 | `era-accuracy` | a change claims 1.7/1.8 authenticity or affects combat feel |
 | `knockback-profiles` | touching the engine, profile schema, presets, or config files |
 | `netty-fast-path` | touching the packet layer, pre-send, or reach validation |
-| `ocm-coexistence` | anything overlapping OldCombatMechanics (ownership, damage shaping) |
 | `paper-cross-version` | code that must behave across the version range |
 | `nms-archaeology` | a version behaves unexpectedly — read the server with javap, don't guess |
 | `live-server-testing` | writing/debugging integration suites (FakePlayer pitfalls, timing) |
@@ -69,7 +68,7 @@ Three single-writer domains, communicating only by immutable values:
   `PlayerView` (`AtomicReference.set`) — the state as of the END of the previous
   tick, the boundary read the era ordering depends on.
 - **D3 global** (global/main): config `Snapshot` swap, the feature reconciler,
-  the `TickClock` implementation, the entityId→UUID index, the OCM binding.
+  the `TickClock` implementation, the entityId→UUID index.
 
 The `DeliveryDesk` (kernel) is the sole `PlayerVelocityEvent` writer, the sole
 `MotionLedger` writer, and it writes the delivery **journal** — the single
@@ -91,12 +90,12 @@ netty realm's only Bukkit-adjacent code is the packet parse **rim**
   `DAMAGE` (armour strength/durability, tool durability, critical hits, sword
   blocking), `CADENCE` (cooldown, sweep, sounds), `SUSTAIN` (golden apples,
   ender-pearl cooldown, player regen, potion durations/values), and `LOADOUT`
-  (offhand, crafting, era hitbox reach) families — 16 rule `Feature`s ported
-  from OldCombatMechanics. All default OFF; zero-touch and era-exact-no-op
-  defaults hold. Mental still yields to OCM via the `OcmBinding`/`ArbiterCore`
-  (over `MechanicToken`s) for the six mechanics OCM owns when present; the
-  ported rule features are OCM-agnostic (enabling the same rule in both
-  double-applies — pick one per rule). Ground truth: the v5 spec
+  (offhand, crafting, era hitbox reach) families — 16 standalone rule `Feature`s
+  (historically ported from OldCombatMechanics). All default OFF; zero-touch and
+  era-exact-no-op defaults hold. Mental ALWAYS applies its own mechanics — there
+  is no OCM coexistence/yielding; the rule features are combat-rules-plugin-agnostic
+  (enabling the same rule in two plugins double-applies — pick one per rule).
+  Ground truth: the v5 spec
   (`docs/superpowers/specs/2026-07-01-mental-v5-spec.md`).
 
 ## Verification gate
@@ -104,7 +103,6 @@ netty realm's only Bukkit-adjacent code is the packet parse **rim**
 ```bash
 ./gradlew build                  # unit tests (+ japicmp, + kernel-Bukkit-free) — always first
 ./gradlew integrationTestMatrix  # sequential: every paper + folia server, one machine
-./gradlew integrationTestOcm     # OCM coexistence, floor + ceiling (stages the pinned OCM jar)
 ```
 
 The matrix runs **sequentially** on one machine (every server binds the same

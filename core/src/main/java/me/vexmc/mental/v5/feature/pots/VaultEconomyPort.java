@@ -10,8 +10,7 @@ import org.bukkit.plugin.RegisteredServiceProvider;
  * The production {@link EconomyPort}: a soft, reflection-only bridge to Vault's
  * {@code net.milkbowl.vault.economy.Economy} service. Mental never compiles
  * against Vault — the whole surface is resolved by name through the
- * {@code ServicesManager}, the same coexistence idiom
- * {@code OcmCompatUnit#bindService} uses for OldCombatMechanics.
+ * {@code ServicesManager}, a by-name soft-dependency service lookup.
  *
  * <p>Everything degrades to "absent / no-op" rather than throwing: no Vault class,
  * no registered provider, or an unexpected provider shape all make

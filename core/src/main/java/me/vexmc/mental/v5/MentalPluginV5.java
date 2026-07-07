@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
@@ -27,7 +26,6 @@ import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.platform.SweepCauses;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
@@ -37,7 +35,6 @@ import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.command.MentalCommand;
 import me.vexmc.mental.v5.debug.PlayerDebugSink;
 import me.vexmc.mental.v5.gui.MenuContext;
@@ -61,7 +58,6 @@ import me.vexmc.mental.v5.feature.Reconciler;
 import me.vexmc.mental.v5.feature.damage.ArmourDurabilityUnit;
 import me.vexmc.mental.v5.feature.damage.ArmourStrengthUnit;
 import me.vexmc.mental.v5.feature.damage.CritFallbackUnit;
-import me.vexmc.mental.v5.feature.damage.DamageOwnership;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.damage.PotionValuesUnit;
 import me.vexmc.mental.v5.feature.damage.SwordBlockingUnit;
@@ -88,7 +84,6 @@ import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.platform.PlatformProfile;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
-import me.vexmc.mental.v5.feature.delivery.OcmCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
 import me.vexmc.mental.v5.feature.knockback.FishingKnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.KnockbackUnit;
@@ -153,11 +148,8 @@ public final class MentalPluginV5 extends JavaPlugin {
     private CounterTickClock counterClock;
     private TaskHandle counterClockTask;
 
-    private OcmBinding ocmBinding;
     private BukkitRegistrar registrar;
     private Reconciler reconciler;
-    /** The always-on OCM coordination unit — held so a reload can re-derive the warnings. */
-    private OcmCompatUnit ocmCompat;
 
     private VelocityValve valve;
     private ViewBuilder viewBuilder;
@@ -266,14 +258,6 @@ public final class MentalPluginV5 extends JavaPlugin {
             this.clock = new PaperTickClock(Bukkit::getCurrentTick);
         }
 
-        // Coexistence: the binding stays ABSENT (Mental owns everything) until
-        // the OCM compat feature scans and binds it — that feature lands with the
-        // delivery family. The startup warnings derive from the current facts.
-        this.ocmBinding = new OcmBinding();
-        for (String warning : ocmBinding.warnings(enabledTokens())) {
-            getLogger().warning("coexistence — " + warning);
-        }
-
         // The packet rim's connection domains (spec §6): per-player sprint + ground
         // FSMs fed by the rim's movement taps. Created before the session service so
         // the session's tick-sampler can gate its ledger ground feed to packetless
@@ -295,7 +279,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.comboReachHandicap = new ComboReachHandicap(this, scheduling, this::snapshot);
         this.comboEvents = new ComboEvents(comboReachHandicap);
         this.sessions = new SessionService(
-                scheduling, clock, viewBuilder, valve, ocmBinding, this::snapshot, positions, domains,
+                scheduling, clock, viewBuilder, valve, this::snapshot, positions, domains,
                 comboEvents);
         sessions.start(this);
 
@@ -338,7 +322,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The feature reconciler. The delivery + knockback families register here
         // (4A2); the damage/cadence/sustain/loadout families follow in 4B–4D. A
         // feature with no registered unit is simply never converged.
-        this.registrar = new BukkitRegistrar(this, ocmBinding);
+        this.registrar = new BukkitRegistrar(this);
         this.reconciler = new Reconciler(
                 registrar, message -> getLogger().warning(message), platformProfile.disabledFeatures());
         registerUnits();
@@ -372,9 +356,9 @@ public final class MentalPluginV5 extends JavaPlugin {
         }
 
         // bStats (spec §13; owner decision: KEEP). Config-gated on metrics.enabled
-        // (default true) — warn-and-fallback: absent section reads true. The four
+        // (default true) — warn-and-fallback: absent section reads true. The
         // charts read the v5 sources live through suppliers, so a reload's changed
-        // anticheat/OCM/probe posture is reflected on the next report.
+        // anticheat/probe posture is reflected on the next report.
         if (snapshot.metricsEnabled()) {
             this.metrics = new Metrics(this, BSTATS_PLUGIN_ID);
             metrics.addCustomChart(new SimplePie("anticheat_mode",
@@ -383,8 +367,6 @@ public final class MentalPluginV5 extends JavaPlugin {
                     () -> probeTransport().name().toLowerCase(Locale.ROOT)));
             metrics.addCustomChart(new SimplePie("scheduling_backend",
                     () -> scheduling.describe()));
-            metrics.addCustomChart(new SimplePie("ocm_coordination",
-                    () -> ocmBinding.mode().name().toLowerCase(Locale.ROOT)));
         } else {
             getLogger().info("bStats metrics disabled (metrics.enabled=false).");
         }
@@ -456,19 +438,11 @@ public final class MentalPluginV5 extends JavaPlugin {
      * warn-and-fallback issues for the invoking sender.
      */
     public @NotNull List<String> reloadAll() {
-        Set<MechanicToken> tokensBefore = enabledTokens();
         configStore.ensureDefaultFiles();
         this.overlay = new Overlay(configStore.overridesFile());
         this.snapshot = parseSnapshot();
         applyDebug(snapshot.debug());
         reconciler.converge(snapshot);
-        // Re-derive the OCM coexistence warnings whenever this converge CHANGED
-        // the enabled-token set (interaction audit: the double-apply warning was
-        // startup-only, so a GUI toggle of a ported rule feature against a live
-        // OCM module double-applied silently). Value-only reloads stay quiet.
-        if (ocmCompat != null && !tokensBefore.equals(enabledTokens())) {
-            ocmCompat.rewarn("reload: enabled features changed");
-        }
         return parseIssues;
     }
 
@@ -523,11 +497,6 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** The player-facing debug sink — the {@code /mental debug subscribe} surface and the GUI tile toggle it. */
     public @NotNull PlayerDebugSink playerDebugSink() {
         return playerDebugSink;
-    }
-
-    /** The live OCM arbiter binding — the routers' frozen ownership source. */
-    public @NotNull OcmBinding ocmBinding() {
-        return ocmBinding;
     }
 
     /** Boot-time capability report (Folia, knockback event, …). */
@@ -637,11 +606,9 @@ public final class MentalPluginV5 extends JavaPlugin {
         boolean folia = capabilities.folia();
         boolean modernProtocol = platformProfile.modernHurtProtocol();
 
-        // The single crit/tool-damage verdict source, threaded to BOTH the fast
-        // path (DamageShaper) and the vanilla-path crit fallback (mandate §4.6 —
-        // the forgotten-gate bug class is structurally dead).
-        DamageOwnership damageOwnership = new DamageOwnership(ocmBinding::mentalOwns);
-        DamageShaper damageShaper = new DamageShaper(damageOwnership);
+        // The fast-path damage-amount composer, shared with the vanilla-path crit
+        // fallback (both apply the era crit off the same predicate).
+        DamageShaper damageShaper = new DamageShaper();
         ToolWear toolWear = new ToolWear(platformProfile);
         EphemeralDecoration swordBlockDecoration =
                 new EphemeralDecoration(this, scheduling, platformProfile.swordBlock());
@@ -658,37 +625,31 @@ public final class MentalPluginV5 extends JavaPlugin {
 
         reconciler.register(new AnticheatCompatUnit(
                 anticheatPolicy, this::snapshot, message -> getLogger().info(message)));
-        // Live OCM arbiter binding — keeps the OcmBinding current (service API
-        // per-player, else config-conservative), the driver the routers' frozen
-        // ownership reads and the coexistence warnings depend on.
-        this.ocmCompat = new OcmCompatUnit(
-                ocmBinding, this::snapshot, this::enabledTokens, message -> getLogger().info(message));
-        reconciler.register(ocmCompat);
         reconciler.register(hitRegistration);
         reconciler.register(new WtapRegistrationUnit(wtapConsultWire));
         // The knockback unit reads the sword-block decoration (observation only) so
         // Mental's own injected temp shield is never mistaken for a real modern
         // shield by the full-block cancel (audit C1 — era: half damage, FULL knock).
         reconciler.register(new KnockbackUnit(
-                sessions, domains, ocmBinding, latency, scheduling, this::snapshot,
+                sessions, domains, latency, scheduling, this::snapshot,
                 hitIds, clock, valve, debug.scoped(DebugCategory.KNOCKBACK), comboEvents,
                 swordBlockDecoration));
         reconciler.register(latencyCompensation);
         reconciler.register(new FishingKnockbackUnit(
-                sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock, folia));
-        reconciler.register(new RodVelocityUnit(ocmBinding, scheduling));
+                sessions, scheduling, this::snapshot, hitIds, clock, folia));
+        reconciler.register(new RodVelocityUnit(scheduling));
         reconciler.register(new ProjectileKnockbackUnit(
-                this, sessions, ocmBinding, scheduling, this::snapshot, hitIds, clock,
+                this, sessions, scheduling, this::snapshot, hitIds, clock,
                 platformProfile.projectileKnockbackRestored()));
 
         // The damage family (4B). The fast-path legacy composition (tool table,
         // era potion values, era crit) lives in the shaper above and is read live
         // from the snapshot; CritFallback restores the era crit on fast-path-off
-        // hits through the SAME ownership verdict; ArmourStrength/ArmourDurability
-        // port the era flat armour reduction and Unbreaking skip.
+        // hits; ArmourStrength/ArmourDurability port the era flat armour reduction
+        // and Unbreaking skip.
         reconciler.register(new ArmourStrengthUnit());
         reconciler.register(new ArmourDurabilityUnit());
-        reconciler.register(new CritFallbackUnit(damageOwnership, this::snapshot, sessions));
+        reconciler.register(new CritFallbackUnit(this::snapshot, sessions));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
         reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration, this::snapshot));
@@ -746,7 +707,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // /potfill on the command map on enable and strips it whole on disable
         // (zero-touch: no command-map or tab-complete trace when off); fast-pots
         // redirects a steeply-thrown splash potion at the thrower's own predicted
-        // feet at a multiplied launch speed. Neither is OCM-arbitrated.
+        // feet at a multiplied launch speed.
         reconciler.register(new PotFillUnit(this, this::snapshot, scheduling,
                 message -> getLogger().info(message)));
         reconciler.register(new FastPotsUnit(this::snapshot));
@@ -803,17 +764,6 @@ public final class MentalPluginV5 extends JavaPlugin {
      */
     public boolean probeSelfTest() {
         return latencyCompensation != null && latencyCompensation.probeSelfTest();
-    }
-
-    /** The tokens every enabled feature restores — the input to the coexistence warnings. */
-    private Set<MechanicToken> enabledTokens() {
-        Set<MechanicToken> tokens = EnumSet.noneOf(MechanicToken.class);
-        for (Feature feature : Feature.values()) {
-            if (snapshot.enabled(feature)) {
-                tokens.addAll(feature.tokens());
-            }
-        }
-        return tokens;
     }
 
     private void isolate(String what, Runnable step) {

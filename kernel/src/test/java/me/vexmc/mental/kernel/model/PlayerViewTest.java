@@ -22,7 +22,7 @@ class PlayerViewTest {
         return new PlayerView(
                 UUID.randomUUID(), 1, at, Decay.Motion.ZERO, true, 0.6, 0.08,
                 0.42, -1, false, false, true, noDamageTicks, maxNoDamageTicks,
-                0.0, false, KnockbackProfile.LEGACY_17, 0, KINEMATICS);
+                0.0, KnockbackProfile.LEGACY_17, 0, KINEMATICS);
     }
 
     @Test

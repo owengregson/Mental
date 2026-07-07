@@ -89,7 +89,6 @@ class SnapshotTest {
         // General sections default; the profile resolves to LEGACY_17 for any world.
         assertEquals(AnticheatModeDefault(), snapshot.anticheat().mode());
         assertFalse(snapshot.debug().enabled());
-        assertEquals(OcmCoordination.AUTO, snapshot.ocmCoordination());
         assertEquals(KnockbackProfile.LEGACY_17, snapshot.profileFor("anything"));
         assertEquals(KnockbackProfile.LEGACY_17, snapshot.profileFor("world_nether"));
         // bStats is on by default; the absent `metrics` section reads true without an issue.
@@ -133,7 +132,6 @@ class SnapshotTest {
         assertFalse(snapshot.enabled(Feature.HITBOX));
         // Infrastructure is always on.
         assertTrue(snapshot.enabled(Feature.ANTICHEAT_COMPAT));
-        assertTrue(snapshot.enabled(Feature.OCM_COMPAT));
     }
 
     @Test

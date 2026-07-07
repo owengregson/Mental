@@ -15,14 +15,13 @@
 #  sum of all of them. Live progress streams into run/matrix-live.log as
 #  "[version] RUN/PASS/FAIL <case>" lines — tail it to watch every server.
 #
-#  The Gradle tasks (integrationTest / integrationTestMatrix /
-#  integrationTestOcm) remain the canonical sequential path (CI uses them);
-#  this is the fast local gate.
+#  The Gradle tasks (integrationTest / integrationTestMatrix) remain the
+#  canonical sequential path (CI uses them); this is the fast local gate.
 #
-#  Usage:  scripts/integration-matrix.sh [--versions <v1>,<v2>] [--no-ocm]
+#  Usage:  scripts/integration-matrix.sh [--versions <v1>,<v2>]
 #  Exit:   0 = every server PASS, 1 = anything else.
 #
-#  Versions, per-version JDK, and the OCM floor/ceiling all come from
+#  Versions and per-version JDK all come from
 #  support-matrix.json (via jq) — THE single source of truth. No version or
 #  JDK literal lives in this script.
 #
@@ -42,31 +41,19 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required (reads support-matrix.js
 # calm machine instead of reaching its longest suites mid-ignition. The
 # descriptor lists oldest -> newest, so reverse it.
 VERSIONS_DEFAULT="$(jq -r '[.entries[] | select(.platform=="paper") | .version] | reverse | join(" ")' "$MATRIX")"
-# OCM runs on the FIXED 1.17.1 + 26.1.2 pair — the same version-pin the Gradle
-# integrationTestOcm gate uses. Positional floor+ceiling broke when the legacy
-# backport re-sorted 1.9.4 to entries[0]: OCM does not target Mental's legacy
-# floor, so the pair is pinned by version, not position.
-OCM_VERSIONS="1.17.1 26.1.2"
 JAR_CACHE="$HOME/.gradle/caches/run-task-jars/paper/jars"
-OCM_JAR="$PWD/run/ocm-jar/OldCombatMechanics.jar"
 LIVE="$PWD/run/matrix-live.log"
 VERDICTS="$PWD/run/matrix-verdicts.txt"
 SERVER_TIMEOUT_SECONDS=420
 BASE_PORT=25600
 
 VERSIONS="$VERSIONS_DEFAULT"
-WITH_OCM=auto
 while [ $# -gt 0 ]; do
     case "$1" in
         --versions) VERSIONS="$(echo "$2" | tr ',' ' ')"; shift 2 ;;
-        --no-ocm) WITH_OCM=no; shift ;;
-        --ocm) WITH_OCM=yes; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
-if [ "$WITH_OCM" = auto ]; then
-    [ -f "$OCM_JAR" ] && WITH_OCM=yes || WITH_OCM=no
-fi
 
 JDKS_DIR="$HOME/.gradle/jdks"
 # Resolve the real java executable for a JDK feature version N. Prefers the
@@ -124,7 +111,6 @@ fi
 # single server, so a missing toolchain fails loudly here instead of as an
 # opaque NO-RESULT per server after minutes of boots.
 preflight_versions="$VERSIONS"
-[ "$WITH_OCM" = yes ] && preflight_versions="$preflight_versions $OCM_VERSIONS"
 for v in $preflight_versions; do
     n=$(jdk_for "$v")
     if [ -z "$n" ] || [ "$n" = null ]; then
@@ -157,9 +143,9 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-# run_one <version> <run-dir> <port> <label> <ocm|plain>
+# run_one <version> <run-dir> <port> <label>
 run_one() {
-    local version=$1 dir=$2 port=$3 label=$4 flavour=$5
+    local version=$1 dir=$2 port=$3 label=$4
     local jar java log result
     jar=$(ls "$JAR_CACHE/$version"/*.jar 2>/dev/null | sort -V | tail -1)
     if [ -z "$jar" ]; then
@@ -175,7 +161,6 @@ run_one() {
     # Mirror the Gradle doFirst: pristine plugin config trees per run.
     rm -rf "$dir/plugins/Mental"
     rm -f "$result" "$dir/plugins/MentalTester/test-failures.txt"
-    [ "$flavour" = ocm ] && rm -rf "$dir/plugins/OldCombatMechanics"
     echo "eula=true" > "$dir/eula.txt"
     if [ ! -f "$dir/server.properties" ]; then
         printf 'level-type=flat\nonline-mode=false\nspawn-protection=0\nview-distance=4\nsimulation-distance=4\nmotd=Mental integration test\n' \
@@ -186,12 +171,10 @@ run_one() {
     # NOT parse -add-plugin= (joptsimple reads it as clustered short options and
     # help-dumps + exits — spike-proven on 1.13.2 build 657), and copying is the
     # universal form that works across the whole range. Pristine-reset first: drop
-    # any Mental/tester/OCM jar a prior run (this script OR the Gradle RunServer,
+    # any Mental/tester jar a prior run (this script OR the Gradle RunServer,
     # which shares run/<v>/) left in plugins/, so exactly this run's set loads.
     rm -f "$dir/plugins/"Mental-*.jar "$dir/plugins/"MentalTester-*.jar
-    [ "$flavour" = ocm ] && rm -f "$dir/plugins/"OldCombatMechanics*.jar
     cp "$MENTAL_JAR" "$TESTER_JAR" "$dir/plugins/"
-    [ "$flavour" = ocm ] && cp "$OCM_JAR" "$dir/plugins/"
 
     # The declared Multi-Release bytecodeTier for this entry — passed to the tester
     # as -Dmental.tester.tier so its boot suite asserts the tree that actually loaded.
@@ -273,7 +256,7 @@ run_one() {
     echo "$label $verdict" >> "$VERDICTS"
 }
 
-echo "── concurrent matrix: $VERSIONS $([ "$WITH_OCM" = yes ] && echo "+ OCM($OCM_VERSIONS)") ──" | tee -a "$LIVE"
+echo "── concurrent matrix: $VERSIONS ──" | tee -a "$LIVE"
 
 # Staggered launches: server BOOT is the CPU spike (world load, class
 # loading); offsetting starts by a few seconds keeps any one server's tick
@@ -281,19 +264,11 @@ echo "── concurrent matrix: $VERSIONS $([ "$WITH_OCM" = yes ] && echo "+ OCM
 STAGGER_SECONDS=3
 port=$BASE_PORT
 for v in $VERSIONS; do
-    run_one "$v" "$PWD/run/$v" "$port" "$v" plain &
+    run_one "$v" "$PWD/run/$v" "$port" "$v" &
     PIDS="$PIDS $!"
     port=$((port + 1))
     sleep "$STAGGER_SECONDS"
 done
-if [ "$WITH_OCM" = yes ]; then
-    for v in $OCM_VERSIONS; do
-        run_one "$v" "$PWD/run/ocm/$v" "$port" "$v+OCM" ocm &
-        PIDS="$PIDS $!"
-        port=$((port + 1))
-        sleep "$STAGGER_SECONDS"
-    done
-fi
 
 for pid in $PIDS; do
     wait "$pid" 2>/dev/null

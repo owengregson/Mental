@@ -8,7 +8,7 @@ import org.jetbrains.annotations.NotNull;
 /**
  * The shared dependencies every menu reads from: the live plugin (the config
  * snapshot, the reconciler's active-feature truth, the machine overlay, the boot
- * environment and OCM binding), and the {@link Management} write-back seam every
+ * environment), and the {@link Management} write-back seam every
  * mutation flows through. One instance lives for the plugin lifetime, held by the
  * {@link MenuManager}.
  *

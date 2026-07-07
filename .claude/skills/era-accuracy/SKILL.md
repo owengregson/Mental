@@ -36,10 +36,7 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
   that freeze), the +1 staleness allowance in the view's immune check (was
   `Snapshot.isDamageImmune`), and the `auto` feedback window at `(max/2 − 1)`
   ticks. "Combos feel floaty / too much vertical" =
-  boundary hits shipping grounded re-stamps = one of those three broke,
-  or OCM owns the knock (see ocm-coexistence: old-player-knockback ships
-  ENABLED in OCM's default modeset and playerDelay ships 18, not the
-  era's 20 — both reproduce the symptom with zero Mental defect).
+  boundary hits shipping grounded re-stamps = one of those three broke.
 - Legacy damage: sharpness 1.25/level, crit-before-enchant with no sprint
   exclusion, pre-1.9 tool tables (diamond sword = 8), rod/projectile knocks
   from the SHOOTER'S POSITION, probabilistic armor resistance.
@@ -97,7 +94,7 @@ the right-click "item rises" cosmetic) — only the FUNCTIONAL reset is restored
 - Randomized knockback (MMC's most-hated era; determinism IS the product).
 - CPS-scaled anything / "anti-reduce" normalization (GommeHD: ~80%
   disapproval, top-player exodus). Fairness features must be opt-in choices.
-- Hit-delay knobs (combat rules → OldCombatMechanics).
+- Hit-delay knobs (a rejected anti-feature — see combo-hold design).
 
 ## Verifying authenticity
 

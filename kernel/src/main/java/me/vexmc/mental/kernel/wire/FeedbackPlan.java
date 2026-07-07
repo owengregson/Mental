@@ -16,7 +16,7 @@ import java.util.List;
  *       packets go out back-to-back unwrapped (the bundle delimiter does not
  *       exist on the wire).</li>
  *   <li><b>No single-packet bundles.</b> A hurt-only burst (velocity
- *       suppressed by the anticheat gate, OCM ownership, or a pending legacy
+ *       suppressed by the anticheat gate or a pending legacy
  *       resistance roll) is sent bare — wrapping one packet buys nothing and
  *       costs a delimiter pair.</li>
  *   <li>Bundle delimiters are always balanced: OPEN appears iff CLOSE does.</li>

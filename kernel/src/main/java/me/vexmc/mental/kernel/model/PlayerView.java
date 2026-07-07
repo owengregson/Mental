@@ -16,7 +16,7 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                          double gravity, double jumpImpulse, int jumpBoostAmplifier,
                          boolean sprinting, boolean creative, boolean pvpAllowed,
                          int noDamageTicks, int maxNoDamageTicks,
-                         double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                         double knockbackResistance,
                          KnockbackProfile profile, int pingMillis,
                          KinematicState kinematics, double moveSpeedAttr,
                          UUID comboAttackerId,
@@ -39,7 +39,7 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                       double gravity, double jumpImpulse, int jumpBoostAmplifier,
                       boolean sprinting, boolean creative, boolean pvpAllowed,
                       int noDamageTicks, int maxNoDamageTicks,
-                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      double knockbackResistance,
                       KnockbackProfile profile, int pingMillis,
                       KinematicState kinematics, double moveSpeedAttr,
                       UUID comboAttackerId,
@@ -47,7 +47,7 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                       double eyeHeight, int groundedTicks) {
         this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
                 jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
-                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                maxNoDamageTicks, knockbackResistance, profile,
                 pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
                 measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, Double.NaN);
     }
@@ -66,13 +66,13 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                       double gravity, double jumpImpulse, int jumpBoostAmplifier,
                       boolean sprinting, boolean creative, boolean pvpAllowed,
                       int noDamageTicks, int maxNoDamageTicks,
-                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      double knockbackResistance,
                       KnockbackProfile profile, int pingMillis,
                       KinematicState kinematics, double moveSpeedAttr,
                       UUID comboAttackerId) {
         this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
                 jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
-                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                maxNoDamageTicks, knockbackResistance, profile,
                 pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
                 0.0, 0.0, 0.0f, DEFAULT_EYE_HEIGHT, 0);
     }
@@ -91,12 +91,12 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                       double gravity, double jumpImpulse, int jumpBoostAmplifier,
                       boolean sprinting, boolean creative, boolean pvpAllowed,
                       int noDamageTicks, int maxNoDamageTicks,
-                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      double knockbackResistance,
                       KnockbackProfile profile, int pingMillis,
                       KinematicState kinematics, double moveSpeedAttr) {
         this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
                 jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
-                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                maxNoDamageTicks, knockbackResistance, profile,
                 pingMillis, kinematics, moveSpeedAttr, null);
     }
 
@@ -117,12 +117,12 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                       double gravity, double jumpImpulse, int jumpBoostAmplifier,
                       boolean sprinting, boolean creative, boolean pvpAllowed,
                       int noDamageTicks, int maxNoDamageTicks,
-                      double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+                      double knockbackResistance,
                       KnockbackProfile profile, int pingMillis,
                       KinematicState kinematics) {
         this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
                 jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
-                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                maxNoDamageTicks, knockbackResistance, profile,
                 pingMillis, kinematics, EntityState.MOVE_SPEED_UNAVAILABLE, null);
     }
 

@@ -28,7 +28,7 @@ class CompensationQueryTest {
         return new PlayerView(
                 UUID.randomUUID(), 1, new TickStamp(0), Decay.Motion.ZERO,
                 kinematics.clientOnGround(), 0.6, GRAVITY, 0.42, -1, false, false, true,
-                noDamageTicks, 20, 0.0, false, KnockbackProfile.LEGACY_17, 0, kinematics);
+                noDamageTicks, 20, 0.0, KnockbackProfile.LEGACY_17, 0, kinematics);
     }
 
     @Test

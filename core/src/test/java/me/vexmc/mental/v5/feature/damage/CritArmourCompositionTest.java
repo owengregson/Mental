@@ -93,7 +93,7 @@ class CritArmourCompositionTest {
 
     /**
      * A crit unit whose snapshot enables ARMOUR_STRENGTH with the fast path OFF
-     * (the audit scenario's scope) and whose ownership always answers "Mental".
+     * (the audit scenario's scope).
      */
     private static CritFallbackUnit crit() throws Exception {
         Snapshot snapshot = parse("""
@@ -107,8 +107,8 @@ class CritArmourCompositionTest {
                 """);
         // A bare SessionService: sessionFor answers null, so the per-hit gate reads
         // every staged event as a vanilla-landing melee (the audit scenario).
-        return new CritFallbackUnit(new DamageOwnership((token, id) -> true), () -> snapshot,
-                new SessionService(null, null, null, null, null, null, null, null, null));
+        return new CritFallbackUnit(() -> snapshot,
+                new SessionService(null, null, null, null, null, null, null, null));
     }
 
     private static Snapshot parse(String main, String hitReg) throws Exception {

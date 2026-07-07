@@ -34,7 +34,7 @@ class CombatSessionTest {
     private static PlayerView freshView(int at) {
         return new PlayerView(
                 UUID.randomUUID(), 1, new TickStamp(at), Decay.Motion.ZERO, true, 0.6, GRAVITY,
-                0.42, -1, false, false, true, 0, 20, 0.0, false, KnockbackProfile.LEGACY_17, 0,
+                0.42, -1, false, false, true, 0, 20, 0.0, KnockbackProfile.LEGACY_17, 0,
                 new KinematicState(0.0, 0.0, true));
     }
 
@@ -72,7 +72,7 @@ class CombatSessionTest {
 
         HitContext context = new HitContext(
                 new HitId(1), new HitSource.Melee(), UUID.randomUUID(), UUID.randomUUID(),
-                new SprintVerdict(false, Boolean.FALSE, new TickStamp(0)), false, true, null,
+                new SprintVerdict(false, Boolean.FALSE, new TickStamp(0)), true, null,
                 new TickStamp(0));
         HitTransaction tx = new HitTransaction(context);
         tx.planned();

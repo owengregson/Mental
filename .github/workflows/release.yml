@@ -232,54 +232,8 @@ jobs:
           name: release-folia-logs
           path: core/build/integration-test-logs/folia-*.log
 
-  # The OldCombatMechanics coexistence gate — release-only. stageOcmJar
-  # downloads the OCM release PINNED in support-matrix.json (url + sha256) and
-  # verifies the hash, so the run is byte-reproducible; integrationTestOcm then
-  # boots the floor and ceiling with OCM installed and runs the coexistence
-  # suite. It is release-only on purpose: two extra real servers plus a plugin
-  # download is too costly to repeat on every PR (a local run/ocm-jar fork
-  # build would override the download, but CI has none).
-  ocm:
-    needs: detect
-    if: needs.detect.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
-        with:
-          # Only the build JDK (the newest matrix JDK, jq max in detect); the
-          # Gradle foojay toolchain auto-provisions the OCM entries' server JDKs.
-          java-version: ${{ needs.detect.outputs.build_jdk }}
-          distribution: 'temurin'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
-
-      - name: Cache foojay-provisioned JDKs
-        uses: actions/cache@v5
-        with:
-          path: ~/.gradle/jdks
-          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
-          restore-keys: |
-            gradle-jdks-${{ runner.os }}-
-
-      - name: Stage the pinned OCM release and run the coexistence gate
-        run: ./gradlew stageOcmJar integrationTestOcm
-
-      - name: Upload OCM server logs
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          name: release-ocm-logs
-          path: core/build/integration-test-logs/ocm-*.log
-
   release:
-    needs: [detect, unit, integration, folia, ocm]
+    needs: [detect, unit, integration, folia]
     if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
 

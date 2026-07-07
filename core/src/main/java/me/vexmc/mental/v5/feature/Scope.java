@@ -3,7 +3,6 @@ package me.vexmc.mental.v5.feature;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 
 /**
  * Every resource a feature acquires, closed as a unit on any exit (B8/R6).
@@ -11,7 +10,7 @@ import me.vexmc.mental.kernel.coexist.MechanicToken;
  * throws part-way closes whatever was already acquired, and a reload disable
  * closes the scope whole.
  *
- * <p>Each {@code listen}/{@code packets}/{@code task}/{@code rule} call routes
+ * <p>Each {@code listen}/{@code packets}/{@code task} call routes
  * to the {@link Registrar} seam and records the returned {@link AutoCloseable}.
  * If acquisition throws, the throw propagates and nothing is recorded for that
  * call — the earlier registrations remain held, so the caller (the reconciler)
@@ -40,10 +39,6 @@ public final class Scope implements AutoCloseable {
 
     public void task(Supplier<AutoCloseable> starter) {
         registrations.add(registrar.task(starter));
-    }
-
-    public void rule(MechanicToken token, Runnable handlerRegistration) {
-        registrations.add(registrar.rule(token, handlerRegistration));
     }
 
     /**

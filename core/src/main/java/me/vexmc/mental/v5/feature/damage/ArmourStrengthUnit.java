@@ -39,8 +39,8 @@ import org.jetbrains.annotations.Nullable;
  * modifiers (armour → resistance → enchant EPF → absorption) off the pure kernel
  * {@link DefenceMath} in the era order. Only modifiers
  * {@link EntityDamageEvent#isApplicable(DamageModifier)} reports present are ever
- * read or written, so the deprecated granular setter never throws (OCM's proven
- * guard). {@code EntityDamageEvent} fires on the victim's region thread, so every
+ * read or written, so the deprecated granular setter never throws (the
+ * applicability guard). {@code EntityDamageEvent} fires on the victim's region thread, so every
  * read/write is inline; the 1.8 model needs no attacker state.
  *
  * <p><strong>Toughness is never read.</strong> The reduction is a function of the

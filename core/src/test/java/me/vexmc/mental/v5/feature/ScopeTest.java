@@ -8,15 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import org.junit.jupiter.api.Test;
 
 /**
  * The scope's transactional lifecycle over a recording stub {@link Registrar}:
  * reverse-order close, per-close exception isolation with a single summary
  * throw, the partial-enable "acquisition throws → nothing leaks" contract, and
- * idempotent double-close. That {@code rule} cannot be registered without a
- * token is a compile-time property (there is no token-less overload).
+ * idempotent double-close.
  */
 class ScopeTest {
 
@@ -55,12 +53,6 @@ class ScopeTest {
             AutoCloseable running = starter.get();
             return track("task");
         }
-
-        @Override
-        public AutoCloseable rule(MechanicToken token, Runnable handlerRegistration) {
-            handlerRegistration.run();
-            return track("rule:" + token);
-        }
     }
 
     @Test
@@ -69,13 +61,11 @@ class ScopeTest {
         Scope scope = new Scope(registrar);
         scope.listen("A");
         scope.packets("B");
-        scope.rule(MechanicToken.REGEN, () -> registrar.events.add("register-rule"));
 
         scope.close();
 
         assertEquals(List.of(
-                "acquire:A", "acquire:B", "register-rule", "acquire:rule:REGEN",
-                "close:rule:REGEN", "close:B", "close:A"), registrar.events);
+                "acquire:A", "acquire:B", "close:B", "close:A"), registrar.events);
     }
 
     @Test

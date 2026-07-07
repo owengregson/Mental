@@ -57,8 +57,7 @@ description: Use when writing or reviewing ANY code in the Mental repo — the c
   owning thread, fed a per-player inbox of immutable signals. A 1-tick task
   **publishes** one `PlayerView` (`AtomicReference.set`) = end-of-previous-tick
   state.
-- **D3 global**: config swap, reconciler, `TickClock`, entityId→UUID index,
-  OCM binding.
+- **D3 global**: config swap, reconciler, `TickClock`, entityId→UUID index.
 - Cross-domain communication is exclusively **immutable values**. All entity
   work goes through `Scheduling.runOn/repeatOn/runGlobal(...)` — region-correct
   on Folia, main-thread on Paper, identical code.

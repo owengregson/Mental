@@ -57,7 +57,7 @@ class DeliveryDeskTest {
         return new HitContext(
                 new HitId(id), source, UUID.randomUUID(), UUID.randomUUID(),
                 new SprintVerdict(true, Boolean.TRUE, new TickStamp(registeredAtTick)),
-                false, true, null, new TickStamp(registeredAtTick));
+                true, null, new TickStamp(registeredAtTick));
     }
 
     /** A PRE_SENT transaction carrying {@code vector}, registered at {@code tick}. */

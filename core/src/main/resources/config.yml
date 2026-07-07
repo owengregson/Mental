@@ -12,7 +12,7 @@
 #
 #  Everything here is managed in-game through the Mental menu — run /mental
 #  (op only): module switches, the server-wide knockback profile, anticheat
-#  and OCM coordination, and debug. Changes apply atomically — no hit is ever
+#  posture, and debug. Changes apply atomically — no hit is ever
 #  processed against a half-applied config. The console can still reload with
 #  /mental reload. Editing files by hand still works; reload to apply.
 # ──────────────────────────────────────────────────────────────────────────
@@ -110,9 +110,9 @@ modules:
   # deterministically (no per-hit randomness) since clients never predict armour,
   # so the jitter is invisible. Era values pinned from decompiled 1.8.9 (pr.java/
   # acr.java/ack.java). Implemented by overriding the granular damage modifiers
-  # (ARMOR/RESISTANCE/MAGIC/ABSORPTION) at LOWEST priority — the same proven
-  # cross-version mechanism OCM uses (the deprecated modifier setter only throws
-  # when a modifier is absent, so we only ever write applicable ones).
+  # (ARMOR/RESISTANCE/MAGIC/ABSORPTION) at LOWEST priority — the deprecated
+  # modifier setter only throws when a modifier is absent, so we only ever write
+  # applicable ones.
   # Default OFF (era-exact no-op when disabled).
   old-armour-strength: false
   # Restores the 1.8 armour-durability Unbreaking skip: worn armour takes its
@@ -120,19 +120,18 @@ modules:
   # hits as Unbreaking rises), in place of modern armour's generic
   # level/(level+1). The per-hit wear MAGNITUDE is left at vanilla's
   # max(1, floor(damage/4)) — identical 1.8<->modern, so it is never changed
-  # (OCM's flat-1 override is NOT era-exact). At Unbreaking 0 nothing skips, as in
+  # (a flat-1 override would NOT be era-exact). At Unbreaking 0 nothing skips, as in
   # 1.8 NMS. Only currently-worn armour pieces are affected (elytra excluded).
-  # Era values pinned from decompiled 1.8.9 (acg.java/wm.java); mirrors OCM's
-  # ModuleOldArmourDurability. Implemented on PlayerItemDamageEvent at LOWEST
+  # Era values pinned from decompiled 1.8.9 (acg.java/wm.java). Implemented on
+  # PlayerItemDamageEvent at LOWEST
   # priority, on the player's region thread (Folia-safe, no scheduler).
   # Default OFF (era-exact no-op when disabled).
   old-armour-durability: false
   # Restores the pre-1.9 (1.8) potion DURATIONS. 1.9 shortened many potion
   # durations; this rewrites a potion's effect back to its 1.8 length when a
   # player drinks it (PlayerItemConsumeEvent), throws a splash/lingering potion
-  # (right-click), or a dispenser fires one (BlockDispenseEvent) — the same three
-  # hooks OCM's old-potion-effects uses. The duration table is OCM's
-  # old-potion-effects.potion-durations (drink/splash, in seconds), converted to
+  # (right-click), or a dispenser fires one (BlockDispenseEvent). The era
+  # duration table (drink/splash, in seconds) is converted to
   # ticks: Strength 180/135 s, Swiftness 180/135 s, Fire Resistance 180 s,
   # Weakness 90 s, Poison 45/33 s, Regeneration 45/33 s, Night Vision 180 s,
   # Invisibility 180/135 s, Water Breathing 180/135 s, Slowness 90/67 s, Leaping
@@ -149,14 +148,12 @@ modules:
   # weapon base (factor 1 + 2.5*(amp+1) — Strength I x3.5, Strength II x6.0, far
   # stronger than 1.9's flat +3*(amp+1)), and era Weakness subtracted only
   # 2.0*(amp+1) (1.9 doubled it to 4.0*(amp+1)). Era values pinned from
-  # decompiled 1.8.9 (pe.java/rv.java); OCM's own defaults (Strength 1.3,
-  # Weakness -0.5) are NOT era-exact and are deliberately not used. Applied to
+  # decompiled 1.8.9 (pe.java/rv.java). Applied to
   # the weapon base BEFORE the crit x1.5 and BEFORE the Sharpness additive
   # (era order, wn.java:761-764), clamped >= 0. Implemented in the fast-path
   # DamageCalculator. SCOPE: fast-path PvP melee only (the dominant case) — mob
-  # attacks and fast-path-off hits keep vanilla Strength/Weakness, and when OCM
-  # shapes the damage these era values are skipped. This is the VALUES half only;
-  # potion DURATIONS are the separate old-potion-durations module.
+  # attacks and fast-path-off hits keep vanilla Strength/Weakness. This is the
+  # VALUES half only; potion DURATIONS are the separate old-potion-durations module.
   # Default OFF (era-exact no-op when disabled).
   old-potion-values: false
   # Applies the 1.8 era critical-hit multiplier (x1.5 on attack damage) for
@@ -170,9 +167,8 @@ modules:
   # player melee only — when Mental's fast path is ON, DamageCalculator already
   # applies the era crit with the correct ordering (weapon base before Sharpness);
   # this module is a no-op when the fast path is ON. Fast-path-off is a minority
-  # case: most PvP hits on a Mental server go through the fast path. When OCM owns
-  # old-critical-hits for the attacker, OCM handles the crit — this module does
-  # not double-apply. Default OFF (era-exact no-op when disabled).
+  # case: most PvP hits on a Mental server go through the fast path.
+  # Default OFF (era-exact no-op when disabled).
   old-critical-hits: false
   # Restores weapon durability loss on Mental's fast-path melee hits, which the
   # fast path otherwise OMITS by design: the fast path applies damage via a direct
@@ -510,26 +506,10 @@ anticheat:
     - GrimAC
     - Vulcan
 
-# Coexistence with combat-rules plugins.
-compatibility:
-  # OldCombatMechanics divides combat with Mental: OCM owns the rules
-  # (attack cooldown, sword blocking, regen, armour, golden apples), Mental
-  # owns knockback and hit delivery. Where OCM's own modules reach into
-  # Mental's half — old-player-knockback, old-fishing-knockback,
-  # fishing-rod-velocity, projectile-knockback, old-tool-damage,
-  # old-critical-hits — Mental yields exactly the interactions OCM is
-  # configured to handle, per player modeset when OCM's API is available.
-  # To give a mechanic to Mental, disable the corresponding OCM module (or
-  # drop it from the modeset); Mental's combos, positional projectile
-  # knockback and ping compensation apply to interactions Mental owns.
-  #   auto   — coordinate as described (recommended).
-  #   ignore — pretend OCM is absent; both plugins will fight. Not advised.
-  old-combat-mechanics: auto
-
 # Anonymous usage statistics via bStats (https://bstats.org/plugin/bukkit, id
 # 31788). No player data is collected — only aggregate counts (server software,
-# Mental's anticheat mode, latency probe strategy, scheduling backend, and OCM
-# coordination mode). Set to false to opt out entirely.
+# Mental's anticheat mode, latency probe strategy, and scheduling backend). Set
+# to false to opt out entirely.
 metrics:
   enabled: true
 

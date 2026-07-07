@@ -6,9 +6,6 @@ folia-supported: true
 description: Latency-compensated 1.7.10 combat — async hit registration, knockback, fishing and projectile mechanics.
 authors: [owengregson]
 website: https://github.com/owengregson/Mental
-# Load after OldCombatMechanics so its config and service API exist when
-# Mental evaluates combat ownership at startup (late enables are handled too).
-softdepend: [OldCombatMechanics]
 
 commands:
   mental:

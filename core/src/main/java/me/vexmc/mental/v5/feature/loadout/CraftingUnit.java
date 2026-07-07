@@ -21,8 +21,8 @@ import org.jetbrains.annotations.NotNull;
  * 1.7/1.8 era server there is no shield; even with the off-hand blocked, a modern
  * crafting table can still produce one into the main inventory. This rule closes
  * that gap by clearing the crafting RESULT whenever it would be a blocked
- * material — the same {@link PrepareItemCraftEvent} approach OCM's
- * {@code ModuleDisableCrafting} and the Bukkit docs prescribe. The recipe is not
+ * material — the same {@link PrepareItemCraftEvent} approach the Bukkit docs
+ * prescribe. The recipe is not
  * removed from the server registry: blocking the result is fully reversible and
  * touches no persistent state, which is exactly the zero-touch restore this
  * feature needs — when the scope closes (disable/reload-off) the listener

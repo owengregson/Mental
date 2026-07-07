@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Set;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -69,17 +68,6 @@ class FeatureRegistryTest {
     }
 
     @Test
-    void featuresDeclaringAnOcmMappedTokenHaveFacetsFullyDeclared() {
-        for (Feature feature : Feature.values()) {
-            boolean hasOcmMappedToken = feature.tokens().stream()
-                    .anyMatch(token -> token.ocmKey() != null);
-            if (hasOcmMappedToken) {
-                assertFacetsFullyDeclared(feature);
-            }
-        }
-    }
-
-    @Test
     void everyNonInfraFeatureDeclaresAllFourFacetsExplicitly() {
         for (Feature feature : Feature.values()) {
             if (feature.infrastructure()) {
@@ -116,33 +104,10 @@ class FeatureRegistryTest {
         Set<Feature> defaultOn = Set.of(
                 Feature.HIT_REGISTRATION, Feature.WTAP_REGISTRATION, Feature.KNOCKBACK,
                 Feature.LATENCY_COMPENSATION, Feature.FISHING_KNOCKBACK, Feature.ROD_VELOCITY,
-                Feature.PROJECTILE_KNOCKBACK, Feature.ANTICHEAT_COMPAT, Feature.OCM_COMPAT);
+                Feature.PROJECTILE_KNOCKBACK, Feature.ANTICHEAT_COMPAT);
         for (Feature feature : Feature.values()) {
             assertEquals(defaultOn.contains(feature), feature.defaultEnabled(),
                     () -> feature + " default enablement");
         }
-    }
-
-    @Test
-    void everyArbitratedTokenIsDeclaredByExactlyOneFeature() {
-        for (MechanicToken token : MechanicToken.values()) {
-            if (!token.arbitrated()) {
-                continue;
-            }
-            long owners = java.util.Arrays.stream(Feature.values())
-                    .filter(feature -> feature.tokens().contains(token))
-                    .count();
-            assertEquals(1, owners, () -> token + " must be declared by exactly one feature");
-        }
-    }
-
-    @Test
-    void everyTokenIsDeclaredBySomeFeature() {
-        Set<MechanicToken> declared = new HashSet<>();
-        for (Feature feature : Feature.values()) {
-            declared.addAll(feature.tokens());
-        }
-        assertEquals(Set.of(MechanicToken.values()), declared,
-                "every mechanic token must be owned by at least one feature");
     }
 }

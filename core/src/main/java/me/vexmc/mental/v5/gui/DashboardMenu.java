@@ -8,7 +8,6 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.text.Brand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextDecoration;
-import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
@@ -69,7 +68,7 @@ public final class DashboardMenu extends Menu {
         drawSections(viewer, DashboardModel.sections());
 
         set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility",
-                "Anticheat posture and OldCombatMechanics coordination."),
+                "Anticheat posture."),
                 click -> navigate(viewer, new CompatibilityMenu(ctx)));
         set(DEBUG_SLOT, Buttons.nav("REPEATER", "Debug",
                 "Verbose logging channels for operators."),
@@ -135,10 +134,6 @@ public final class DashboardMenu extends Menu {
                 enabled++;
             }
         }
-        boolean ocmPresent = Bukkit.getPluginManager().getPlugin("OldCombatMechanics") != null;
-        String ocm = ctx.plugin().snapshot().ocmCoordination().name().toLowerCase(Locale.ROOT)
-                + (ocmPresent ? " (present)" : " (absent)");
-
         Icon plate = Buttons.title("NETHER_STAR", "Mental");
         plate.lore("Latency-compensated 1.7.10 combat", Brand.MUTED);
         plate.blank();
@@ -149,7 +144,6 @@ public final class DashboardMenu extends Menu {
         plate.lore(kv("Modules", enabled + " / " + total + " active"));
         plate.lore(kv("Anticheat", ctx.plugin().snapshot().anticheat().mode()
                 .name().toLowerCase(Locale.ROOT)));
-        plate.lore(kv("OCM", ocm));
         return plate.build();
     }
 

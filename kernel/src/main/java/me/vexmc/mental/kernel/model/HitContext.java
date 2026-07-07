@@ -11,7 +11,6 @@ import java.util.UUID;
  *
  * @param sprint                 the attack-time sprint answer (from the D1 SprintWire);
  *                               {@code fresh} may be null when no wire view existed.
- * @param ocmOwnsMeleeKnockback  the OCM ownership verdict frozen into the view.
  * @param victimHasWire          whether the victim has a live PacketEvents user
  *                               (a pinned path when false).
  * @param compensationY          the per-hit vertical override, or null when none applies.
@@ -19,7 +18,7 @@ import java.util.UUID;
  */
 public record HitContext(HitId id, HitSource source,
                          UUID attackerId, UUID victimId,
-                         SprintVerdict sprint, boolean ocmOwnsMeleeKnockback,
+                         SprintVerdict sprint,
                          boolean victimHasWire, Double compensationY,
                          TickStamp registeredAt) {
 }

@@ -7,7 +7,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.debug.DebugLog;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -35,7 +34,6 @@ import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.Vectors;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
@@ -85,7 +83,6 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
 
     private final SessionService sessions;
     private final ConnectionDomains domains;
-    private final OcmBinding ocmBinding;
     private final LatencyModel latency;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
@@ -117,13 +114,12 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private volatile BurstSender blockBurst;
 
     public KnockbackUnit(
-            SessionService sessions, ConnectionDomains domains, OcmBinding ocmBinding,
+            SessionService sessions, ConnectionDomains domains,
             LatencyModel latency, Scheduling scheduling, Supplier<Snapshot> snapshot,
             HitIds ids, TickClock clock, VelocityValve valve, DebugLog.Scoped debug,
             ComboEvents comboEvents, EphemeralDecoration swordBlock) {
         this.sessions = sessions;
         this.domains = domains;
-        this.ocmBinding = ocmBinding;
         this.latency = latency;
         this.scheduling = scheduling;
         this.snapshot = snapshot;
@@ -215,13 +211,6 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             desk.withdraw(tx.context().id());
             return;
         }
-        // OCM owns melee knockback for this attacker's modeset — yield entirely.
-        UUID decider = attacker instanceof Player ? attacker.getUniqueId() : victim.getUniqueId();
-        if (!ocmBinding.mentalOwns(MechanicToken.MELEE_KNOCKBACK, decider)) {
-            desk.withdraw(tx.context().id());
-            return;
-        }
-
         boolean sprinting = attackerSprinting(source, tx, attacker);
         // A PARTIAL native block (a negative BLOCKING modifier that still lands
         // damage — the BLOCKS_ATTACKS component tier on 1.21.5+, or the off-hand
@@ -565,7 +554,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             HitSource source, UUID attackerId, UUID victimId, SprintVerdict verdict,
             double paceFactor, double comboFactor) {
         HitContext context = new HitContext(
-                ids.next(), source, attackerId, victimId, verdict, false, false, null, clock.current());
+                ids.next(), source, attackerId, victimId, verdict, false, null, clock.current());
         HitTransaction fresh = new HitTransaction(context);
         fresh.paceFactor(paceFactor); // carry the factors the original applied (D-6)
         fresh.comboFactor(comboFactor);

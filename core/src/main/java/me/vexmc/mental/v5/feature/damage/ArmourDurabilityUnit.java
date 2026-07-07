@@ -24,7 +24,7 @@ import org.jetbrains.annotations.NotNull;
  * 1.8↔modern, so it is never touched; only the era Unbreaking skip probability
  * ({@code 60 + 40/(level+1)}%, {@link ArmourDurabilityMath}) differs — on a skip
  * the whole {@link PlayerItemDamageEvent} is suppressed with {@code setDamage(0)}.
- * Fires on the player's region thread ({@link EventPriority#LOWEST}); the OCM
+ * Fires on the player's region thread ({@link EventPriority#LOWEST}); an
  * explosion-dedup timer is deliberately omitted (no global scheduler).
  */
 public final class ArmourDurabilityUnit implements FeatureUnit, Listener {

@@ -22,8 +22,8 @@ evaluationDependsOn(":tester")
 
 /* ────────────────────────────────────────────────────────────────────────
  *  support-matrix.json — THE single machine-readable source of truth for the
- *  supported platform matrix. Every version, its JDK, its CI lane, the OCM
- *  pin, and the plugin.yml api-version floor come from here; no Minecraft
+ *  supported platform matrix. Every version, its JDK, its CI lane, and the
+ *  plugin.yml api-version floor come from here; no Minecraft
  *  version or JDK literal lives anywhere else in the build (Task 5.3).
  * ──────────────────────────────────────────────────────────────────────── */
 
@@ -726,20 +726,16 @@ fun registerIntegrationServer(
             // The whole config tree resets per run — split files, profiles,
             // migration artifacts — so every suite starts from the defaults.
             runDir.resolve("plugins/Mental").deleteRecursively()
-            // Companion plugins must start pristine too — their defaults are
-            // part of what the coexistence suite asserts against.
-            runDir.resolve("plugins/OldCombatMechanics").deleteRecursively()
             // Stale versioned plugin JARs must go too. scripts/integration-matrix.sh copies
             // this run's jars verbatim into the SHARED run/<v>/plugins dir; run-paper's own
             // deleteOldPlugins only prunes its "_RunServer_plugin.jar"-suffixed copies, so a
-            // script-left Mental-*.jar / MentalTester-*.jar (or an OCM jar) — from a prior
-            // version or a non-OCM run — would double-load as an ambiguous plugin. run-paper's
-            // setupPlugins re-copies THIS run's pluginJars (OCM extra included) in exec(), after
-            // this doFirst, so clearing all three patterns unconditionally is the correct reset.
+            // script-left Mental-*.jar / MentalTester-*.jar — from a prior
+            // version — would double-load as an ambiguous plugin. run-paper's
+            // setupPlugins re-copies THIS run's pluginJars in exec(), after
+            // this doFirst, so clearing both patterns unconditionally is the correct reset.
             runDir.resolve("plugins").listFiles()?.forEach { jar ->
                 val n = jar.name
-                if (n.endsWith(".jar") && (n.startsWith("Mental-") || n.startsWith("MentalTester-")
-                        || n.startsWith("OldCombatMechanics"))) jar.delete()
+                if (n.endsWith(".jar") && (n.startsWith("Mental-") || n.startsWith("MentalTester-"))) jar.delete()
             }
             // Belt-and-suspenders EULA acceptance: modern Paper honours the
             // -Dcom.mojang.eula.agree property, but the legacy builds are more
@@ -877,75 +873,6 @@ foliaEntries.forEach { entry ->
     foliaCheckTasks.add(checkTask)
 }
 
-/* ────────────────────────────────────────────────────────────────────────
- *  OCM coexistence runs (Task 5.4: reproducible CI staging).
- *
- *  The OCM artifact is PINNED in support-matrix.json (an "ocm" object:
- *  version, url, sha256). stageOcmJar guarantees
- *  run/ocm-jar/OldCombatMechanics.jar exists before either OCM server boots:
- *    - a locally-present jar (a fork build: ./gradlew shadowJar in the
- *      BukkitOldCombatMechanics repo, copied there) is used AS-IS — the
- *      developer override, hash not enforced;
- *    - otherwise the pinned kernitus release is downloaded and its sha256
- *      verified, so CI is byte-reproducible.
- *  The OCM tasks are always registered but wired ONLY into integrationTestOcm
- *  (never into build / integrationTestMatrix), so the pinned download happens
- *  only when the coexistence gate is explicitly requested.
- * ──────────────────────────────────────────────────────────────────────── */
-val ocmJarFile = rootProject.layout.projectDirectory.file("run/ocm-jar/OldCombatMechanics.jar").asFile
-
-@Suppress("UNCHECKED_CAST")
-val ocmPin: Map<String, Any> = supportMatrix["ocm"] as Map<String, Any>
-val ocmVersion = ocmPin["version"] as String
-val ocmUrl = ocmPin["url"] as String
-val ocmSha256 = ocmPin["sha256"] as String
-
-val stageOcmJar = tasks.register("stageOcmJar") {
-    group = "mental integration"
-    description = "Ensures run/ocm-jar/OldCombatMechanics.jar exists: a local build wins " +
-            "(fork override); else downloads the pinned kernitus $ocmVersion release and " +
-            "verifies its sha256."
-    outputs.file(ocmJarFile)
-    doLast {
-        if (ocmJarFile.isFile) {
-            logger.lifecycle(
-                "[ocm] using existing ${ocmJarFile.absolutePath} — local override, hash not enforced.")
-            return@doLast
-        }
-        ocmJarFile.parentFile.mkdirs()
-        logger.lifecycle("[ocm] downloading pinned OldCombatMechanics $ocmVersion from $ocmUrl")
-        URI(ocmUrl).toURL().openStream().use { input ->
-            Files.copy(input, ocmJarFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        }
-        val actual = MessageDigest.getInstance("SHA-256")
-            .digest(ocmJarFile.readBytes())
-            .joinToString("") { byte -> "%02x".format(byte) }
-        if (!actual.equals(ocmSha256, ignoreCase = true)) {
-            ocmJarFile.delete()
-            throw GradleException(
-                "[ocm] sha256 mismatch for $ocmUrl — expected $ocmSha256, got $actual. Refusing to stage.")
-        }
-        logger.lifecycle("[ocm] verified sha256=$actual — staged to ${ocmJarFile.absolutePath}")
-    }
-}
-
-val ocmCheckTasks = mutableListOf<TaskProvider<Task>>()
-// The OCM coexistence gate runs on the FIXED 1.17.1 + 26.1.2 pair — its scope (the OCM ownership split)
-// is unchanged by the legacy backport, so it is pinned by version rather than positionally (the legacy
-// entries re-sorted 1.9.4 to entries[0], which would otherwise pull the floor of this pair down to a
-// boot-tier legacy version OCM does not target).
-val ocmVersions = listOf("1.17.1", "26.1.2")
-paperEntries.filter { it.version in ocmVersions }.distinctBy { it.version }.forEach { entry ->
-    val suffix = "Ocm_" + entry.version.replace(".", "_")
-    val (runTask, checkTask) = registerIntegrationServer(
-        suffix, entry.version, "ocm/${entry.version}", listOf(ocmJarFile), " +OCM", entry.jdk,
-        suites = entry.suites, bytecodeTier = entry.bytecodeTier)
-    runTask.configure { dependsOn(stageOcmJar) }
-    previousCheck?.let { prior -> runTask.configure { mustRunAfter(prior) } }
-    previousCheck = checkTask
-    ocmCheckTasks.add(checkTask)
-}
-
 tasks.register("integrationTest") {
     group = "mental integration"
     description = "Runs the suite on the modern floor and newest supported versions (PR smoke)."
@@ -970,11 +897,4 @@ tasks.register("integrationTestFolia") {
     group = "mental integration"
     description = "Runs the suite on every folia entry in support-matrix.json."
     dependsOn(foliaCheckTasks)
-}
-
-tasks.register("integrationTestOcm") {
-    group = "mental integration"
-    description = "Runs the OldCombatMechanics coexistence suite on floor and ceiling. " +
-            "Stages the pinned OCM release (a local run/ocm-jar override wins) then boots both."
-    dependsOn(ocmCheckTasks)
 }

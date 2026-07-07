@@ -76,7 +76,7 @@ public final class DamageRouter implements Listener {
     HitTransaction mintVanilla(HitSource source, UUID attackerId, UUID victimId) {
         HitContext context = new HitContext(
                 ids.next(), source, attackerId, victimId,
-                new SprintVerdict(false, null, clock.current()), false, false, null, clock.current());
+                new SprintVerdict(false, null, clock.current()), false, null, clock.current());
         return new HitTransaction(context);
     }
 

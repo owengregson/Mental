@@ -33,12 +33,12 @@ public final class ViewBuilder {
             double gravity, double jumpImpulse, int jumpBoostAmplifier,
             boolean sprinting, boolean creative, boolean pvpAllowed,
             int noDamageTicks, int maxNoDamageTicks,
-            double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+            double knockbackResistance,
             KnockbackProfile profile, int pingMillis,
             KinematicState kinematics, double moveSpeedAttr) {
         return build(id, entityId, motion, grounded, slipperiness, gravity, jumpImpulse,
                 jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
-                maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback, profile,
+                maxNoDamageTicks, knockbackResistance, profile,
                 pingMillis, kinematics, moveSpeedAttr, null);
     }
 
@@ -54,13 +54,13 @@ public final class ViewBuilder {
             double gravity, double jumpImpulse, int jumpBoostAmplifier,
             boolean sprinting, boolean creative, boolean pvpAllowed,
             int noDamageTicks, int maxNoDamageTicks,
-            double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+            double knockbackResistance,
             KnockbackProfile profile, int pingMillis,
             KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId) {
         return new PlayerView(
                 id, entityId, clock.current(), motion, grounded, slipperiness,
                 gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
-                noDamageTicks, maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback,
+                noDamageTicks, maxNoDamageTicks, knockbackResistance,
                 profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId);
     }
 
@@ -81,7 +81,7 @@ public final class ViewBuilder {
             double gravity, double jumpImpulse, int jumpBoostAmplifier,
             boolean sprinting, boolean creative, boolean pvpAllowed,
             int noDamageTicks, int maxNoDamageTicks,
-            double knockbackResistance, boolean ocmOwnsMeleeKnockback,
+            double knockbackResistance,
             KnockbackProfile profile, int pingMillis,
             KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId,
             double measuredVx, double measuredVz, float yaw, double eyeHeight, int groundedTicks,
@@ -89,7 +89,7 @@ public final class ViewBuilder {
         return new PlayerView(
                 id, entityId, clock.current(), motion, grounded, slipperiness,
                 gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
-                noDamageTicks, maxNoDamageTicks, knockbackResistance, ocmOwnsMeleeKnockback,
+                noDamageTicks, maxNoDamageTicks, knockbackResistance,
                 profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
                 measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick);
     }

@@ -48,7 +48,7 @@ class DashboardModelTest {
 
     @Test
     void infrastructureDescriptorsAreNeverSurfaced() {
-        // Always-on infrastructure (anticheat / OCM coexistence) carries no
+        // Always-on infrastructure (anticheat coexistence) carries no
         // modules.* toggle and is configured on its own screen — it must never
         // appear as a family toggle.
         Set<Feature> surfaced = DashboardModel.allSurfaced();

@@ -617,8 +617,8 @@ public final class BlockingSuite {
             // A bare-fist hit deals 1.0 base damage, which blocks to (1-1)*0.5 = 0
             // reduction — the assertion would be vacuous. Synthetic players skip
             // vanilla's per-tick equipment bookkeeping, so a held sword never
-            // raises attackDamage; pin the attribute directly (as the OCM suite
-            // does) so the base damage is well above 1.0 and the block bites.
+            // raises attackDamage; pin the attribute directly so the base damage
+            // is well above 1.0 and the block bites.
             boolean armed = context.sync(() -> {
                 Attribute damageAttribute = Attributes.attackDamage();
                 Attribute speedAttribute = Attributes.attackSpeed();

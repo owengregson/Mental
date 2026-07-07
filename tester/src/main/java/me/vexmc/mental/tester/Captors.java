@@ -79,10 +79,8 @@ public final class Captors implements Listener {
     }
 
     /**
-     * Mental fires this for every knockback it applies and for nothing it
-     * yields — the ownership discriminator for coexistence assertions (the
-     * raw velocity values of Mental's 1.7.10 and OCM's 1.8 first hits are
-     * intentionally identical).
+     * Mental fires this for every knockback it applies — the discriminator the
+     * suites assert Mental owns and ships the era knock.
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onKnockbackApply(@NotNull KnockbackApplyEvent event) {

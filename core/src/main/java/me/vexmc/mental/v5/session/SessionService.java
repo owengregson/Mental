@@ -9,7 +9,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.combo.ComboEndReason;
 import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
@@ -33,7 +32,6 @@ import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.VelocityValve;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
@@ -81,7 +79,6 @@ public final class SessionService implements Listener, SessionAccess {
     private final TickClock clock;
     private final ViewBuilder viewBuilder;
     private final VelocityValve valve;
-    private final OcmBinding ocmBinding;
     private final Supplier<Snapshot> snapshot;
     private final PositionRing positions;
     private final ConnectionDomains domains;
@@ -120,13 +117,12 @@ public final class SessionService implements Listener, SessionAccess {
 
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
-            VelocityValve valve, OcmBinding ocmBinding, Supplier<Snapshot> snapshot,
+            VelocityValve valve, Supplier<Snapshot> snapshot,
             PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
         this.valve = valve;
-        this.ocmBinding = ocmBinding;
         this.snapshot = snapshot;
         this.positions = positions;
         this.domains = domains;
@@ -503,7 +499,6 @@ public final class SessionService implements Listener, SessionAccess {
         // attribute API ⇒ the sentinel ⇒ pace factor 1.0.
         double moveSpeedAttr = Attributes.movementSpeedWalkNormalized(player);
         double slipperiness = GroundFriction.of(blockUnderFeet(player, location));
-        boolean ocmOwnsMelee = !ocmBinding.mentalOwns(MechanicToken.MELEE_KNOCKBACK, id);
         KnockbackProfile profile = snapshot.get().profileFor(player.getWorld().getName());
         KinematicState kinematics = new KinematicState(
                 location.getY(), GroundDistance.measure(location), grounded);
@@ -534,7 +529,7 @@ public final class SessionService implements Listener, SessionAccess {
                 gravity, Decay.JUMP_IMPULSE, jumpBoostAmplifier(player),
                 player.isSprinting(), player.getGameMode() == GameMode.CREATIVE, player.getWorld().getPVP(),
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
-                knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics,
+                knockbackResistance, profile, Pings.of(player), kinematics,
                 moveSpeedAttr, session.comboAttackerId(),
                 measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks,
                 yawRate);

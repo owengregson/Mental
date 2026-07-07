@@ -85,8 +85,6 @@ public final class SnapshotParser {
                 reader(knockback, "knockback", "knockback.yml", issues), profiles, issues));
         builder.anticheat(parseAnticheat(reader(main, "anticheat", "config.yml", issues)));
         builder.debug(parseDebug(reader(main, "debug", "config.yml", issues)));
-        builder.ocmCoordination(reader(main, "compatibility", "config.yml", issues)
-                .oneOf("old-combat-mechanics", OcmCoordination.AUTO, OcmCoordination.class));
         // bStats metrics toggle (spec §13). Parse-with-default: an absent
         // `metrics` section (or key) reads true silently — the frozen bundled
         // config need not carry it. Warn-and-fallback on a non-boolean value.

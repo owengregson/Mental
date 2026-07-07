@@ -32,7 +32,7 @@ class ViewBuilderTest {
         PlayerView view = builder.build(
                 id, 42, motion, false, 0.98,
                 0.081, 0.42, 3, true, false, true,
-                7, 20, 0.25, true, profile, 55, kinematics, 0.13);
+                7, 20, 0.25, profile, 55, kinematics, 0.13);
 
         assertEquals(id, view.id());
         assertEquals(42, view.entityId());
@@ -49,7 +49,6 @@ class ViewBuilderTest {
         assertEquals(7, view.noDamageTicks());
         assertEquals(20, view.maxNoDamageTicks());
         assertEquals(0.25, view.knockbackResistance());
-        assertTrue(view.ocmOwnsMeleeKnockback());
         assertSame(profile, view.profile());
         assertEquals(55, view.pingMillis());
         assertSame(kinematics, view.kinematics());
@@ -64,11 +63,11 @@ class ViewBuilderTest {
 
         tick[0] = 5;
         PlayerView first = builder.build(UUID.randomUUID(), 1, Decay.Motion.ZERO, true, 0.6,
-                0.08, 0.42, -1, false, false, true, 0, 20, 0.0, false,
+                0.08, 0.42, -1, false, false, true, 0, 20, 0.0,
                 KnockbackProfile.LEGACY_17, 0, kinematics, 0.1);
         tick[0] = 6;
         PlayerView second = builder.build(UUID.randomUUID(), 1, Decay.Motion.ZERO, true, 0.6,
-                0.08, 0.42, -1, false, false, true, 0, 20, 0.0, false,
+                0.08, 0.42, -1, false, false, true, 0, 20, 0.0,
                 KnockbackProfile.LEGACY_17, 0, kinematics, 0.1);
 
         assertEquals(new TickStamp(5), first.at());

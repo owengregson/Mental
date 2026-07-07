@@ -73,7 +73,7 @@ import org.bukkit.entity.Player;
  * never a live entity. Player positions for the pre-send direction come from the
  * ring (the owning-thread sampler wrote them); the view lacks horizontal position
  * by design, so the ring is the off-region-safe source. A hit whose pre-send is
- * suppressed (anticheat, OCM ownership, legacy resistance roll, missing views, the
+ * suppressed (anticheat, legacy resistance roll, missing views, the
  * feedback window) still ships hurt and still schedules the authoritative pass; the
  * era vector is computed and shipped there.</p>
  */
@@ -321,14 +321,13 @@ public final class HitRegistrationUnit implements FeatureUnit {
             SprintVerdict verdict = sprintVerdict(attackerId);
             PlayerView attackerView = sessions.viewOf(attackerId);
             PlayerView victimView = victimId == null ? null : sessions.viewOf(victimId);
-            boolean ocmOwns = attackerView != null && attackerView.ocmOwnsMeleeKnockback();
             boolean victimHasWire = playerVictim != null
                     && PacketEvents.getAPI().getPlayerManager().getUser(playerVictim) != null;
             Double compensationY = compensationFor(victimId, victimView);
 
             HitContext context = new HitContext(
                     ids.next(), new HitSource.Melee(), attackerId, victimId,
-                    verdict, ocmOwns, victimHasWire, compensationY, clock.current());
+                    verdict, victimHasWire, compensationY, clock.current());
             HitTransaction tx = new HitTransaction(context);
 
             // The pre-send only exists for player victims with published views.
@@ -339,7 +338,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
             KnockbackProfile profile = victimView.profile();
             KnockbackVector vector = null;
-            String suppressed = suppressorFor(ocmOwns, profile, victimView);
+            String suppressed = suppressorFor(profile, victimView);
             if (suppressed == null) {
                 // The pocket servo (combo-hold §3.2): active only when THIS attacker
                 // holds the victim's active combo (read from the victim's frozen view
@@ -391,7 +390,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             }
 
             // B4: the pacing gate paces the VELOCITY component ONLY. A hurt-only
-            // burst (velocity suppressed — a LEGACY resistance roll, OCM ownership,
+            // burst (velocity suppressed — a LEGACY resistance roll or
             // an anticheat force-safe posture) must NEVER debit the budget, or it
             // starves a later eligible velocity pre-send. Compute the velocity
             // eligibility first, then consult the gate only when a velocity would
@@ -545,12 +544,9 @@ public final class HitRegistrationUnit implements FeatureUnit {
     }
 
     /** The velocity-pre-send suppressor reason, or null when the pre-send is eligible. */
-    private String suppressorFor(boolean ocmOwns, KnockbackProfile profile, PlayerView victimView) {
+    private String suppressorFor(KnockbackProfile profile, PlayerView victimView) {
         if (!anticheat.allowVelocityPreSend()) {
             return "anticheat";
-        }
-        if (ocmOwns) {
-            return "ocm";
         }
         if (profile.resistance() == ResistancePolicy.LEGACY && victimView.knockbackResistance() > 0.0) {
             return "resistance-roll";
@@ -662,10 +658,10 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 || !isStillAttackable(attacker, target) || !isInReach(attacker, target)) {
             return;
         }
-        // A non-player LivingEntity is legacy-composed like a player victim (no
-        // transaction passed to the shaper, so ownership resolves from the
-        // attacker); a non-living Damageable takes the retired HitApplier's flat 1.0.
-        double amount = target instanceof LivingEntity ? composedAmount(attacker, null) : 1.0;
+        // A non-player LivingEntity is legacy-composed like a player victim off
+        // the attacker's live state; a non-living Damageable takes the retired
+        // HitApplier's flat 1.0.
+        double amount = target instanceof LivingEntity ? composedAmount(attacker) : 1.0;
         // Bracket the ATTACKER's session with the minted Melee transaction (a mob
         // victim has no session of its own) so the per-hit crit gate can tell this
         // fast-path-composed damage apart from a genuine Player#attack landing
@@ -694,7 +690,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             session.activeInbound(tx);
         }
         try {
-            victim.damage(composedAmount(attacker, tx), attacker);
+            victim.damage(composedAmount(attacker), attacker);
         } finally {
             if (session != null) {
                 session.clearActiveInbound();
@@ -712,15 +708,15 @@ public final class HitRegistrationUnit implements FeatureUnit {
     /**
      * The fast-path damage amount (spec §4.6): the {@link me.vexmc.mental.v5.feature.damage.DamageShaper}
      * legacy composition — weapon base → era Strength/Weakness → crit ×1.5 →
-     * Sharpness — off the attacker's live state, or a vanilla-shaped amount when
-     * OCM owns the shaping. {@code simulateCrits}/{@code legacyToolDamage} come
-     * from the hit-reg settings; {@code old-potion-values} from its live toggle.
-     * Owning thread only (the attacker read is region-guarded by the caller).
+     * Sharpness — off the attacker's live state. {@code simulateCrits}/{@code
+     * legacyToolDamage} come from the hit-reg settings; {@code old-potion-values}
+     * from its live toggle. Owning thread only (the attacker read is
+     * region-guarded by the caller).
      */
-    private double composedAmount(Player attacker, HitTransaction tx) {
+    private double composedAmount(Player attacker) {
         HitRegSettings settings = settings();
         return shaper.compose(
-                attacker, tx == null ? null : tx.context(),
+                attacker,
                 settings.simulateCrits(), settings.legacyToolDamage(),
                 snapshot.get().enabled(Feature.POTION_VALUES));
     }
