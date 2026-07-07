@@ -26,8 +26,27 @@ import org.jetbrains.annotations.NotNull;
  */
 public final class DashboardMenu extends Menu {
 
-    /** Row-2 slots the (up to nine) family section tiles centre within. */
-    private static final int SECTION_ROW_BASE = 18;
+    /** The status plate's slot — row 0, centred. */
+    private static final int STATUS_SLOT = 4;
+
+    /** The two rows the family section tiles balance across (rows 2 and 3). */
+    private static final int SECTION_ROW_TOP = 18;
+    private static final int SECTION_ROW_BOTTOM = 27;
+
+    /**
+     * At or below this many sections a single centred row reads cleaner than a
+     * split; above it the tiles balance across two rows so a crowded row never
+     * cramps.
+     */
+    private static final int SINGLE_ROW_LIMIT = 5;
+
+    /** Row-4 nav tiles (compatibility / debug), aligned above reload / close. */
+    private static final int COMPAT_SLOT = 39;
+    private static final int DEBUG_SLOT = 41;
+
+    /** Row-5 global actions, mirrored around the centre column. */
+    private static final int RELOAD_SLOT = 48;
+    private static final int CLOSE_SLOT = 50;
 
     public DashboardMenu(@NotNull MenuContext ctx) {
         super(ctx);
@@ -45,25 +64,51 @@ public final class DashboardMenu extends Menu {
 
     @Override
     protected void draw(@NotNull Player viewer) {
-        set(4, statusPlate());
+        set(STATUS_SLOT, statusPlate());
 
-        List<Family> sections = DashboardModel.sections();
-        int start = SECTION_ROW_BASE + Math.max(0, (9 - sections.size()) / 2);
-        for (int i = 0; i < sections.size() && start + i <= 26; i++) {
-            Family family = sections.get(i);
-            set(start + i, Buttons.nav(family.iconName(), family.displayName(), family.blurb()),
-                    click -> navigate(viewer, new FamilyMenu(ctx, family)));
-        }
+        drawSections(viewer, DashboardModel.sections());
 
-        set(30, Buttons.nav("COMPASS", "Compatibility",
+        set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility",
                 "Anticheat posture and OldCombatMechanics coordination."),
                 click -> navigate(viewer, new CompatibilityMenu(ctx)));
-        set(32, Buttons.nav("REPEATER", "Debug",
+        set(DEBUG_SLOT, Buttons.nav("REPEATER", "Debug",
                 "Verbose logging channels for operators."),
                 click -> navigate(viewer, new DebugMenu(ctx)));
 
-        set(48, reloadButton(), click -> apply(viewer, () -> ctx.management().reload()));
-        set(50, closeButton(), click -> viewer.closeInventory());
+        set(RELOAD_SLOT, reloadButton(), click -> apply(viewer, () -> ctx.management().reload()));
+        set(CLOSE_SLOT, closeButton(), click -> viewer.closeInventory());
+    }
+
+    /**
+     * Lays the family navigation tiles out balanced and centred: a single centred
+     * row for a small set, or two balanced rows (the top row taking the odd tile)
+     * for a larger one. Every {@link Family} still renders — the catalog is the
+     * registry, so a new family surfaces here with no edit to this method.
+     */
+    private void drawSections(@NotNull Player viewer, @NotNull List<Family> sections) {
+        int count = sections.size();
+        if (count == 0) {
+            return;
+        }
+        if (count <= SINGLE_ROW_LIMIT) {
+            placeSectionRow(viewer, sections, 0, count, SECTION_ROW_TOP);
+            return;
+        }
+        int top = (count + 1) / 2;
+        placeSectionRow(viewer, sections, 0, top, SECTION_ROW_TOP);
+        placeSectionRow(viewer, sections, top, count, SECTION_ROW_BOTTOM);
+    }
+
+    /** Centres {@code sections[from, to)} within the nine-wide row at {@code rowBase}. */
+    private void placeSectionRow(
+            @NotNull Player viewer, @NotNull List<Family> sections, int from, int to, int rowBase) {
+        int count = to - from;
+        int start = rowBase + Math.max(0, (9 - count) / 2);
+        for (int i = 0; i < count && start + i <= rowBase + 8; i++) {
+            Family family = sections.get(from + i);
+            set(start + i, Buttons.nav(family.iconName(), family.displayName(), family.blurb()),
+                    click -> navigate(viewer, new FamilyMenu(ctx, family)));
+        }
     }
 
     /**

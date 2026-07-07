@@ -100,8 +100,8 @@ class DashboardModelTest {
     void comboReachHandicapRendersUnderCombo() {
         // The 2.4.4 promotion (field report 2): the reach handicap is a real Feature
         // now, so it appears and toggles in the GUI with ZERO GUI edits — under the
-        // COMBO family, beside Combo Hold. Before this it was a config sub-record the
-        // GUI structurally could not show.
+        // COMBO family (Combo Solver), beside Solve Horizontal KB. Before this it was
+        // a config sub-record the GUI structurally could not show.
         assertTrue(DashboardModel.entries(Family.COMBO).contains(Feature.COMBO_REACH_HANDICAP),
                 "COMBO_REACH_HANDICAP must render as a toggle under the COMBO family");
         assertTrue(DashboardModel.allSurfaced().contains(Feature.COMBO_REACH_HANDICAP),

@@ -25,8 +25,8 @@ public enum Family {
             "Era potions and golden apples, ender-pearl spam, and natural regen."),
     LOADOUT("Loadout", "SHIELD",
             "Off-hand blocking, crafting restrictions, and era melee reach."),
-    COMBO("Combo Hold", "TRIPWIRE_HOOK",
-            "The pocket servo — hold a sweet-spot combo by shaping the fresh knock."),
+    COMBO("Combo Solver", "TRIPWIRE_HOOK",
+            "Solve the fresh knock to hold a sweet-spot combo, plus a reach handicap on the juggled victim."),
     POTS("Potions", "SPLASH_POTION",
             "Splash-potion utilities — the /potfill command and steep-throw fast pots.");
 

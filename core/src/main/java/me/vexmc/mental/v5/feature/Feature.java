@@ -286,9 +286,9 @@ public enum Feature {
 
     /* -------------------------------- COMBO --------------------------------- */
 
-    COMBO_HOLD("combo-hold", Family.COMBO, "Combo Hold",
-            "The pocket servo — shapes the fresh melee knock to hold a sweet-spot combo.",
-            "TRIPWIRE_HOOK", false, Set.of(),
+    COMBO_HOLD("combo-hold", Family.COMBO, "Solve Horizontal KB",
+            "Solve the fresh horizontal melee knock to land the victim in the un-retaliatable pocket, holding a sweet-spot combo.",
+            "ITEM_FRAME", false, Set.of(),
             new Facets(
                     Facets.none("scales the fresh melee knock through the velocity pipeline, not a Bukkit rule"),
                     Facets.none("emits no packets of its own — the shaped knock rides the existing pipeline"),
@@ -296,10 +296,10 @@ public enum Feature {
                     Facets.none("no damage contribution")),
             new SettingsKey<>("combo-hold", ComboSettings.class)),
 
-    COMBO_REACH_HANDICAP("combo-reach-handicap", Family.COMBO, "Combo Reach Handicap",
+    COMBO_REACH_HANDICAP("combo-reach-handicap", Family.COMBO, "Scale Reach",
             "Shorten a juggled victim's reach while their combo is held, so a launched victim can't"
-                    + " answer. Works standalone or with Combo Hold; 1.20.5+.",
-            "TRIPWIRE_HOOK", false, Set.of(),
+                    + " answer. Pairs with Solve Horizontal KB under Combo Solver; 1.20.5+.",
+            "REPEATER", false, Set.of(),
             new Facets(
                     // The attribute lever IS a server-side rule (applied on combo transitions).
                     Facets.handled(),

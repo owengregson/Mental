@@ -90,17 +90,43 @@ public final class FamilyMenu extends Menu {
         }
     }
 
-    /** Lays the family's feature toggles out centred within the nine-wide row at {@code rowBase}. */
+    /**
+     * Lays the family's feature toggles out balanced within the nine-wide row at
+     * {@code rowBase}. A small set is spread with a one-slot gap between tiles and
+     * centred (so two toggles sit symmetric around the centre column rather than
+     * cramped together); a set too wide to breathe falls back to a centred
+     * contiguous run. See {@link #spreadColumns(int)}.
+     */
     private void drawToggles(@NotNull Player viewer, @NotNull List<Feature> entries, int rowBase) {
-        int count = entries.size();
-        int start = rowBase + Math.max(0, (9 - count) / 2);
-        for (int i = 0; i < count && start + i <= rowBase + 8; i++) {
+        int[] columns = spreadColumns(entries.size());
+        for (int i = 0; i < entries.size() && i < columns.length; i++) {
             Feature feature = entries.get(i);
             boolean enabled = ctx.plugin().featureActive(feature);
-            set(start + i,
+            set(rowBase + columns[i],
                     Buttons.toggle(feature.iconName(), feature.displayName(), enabled, feature.blurb()),
                     click -> apply(viewer, () -> ctx.management().setModuleEnabled(feature, !enabled)));
         }
+    }
+
+    /**
+     * The centred columns (0–8) for {@code count} tiles in a nine-wide row. Up to
+     * five tiles get a one-slot gap between them (width {@code 2*count-1}), centred;
+     * a larger set packs contiguously, centred, and is capped at the row width.
+     */
+    static int[] spreadColumns(int count) {
+        if (count <= 0) {
+            return new int[0];
+        }
+        int capped = Math.min(count, 9);
+        int spread = 2 * capped - 1;
+        boolean gapped = spread <= 9;
+        int width = gapped ? spread : capped;
+        int startCol = (9 - width) / 2;
+        int[] columns = new int[capped];
+        for (int i = 0; i < capped; i++) {
+            columns[i] = startCol + (gapped ? i * 2 : i);
+        }
+        return columns;
     }
 
     /** The server-wide profile picker — the knockback screen's defining half. */
