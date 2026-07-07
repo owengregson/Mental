@@ -79,7 +79,14 @@ public final class PotsAim {
 
     /** An immutable aimed launch velocity plus the impact tick it was solved for. */
     public record Aim(double x, double y, double z, int ticks) {
-        /** Euclidean length — the solved launch speed (always {@code ≤} the requested cap). */
+        /**
+         * Euclidean length — the solved launch speed, at or below the requested cap.
+         * The feasible path returns the exact vector whose length was compared to the
+         * cap, so it is {@code ≤} by construction; the rare out-of-budget fallback
+         * re-scales, which float rounding can push a couple of ulp over the cap
+         * (~1e-15 b/t — physically nil, and the redirect reads {@link #x()}/{@link #y()}/
+         * {@link #z()} directly, never this).
+         */
         public double magnitude() {
             return Math.sqrt(x * x + y * y + z * z);
         }
