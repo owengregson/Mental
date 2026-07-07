@@ -74,6 +74,7 @@ import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicapUnit;
+import me.vexmc.mental.v5.feature.combo.ComboVerticalUnit;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
@@ -720,6 +721,12 @@ public final class MentalPluginV5 extends JavaPlugin {
         // while the per-combo apply/remove rides the combo transitions via ComboEvents.
         // It depends on combo-hold (the parser warns loudly when on without it).
         reconciler.register(new ComboReachHandicapUnit(comboReachHandicap));
+        // The vertical-axis keeper (COMBO_VERTICAL): shapes the FRESH vertical knock to a
+        // bounded target apex (the VerticalTrim kernel piece, applied at the same engine
+        // seam the servo uses). Its own module — INDEPENDENT of combo-hold — that rides
+        // the SAME shared combo detection (retained/released on the SessionService like
+        // ComboHoldUnit), so a vertical-only config still detects combos. Default OFF.
+        reconciler.register(new ComboVerticalUnit(sessions));
         // The POTS family (owner directive 2026-07-04) — two independently-toggled
         // splash-potion utilities, both default OFF. Pot-fill dynamically registers
         // /potfill on the command map on enable and strips it whole on disable

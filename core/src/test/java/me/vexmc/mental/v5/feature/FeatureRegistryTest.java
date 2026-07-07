@@ -49,6 +49,7 @@ class FeatureRegistryTest {
             "old-hitboxes",
             "combo-hold",
             "combo-reach-handicap",
+            "combo-vertical",
             "pot-fill",
             "fast-pots");
 

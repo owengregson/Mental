@@ -288,6 +288,19 @@ modules:
   # An upgraded config with the old nested key still works for one release — it is
   # honoured with a loud reload notice — but move it here.)
   combo-reach-handicap: false
+  # combo-vertical — the vertical-axis combo keeper. Where combo-hold shapes the
+  # fresh HORIZONTAL knock (spacing), this shapes the fresh VERTICAL knock so a
+  # juggled victim reaches a bounded target apex elevation: a higher victim has a
+  # longer reach-back hypotenuse, so the separation at which they can answer shrinks
+  # — a complement to combo-reach-handicap. It is its OWN keeper (does NOT require
+  # combo-hold): it rides the SAME combo detection, so a vertical-only setup still
+  # works. The shaping is deliberately MINIMAL and HARD-BOUNDED (combos hold fine at
+  # standard KB with no vertical shaping) — the per-hit adjustment can never exceed
+  # combo-vertical.bound, and it only ever nudges the fresh vertical (never the
+  # horizontal or the victim's own residual motion). Like combo-hold this is Mental's
+  # own novel mechanic, so it is strictly server-opt-in. Tuned in the combo-vertical
+  # section below. Default OFF (era-exact no-op).
+  combo-vertical: false
   # POTS family — two independent splash-potion utilities. These are PvP-server
   # conveniences, not a 1.7/1.8 restoration; both default OFF and touch nothing
   # while disabled.
@@ -417,6 +430,30 @@ modules:
 #                only ever SHORTENS reach (a handicap never inflates it).
 #combo-reach-handicap:
 #  reach-scale: 0.8
+
+# Combo vertical trim, active when modules.combo-vertical is true. While a victim is
+# held in a combo, shape the FRESH vertical knock so their flight apex meets a target
+# elevation — the height that keeps the deny-geometry favorable (a higher victim is
+# denied their reach-back at closer range). It steers only the fresh vertical; the
+# horizontal, the victim's residual motion, and reach are untouched. It composes with
+# combo-hold (the vertical trim runs first and fixes the shipped vertical; the servo
+# then reads that height for its spacing prediction) but does NOT require it.
+#
+#   target-apex  the peak feet-height (blocks above the launch ground) the trim steers
+#                toward. Default 1.15 — the era apex of a standard 0.4 fresh launch, so
+#                a standard knock is held at its OWN canonical apex and the trim barely
+#                moves (the design's "the standard knock already lifts to a useful ~1.15
+#                apex"). Raise it slightly for MORE denial; lower it to sit combos flatter.
+#   bound        the hard cap on the per-hit adjustment to the fresh vertical (blocks/
+#                tick). This IS the era-safety guarantee and the minimal-shaping guard:
+#                combos hold at standard KB, so the vertical should barely move — if the
+#                solve wants MORE than this it clamps and flags it to the debug sink (the
+#                "something is wrong" signal). Default 0.06 (~15% of the 0.4 era launch);
+#                capped at 0.2, and an out-of-range value is clamped with a warning. You
+#                can only ever make the shaping SMALLER.
+#combo-vertical:
+#  target-apex: 1.15
+#  bound: 0.06
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.

@@ -23,6 +23,8 @@ import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.math.TargetMode;
+import me.vexmc.mental.kernel.math.VerticalTrim;
+import me.vexmc.mental.kernel.math.VerticalTrimConfig;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -43,6 +45,7 @@ import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
+import me.vexmc.mental.v5.config.settings.VerticalTrimSettings;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -174,6 +177,26 @@ public final class HitRegistrationUnit implements FeatureUnit {
         ComboSettings settings = snapshot.get().settings(
                 (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
         return settings.servo();
+    }
+
+    /**
+     * The vertical-trim config for a pre-send from {@code attackerId} to the victim
+     * whose frozen {@code victimView} is given (COMBO_VERTICAL). Active only when the
+     * module is on AND this attacker holds the victim's active combo — the same gate
+     * the region path uses, off the one frozen truth, and independent of COMBO_HOLD so a
+     * vertical-only config still shapes. Otherwise {@link VerticalTrimConfig#INACTIVE}.
+     */
+    @SuppressWarnings("unchecked")
+    private VerticalTrimConfig comboVerticalTrimFor(PlayerView victimView, UUID attackerId) {
+        if (victimView == null || attackerId == null || !snapshot.get().enabled(Feature.COMBO_VERTICAL)) {
+            return VerticalTrimConfig.INACTIVE;
+        }
+        if (!attackerId.equals(victimView.comboAttackerId())) {
+            return VerticalTrimConfig.INACTIVE;
+        }
+        VerticalTrimSettings settings = snapshot.get().settings(
+                (me.vexmc.mental.v5.feature.SettingsKey<VerticalTrimSettings>) Feature.COMBO_VERTICAL.settingsKey());
+        return settings.trim();
     }
 
     /* ---------------------------- the netty listener ---------------------------- */
@@ -311,9 +334,15 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 // — the SAME truth the region path reads, so the adopted pre-send and a
                 // recompute would agree). INACTIVE ⇒ σ = 1.0 (byte-identical).
                 PocketServoConfig servo = comboServoFor(victimView, attackerId);
-                // The precision predictor inputs (combo-hold §3.2b) — frozen views +
-                // ring + latency, built only when the servo is active (zero cost off).
-                PredictorInputs inputs = servo.active()
+                // The vertical trim (COMBO_VERTICAL): active only when THIS attacker holds
+                // the victim's combo (the same one-frozen-truth gate the servo uses, so the
+                // adopted pre-send and a recompute agree). It fixes the shipped vertical the
+                // servo then reads; INACTIVE ⇒ the era vertical (byte-identical).
+                VerticalTrimConfig verticalTrim = comboVerticalTrimFor(victimView, attackerId);
+                // The precision predictor inputs (combo-hold §3.2b) — frozen views + ring +
+                // latency, built when EITHER keeper is active (the vertical trim also needs
+                // the real launch height for its apex solve; zero cost with both off).
+                PredictorInputs inputs = servo.active() || verticalTrim.active()
                         ? ComboPredictor.build(attackerId, victimId,
                                 positionX(attackerId), positionZ(attackerId),
                                 positionX(victimId), positionZ(victimId),
@@ -325,7 +354,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 boolean freshSprint = verdict.fresh() != null && verdict.fresh() && verdict.sprinting();
                 KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                         preAttacker, preVictim, profile, compensationY, ThreadLocalRandom.current(),
-                        freshSprint, servo, inputs);
+                        freshSprint, servo, inputs, verticalTrim);
                 vector = paced.vector();
                 tx.paceFactor(paced.paceFactor()); // journal the factors the pre-send applied (D-6)
                 tx.comboFactor(paced.comboFactor());
@@ -347,6 +376,14 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     if (debug.active()) {
                         debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
                     }
+                }
+                // The vertical trim's observability at the pre-send seam: a debug line
+                // (carrying the saturation flag) whenever it is live and the debug sink
+                // is on — the same "wanted more than the bound allows" signal.
+                if (verticalTrim.active() && debug.active()) {
+                    VerticalTrim.Result trimResult = KnockbackEngine.explainVerticalTrim(
+                            preAttacker, preVictim, profile, compensationY, freshSprint, verticalTrim, inputs);
+                    debug.log(() -> ComboPredictor.verticalTrimLine(victimId, attackerId, trimResult));
                 }
             }
 

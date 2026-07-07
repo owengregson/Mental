@@ -104,14 +104,23 @@ public final class SessionService implements Listener, SessionAccess {
     private final List<Consumer<UUID>> forgetHooks = new ArrayList<>();
 
     /**
-     * Whether the combo-hold module holds an open scope (combo-hold §3). Flipped
-     * by the {@code ComboHoldUnit}'s assemble/close, so it is the reconciler's
-     * scope truth, not a re-read config flag. While false, sessions carry no
-     * tracker and the per-tick sweep does nothing (zero-touch); the transition to
-     * false is reconciled on each session's next tick (tracker dropped, one
-     * DISABLED end fired on its owning thread).
+     * Whether ANY combo keeper holds an open scope — the reconciler's scope truth, not
+     * a re-read config flag. The per-tick sweep reads this single volatile flag (its
+     * hot-path cost is one boolean read). While false, sessions carry no tracker and the
+     * sweep does nothing (zero-touch); the transition to false is reconciled on each
+     * session's next tick (tracker dropped, one DISABLED end fired on its owning thread).
+     *
+     * <p><b>INTEGRATION (feature/combo-vertical-trim).</b> Detection is now shared by
+     * MULTIPLE keepers (combo-hold + combo-vertical), so this flag is derived from
+     * {@link #comboRetainCount} — detection is live iff at least one keeper has retained.
+     * Was a bare boolean flipped only by {@code ComboHoldUnit}; the concurrent 2.4.5
+     * combo-substrate rebuild is expected to land the same ref-counted retain/release —
+     * reconcile at merge.</p>
      */
     private volatile boolean comboEnabled;
+
+    /** How many combo keepers currently hold detection open (guarded by {@code this}). */
+    private int comboRetainCount;
 
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
@@ -154,14 +163,27 @@ public final class SessionService implements Listener, SessionAccess {
         forgetHooks.add(hook);
     }
 
-    /** The {@code ComboHoldUnit} opens combo tracking (assemble); trackers install lazily per tick. */
-    public void enableCombo() {
-        this.comboEnabled = true;
+    /**
+     * A combo keeper (combo-hold or combo-vertical) retains the shared combo detection
+     * on assemble; trackers install lazily per tick. Ref-counted so detection stays live
+     * while ANY keeper holds it — a vertical-only config keeps the detector running with
+     * combo-hold off (INTEGRATION: see {@link #comboEnabled}).
+     */
+    public synchronized void enableCombo() {
+        comboRetainCount++;
+        comboEnabled = comboRetainCount > 0;
     }
 
-    /** The {@code ComboHoldUnit} closes combo tracking (scope close); each session drops its tracker next tick. */
-    public void disableCombo() {
-        this.comboEnabled = false;
+    /**
+     * A combo keeper releases the shared detection on scope close; when the LAST keeper
+     * releases, each session drops its tracker next tick (one DISABLED end on its owning
+     * thread). Floored at zero so an unbalanced release can never drive it negative.
+     */
+    public synchronized void disableCombo() {
+        if (comboRetainCount > 0) {
+            comboRetainCount--;
+        }
+        comboEnabled = comboRetainCount > 0;
     }
 
     /* --------------------------- rim read seams --------------------------- */
