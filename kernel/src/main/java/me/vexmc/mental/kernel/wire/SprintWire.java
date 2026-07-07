@@ -32,19 +32,36 @@ import me.vexmc.mental.kernel.port.TickClock;
  * never touched by {@link #onServerClear(TickStamp)} or {@link #reconcile}, so it
  * survives Mental's own post-hit {@code setSprinting(false)} the way the era's
  * client flag did.</p>
+ *
+ * <p><b>The universal blockhit contract</b> (era-accuracy; the owner's directive):
+ * a sword block engages by re-arming sprint (the era technique's whole purpose),
+ * and while that SAME engagement is held every hit ships the FRESH sprint knock —
+ * even the second and later hits of a held-block combo, whose wire
+ * {@code sprinting}/{@code armed} the prior hit's {@link #onServerClear} already
+ * dropped. This is the sticky {@code blockReset}: raised by
+ * {@link #onBlockSprintReset} on the block right-click, gated by the raw client
+ * flag in {@link #verdictAt} (a STOP_SPRINTING ends it — you are no longer
+ * moving), and dropped by {@link #onBlockReleased} when the block button is
+ * released (the "while currently blocking" boundary). It survives
+ * {@link #onServerClear} — that is the whole point. Stamp-ordered, no wall clock;
+ * a hit past the release or past a STOP falls straight back to the ordinary wire
+ * verdict.</p>
  */
 public final class SprintWire {
 
     /**
      * The whole wire state as one immutable value. {@code clientSprinting} is the
      * raw client-packet flag; {@code sprinting}/{@code armed} are the era wire
-     * view a hit consumes; {@code seen} gates reconcile seeding; {@code lastWrite}
-     * is the newer-wire-write-wins clock.
+     * view a hit consumes; {@code blockReset} is the held-sword-block sprint reset
+     * (the universal blockhit contract — sticky across {@link #onServerClear});
+     * {@code seen} gates reconcile seeding; {@code lastWrite} is the
+     * newer-wire-write-wins clock.
      */
     private record State(boolean seen, boolean sprinting, boolean armed,
-                         boolean clientSprinting, TickStamp lastWrite) {}
+                         boolean clientSprinting, boolean blockReset, TickStamp lastWrite) {}
 
-    private static final State INITIAL = new State(false, false, false, false, TickStamp.NO_TICK);
+    private static final State INITIAL =
+            new State(false, false, false, false, false, TickStamp.NO_TICK);
 
     private final TickClock clock;
     private final AtomicReference<State> state = new AtomicReference<>(INITIAL);
@@ -56,13 +73,13 @@ public final class SprintWire {
     /** A wire START: sets the flag, arms freshness, and raises the raw client flag (the re-engage is the w-tap). */
     public void onSprintStart() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, true, true, true, now));
+        state.updateAndGet(s -> new State(true, true, true, true, s.blockReset(), now));
     }
 
     /** A wire STOP: drops the flag and the raw client flag — armed freshness survives the release half. */
     public void onSprintStop() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, false, s.armed(), false, now));
+        state.updateAndGet(s -> new State(true, false, s.armed(), false, s.blockReset(), now));
     }
 
     /**
@@ -86,7 +103,9 @@ public final class SprintWire {
             if (s.lastWrite().known() && asOf.known() && s.lastWrite().value() > asOf.value()) {
                 return s; // a newer wire write wins — never retro-clear a later re-engage
             }
-            return new State(true, false, false, s.clientSprinting(), now);
+            // blockReset survives: a held sword-block re-arms every hit of the combo,
+            // so the freshness this hit spent must NOT drop while the block is held.
+            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now);
         });
     }
 
@@ -102,7 +121,41 @@ public final class SprintWire {
     @Deprecated
     public void onServerClear() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, false, false, s.clientSprinting(), now));
+        state.updateAndGet(s -> new State(true, false, false, s.clientSprinting(), s.blockReset(), now));
+    }
+
+    /**
+     * A sword-block engagement re-armed sprint and is now HELD — the universal
+     * blockhit contract (era-accuracy). Called by {@code SwordBlockingUnit} on the
+     * block right-click, gated there on the raw client sprint flag, a sanctioned
+     * cross-thread writer (the attacker's own thread, atomic under the CAS). It
+     * re-arms sprint exactly like {@link #onSprintStart} AND raises the sticky
+     * {@code blockReset}: while the SAME engagement is held, {@link #verdictAt}
+     * reports a FRESH sprint verdict on every hit, so a held-block combo's second
+     * and later hits stay fresh where {@link #onServerClear} would otherwise have
+     * dropped the freshness the first hit spent. The reset is ended by
+     * {@link #onBlockReleased} (the block button releasing) or by a STOP_SPRINTING
+     * lowering the raw client flag.
+     */
+    public void onBlockSprintReset() {
+        TickStamp now = clock.current();
+        state.updateAndGet(s -> new State(true, true, true, true, true, now));
+    }
+
+    /**
+     * The held sword-block was released — the client's RELEASE_USE_ITEM, observed
+     * on the connection's own netty thread. Drops the sticky {@code blockReset} so
+     * a hit after the release falls straight back to the ordinary wire verdict
+     * (the "while currently blocking" boundary of the blockhit contract). It
+     * touches nothing else — not {@code lastWrite} (a release is not a sprint wire
+     * write) — and is a no-op when no reset is held, so the always-inbound
+     * RELEASE_USE_ITEM packets of any other item use (eating, drawing a bow) never
+     * churn the wire.
+     */
+    public void onBlockReleased() {
+        state.updateAndGet(s -> s.blockReset()
+                ? new State(s.seen(), s.sprinting(), s.armed(), s.clientSprinting(), false, s.lastWrite())
+                : s);
     }
 
     /**
@@ -114,20 +167,34 @@ public final class SprintWire {
     public void reconcile(boolean serverSprinting, TickStamp now, int quietTicks) {
         state.updateAndGet(s -> {
             if (!s.seen()) {
-                return new State(true, serverSprinting, false, s.clientSprinting(), now);
+                return new State(true, serverSprinting, false, s.clientSprinting(), s.blockReset(), now);
             }
             if (s.sprinting() != serverSprinting && s.lastWrite().known() && now.known()
                     && now.value() - s.lastWrite().value() >= quietTicks) {
-                return new State(true, serverSprinting, s.armed(), s.clientSprinting(), now);
+                return new State(true, serverSprinting, s.armed(), s.clientSprinting(), s.blockReset(), now);
             }
             return s;
         });
     }
 
-    /** The registration-time verdict (never null; falls back to the seeded state). */
+    /**
+     * The registration-time verdict (never null; falls back to the seeded state).
+     *
+     * <p>A held sword-block sprint reset ({@code blockReset}) overrides the wire
+     * view while the raw client flag survives: a hit delivered while the block is
+     * still held reports FRESH sprint regardless of a prior hit's
+     * {@link #onServerClear} having dropped {@code sprinting}/{@code armed} — the
+     * universal blockhit contract. A STOP_SPRINTING drops {@code clientSprinting}
+     * and so ends the override (the attacker is no longer moving); the block
+     * release drops {@code blockReset} itself. Otherwise the verdict is the plain
+     * arrival-order wire view, byte-identical to before.</p>
+     */
     public SprintVerdict verdictAt(TickStamp now) {
         State s = state.get();
-        return new SprintVerdict(s.sprinting(), s.armed(), now);
+        boolean blockHeldReset = s.blockReset() && s.clientSprinting();
+        boolean sprinting = blockHeldReset || s.sprinting();
+        boolean fresh = blockHeldReset || s.armed();
+        return new SprintVerdict(sprinting, fresh, now);
     }
 
     /**
