@@ -150,3 +150,38 @@ the `player_input` enhancement); (3) the kernel projection + pins; (4) swap it i
 `ComboPredictor` as the primary chase with the measured/attribute fallbacks; (5)
 full gate. The universal tier alone already covers the blockhit case across the
 whole version range — that is the priority.
+
+## As-built (2026-07-07)
+
+Shipped in commits `2479a35` (kernel `DynamicChase`), `d8a44b1` (servo-window
+integration), `a483515` (D1 reset-model classifier + predictor feed). Two
+deliberate simplifications from the design above, both keeping the core value:
+
+- **`ResetModel` = `{phaseTicks, sprinting, blocking, known}`**, not the explicit
+  `technique` enum (`W_TAP`/`S_TAP`/`SPRINT_TOGGLE`/`BLOCKHIT`). The chase depends
+  on the ramp *phase* and the *effective speed*, not the technique label: every
+  sprint (re-)engage is a reset point (so a w-tap and a sprint-toggle are the same
+  phase-0 signal), and blocking is carried as its own flag. `ResetModelWire`
+  publishes the phase from the last (re-)engage tick; `ComboPredictor` resolves the
+  steady speed from the attacker's move-speed attribute.
+
+- **Blockhitters DEFER to the measured-ring** rather than applying a modelled
+  block-slow. Per the NMS calibration, the ×0.2 block-slow is a *legacy-client*
+  artifact (true 1.8 blocking cancels sprint → a ~0.043 b/t crawl), while a
+  modern-client blockhitter under Mental keeps full sprint. Rather than probe the
+  protocol, a `blocking` attacker is left on the measured-ring chase, which
+  captures either speed empirically — sidestepping the ambiguity.
+
+- **Chase alignment is assumed 1.0** (a committed combo attacker sprints straight
+  at the victim). An off-axis attacker over-states the close, but the servo's
+  reachability clamp caps the target at `sepReach` and σ is clamped `[0.8,1.2]`, so
+  the error is bounded; the measured-ring (the fallback rung) carries the true
+  axis-projected closing when the dynamic model steps aside.
+
+**Deferred enhancement:** the modern `player_input` tier (1.21.4+) for true
+`W_TAP`/`S_TAP` discrimination and a *measured* directional alignment. The
+universal tier already reads w-taps via the sprint START/STOP entity-actions, so
+this is a refinement (finer reset-depth + alignment), not core dynamic-chase
+behaviour. Wire a `PLAYER_INPUT` handler in `PacketTap` (version-gated) feeding
+`ResetModelWire`, and project the chase on the measured input direction, when it
+earns its keep.

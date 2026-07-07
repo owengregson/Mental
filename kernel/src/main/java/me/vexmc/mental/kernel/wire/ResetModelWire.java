@@ -54,10 +54,15 @@ public final class ResetModelWire {
         state.updateAndGet(s -> new State(false, s.blocking(), s.resetTick(), true));
     }
 
-    /** A sword block engaged — a reset point at the current tick that also raises {@code blocking}. */
+    /**
+     * A sword block engaged — raises {@code blocking} (so the caller defers a
+     * blockhitter to the measured-ring) but PRESERVES the sprint ramp phase. A
+     * modern client keeps full sprint through Mental's damage-only block, so the
+     * block is not a genuine re-accel reset; a post-release continuation must read
+     * its true (settled) sprint phase, not a fictitiously fresh one.
+     */
     public void onBlockRaise() {
-        TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(s.sprinting(), true, now, true));
+        state.updateAndGet(s -> new State(s.sprinting(), true, s.resetTick(), true));
     }
 
     /** The sword block released — drops {@code blocking}; a no-op when not blocking. */

@@ -251,6 +251,14 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onHeldChange(@NotNull PlayerItemHeldEvent event) {
         decoration.onHeldChange(event.getPlayer(), event.getPreviousSlot(), event.getNewSlot());
+        // Switching the held slot ends any sword block, but the RELEASE_USE_ITEM packet
+        // is not guaranteed on a slot change — clear the reset-model blocking flag here
+        // too so a stuck flag can't keep the dynamic chase deferred. Non-creating peek;
+        // onBlockRelease is idempotent (a no-op when not blocking).
+        ConnectionDomains.Domain heldDomain = domains.peek(event.getPlayer().getUniqueId());
+        if (heldDomain != null) {
+            heldDomain.resetModel().onBlockRelease();
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)

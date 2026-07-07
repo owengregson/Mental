@@ -76,25 +76,33 @@ class ResetModelWireTest {
     }
 
     @Test
-    void blockRaiseMarksBlockingAndResetsThePhase() {
+    void blockRaiseMarksBlockingButKeepsTheSprintPhase() {
+        // A modern-client blockhitter keeps sprint through Mental's damage-only block,
+        // so a block raise flags blocking (defer to the measured-ring) but must NOT
+        // reset the ramp phase — else a post-release continuation reads fictitiously
+        // fresh and under-prices the close. The phase continues from the sprint start.
         MutableClock clock = new MutableClock();
         ResetModelWire wire = new ResetModelWire(clock);
         clock.tick = 10;
         wire.onSprintStart();
         clock.tick = 30;
-        wire.onBlockRaise(); // a blockhit re-engage — a fresh reset point
+        wire.onBlockRaise();
         ResetModel at32 = wire.modelAt(new TickStamp(32));
         assertTrue(at32.blocking());
-        assertEquals(2, at32.phaseTicks());
+        assertEquals(22, at32.phaseTicks(), "the sprint ramp phase continues from the last sprint start, not the block");
     }
 
     @Test
     void blockReleaseClearsBlocking() {
         MutableClock clock = new MutableClock();
         ResetModelWire wire = new ResetModelWire(clock);
+        clock.tick = 10;
+        wire.onSprintStart();
         clock.tick = 30;
         wire.onBlockRaise();
         wire.onBlockRelease();
-        assertFalse(wire.modelAt(new TickStamp(32)).blocking());
+        ResetModel at32 = wire.modelAt(new TickStamp(32));
+        assertFalse(at32.blocking());
+        assertEquals(22, at32.phaseTicks(), "release leaves the preserved sprint phase intact");
     }
 }
