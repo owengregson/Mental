@@ -278,10 +278,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // views + ring + latency, with the live capture positions as the axis source.
         PlayerView victimView = session.view();
         PlayerView attackerView = sessions.viewOf(attacker.getUniqueId());
+        // One tick read serves the build AND the window commit below — the post-hit
+        // chase window's gap arithmetic needs both on the same clock instant.
+        TickStamp servoNow = clock.current();
         PredictorInputs inputs = servo.active() && victimView != null
                 ? ComboPredictor.build(attacker.getUniqueId(), victim.getUniqueId(),
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
-                        victimView, attackerView, sessions.positions(), latency)
+                        victimView, attackerView, sessions.positions(), latency, servoNow)
                 : PredictorInputs.degraded(victimState.grounded(),
                         victimView != null ? victimView.slipperiness() : Decay.DEFAULT_SLIPPERINESS,
                         victimState.moveSpeedAttr());
@@ -291,6 +294,14 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
+        // Commit the post-hit chase window on EVERY active servo hit (servo-lab
+        // 2.4.5): this hit's attacker position/tick anchors the next window's
+        // measurement, and the EMA the inputs carried is persisted. Load-bearing —
+        // never gated behind the diagnostics sink or the dynamic-target mode.
+        if (servo.active()) {
+            ComboPredictor.rememberWindow(victim.getUniqueId(),
+                    attackerState.x(), attackerState.z(), servoNow, inputs);
+        }
         // The V2 dynamic-target smoothing memory commits whenever the DYNAMIC
         // target is live — never gated behind the diagnostics sink (interaction
         // audit; see the pre-send site for the full why). The debug LINE alone

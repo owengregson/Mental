@@ -220,6 +220,27 @@ class PocketServoPrecisionTest {
     }
 
     @Test
+    void windowChaseRateMeasuresThePostHitWindow() {
+        // The servo-lab 2.4.5 chase correction: the attacker's displacement over the
+        // just-completed inter-hit gap, axis-projected, per tick. Lab scale: the
+        // slow-cadence cell measured ~1.75 blocks of actual re-chase over an 18-tick
+        // window → 1.746 / 18 = 0.097 b/t exactly.
+        assertEquals(0.097, PocketServo.windowChaseRate(10.0, 4.0, 11.746, 4.0, 1.0, 0.0, 18), EPSILON,
+                "closing displacement / gap, on-axis");
+        // Moving AWAY from the victim (against the axis) reads negative — the w-tap
+        // back-off phase the old pre-hit trend mistook for the whole window.
+        assertEquals(-0.10, PocketServo.windowChaseRate(10.0, 4.0, 9.0, 4.0, 1.0, 0.0, 10), EPSILON);
+        // Off-axis displacement projects: (0, 1.8) on axis (0.6, 0.8) over 12 → 1.44/12.
+        assertEquals(0.12, PocketServo.windowChaseRate(0.0, 0.0, 0.0, 1.8, 0.6, 0.8, 12), EPSILON);
+        // A degenerate gap is no window at all.
+        assertTrue(Double.isNaN(PocketServo.windowChaseRate(0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0)));
+        // The per-combo EMA rides the same seeded blend as the V2 chase EMA: a NaN
+        // prior seeds to the first window; 0.3·0.15 + 0.7·0.097 = 0.1129 thereafter.
+        assertEquals(0.097, PocketServo.chaseEma(Double.NaN, 0.097), EPSILON, "first window seeds");
+        assertEquals(0.1129, PocketServo.chaseEma(0.097, 0.15), EPSILON, "0.3·0.15 + 0.7·0.097");
+    }
+
+    @Test
     void chaseEmaSeedsThenBlends() {
         // repair #2: NaN prior seeds to the instantaneous rate; then α=0.3 blend.
         assertEquals(0.30, PocketServo.chaseEma(Double.NaN, 0.30), EPSILON, "first hit seeds");

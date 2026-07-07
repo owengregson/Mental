@@ -152,11 +152,16 @@ public final class ComboSuite {
                 EntityState attackerState = EntityStates.capture(attacker.player());
                 EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
                 PocketServoConfig servo = comboSettings(mental).servo();
+                // The same tick the region solve will read inside this sync block —
+                // the post-hit chase window's gap arithmetic must match it, and
+                // build() is a pure read (the window commits only at the delivery
+                // seams), so this re-derivation consumes exactly the memory state
+                // the production solve consumes.
                 PredictorInputs inputs = ComboPredictor.build(
                         attacker.uuid(), victim.uuid(),
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
                         view, mental.sessions().viewOf(attacker.uuid()),
-                        mental.sessions().positions(), new LatencyModel());
+                        mental.sessions().positions(), new LatencyModel(), mental.clock().current());
                 // D-8: the java.util.Random overload keeps a jvmdowngrader RandomGenerator
                 // stub type out of this cross-jar call's descriptor (a RandomGenerator descriptor
                 // resolves a mismatched per-plugin stub and NoSuchMethodErrors on the v52 tier).

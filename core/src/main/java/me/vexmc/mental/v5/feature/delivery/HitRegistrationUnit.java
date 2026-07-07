@@ -29,6 +29,7 @@ import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.model.SprintVerdict;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
@@ -313,11 +314,16 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 PocketServoConfig servo = comboServoFor(victimView, attackerId);
                 // The precision predictor inputs (combo-hold §3.2b) — frozen views +
                 // ring + latency, built only when the servo is active (zero cost off).
+                // The attacker position and tick are hoisted so the build and the
+                // post-hit window commit below share one truth.
+                double servoAttackerX = positionX(attackerId);
+                double servoAttackerZ = positionZ(attackerId);
+                TickStamp servoNow = clock.current();
                 PredictorInputs inputs = servo.active()
                         ? ComboPredictor.build(attackerId, victimId,
-                                positionX(attackerId), positionZ(attackerId),
+                                servoAttackerX, servoAttackerZ,
                                 positionX(victimId), positionZ(victimId),
-                                victimView, attackerView, sessions.positions(), latency)
+                                victimView, attackerView, sessions.positions(), latency, servoNow)
                         : PredictorInputs.degraded(
                                 victimView.grounded(), victimView.slipperiness(), victimView.moveSpeedAttr());
                 EntityState preAttacker = preAttackerState(attackerId, attackerView, verdict);
@@ -329,6 +335,14 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 vector = paced.vector();
                 tx.paceFactor(paced.paceFactor()); // journal the factors the pre-send applied (D-6)
                 tx.comboFactor(paced.comboFactor());
+                // Commit the post-hit chase window on EVERY active servo hit
+                // (servo-lab 2.4.5) — load-bearing solve state, never gated behind
+                // the sink or the target mode. A suppressed velocity later in this
+                // method leaves the region recompute to re-solve this hit; its own
+                // commit lands under the minimum window gap, so no double-advance.
+                if (servo.active()) {
+                    ComboPredictor.rememberWindow(victimId, servoAttackerX, servoAttackerZ, servoNow, inputs);
+                }
                 // The V2 dynamic-target smoothing memory (target-v2 repair #2) commits
                 // whenever the DYNAMIC target is live — a gameplay-shaping input must
                 // never be gated behind the diagnostics sink (interaction audit: with

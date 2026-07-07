@@ -612,6 +612,33 @@ public final class PocketServo {
                 : CHASE_EMA_ALPHA * chaseRate + (1.0 - CHASE_EMA_ALPHA) * priorChaseEma;
     }
 
+    /**
+     * The measured POST-hit window chase rate (b/t, + = closing): the attacker's
+     * displacement since the previous servo hit, projected on the CURRENT
+     * attacker→victim axis, per tick of the inter-hit gap.
+     *
+     * <p>This is the servo-lab 2.4.5 chase correction. The pre-hit instantaneous
+     * velocity trend the §2-estimator-applied-to-the-attacker read (derivation §6
+     * row 7 / issue 7) samples the WRONG PHASE of the attacker's cycle: at ring
+     * time the attacker has arrived at range and idles or w-taps backward (the lab
+     * measured it at ≈ 0 to negative), while the quantity the solve prices is the
+     * RE-chase after the knock ships (+1.1…+1.7 blocks per window, every cell).
+     * The just-completed inter-hit window is the same "measured attacker-velocity
+     * trend" issue 7 prefers, evaluated over the horizon it actually prices — and
+     * it folds the ×0.6 self-slow and the line deviation in for free, exactly the
+     * two residuals row 7 wanted the measured estimator to recover. The attribute
+     * model ({@link #SPRINT_GROUND_SPEED} × attr/0.10) stays the fallback for the
+     * first window of a combo ({@link Double#NaN} here ⇒ the solve's model path).</p>
+     */
+    public static double windowChaseRate(
+            double anchorX, double anchorZ, double x, double z,
+            double ux, double uz, long gapTicks) {
+        if (gapTicks < 1) {
+            return Double.NaN;
+        }
+        return ((x - anchorX) * ux + (z - anchorZ) * uz) / gapTicks;
+    }
+
     /** Slew-limit the emitted target to {@code ±limit} of the prior (repair #2); a NaN prior passes through. */
     private static double slew(double priorTarget, double raw, double limit) {
         if (Double.isNaN(priorTarget)) {

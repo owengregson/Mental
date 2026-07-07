@@ -8,6 +8,7 @@ import me.vexmc.mental.kernel.math.DriftEstimator;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 
@@ -43,18 +44,53 @@ public final class ComboPredictor {
     /** How many ring samples the drift estimator reads (≥ 3 deltas for the N=3 mean). */
     private static final int DRIFT_SAMPLES = 5;
 
-    /** How many ring samples the chase trend averages (~3 deltas). */
-    private static final int CHASE_SAMPLES = 4;
+    /**
+     * The shortest inter-hit gap a POST-hit chase window may measure (servo-lab
+     * 2.4.5). The era immunity floor keeps landed knocks ≥ ~10 ticks apart
+     * (maxHurtResistantTime/2, boundary reads 9), so any shorter "window" is the
+     * same hit re-solved at the second delivery seam (a suppressed pre-send
+     * followed by the region recompute lands 0–1 ticks apart) — an artifact, never
+     * a real window. Half the era floor keeps a wide honesty margin.
+     */
+    private static final int MIN_WINDOW_GAP_TICKS = 5;
 
     /**
-     * The per-victim pocket-servo memory (target-v2 repair #2): {@code {chaseEma,
-     * dynamicTarget}} carried hit-to-hit so the V2 dynamic target's smoothing (chase
-     * EMA + ≤0.05/hit slew) survives across a combo. A lab-instrument cache — read
-     * by {@link #build} and committed by {@link #remember}; both delivery seams touch
-     * it, hence the concurrent map. Empty (no smoothing) under the shipped ANCHOR
-     * default, which uses the anchor and never reads the dynamic value.
+     * The longest gap a window may measure: 2× the default max-gap (20) that ends
+     * every default combo. A live combo past a 40-tick gap exists only under
+     * widened test configs, where the "window" no longer measures re-chase but
+     * idle wandering — the EMAs keep their prior instead.
      */
-    private static final ConcurrentHashMap<UUID, double[]> MEMORY = new ConcurrentHashMap<>();
+    private static final int MAX_WINDOW_GAP_TICKS = 40;
+
+    /**
+     * The per-victim pocket-servo memory, carried hit-to-hit within one combo and
+     * cleared on every combo END ({@link #forget}). Two tenants: the V2 dynamic
+     * target's smoothing state (target-v2 repair #2 — {@code chaseEma}/{@code
+     * dynamicTarget}, committed by {@link #remember}, meaningful only under
+     * {@code target-mode: dynamic}), and the servo-lab 2.4.5 POST-hit chase window
+     * ({@code windowChaseEma} + the previous hit's attacker anchor, committed by
+     * {@link #rememberWindow} on EVERY active servo hit — this one is
+     * load-bearing: it is the chase the σ* solve prices). Both delivery seams
+     * (netty pre-send D1, region compute D2) read and commit it, hence the
+     * concurrent map; exactly one seam computes any given hit, so commits are
+     * per-hit serialized in practice.
+     */
+    private static final ConcurrentHashMap<UUID, ServoMemory> MEMORY = new ConcurrentHashMap<>();
+
+    /**
+     * One victim's cross-hit servo state. {@code anchorTick} is the tick of the
+     * previous servo-solved hit and {@code anchorX/Z} the attacker's feet there —
+     * the base of the next POST-hit chase window; {@link TickStamp#NO_TICK}'s
+     * value marks "no anchor yet" (a fresh combo).
+     */
+    private record ServoMemory(
+            double chaseEma, double dynamicTarget,
+            double windowChaseEma,
+            double anchorX, double anchorZ, int anchorTick) {
+
+        static final ServoMemory EMPTY = new ServoMemory(
+                Double.NaN, Double.NaN, Double.NaN, 0.0, 0.0, Integer.MIN_VALUE);
+    }
 
     private ComboPredictor() {}
 
@@ -62,20 +98,32 @@ public final class ComboPredictor {
      * Builds the precision inputs for a hit from {@code attackerId} to the victim
      * whose frozen {@code victimView} is given. {@code attackerView} may be null
      * (its RTT then falls back to the model / zero); the positions are the current
-     * ring-latest feet positions of both parties (the axis source).
+     * ring-latest feet positions of both parties (the axis source); {@code now} is
+     * the hit tick — the POST-hit chase window's clock.
      *
-     * <p>The victim's per-combo pocket-servo memory (target-v2 repair #2) is read
-     * from {@link #MEMORY} and ridden into the kernel via {@link PredictorInputs}
-     * so the V2 dynamic target smooths across the combo — {@link Double#NaN} for a
-     * fresh combo. It never touches the σ* placement solve; the memory is committed
-     * by {@link #remember} at the delivery seam.</p>
+     * <p>Pure read: the victim's per-combo servo memory is consumed here (the V2
+     * dynamic-target smoothing state, target-v2 repair #2, AND the servo-lab 2.4.5
+     * post-hit chase window) but only the seams commit it — {@link #rememberWindow}
+     * for the window anchor/EMA on every active servo hit, {@link #remember} for the
+     * dynamic-target state — so a re-derivation of the same hit (the ComboSuite's
+     * expected-σ build) reads exactly what the production solve read.</p>
+     *
+     * <p><b>The chase channel (servo-lab 2.4.5).</b> The measured chase fed to the
+     * solve is the per-combo EMA of POST-hit windows ({@link
+     * PocketServo#windowChaseRate}): the attacker's actual displacement over the
+     * just-completed inter-hit gap, axis-projected. The old pre-hit ring-velocity
+     * trend read the attacker's at-ring idle/w-tap phase (≈ 0 to negative in every
+     * lab cell) while the actual post-hit re-chase measured +1.1…+1.7 blocks per
+     * window — under-pricing the chase, driving σ* into the false-low min-clamp
+     * mode and shipping every landed hit below era. A fresh combo has no window yet
+     * ({@link Double#NaN}) ⇒ the kernel falls back to the §1.4 attribute model.</p>
      */
     public static PredictorInputs build(
             UUID attackerId, UUID victimId,
             double attackerX, double attackerZ,
             double victimX, double victimZ,
             PlayerView victimView, PlayerView attackerView,
-            PositionRing positions, LatencyModel latency) {
+            PositionRing positions, LatencyModel latency, TickStamp now) {
 
         // The attacker→victim unit axis (pointing away from the attacker).
         double dx = victimX - attackerX;
@@ -96,16 +144,31 @@ public final class ComboPredictor {
         double launchHeight = launchGrounded ? 0.0 : Math.max(0.0, victimView.kinematics().distanceToGround());
 
         double driftAxis = DRIFT_SHRINKAGE * estimateDrift(positions, victimId, victimView, ux, uz);
-        double chaseAxis = estimateChase(positions, attackerId, ux, uz);
+
+        // The POST-hit chase window (servo-lab 2.4.5): advance the per-combo EMA
+        // with the attacker's measured displacement over the just-completed
+        // inter-hit gap. Gaps outside [MIN, MAX] are artifacts (the dual-seam
+        // re-solve, or an idle stretch under a widened test config) — the EMA
+        // carries its prior unchanged, and a combo with no window yet rides NaN
+        // into the kernel's attribute-model fallback.
+        ServoMemory memory = MEMORY.getOrDefault(victimId, ServoMemory.EMPTY);
+        double chaseAxis = memory.windowChaseEma();
+        if (memory.anchorTick() != Integer.MIN_VALUE && now != null && now.known()) {
+            long gap = (long) now.value() - memory.anchorTick();
+            if (gap >= MIN_WINDOW_GAP_TICKS && gap <= MAX_WINDOW_GAP_TICKS) {
+                double measured = PocketServo.windowChaseRate(
+                        memory.anchorX(), memory.anchorZ(), attackerX, attackerZ, ux, uz, gap);
+                chaseAxis = PocketServo.chaseEma(chaseAxis, measured);
+            }
+        }
 
         int attackerRtt = rttMillis(latency, attackerId, attackerView);
         int victimRtt = rttMillis(latency, victimId, victimView);
 
         double yawVsAxis = yawVsAxisDeg(victimView.yaw(), ux, uz);
 
-        double[] memory = MEMORY.get(victimId);
-        double priorChaseEma = memory != null ? memory[0] : Double.NaN;
-        double priorDynamicTarget = memory != null ? memory[1] : Double.NaN;
+        double priorChaseEma = memory.chaseEma();
+        double priorDynamicTarget = memory.dynamicTarget();
 
         return new PredictorInputs(
                 launchGrounded, slip, slip, launchHeight,
@@ -120,20 +183,49 @@ public final class ComboPredictor {
     }
 
     /**
+     * Commits the POST-hit chase window state this hit's solve consumed (servo-lab
+     * 2.4.5): the advanced window-chase EMA the inputs carried, plus THIS hit's
+     * attacker position and tick as the next window's anchor. Called on EVERY
+     * active servo hit at whichever delivery seam computed it (a suppressed
+     * pre-send followed by the region recompute commits twice; the second sits
+     * under {@link #MIN_WINDOW_GAP_TICKS}, so the EMA never double-advances).
+     * The V2 dynamic-target tenant is preserved untouched.
+     */
+    public static void rememberWindow(
+            UUID victimId, double attackerX, double attackerZ, TickStamp now, PredictorInputs inputs) {
+        if (victimId == null || now == null || !now.known()) {
+            return;
+        }
+        MEMORY.compute(victimId, (id, prior) -> {
+            ServoMemory base = prior != null ? prior : ServoMemory.EMPTY;
+            return new ServoMemory(
+                    base.chaseEma(), base.dynamicTarget(),
+                    inputs.chaseAlongAxis(),
+                    attackerX, attackerZ, now.value());
+        });
+    }
+
+    /**
      * Commits the pocket-servo memory this hit produced (target-v2 repair #2): the
      * advanced chase EMA and the emitted dynamic target, so the victim's next hit's
      * V2 target smooths from them. Keyed by victim; a {@link ConcurrentHashMap}
      * because the two delivery seams (netty pre-send D1, region recompute D2) both
      * assemble the solve. A declined solve (NaN chaseEma) leaves the memory alone,
      * so a stray non-combo hit never poisons it. Cleared by {@link #forget} on
-     * session teardown. Only meaningful under {@code target-mode: dynamic}; harmless
-     * (unread) under the shipped ANCHOR default.
+     * session teardown. Only meaningful under {@code target-mode: dynamic}; the
+     * post-hit chase window tenant is preserved untouched.
      */
     public static void remember(UUID victimId, PocketServo.Solution solution) {
         if (victimId == null || Double.isNaN(solution.chaseEma())) {
             return;
         }
-        MEMORY.put(victimId, new double[] {solution.chaseEma(), solution.dynamicTarget()});
+        MEMORY.compute(victimId, (id, prior) -> {
+            ServoMemory base = prior != null ? prior : ServoMemory.EMPTY;
+            return new ServoMemory(
+                    solution.chaseEma(), solution.dynamicTarget(),
+                    base.windowChaseEma(),
+                    base.anchorX(), base.anchorZ(), base.anchorTick());
+        });
     }
 
     /** Drops the victim's servo memory (session forget hook / combo teardown). */
@@ -172,27 +264,6 @@ public final class ComboPredictor {
             knock[i] = (rvx * factor) * ux + (rvz * factor) * uz;
         }
         return DriftEstimator.estimate(measured, knock);
-    }
-
-    /**
-     * The attacker's measured closing rate, axis-projected (precision-derivation
-     * §1.4/§7 issue 7): the recent ring-velocity trend along the axis toward the
-     * victim, positive when closing. {@link Double#NaN} when the history is too
-     * short — the solve falls back to the 0.2806×attr model.
-     */
-    private static double estimateChase(PositionRing positions, UUID attackerId, double ux, double uz) {
-        List<PositionRing.Sample> ring = positions.recent(attackerId, CHASE_SAMPLES);
-        int deltas = ring.size() - 1;
-        if (deltas < 1) {
-            return Double.NaN;
-        }
-        double sx = 0.0;
-        double sz = 0.0;
-        for (int i = 0; i < deltas; i++) {
-            sx += ring.get(i + 1).x() - ring.get(i).x();
-            sz += ring.get(i + 1).z() - ring.get(i).z();
-        }
-        return (sx / deltas) * ux + (sz / deltas) * uz;
     }
 
     /** The full RTT (ms) from the latency model, or the view's Bukkit ping, or 0 (unavailable → no shift). */
