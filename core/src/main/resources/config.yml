@@ -332,7 +332,8 @@ modules:
 #
 # ── Detector: when is a combo "active"? ────────────────────────────────────
 #   min-hits            hits from ONE attacker before the servo engages (the
-#                       first two confirm intent; the servo helps from the third).
+#                       first develops the chain; the second confirms intent and
+#                       engages the servo — two hits, no retaliation = in combo).
 #   max-gap-ticks       an inter-hit gap longer than this ends the chain — era
 #                       sweet-spot cadence is ~10-12 ticks, so 20 is generous.
 #   grounded-run-ticks  consecutive grounded ticks that end the combo: brief
@@ -377,7 +378,7 @@ modules:
 # nested combo-hold.reach-handicap block; an upgraded config with that old block still
 # works for one release — honoured with a loud reload notice — but move it.)
 #combo-hold:
-#  min-hits: 3
+#  min-hits: 2
 #  max-gap-ticks: 20
 #  grounded-run-ticks: 10
 #  blowout-blocks: 6.0

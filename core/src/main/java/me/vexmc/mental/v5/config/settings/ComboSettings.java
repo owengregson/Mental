@@ -45,10 +45,11 @@ public record ComboSettings(
         TargetMode targetMode,
         double hitCap) {
 
-    /** The design defaults (§3.1/§3.2/§3.2b; target 2.85 per the target-v2 retune).
-     *  The MODULE toggle — not this record — is what makes it a no-op. */
+    /** The design defaults (§3.1/§3.2/§3.2b; target 2.85 per the target-v2 retune;
+     *  {@code minHits 2} per the 2.4.5 combo-detection retune — the SECOND hit fires
+     *  COMBO START). The MODULE toggle — not this record — is what makes it a no-op. */
     public static final ComboSettings DEFAULTS =
-            new ComboSettings(3, 20, 10, 6.0, 2.85, 1.0, 0.8, 1.2, 10,
+            new ComboSettings(2, 20, 10, 6.0, 2.85, 1.0, 0.8, 1.2, 10,
                     TargetMode.ANCHOR, PocketServoConfig.DEFAULT_HIT_CAP);
 
     /** The detector thresholds the {@code ComboTracker} reads. */

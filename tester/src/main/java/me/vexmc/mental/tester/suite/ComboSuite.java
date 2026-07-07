@@ -72,8 +72,9 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p><b>One-hit publish latency.</b> The detector is fed at the delivery fold and
  * the servo reads the frozen view, so a hit's σ uses the combo state published on
- * the PREVIOUS tick. The chain therefore activates on the third shipped hit and
- * the first servo-valued hit is the next one computed after that publish. The
+ * the PREVIOUS tick. The chain therefore activates on the second shipped hit
+ * (minHits 2, the 2.4.5 retune) and the first servo-valued hit is the next one
+ * computed after that publish. The
  * scenarios assert the opener hits are 1.0 and that an established-combo hit is
  * servo-valued and matches the same solve the engine runs — they do not pin a
  * single ordinal, which the latency makes brittle.</p>
@@ -788,7 +789,10 @@ public final class ComboSuite {
         context.awaitTicks(2);
     }
 
-    /** Drives three same-attacker hits and waits until the view publishes the active combo. */
+    /**
+     * Drives three same-attacker hits — one past the 2-hit minHits (the 2.4.5 retune),
+     * a publish-latency margin — and waits until the view publishes the active combo.
+     */
     private static void buildActiveCombo(
             MentalPluginV5 mental, TestContext context, FakePlayer attacker, FakePlayer victim) throws Exception {
         for (int hit = 0; hit < 3; hit++) {

@@ -82,7 +82,7 @@ below — a separate lever, 1.20.5+ only; the servo itself never touches it.)
 
 ## When a combo is "active"
 
-Detected per victim: a combo with one attacker goes active on the **third** melee
+Detected per victim: a combo with one attacker goes active on the **second** melee
 hit (`min-hits`) when each inter-hit gap holds within `max-gap-ticks`, and ends on
 any of — the gap expiring; the victim landing a melee hit of their own
 (retaliation); a real touchdown (`grounded-run-ticks` consecutive grounded ticks,
@@ -95,7 +95,7 @@ All optional; an absent section uses the defaults shown.
 
 | Key | Default | What |
 | --- | --- | --- |
-| `min-hits` | `3` | hits from one attacker before the servo engages |
+| `min-hits` | `2` | hits from one attacker before the servo engages (the second hit fires combo start) |
 | `max-gap-ticks` | `20` | a longer inter-hit gap ends the chain |
 | `grounded-run-ticks` | `10` | consecutive grounded ticks that end the combo |
 | `blowout-blocks` | `6.0` | separation past this ends the combo |

@@ -13,10 +13,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Hand-computed pins for the combo detector state machine (combo-hold §3.1).
- * Defaults: minHits 3, maxGapTicks 20, groundedRunTicks 10, blowoutBlocks 6.0.
- * Every boundary (activation on the third hit, gap expiry at exactly gap+1,
- * attacker-switch restart, retaliation, grounded-run, blowout, NaN separation)
- * is asserted so the machine can never drift silently.
+ * Defaults: minHits 2, maxGapTicks 20, groundedRunTicks 10, blowoutBlocks 6.0.
+ * Every boundary (activation on the second hit — the 2.4.5 retune, gap expiry at
+ * exactly gap+1, attacker-switch restart, retaliation, grounded-run, blowout, NaN
+ * separation) is asserted so the machine can never drift silently.
  */
 class ComboTrackerTest {
 
@@ -32,11 +32,16 @@ class ComboTrackerTest {
         return new ComboTracker(RULES);
     }
 
-    /** Drive three same-attacker hits at a 10-tick cadence to an active combo. */
+    /**
+     * Drive three same-attacker hits at a 10-tick cadence to an active combo. The
+     * combo goes active on the SECOND hit (minHits 2); the third continues it and
+     * leaves {@code lastHitTick} at t(20) — the gap clock the downstream gap/grounded
+     * pins measure their offsets from.
+     */
     private static ComboTracker active() {
         ComboTracker tracker = tracker();
         tracker.onKnockShipped(A, t(0));
-        tracker.onKnockShipped(A, t(10));
+        tracker.onKnockShipped(A, t(10)); // second hit → active
         tracker.onKnockShipped(A, t(20));
         return tracker;
     }
@@ -48,7 +53,8 @@ class ComboTrackerTest {
     }
 
     @Test
-    void activatesExactlyOnTheThirdHit() {
+    void activatesExactlyOnTheSecondHit() {
+        // The 2.4.5 retune: minHits 2, so the SECOND shipped hit fires COMBO START.
         ComboTracker tracker = tracker();
 
         ComboTransition first = one(tracker.onKnockShipped(A, t(0)));
@@ -57,28 +63,31 @@ class ComboTrackerTest {
         assertNull(tracker.snapshot().attackerId(), "developing chain publishes no attacker");
 
         ComboTransition second = one(tracker.onKnockShipped(A, t(10)));
-        assertEquals(ComboTransition.Kind.NONE, second.kind(), "hit 2 does not activate");
-        assertFalse(tracker.active());
-
-        ComboTransition third = one(tracker.onKnockShipped(A, t(20)));
-        assertTrue(third.started(), "hit 3 activates the combo");
-        assertEquals(A, third.attacker());
-        assertEquals(3, third.hits());
+        assertTrue(second.started(), "hit 2 activates the combo");
+        assertEquals(A, second.attacker());
+        assertEquals(2, second.hits());
         assertTrue(tracker.active());
         assertEquals(A, tracker.snapshot().attackerId());
-        assertEquals(t(20), tracker.snapshot().activeSince());
+        assertEquals(t(10), tracker.snapshot().activeSince());
+
+        // A third same-attacker hit continues the active chain — no fresh START.
+        ComboTransition third = one(tracker.onKnockShipped(A, t(20)));
+        assertEquals(ComboTransition.Kind.NONE, third.kind(), "hit 3 does not re-start an active combo");
+        assertTrue(tracker.active());
+        assertEquals(t(10), tracker.snapshot().activeSince(), "activeSince stays the second hit's tick");
     }
 
     @Test
     void gapExpiresAtExactlyMaxGapPlusOne() {
-        // Two hits at 0 and 20 (gap 20 == maxGap) keep the developing chain alive;
-        // a hit at 40 (gap 20) then a hit at 61 (gap 21 > maxGap) restarts it.
+        // Two hits at 0 and 20 (gap 20 == maxGap) activate the chain (minHits 2);
+        // a third at 40 (gap 20) continues it, then a tick at 61 (gap 21 > maxGap) ends it.
         ComboTracker tracker = tracker();
         tracker.onKnockShipped(A, t(0));
-        assertEquals(ComboTransition.Kind.NONE, one(tracker.onKnockShipped(A, t(20))).kind());
-        // The chain now has two hits (gaps all == 20, none expired). A third at 40
-        // (gap 20) activates it.
-        assertTrue(one(tracker.onKnockShipped(A, t(40))).started());
+        // The second hit at 20 (gap 20 == maxGap, not expired) activates it.
+        assertTrue(one(tracker.onKnockShipped(A, t(20))).started());
+        assertTrue(tracker.active());
+        // A third at 40 (gap 20) continues the active chain — no transition, lastHit → 40.
+        assertEquals(ComboTransition.Kind.NONE, one(tracker.onKnockShipped(A, t(40))).kind());
         assertTrue(tracker.active());
 
         // onTick at gap == maxGap (tick 60, lastHit 40) does NOT expire.
@@ -101,9 +110,9 @@ class ComboTrackerTest {
         assertTrue(restart.ended());
         assertEquals(ComboEndReason.EXPIRED, restart.reason());
         assertFalse(tracker.active(), "the fresh chain is developing, not active");
-        // Two more within the window re-activate.
-        assertEquals(ComboTransition.Kind.NONE, one(tracker.onKnockShipped(A, t(51))).kind());
-        assertTrue(one(tracker.onKnockShipped(A, t(61))).started());
+        // One more within the window re-activates (minHits 2: the second hit of the fresh chain).
+        assertTrue(one(tracker.onKnockShipped(A, t(51))).started());
+        assertTrue(tracker.active());
     }
 
     @Test
@@ -113,9 +122,8 @@ class ComboTrackerTest {
         assertTrue(switched.ended(), "A's combo ends when B takes over");
         assertEquals(A, switched.attacker());
         assertFalse(tracker.active());
-        // B now develops its own chain.
-        tracker.onKnockShipped(B, t(30));
-        ComboTransition bActive = one(tracker.onKnockShipped(B, t(35)));
+        // B now develops its own chain; its SECOND hit activates it (minHits 2).
+        ComboTransition bActive = one(tracker.onKnockShipped(B, t(30)));
         assertTrue(bActive.started());
         assertEquals(B, bActive.attacker());
         assertEquals(B, tracker.snapshot().attackerId());
@@ -158,8 +166,7 @@ class ComboTrackerTest {
     @Test
     void ownHitOnADevelopingChainResetsSilently() {
         ComboTracker tracker = tracker();
-        tracker.onKnockShipped(A, t(0));
-        tracker.onKnockShipped(A, t(10)); // two hits, not yet active
+        tracker.onKnockShipped(A, t(0)); // one hit, still developing (minHits 2 not reached)
         ComboTransition reset = tracker.onOwnHitLanded(t(12));
         assertEquals(ComboTransition.Kind.NONE, reset.kind(), "no START had fired — no END to balance");
         assertFalse(tracker.active());
