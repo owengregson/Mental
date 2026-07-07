@@ -13,7 +13,6 @@ import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
-import me.vexmc.mental.v5.config.settings.VerticalTrimSettings;
 
 /**
  * The single enumerable feature registry (spec §7). One constant per feature,
@@ -310,18 +309,6 @@ public enum Feature {
                     Facets.none("no damage contribution"),
                     Facets.none("no damage contribution")),
             new SettingsKey<>("combo-reach-handicap", ReachHandicapSettings.class)),
-
-    COMBO_VERTICAL("combo-vertical", Family.COMBO, "Combo Vertical",
-            "Shape the FRESH vertical knock so a juggled victim reaches a bounded target apex — a"
-                    + " higher victim is denied their reach-back at closer range. Rides the same combo"
-                    + " detection as Combo Hold; hard-bounded, minimal shaping.",
-            "TRIPWIRE_HOOK", false, Set.of(),
-            new Facets(
-                    Facets.none("shapes the fresh vertical knock through the velocity pipeline, not a Bukkit rule"),
-                    Facets.none("emits no packets of its own — the shaped vertical rides the existing pipeline"),
-                    Facets.none("no damage contribution"),
-                    Facets.none("no damage contribution")),
-            new SettingsKey<>("combo-vertical", VerticalTrimSettings.class)),
 
     /* --------------------------------- POTS --------------------------------- */
 

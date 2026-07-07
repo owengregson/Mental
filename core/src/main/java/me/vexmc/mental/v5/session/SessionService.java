@@ -106,16 +106,15 @@ public final class SessionService implements Listener, SessionAccess {
 
     /**
      * How many combo KEEPERS hold combo detection open (combo-hold §3; the 2.4.5
-     * detection/servo split). The {@code ComboHoldUnit} (the pocket servo), the
-     * {@code ComboReachHandicapUnit} (the reach handicap), and the {@code
-     * ComboVerticalUnit} (the vertical trim) each retain/release it on assemble/close,
-     * so detection is live iff AT LEAST ONE keeper holds it — every keeper rides the
-     * combo transitions independently of the others. This is the reconciler's scope
-     * truth, not a re-read config flag: each feature has at most one open scope, so
-     * each contributes 0 or 1. While the count is 0, sessions carry no tracker and the
-     * per-tick sweep does nothing (zero-touch); the transition to 0 is reconciled on
-     * each session's next tick (tracker dropped, one DISABLED end fired on its
-     * owning thread).
+     * detection/servo split). The {@code ComboHoldUnit} (the pocket servo) and the
+     * {@code ComboReachHandicapUnit} (the reach handicap) each retain/release it on
+     * assemble/close, so detection is live iff AT LEAST ONE keeper holds it — every
+     * keeper rides the combo transitions independently of the others. This is the
+     * reconciler's scope truth, not a re-read config flag: each feature has at most
+     * one open scope, so each contributes 0 or 1. While the count is 0, sessions
+     * carry no tracker and the per-tick sweep does nothing (zero-touch); the
+     * transition to 0 is reconciled on each session's next tick (tracker dropped,
+     * one DISABLED end fired on its owning thread).
      */
     private final AtomicInteger comboKeepers = new AtomicInteger();
 

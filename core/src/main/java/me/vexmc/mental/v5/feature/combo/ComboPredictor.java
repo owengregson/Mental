@@ -7,7 +7,6 @@ import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.DriftEstimator;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PredictorInputs;
-import me.vexmc.mental.kernel.math.VerticalTrim;
 import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.model.TickStamp;
@@ -339,21 +338,6 @@ public final class ComboPredictor {
                 + " targetStatic=" + fmt(s.staticTarget()) + " targetUsed=" + fmt(s.target())
                 + " sigmaStar=" + fmt(s.sigmaStar()) + " sigma=" + fmt(s.sigma())
                 + " dNext=" + fmt(s.predictedDNext()) + " declined=" + s.declined();
-    }
-
-    /**
-     * The per-hit vertical-trim debug line (COMBO_VERTICAL). Mirrors {@link #debugLine}
-     * for the vertical keeper: the era vs. shipped fresh vertical, the applied bounded
-     * delta, the target vs. achieved apex, and the {@code saturated} over-shaping flag —
-     * the observable "the shaper wanted more than the bound allows" signal.
-     */
-    public static String verticalTrimLine(UUID victimId, UUID attackerId, VerticalTrim.Result r) {
-        return "combo-vertical"
-                + " victim=" + victimId + " attacker=" + attackerId
-                + " eraV=" + fmt(r.eraVertical()) + " shippedV=" + fmt(r.shipped())
-                + " delta=" + fmt(r.delta())
-                + " targetApex=" + fmt(r.targetApex()) + " achievedApex=" + fmt(r.achievedApex())
-                + " saturated=" + r.saturated();
     }
 
     private static String fmt(double value) {

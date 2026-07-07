@@ -188,48 +188,6 @@ public final class KnockbackEngine {
             boolean freshSprint,
             PocketServoConfig servo,
             PredictorInputs predictorInputs) {
-        // The vertical trim (COMBO_VERTICAL) rides on TOP of this seam via the
-        // overload below; INACTIVE ⇒ no vertical shaping, byte-identical here.
-        return computePaced(
-                attacker, victim, profile, victimYOverride, random, freshSprint,
-                servo, predictorInputs, VerticalTrimConfig.INACTIVE);
-    }
-
-    /**
-     * Melee knockback with BOTH combo keepers (combo-hold §3.2 + COMBO_VERTICAL) —
-     * the horizontal pocket servo σ and the bounded vertical trim, returning the
-     * vector plus the pace AND combo factors applied.
-     *
-     * <p><b>Compose order (design-pinned).</b> The vertical trim runs FIRST and
-     * fixes the shipped fresh vertical; the pocket servo then reads THAT shaped
-     * vertical (not the era value) for its flight-window prediction, so the victim's
-     * predicted elevation arc — and with it the σ that places them at {@code target}
-     * — reflects the height the trim actually ships. The trim adjusts the FRESH
-     * vertical ONLY (the A3-analog law): it starts from the era shipped vertical V0,
-     * which already folds the friction-carried residual and any latency-comp
-     * override, and adds a hard-bounded fresh delta — never touching the horizontal
-     * or the residual. σ, in turn, never touches the vertical.</p>
-     *
-     * <p><b>Latency-compensation precedence.</b> {@code victimYOverride} is latency
-     * compensation's predicted victim vy at hit-land time; the era vertical replay
-     * ({@link #shippedVertical}) folds it into V0. The trim therefore shapes a vertical
-     * that ALREADY carries the ping correction and never re-derives {@code
-     * victimYOverride} — it composes downstream of latency comp, so the two cannot
-     * double-apply.</p>
-     *
-     * <p>At {@link VerticalTrimConfig#INACTIVE} — module off, not-this-attacker — the
-     * shipped vertical is the era stamp, byte-identical to the servo-only path.</p>
-     */
-    public static Paced computePaced(
-            EntityState attacker,
-            EntityState victim,
-            KnockbackProfile profile,
-            Double victimYOverride,
-            RandomGenerator random,
-            boolean freshSprint,
-            PocketServoConfig servo,
-            PredictorInputs predictorInputs,
-            VerticalTrimConfig verticalTrim) {
 
         if (resistanceCancels(victim, profile, random)) {
             return new Paced(null, 1.0, 1.0); // suppressed before compute ⇒ no factors applied
@@ -241,22 +199,13 @@ public final class KnockbackEngine {
         double pace = PaceScale.factor(attacker.moveSpeedAttr(), profile.paceScaling());
         double taper = profile.rangeReduction().reductionAt(distance(attacker, victim));
 
-        // COMBO_VERTICAL: the vertical trim runs FIRST and fixes the shipped fresh
-        // vertical, so the pocket servo below predicts the victim's arc from the height
-        // the trim actually ships (the design's compose order). Null (no shippedVertical
-        // replay, no override) when inactive — byte-identical to the servo-only path.
-        Double shapedVertical = verticalTrim != null && verticalTrim.active()
-                ? shapedVertical(attacker, victim, profile, victimYOverride, freshSprint,
-                        verticalTrim, predictorInputs)
-                : null;
-
         // The pocket servo σ: the exact inverse solve, computed BEFORE the vector so
         // its inputs (the σ=1 fresh horizontal and the shipped vertical stamp) are the
-        // era values the flight model expects — with the vertical trim on, it reads the
-        // SHAPED vertical stamp. 1.0 (skipped) when the servo is inactive for this hit.
+        // era values the flight model expects. 1.0 (skipped) when the servo is
+        // inactive for this hit.
         double combo = servo.active()
                 ? servoFactor(attacker, victim, profile, victimYOverride, pace, taper,
-                        freshSprint, servo, predictorInputs, shapedVertical).sigma()
+                        freshSprint, servo, predictorInputs).sigma()
                 : 1.0;
         double freshFactor = pace * combo;
 
@@ -278,35 +227,7 @@ public final class KnockbackEngine {
             vector[1] += wtap ? profile.wtapExtra().vertical() : profile.extra().vertical();
         }
 
-        KnockbackVector finished = finish(vector, victim, profile);
-        // Ship the shaped vertical: finish() reproduced the era vertical exactly (it is
-        // the faithful replay shippedVertical mirrors, the same value σ read), so
-        // overriding it with the bounded shaped value is the whole vertical-trim effect
-        // — the fresh vertical only, the horizontal and residual untouched. Null when
-        // the trim is inactive ⇒ no override ⇒ zero-touch.
-        if (shapedVertical != null) {
-            finished = new KnockbackVector(finished.x(), shapedVertical, finished.z());
-        }
-        return new Paced(finished, pace, combo);
-    }
-
-    /**
-     * The bounded shaped fresh vertical (COMBO_VERTICAL) — the era shipped vertical V0
-     * (with any latency-comp override already folded in) passed through the
-     * {@link VerticalTrim} solve toward the config's target apex, clamped to the config
-     * bound. {@code bonus}/{@code wtap} mirror the engine's vertical replay so V0 is the
-     * exact stamp the vector ships. Kept separate so the compute path and {@link
-     * #explainVerticalTrim} share one derivation.
-     */
-    private static double shapedVertical(
-            EntityState attacker, EntityState victim, KnockbackProfile profile, Double victimYOverride,
-            boolean freshSprint, VerticalTrimConfig verticalTrim, PredictorInputs predictorInputs) {
-        double sprintLevels = attacker.sprinting() ? profile.sprintFactor() : 0.0;
-        double enchantLevels = attacker.knockbackEnchantLevel();
-        boolean bonus = sprintLevels + enchantLevels > 0;
-        boolean wtap = profile.wtapExtra().enabled() && sprintLevels > 0 && freshSprint;
-        double eraVertical = shippedVertical(victim, profile, victimYOverride, bonus, wtap);
-        return VerticalTrim.trim(verticalTrim, eraVertical, predictorInputs.launchHeight()).shipped();
+        return new Paced(finish(vector, victim, profile), pace, combo);
     }
 
     /**
@@ -365,30 +286,6 @@ public final class KnockbackEngine {
     }
 
     /**
-     * The full vertical-trim solve for one melee hit (COMBO_VERTICAL), exposed so the
-     * core can push the {@link VerticalTrim.Result} — the era vs. shipped vertical, the
-     * applied delta, the target vs. achieved apex, and the {@link
-     * VerticalTrim.Result#saturated()} over-shaping flag — to the debug sink WITHOUT
-     * re-deriving the era vertical the engine already replays. Shares the same
-     * derivation the compute path uses ({@link #shapedVertical}).
-     */
-    public static VerticalTrim.Result explainVerticalTrim(
-            EntityState attacker,
-            EntityState victim,
-            KnockbackProfile profile,
-            Double victimYOverride,
-            boolean freshSprint,
-            VerticalTrimConfig verticalTrim,
-            PredictorInputs predictorInputs) {
-        double sprintLevels = attacker.sprinting() ? profile.sprintFactor() : 0.0;
-        double enchantLevels = attacker.knockbackEnchantLevel();
-        boolean bonus = sprintLevels + enchantLevels > 0;
-        boolean wtap = profile.wtapExtra().enabled() && sprintLevels > 0 && freshSprint;
-        double eraVertical = shippedVertical(victim, profile, victimYOverride, bonus, wtap);
-        return VerticalTrim.trim(verticalTrim, eraVertical, predictorInputs.launchHeight());
-    }
-
-    /**
      * The pocket-servo solve for one melee hit (combo-hold §3.2/§3.2b). Extracts the
      * era quantities the {@link PocketServo} solve needs — the horizontal separation
      * {@code d0}, the σ=1 fresh horizontal and the friction-carried residual both
@@ -409,29 +306,6 @@ public final class KnockbackEngine {
             boolean freshSprint,
             PocketServoConfig servo,
             PredictorInputs predictorInputs) {
-        return servoFactor(attacker, victim, profile, victimYOverride, pace, taper,
-                freshSprint, servo, predictorInputs, null);
-    }
-
-    /**
-     * As {@link #servoFactor(EntityState, EntityState, KnockbackProfile, Double, double,
-     * double, boolean, PocketServoConfig, PredictorInputs)}, but with an optional shipped
-     * vertical stamp override — the vertical the COMBO_VERTICAL trim ships, which the
-     * servo's flight window must read instead of the engine's own era stamp (the
-     * compose order: vertical trim first, servo reads its result). Null ⇒ the era
-     * stamp (byte-identical to the non-trim path).
-     */
-    private static PocketServo.Solution servoFactor(
-            EntityState attacker,
-            EntityState victim,
-            KnockbackProfile profile,
-            Double victimYOverride,
-            double pace,
-            double taper,
-            boolean freshSprint,
-            PocketServoConfig servo,
-            PredictorInputs predictorInputs,
-            Double verticalStampOverride) {
         double deltaX = attacker.x() - victim.x();
         double deltaZ = attacker.z() - victim.z();
         double separation = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
@@ -467,12 +341,9 @@ public final class KnockbackEngine {
         double residualCarry =
                 (victim.vx() * profile.friction().x() * ux + victim.vz() * profile.friction().z() * uz)
                         * airHorizontal;
-        // The shipped vertical stamp: the COMBO_VERTICAL shaped value when the trim is
-        // live (so the servo predicts the arc from the height the knock actually ships),
-        // else the engine's own faithful era replay.
-        double verticalStamp = verticalStampOverride != null
-                ? verticalStampOverride
-                : shippedVertical(victim, profile, victimYOverride, bonus, wtap);
+        // The shipped vertical stamp: the engine's own faithful era replay (the servo
+        // never shapes it, only reads it to bound the flight window).
+        double verticalStamp = shippedVertical(victim, profile, victimYOverride, bonus, wtap);
 
         return PocketServo.solve(
                 servo, predictorInputs, separation, residualCarry, freshEra,

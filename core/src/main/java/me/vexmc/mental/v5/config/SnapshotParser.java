@@ -19,7 +19,6 @@ import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
-import me.vexmc.mental.v5.config.settings.VerticalTrimSettings;
 import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Material;
@@ -119,7 +118,6 @@ public final class SnapshotParser {
             case COMBO_REACH_HANDICAP -> parseReachHandicap(
                     reader(main, "combo-reach-handicap", "config.yml", issues),
                     reader(main, "combo-hold", "config.yml", issues).sub("reach-handicap"));
-            case COMBO_VERTICAL -> parseVerticalTrim(reader(main, "combo-vertical", "config.yml", issues));
             case POT_FILL -> parsePotFill(reader(main, "pot-fill", "config.yml", issues));
             case FAST_POTS -> parseFastPots(reader(main, "fast-pots", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
@@ -281,20 +279,6 @@ public final class SnapshotParser {
             return TargetMode.BOUNDARY;
         }
         return reader.oneOf("target-mode", def, TargetMode.class);
-    }
-
-    /**
-     * The vertical-trim knobs (COMBO_VERTICAL). {@code target-apex} is a plain
-     * blocks value (≥ 0); {@code bound} is HARD-CAPPED to {@code [0, 0.2]} — the bound
-     * is the era-safety guarantee, so an operator can only ever make the shaping
-     * SMALLER, never widen it into non-minimal shaping (a value past the cap warns and
-     * clamps). An absent section uses the defaults; the module toggle makes it a no-op.
-     */
-    private static VerticalTrimSettings parseVerticalTrim(ConfigReader reader) {
-        VerticalTrimSettings d = VerticalTrimSettings.DEFAULTS;
-        return new VerticalTrimSettings(
-                reader.numberAtLeast("target-apex", d.targetApex(), 0.0),
-                reader.numberClamped("bound", d.bound(), 0.0, 0.2));
     }
 
     /**
