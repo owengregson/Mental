@@ -51,7 +51,7 @@ public final class BurstSender {
     /**
      * Ships the victim burst: an optional velocity pre-send plus the hurt
      * animation, in plan order, single flush. A null {@code velocity} means the
-     * velocity component was suppressed (anticheat gate, OCM ownership, pending
+     * velocity component was suppressed (anticheat gate, pending
      * resistance roll) — the hurt still ships, bare.
      *
      * @param user            the victim's PacketEvents user, or null (unsendable)

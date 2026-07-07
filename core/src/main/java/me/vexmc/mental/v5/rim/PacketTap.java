@@ -102,8 +102,10 @@ public final class PacketTap extends PacketListenerAbstract {
         Domain domain = domains.domainFor(id);
         if (packet.getAction() == WrapperPlayClientEntityAction.Action.START_SPRINTING) {
             domain.sprint().onSprintStart();
+            domain.resetModel().onSprintStart(); // the dynamic-chase ramp restarts on a (re-)engage
         } else if (packet.getAction() == WrapperPlayClientEntityAction.Action.STOP_SPRINTING) {
             domain.sprint().onSprintStop();
+            domain.resetModel().onSprintStop();
         }
     }
 

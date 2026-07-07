@@ -1,7 +1,5 @@
 package me.vexmc.mental.v5.feature;
 
-import java.util.Set;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
@@ -18,11 +16,11 @@ import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
  * The single enumerable feature registry (spec §7). One constant per feature,
  * carrying its complete identity: the {@code yamlKey} (the exact {@code modules.*}
  * string that is the operator contract — copied from the retired
- * {@code MentalConfig.reload}; {@code null} for the two always-on infrastructure
- * descriptors), the dashboard {@link Family}, display metadata (blurb + icon
+ * {@code MentalConfig.reload}; {@code null} for the always-on infrastructure
+ * descriptor), the dashboard {@link Family}, display metadata (blurb + icon
  * copied from {@code gui/menu/Catalog}; the concise display name authored here,
- * as Catalog carries none), the era-default enablement, the {@link MechanicToken}s
- * it restores, its {@link Facets} declaration, and its typed {@link SettingsKey}.
+ * as Catalog carries none), the era-default enablement, its {@link Facets}
+ * declaration, and its typed {@link SettingsKey}.
  *
  * <p>Zero silent gaps by construction (B5): every non-infrastructure feature
  * declares all four facets and a settings key; a registry test enumerates the
@@ -36,7 +34,7 @@ public enum Feature {
 
     HIT_REGISTRATION("hit-registration", Family.DELIVERY, "Hit Registration",
             "Async hit registration — attacks validated on the netty thread, damage on the victim's region.",
-            "IRON_SWORD", true, Set.of(MechanicToken.TOOL_DAMAGE),
+            "IRON_SWORD", true,
             new Facets(
                     Facets.none("async delivery pipeline, not a Bukkit rule"),
                     Facets.handled(),
@@ -46,7 +44,7 @@ public enum Feature {
 
     WTAP_REGISTRATION("wtap-registration", Family.DELIVERY, "W-Tap Registration",
             "Reads the attacker's sprint in packet-arrival order, so a w-tap registers however fast the tap.",
-            "FEATHER", true, Set.of(),
+            "FEATHER", true,
             new Facets(
                     Facets.none("arrival-order sprint read feeding the knockback engine"),
                     Facets.none("emits no packets of its own"),
@@ -56,19 +54,14 @@ public enum Feature {
 
     ANTICHEAT_COMPAT(null, Family.DELIVERY, "Anticheat Coexistence",
             "Always-on infrastructure — disables netty-thread pre-send while a prediction anticheat is present.",
-            "IRON_BARS", true, Set.of(), null,
+            "IRON_BARS", true, null,
             new SettingsKey<>("anticheat-compat", NoSettings.class)),
-
-    OCM_COMPAT(null, Family.DELIVERY, "OldCombatMechanics Coexistence",
-            "Always-on infrastructure — binds the arbiter and derives the coexistence startup warnings.",
-            "DIAMOND_SWORD", true, Set.of(), null,
-            new SettingsKey<>("ocm-compat", NoSettings.class)),
 
     /* ------------------------------- KNOCKBACK ------------------------------ */
 
     KNOCKBACK("knockback", Family.KNOCKBACK, "Knockback",
             "Melee knockback through the velocity pipeline, shaped by the active profile.",
-            "PISTON", true, Set.of(MechanicToken.MELEE_KNOCKBACK, MechanicToken.ARROW_KNOCKBACK),
+            "PISTON", true,
             new Facets(
                     Facets.none("velocity pipeline, not a rule"),
                     Facets.handled(),
@@ -78,7 +71,7 @@ public enum Feature {
 
     LATENCY_COMPENSATION("latency-compensation", Family.KNOCKBACK, "Latency Compensation",
             "Ping-aware vertical-knockback correction.",
-            "CLOCK", true, Set.of(),
+            "CLOCK", true,
             new Facets(
                     Facets.none("vertical correction rides the knockback pipeline"),
                     Facets.handled(),
@@ -88,7 +81,7 @@ public enum Feature {
 
     FISHING_KNOCKBACK("fishing-knockback", Family.KNOCKBACK, "Fishing Knockback",
             "1.7 rod combat — hooks are real zero-damage hits that knock.",
-            "FISHING_ROD", true, Set.of(MechanicToken.FISHING_KNOCKBACK),
+            "FISHING_ROD", true,
             new Facets(
                     Facets.handled(),
                     Facets.none("emits no packets of its own"),
@@ -98,7 +91,7 @@ public enum Feature {
 
     ROD_VELOCITY("rod-velocity", Family.KNOCKBACK, "Rod Velocity",
             "1.7 rod cast feel — launch speed, spread, and flight gravity.",
-            "TRIPWIRE_HOOK", true, Set.of(MechanicToken.FISHING_ROD_VELOCITY),
+            "TRIPWIRE_HOOK", true,
             new Facets(
                     Facets.handled(),
                     Facets.none("server-side cast velocity only"),
@@ -108,7 +101,7 @@ public enum Feature {
 
     PROJECTILE_KNOCKBACK("projectile-knockback", Family.KNOCKBACK, "Projectile Knockback",
             "1.7 projectile knockback — snowballs, eggs, pearls, and arrows.",
-            "SNOWBALL", true, Set.of(MechanicToken.PROJECTILE_KNOCKBACK),
+            "SNOWBALL", true,
             new Facets(
                     Facets.handled(),
                     Facets.none("knockback ships through the velocity pipeline"),
@@ -120,7 +113,7 @@ public enum Feature {
 
     ARMOUR_STRENGTH("old-armour-strength", Family.DAMAGE, "Old Armour Strength",
             "1.8 flat armour reduction — 4% per point, no toughness.",
-            "IRON_CHESTPLATE", false, Set.of(MechanicToken.ARMOUR_STRENGTH),
+            "IRON_CHESTPLATE", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -130,7 +123,7 @@ public enum Feature {
 
     ARMOUR_DURABILITY("old-armour-durability", Family.DAMAGE, "Old Armour Durability",
             "1.8 armour-durability Unbreaking skip.",
-            "DIAMOND_CHESTPLATE", false, Set.of(MechanicToken.ARMOUR_DURABILITY),
+            "DIAMOND_CHESTPLATE", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -140,7 +133,7 @@ public enum Feature {
 
     CRIT_FALLBACK("old-critical-hits", Family.DAMAGE, "Old Critical Hits",
             "1.8 crit rule — x1.5 with no sprint/cooldown gate (fast-path-off hits).",
-            "NETHER_STAR", false, Set.of(MechanicToken.CRITICAL_HITS),
+            "NETHER_STAR", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -150,7 +143,7 @@ public enum Feature {
 
     TOOL_DURABILITY("old-tool-durability", Family.DAMAGE, "Old Tool Durability",
             "Restore weapon durability loss on fast-path melee hits.",
-            "IRON_PICKAXE", false, Set.of(MechanicToken.TOOL_DURABILITY),
+            "IRON_PICKAXE", false,
             new Facets(
                     Facets.none("applied inline on the fast-path hit"),
                     Facets.none("no client-visible change"),
@@ -160,7 +153,7 @@ public enum Feature {
 
     SWORD_BLOCKING("sword-blocking", Family.DAMAGE, "Sword Blocking",
             "Restore 1.7/1.8 right-click sword blocking — a blocked hit takes (1 + dmg) x 0.5.",
-            "STONE_SWORD", false, Set.of(MechanicToken.SWORD_BLOCKING),
+            "STONE_SWORD", false,
             new Facets(
                     Facets.handled(),
                     Facets.handled(),
@@ -172,7 +165,7 @@ public enum Feature {
 
     ATTACK_COOLDOWN("attack-cooldown", Family.CADENCE, "Attack Cooldown",
             "Remove the 1.9 attack cooldown — full-charge damage on every swing.",
-            "NETHERITE_SWORD", false, Set.of(MechanicToken.ATTACK_COOLDOWN),
+            "NETHERITE_SWORD", false,
             new Facets(
                     Facets.handled(),
                     Facets.handled(),
@@ -182,7 +175,7 @@ public enum Feature {
 
     ATTACK_SOUNDS("disable-attack-sounds", Family.CADENCE, "Disable Attack Sounds",
             "Suppress the 1.9 swing-result sounds — 1.7/1.8 combat was silent.",
-            "NOTE_BLOCK", false, Set.of(MechanicToken.ATTACK_SOUNDS),
+            "NOTE_BLOCK", false,
             new Facets(
                     Facets.none("no behavior change, cosmetic only"),
                     Facets.handled(),
@@ -192,7 +185,7 @@ public enum Feature {
 
     SWEEP("disable-sword-sweep", Family.CADENCE, "Disable Sword Sweep",
             "Disable the 1.9 sweep attack — swords hit a single target, no sweep particle.",
-            "IRON_SWORD", false, Set.of(MechanicToken.SWEEP),
+            "IRON_SWORD", false,
             new Facets(
                     Facets.handled(),
                     Facets.handled(),
@@ -204,7 +197,7 @@ public enum Feature {
 
     GOLDEN_APPLES("old-golden-apples", Family.SUSTAIN, "Old Golden Apples",
             "1.8.9 golden-apple effects and the notch-apple recipe.",
-            "ENCHANTED_GOLDEN_APPLE", false, Set.of(MechanicToken.GOLDEN_APPLES),
+            "ENCHANTED_GOLDEN_APPLE", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -214,7 +207,7 @@ public enum Feature {
 
     ENDER_PEARL_COOLDOWN("disable-enderpearl-cooldown", Family.SUSTAIN, "Disable Ender-Pearl Cooldown",
             "Remove the 1.9 ender-pearl throw cooldown.",
-            "ENDER_PEARL", false, Set.of(MechanicToken.ENDER_PEARL_COOLDOWN),
+            "ENDER_PEARL", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -224,7 +217,7 @@ public enum Feature {
 
     REGEN("old-player-regen", Family.SUSTAIN, "Old Player Regen",
             "1.8 natural regen — heal 1 HP every 4s at food level 18+.",
-            "GOLDEN_APPLE", false, Set.of(MechanicToken.REGEN),
+            "GOLDEN_APPLE", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -234,7 +227,7 @@ public enum Feature {
 
     POTION_DURATIONS("old-potion-durations", Family.SUSTAIN, "Old Potion Durations",
             "Restore the pre-1.9 potion durations.",
-            "POTION", false, Set.of(MechanicToken.POTION_DURATIONS),
+            "POTION", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -244,7 +237,7 @@ public enum Feature {
 
     POTION_VALUES("old-potion-values", Family.SUSTAIN, "Old Potion Values",
             "Restore the pre-1.9 Strength/Weakness damage values.",
-            "SPLASH_POTION", false, Set.of(MechanicToken.POTION_VALUES),
+            "SPLASH_POTION", false,
             new Facets(
                     Facets.none("applied to fast-path melee only"),
                     Facets.none("no client-visible change"),
@@ -256,7 +249,7 @@ public enum Feature {
 
     CRAFTING("disable-crafting", Family.LOADOUT, "Disable Crafting",
             "Make the configured items uncraftable (shield by default).",
-            "CRAFTING_TABLE", false, Set.of(MechanicToken.CRAFTING),
+            "CRAFTING_TABLE", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -266,7 +259,7 @@ public enum Feature {
 
     OFFHAND("disable-offhand", Family.LOADOUT, "Disable Off-Hand",
             "Block items from the off-hand slot — the slot did not exist pre-1.9.",
-            "SHIELD", false, Set.of(MechanicToken.OFFHAND),
+            "SHIELD", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -276,7 +269,7 @@ public enum Feature {
 
     HITBOX("old-hitboxes", Family.LOADOUT, "Old Hitboxes",
             "1.7/1.8 melee reach (3.0) and hitbox margin, where the server allows.",
-            "TARGET", false, Set.of(MechanicToken.HITBOX),
+            "TARGET", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change"),
@@ -286,9 +279,9 @@ public enum Feature {
 
     /* -------------------------------- COMBO --------------------------------- */
 
-    COMBO_HOLD("combo-hold", Family.COMBO, "Combo Hold",
-            "The pocket servo — shapes the fresh melee knock to hold a sweet-spot combo.",
-            "TRIPWIRE_HOOK", false, Set.of(),
+    COMBO_HOLD("combo-hold", Family.COMBO, "Solve Horizontal KB",
+            "Solve the fresh horizontal melee knock to land the victim in the un-retaliatable pocket, holding a sweet-spot combo.",
+            "ITEM_FRAME", false,
             new Facets(
                     Facets.none("scales the fresh melee knock through the velocity pipeline, not a Bukkit rule"),
                     Facets.none("emits no packets of its own — the shaped knock rides the existing pipeline"),
@@ -296,10 +289,10 @@ public enum Feature {
                     Facets.none("no damage contribution")),
             new SettingsKey<>("combo-hold", ComboSettings.class)),
 
-    COMBO_REACH_HANDICAP("combo-reach-handicap", Family.COMBO, "Combo Reach Handicap",
+    COMBO_REACH_HANDICAP("combo-reach-handicap", Family.COMBO, "Scale Reach",
             "Shorten a juggled victim's reach while their combo is held, so a launched victim can't"
-                    + " answer. Requires Combo Hold; 1.20.5+.",
-            "TRIPWIRE_HOOK", false, Set.of(),
+                    + " answer. Pairs with Solve Horizontal KB under Combo Solver; 1.20.5+.",
+            "REPEATER", false,
             new Facets(
                     // The attribute lever IS a server-side rule (applied on combo transitions).
                     Facets.handled(),
@@ -314,7 +307,7 @@ public enum Feature {
 
     POT_FILL("pot-fill", Family.POTS, "Pot Fill",
             "The /potfill command — fill empty inventory slots with splash Instant Health II.",
-            "SPLASH_POTION", false, Set.of(),
+            "SPLASH_POTION", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("no client-visible change — inventory is filled server-side"),
@@ -324,7 +317,7 @@ public enum Feature {
 
     FAST_POTS("fast-pots", Family.POTS, "Fast Pots",
             "Redirect a steeply-thrown splash potion at the thrower's own feet at a multiplied speed.",
-            "SPLASH_POTION", false, Set.of(),
+            "SPLASH_POTION", false,
             new Facets(
                     Facets.handled(),
                     Facets.none("velocity is re-aimed server-side; the client sees a normal throw"),
@@ -338,7 +331,6 @@ public enum Feature {
     private final String blurb;
     private final String iconName;
     private final boolean defaultEnabled;
-    private final Set<MechanicToken> tokens;
     private final Facets facets;
     private final SettingsKey<?> settingsKey;
 
@@ -349,7 +341,6 @@ public enum Feature {
             String blurb,
             String iconName,
             boolean defaultEnabled,
-            Set<MechanicToken> tokens,
             Facets facets,
             SettingsKey<?> settingsKey) {
         this.yamlKey = yamlKey;
@@ -358,7 +349,6 @@ public enum Feature {
         this.blurb = blurb;
         this.iconName = iconName;
         this.defaultEnabled = defaultEnabled;
-        this.tokens = Set.copyOf(tokens);
         this.facets = facets;
         this.settingsKey = settingsKey;
     }
@@ -409,10 +399,6 @@ public enum Feature {
 
     public boolean defaultEnabled() {
         return defaultEnabled;
-    }
-
-    public Set<MechanicToken> tokens() {
-        return tokens;
     }
 
     /** The four-surface declaration, or {@code null} for infrastructure. */

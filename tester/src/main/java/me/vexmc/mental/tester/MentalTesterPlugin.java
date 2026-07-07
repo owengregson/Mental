@@ -17,7 +17,6 @@ import me.vexmc.mental.tester.suite.FoliaCombatSmoke;
 import me.vexmc.mental.tester.suite.HitboxSuite;
 import me.vexmc.mental.tester.suite.InventoryRulesSuite;
 import me.vexmc.mental.tester.suite.KnockbackSuite;
-import me.vexmc.mental.tester.suite.OcmCoexistenceSuite;
 import me.vexmc.mental.tester.suite.PotsSuite;
 import me.vexmc.mental.tester.suite.ProfileSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
@@ -34,12 +33,10 @@ import org.bukkit.plugin.java.JavaPlugin;
  * Paper-shaped era suites drive cross-region state from one global context,
  * which Folia forbids; see {@code FoliaCombatSmoke} and Task 5.6).
  *
- * <p>4E restores the FULL suite list. On a plain server the active list is
+ * <p>On a plain server the active list is
  * {@code Boot, Knockback, Profile, Fishing, Projectile, EraParity, DamageRules,
  * Blocking, ConsumableRules, CosmeticSmoke, Hitbox, InventoryRules, Pots,
- * Command, Reload, ZeroTouch}; with OldCombatMechanics installed it is {@code Boot +
- * OcmCoexistence} (the coexistence suite asserts the ownership split the era
- * suites cannot, since OCM contests ownership).</p>
+ * Command, Combo, Reload, ZeroTouch}.</p>
  */
 public final class MentalTesterPlugin extends JavaPlugin {
 
@@ -65,7 +62,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
         // The suite tier for this boot, from the integration harness (-Dmental.tester.suites). "boot" is
         // the legacy-backport classload/boot-safety tier: run BootSuite ONLY, whatever else is detected —
         // feature correctness on those versions is promoted per-phase. Any other value (or absent, a manual
-        // boot) keeps the historical behavior, so every modern/Folia/OCM entry is untouched.
+        // boot) keeps the historical behavior, so every modern/Folia entry is untouched.
         String suites = System.getProperty("mental.tester.suites", "");
         boolean bootOnly = "boot".equals(suites);
 
@@ -73,7 +70,6 @@ public final class MentalTesterPlugin extends JavaPlugin {
         TaskHandle[] starter = new TaskHandle[1];
         starter[0] = scheduling.repeatGlobal(SETTLE_TICKS, 72_000L, () -> {
             starter[0].cancel();
-            boolean ocmInstalled = getServer().getPluginManager().getPlugin("OldCombatMechanics") != null;
             List<TestCase> suite = new ArrayList<>(BootSuite.tests(mental));
             if (bootOnly) {
                 getLogger().info("mental.tester.suites=boot — running the boot suite only "
@@ -85,12 +81,6 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 // thread and asserts the journal-recorded desk delivery (Task 5.6).
                 getLogger().info("Folia detected — running boot + the Folia combat smoke.");
                 suite.addAll(FoliaCombatSmoke.tests(mental, this));
-            } else if (ocmInstalled) {
-                // With OCM present the era suites assert Mental's ownership,
-                // which OCM contests; the coexistence suite (restored in 4E)
-                // instead asserts the ownership split through the live binding.
-                getLogger().info("OldCombatMechanics detected — running boot + the coexistence suite.");
-                suite.addAll(OcmCoexistenceSuite.tests(mental, this));
             } else {
                 suite.addAll(KnockbackSuite.tests(mental, this));
                 suite.addAll(ProfileSuite.tests(mental, this));

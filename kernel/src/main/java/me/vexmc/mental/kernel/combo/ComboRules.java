@@ -5,8 +5,9 @@ package me.vexmc.mental.kernel.combo;
  * {@link ComboTracker} reads. Every default is the design's:
  *
  * <ul>
- *   <li>{@code minHits 3} — the chain is <em>active</em> only from the third
- *       hit; two hits confirm intent before the servo engages.</li>
+ *   <li>{@code minHits 2} — the chain is <em>active</em> from the second hit;
+ *       the first develops the chain and the second confirms intent, engaging the
+ *       servo (a victim in a two-hit chain is "in combo" — no retaliation yet).</li>
  *   <li>{@code maxGapTicks 20} — sweet-spot cadence is ~10–12 ticks; a gap over
  *       20 ends the chain (era combos never idle that long).</li>
  *   <li>{@code groundedRunTicks 10} — brief ground-skims survive, a real
@@ -22,5 +23,5 @@ package me.vexmc.mental.kernel.combo;
 public record ComboRules(int minHits, int maxGapTicks, int groundedRunTicks, double blowoutBlocks) {
 
     /** The design defaults (§3.1) — the era-exact starting point the config carries. */
-    public static final ComboRules DEFAULTS = new ComboRules(3, 20, 10, 6.0);
+    public static final ComboRules DEFAULTS = new ComboRules(2, 20, 10, 6.0);
 }

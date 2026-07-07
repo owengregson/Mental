@@ -31,7 +31,7 @@ class HitTransactionTest {
                 new HitId(1L), new HitSource.Melee(),
                 UUID.randomUUID(), UUID.randomUUID(),
                 new SprintVerdict(true, Boolean.TRUE, new TickStamp(5)),
-                false, true, null, new TickStamp(5));
+                true, null, new TickStamp(5));
     }
 
     private static HitTransaction fresh() {

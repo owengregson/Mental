@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.ServerEnvironment;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.v5.feature.Registrar;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.platform.WeaponTooltipAdapter;
@@ -50,12 +49,6 @@ class AttackCooldownUnitTest {
             // Bukkit.getOnlinePlayers (unavailable in a plain unit test). The scope
             // still records+closes this registration, which is what we assert.
             return track("task");
-        }
-
-        @Override
-        public AutoCloseable rule(MechanicToken token, Runnable handlerRegistration) {
-            handlerRegistration.run();
-            return track("rule:" + token);
         }
     }
 

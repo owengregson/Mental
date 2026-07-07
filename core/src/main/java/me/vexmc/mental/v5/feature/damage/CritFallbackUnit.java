@@ -29,28 +29,15 @@ import org.bukkit.event.entity.EntityDamageEvent;
  * crit in charge with this feature explicitly enabled). Any melee that reaches
  * the vanilla {@code Player#attack} path gets the era ×1.5 fold here, whether
  * the fast path is globally on or not.
- *
- * <p>Crit/tool-damage ownership resolves through the SAME {@link DamageOwnership}
- * the fast path holds (mandate §4.6): the forgotten-gate bug — the retired
- * fallback module omitted the OCM gate the fast path had — is structurally dead,
- * because both paths read one verdict source. When OCM owns crits for the
- * attacker, this unit yields so OCM stays the single source of truth.</p>
  */
 public final class CritFallbackUnit implements FeatureUnit, Listener {
 
-    private final DamageOwnership ownership;
     private final Supplier<Snapshot> snapshot;
     private final SessionService sessions;
 
-    public CritFallbackUnit(DamageOwnership ownership, Supplier<Snapshot> snapshot, SessionService sessions) {
-        this.ownership = ownership;
+    public CritFallbackUnit(Supplier<Snapshot> snapshot, SessionService sessions) {
         this.snapshot = snapshot;
         this.sessions = sessions;
-    }
-
-    /** The shared crit/tool-damage verdict source — identical instance to the fast-path shaper. */
-    public DamageOwnership ownership() {
-        return ownership;
     }
 
     @Override
@@ -77,10 +64,6 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
         // damage() calls with — never the global config knob, whose coverage is
         // per-hit in reality.
         if (fastPathMinted(event, attacker)) {
-            return;
-        }
-        // The shared verdict: OCM owns crits for this attacker → yield entirely.
-        if (!ownership.mentalOwnsCriticalHits(attacker.getUniqueId())) {
             return;
         }
         // Era crit posture (shared predicate with the fast path). Sprinting does

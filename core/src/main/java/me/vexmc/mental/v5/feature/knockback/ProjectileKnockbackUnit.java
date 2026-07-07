@@ -6,7 +6,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Scheduling;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PunchMath;
@@ -22,7 +21,6 @@ import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.Vectors;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.delivery.HitIds;
@@ -89,7 +87,6 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     private record PunchStamp(int level, long stampNanos) {}
 
     private final SessionService sessions;
-    private final OcmBinding ocmBinding;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
     private final HitIds ids;
@@ -136,12 +133,11 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     private final boolean projectileHitEntitySupported;
 
     public ProjectileKnockbackUnit(
-            Plugin plugin, SessionService sessions, OcmBinding ocmBinding, Scheduling scheduling,
+            Plugin plugin, SessionService sessions, Scheduling scheduling,
             Supplier<Snapshot> snapshot, HitIds ids, TickClock clock,
             boolean projectileKnockbackRestored) {
         this.plugin = plugin;
         this.sessions = sessions;
-        this.ocmBinding = ocmBinding;
         this.scheduling = scheduling;
         this.snapshot = snapshot;
         this.ids = ids;
@@ -291,9 +287,6 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         if (!isThrown(projectile) || !(event.getHitEntity() instanceof Player victim)) {
             return;
         }
-        if (!ocmBinding.mentalOwns(MechanicToken.PROJECTILE_KNOCKBACK, victim.getUniqueId())) {
-            return;
-        }
         if (!isKnockable(victim, projectile.getShooter())) {
             return;
         }
@@ -333,10 +326,6 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
         } else if (event.getDamager() instanceof EnderPearl) {
             substitute = settings.enderPearlDamage();
         } else {
-            return;
-        }
-        UUID decider = event.getEntity() instanceof Player victim ? victim.getUniqueId() : null;
-        if (decider != null && !ocmBinding.mentalOwns(MechanicToken.PROJECTILE_KNOCKBACK, decider)) {
             return;
         }
         event.setDamage(substitute);
@@ -405,7 +394,7 @@ public final class ProjectileKnockbackUnit implements FeatureUnit, Listener {
     private HitTransaction mint(HitSource source, UUID shooterId, UUID victimId) {
         HitContext context = new HitContext(
                 ids.next(), source, shooterId, victimId,
-                new SprintVerdict(false, null, clock.current()), false, false, null, clock.current());
+                new SprintVerdict(false, null, clock.current()), false, null, clock.current());
         return new HitTransaction(context);
     }
 

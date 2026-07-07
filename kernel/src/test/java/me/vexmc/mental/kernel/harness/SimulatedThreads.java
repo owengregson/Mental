@@ -140,7 +140,7 @@ final class SimulatedThreads {
         KinematicState kinematics = new KinematicState(0.0, s.distanceToGround, grounded);
         s.published = new PlayerView(
                 s.id, s.entityId, now(), motion, grounded, Decay.DEFAULT_SLIPPERINESS,
-                GRAVITY, Decay.JUMP_IMPULSE, -1, false, false, true, 0, 20, 0.0, false,
+                GRAVITY, Decay.JUMP_IMPULSE, -1, false, false, true, 0, 20, 0.0,
                 KnockbackProfile.LEGACY_17, 0, kinematics);
     }
 
@@ -150,7 +150,7 @@ final class SimulatedThreads {
 
     HitContext context(HitSource source) {
         return new HitContext(nextId(), source, attacker.id, victim.id,
-                new SprintVerdict(false, Boolean.FALSE, now()), false, true, null, now());
+                new SprintVerdict(false, Boolean.FALSE, now()), true, null, now());
     }
 
     /**

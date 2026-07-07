@@ -4,11 +4,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.combo.ComboEndReason;
 import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
@@ -32,7 +32,6 @@ import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.VelocityValve;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
@@ -80,7 +79,6 @@ public final class SessionService implements Listener, SessionAccess {
     private final TickClock clock;
     private final ViewBuilder viewBuilder;
     private final VelocityValve valve;
-    private final OcmBinding ocmBinding;
     private final Supplier<Snapshot> snapshot;
     private final PositionRing positions;
     private final ConnectionDomains domains;
@@ -104,24 +102,27 @@ public final class SessionService implements Listener, SessionAccess {
     private final List<Consumer<UUID>> forgetHooks = new ArrayList<>();
 
     /**
-     * Whether the combo-hold module holds an open scope (combo-hold §3). Flipped
-     * by the {@code ComboHoldUnit}'s assemble/close, so it is the reconciler's
-     * scope truth, not a re-read config flag. While false, sessions carry no
-     * tracker and the per-tick sweep does nothing (zero-touch); the transition to
-     * false is reconciled on each session's next tick (tracker dropped, one
-     * DISABLED end fired on its owning thread).
+     * How many combo KEEPERS hold combo detection open (combo-hold §3; the 2.4.5
+     * detection/servo split). The {@code ComboHoldUnit} (the pocket servo) and the
+     * {@code ComboReachHandicapUnit} (the reach handicap) each retain/release it on
+     * assemble/close, so detection is live iff AT LEAST ONE keeper holds it — every
+     * keeper rides the combo transitions independently of the others. This is the
+     * reconciler's scope truth, not a re-read config flag: each feature has at most
+     * one open scope, so each contributes 0 or 1. While the count is 0, sessions
+     * carry no tracker and the per-tick sweep does nothing (zero-touch); the
+     * transition to 0 is reconciled on each session's next tick (tracker dropped,
+     * one DISABLED end fired on its owning thread).
      */
-    private volatile boolean comboEnabled;
+    private final AtomicInteger comboKeepers = new AtomicInteger();
 
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
-            VelocityValve valve, OcmBinding ocmBinding, Supplier<Snapshot> snapshot,
+            VelocityValve valve, Supplier<Snapshot> snapshot,
             PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
         this.valve = valve;
-        this.ocmBinding = ocmBinding;
         this.snapshot = snapshot;
         this.positions = positions;
         this.domains = domains;
@@ -154,14 +155,23 @@ public final class SessionService implements Listener, SessionAccess {
         forgetHooks.add(hook);
     }
 
-    /** The {@code ComboHoldUnit} opens combo tracking (assemble); trackers install lazily per tick. */
-    public void enableCombo() {
-        this.comboEnabled = true;
+    /**
+     * A combo KEEPER (the pocket servo, the reach handicap, or the vertical trim) opens
+     * combo detection (assemble); trackers install lazily per tick. Detection stays live
+     * until every keeper has released — the 2.4.5 detection/servo split, so each keeper
+     * runs standalone.
+     */
+    public void retainCombo() {
+        this.comboKeepers.incrementAndGet();
     }
 
-    /** The {@code ComboHoldUnit} closes combo tracking (scope close); each session drops its tracker next tick. */
-    public void disableCombo() {
-        this.comboEnabled = false;
+    /**
+     * A combo keeper closes its hold on combo detection (scope close). When the LAST
+     * keeper releases, each session drops its tracker on its next tick (one DISABLED
+     * end fired on its owning thread).
+     */
+    public void releaseCombo() {
+        this.comboKeepers.decrementAndGet();
     }
 
     /* --------------------------- rim read seams --------------------------- */
@@ -489,7 +499,6 @@ public final class SessionService implements Listener, SessionAccess {
         // attribute API ⇒ the sentinel ⇒ pace factor 1.0.
         double moveSpeedAttr = Attributes.movementSpeedWalkNormalized(player);
         double slipperiness = GroundFriction.of(blockUnderFeet(player, location));
-        boolean ocmOwnsMelee = !ocmBinding.mentalOwns(MechanicToken.MELEE_KNOCKBACK, id);
         KnockbackProfile profile = snapshot.get().profileFor(player.getWorld().getName());
         KinematicState kinematics = new KinematicState(
                 location.getY(), GroundDistance.measure(location), grounded);
@@ -520,23 +529,24 @@ public final class SessionService implements Listener, SessionAccess {
                 gravity, Decay.JUMP_IMPULSE, jumpBoostAmplifier(player),
                 player.isSprinting(), player.getGameMode() == GameMode.CREATIVE, player.getWorld().getPVP(),
                 player.getNoDamageTicks(), player.getMaximumNoDamageTicks(),
-                knockbackResistance, ocmOwnsMelee, profile, Pings.of(player), kinematics,
+                knockbackResistance, profile, Pings.of(player), kinematics,
                 moveSpeedAttr, session.comboAttackerId(),
                 measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks,
                 yawRate);
     }
 
     /**
-     * The combo-hold per-tick sweep (combo-hold §3.1) — run on the owning thread
-     * before the view is built so the publish reflects this tick's state. Zero-touch
-     * when the module is off: no tracker exists, no work is done. Reconciles the
-     * tracker's presence with the module's scope (installing lazily on enable,
-     * dropping with one DISABLED end on disable), then feeds the detector this
-     * tick's grounded flag and pair separation and fires any transition.
+     * The combo per-tick sweep (combo-hold §3.1) — run on the owning thread before
+     * the view is built so the publish reflects this tick's state. Zero-touch when
+     * NO combo keeper is active (both the pocket servo and the reach handicap off):
+     * no tracker exists, no work is done. Reconciles the tracker's presence with the
+     * keeper count (installing lazily once a keeper retains, dropping with one
+     * DISABLED end when the last releases), then feeds the detector this tick's
+     * grounded flag and pair separation and fires any transition.
      */
     private void driveCombo(Player player, CombatSession session, boolean combatGrounded) {
         ComboTracker tracker = session.comboTracker();
-        if (!comboEnabled) {
+        if (comboKeepers.get() <= 0) {
             if (tracker != null) {
                 comboEvents.fire(player, tracker.reset(ComboEndReason.DISABLED));
                 session.clearComboTracker();

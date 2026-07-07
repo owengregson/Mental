@@ -21,9 +21,9 @@ import me.vexmc.mental.v5.feature.Feature;
  * <p>{@link DashboardMenu} and {@link FamilyMenu} render off exactly these
  * methods, so {@code DashboardModelTest} — which asserts {@link #allSurfaced()}
  * equals every non-infrastructure descriptor — is a proof about the real render
- * path, not a parallel re-derivation. The always-on infrastructure descriptors
- * (anticheat / OCM coexistence) carry no {@code modules.*} toggle and are
- * configured on their own screens, so they are deliberately excluded here.</p>
+ * path, not a parallel re-derivation. The always-on infrastructure descriptor
+ * (anticheat coexistence) carries no {@code modules.*} toggle and is
+ * configured on its own screen, so it is deliberately excluded here.</p>
  */
 public final class DashboardModel {
 

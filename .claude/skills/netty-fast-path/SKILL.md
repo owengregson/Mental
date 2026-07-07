@@ -120,9 +120,8 @@ Two corollaries:
   land in the same client frame. Below 1.19.4: bare, back-to-back.
 - Never a single-packet bundle: a suppressed velocity ships hurt bare.
 - Velocity suppressors (hurt still ships; the transaction records the reason):
-  the anticheat gate, OCM owning the attacker's knockback (frozen in the view),
-  pending LEGACY resistance roll, missing/stale views, the per-victim feedback
-  window (`auto` = live maxNoDamageTicks/2).
+  the anticheat gate, pending LEGACY resistance roll, missing/stale views, the
+  per-victim feedback window (`auto` = live maxNoDamageTicks/2).
 - A victim with NO PacketEvents user (in-process bots like SimpleBoxer,
   synthetic players) gets NO burst and must never be accounted
   wire-delivered — the transaction resolves `PINNED` instead of `PRE_SENT`:

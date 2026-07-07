@@ -82,7 +82,7 @@ below — a separate lever, 1.20.5+ only; the servo itself never touches it.)
 
 ## When a combo is "active"
 
-Detected per victim: a combo with one attacker goes active on the **third** melee
+Detected per victim: a combo with one attacker goes active on the **second** melee
 hit (`min-hits`) when each inter-hit gap holds within `max-gap-ticks`, and ends on
 any of — the gap expiring; the victim landing a melee hit of their own
 (retaliation); a real touchdown (`grounded-run-ticks` consecutive grounded ticks,
@@ -95,7 +95,7 @@ All optional; an absent section uses the defaults shown.
 
 | Key | Default | What |
 | --- | --- | --- |
-| `min-hits` | `3` | hits from one attacker before the servo engages |
+| `min-hits` | `2` | hits from one attacker before the servo engages (the second hit fires combo start) |
 | `max-gap-ticks` | `20` | a longer inter-hit gap ends the chain |
 | `grounded-run-ticks` | `10` | consecutive grounded ticks that end the combo |
 | `blowout-blocks` | `6.0` | separation past this ends the combo |
@@ -115,8 +115,8 @@ The reach handicap is **its own module** (`modules.combo-reach-handicap`) since 
 The servo shapes **spacing** — where the victim lands. The **reach handicap** is a
 separate, secondary lever that tightens **retaliation** directly: while a victim is
 held in a combo, their `entity-interaction-range` attribute is scaled down
-(`combo-reach-handicap.reach-scale`, default `0.8`, in `[0.5, 1.0]`, so the era 3.0
-reach becomes 2.4 blocks) with an **additive** modifier (`mental:combo-reach`,
+(`combo-reach-handicap.reach-scale`, default `0.87`, in `[0.5, 1.0]`, so the era 3.0
+reach becomes 2.61 blocks) with an **additive** modifier (`mental:combo-reach`,
 `MULTIPLY_SCALAR_1`), never a base rewrite — so it composes with any third-party
 reach base. It is applied the moment the combo goes active and removed the moment it
 ends **by any reason** (`EXPIRED` / `RETALIATION` / `GROUNDED` / `BLOWOUT` /

@@ -12,10 +12,13 @@ package me.vexmc.mental.v5.config.settings;
  *       when {@code location.getPitch() > angleDegrees}. Parse-clamped to
  *       {@code [0, 90]} (0 = redirect any downward-or-level throw, 90 = only a
  *       perfectly vertical throw). Default {@code 35.0}.</li>
- *   <li>{@code speedMultiplier} — the factor applied to the vanilla launch speed
- *       for the redirected potion. Parse-clamped to {@code [1.0, 5.0]} (never
+ *   <li>{@code speedMultiplier} — the CEILING on the redirected launch speed, as a
+ *       factor of the vanilla launch speed. The exact-ballistic aim spends the
+ *       least speed that still lands the burst on the predicted feet and never
+ *       exceeds {@code multiplier × vanilla} — so this bounds the max speed (never
  *       slower than vanilla, capped so the potion cannot outrun its own splash
- *       resolution). Default {@code 3.0}.</li>
+ *       resolution), it is no longer a fixed target speed. Parse-clamped to
+ *       {@code [1.0, 5.0]}. Default {@code 3.0}.</li>
  * </ul>
  *
  * <p>Shallower throws (pitch at or below the threshold) are left byte-for-byte

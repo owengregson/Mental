@@ -2,6 +2,7 @@ package me.vexmc.mental.kernel.combo;
 
 import java.util.List;
 import java.util.UUID;
+import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.model.TickStamp;
 
 /**
@@ -17,9 +18,12 @@ import me.vexmc.mental.kernel.model.TickStamp;
  * {@code minHits} melee hits with each inter-hit gap {@code <= maxGapTicks}. It
  * ends on: gap expiry (checked lazily at reads AND every {@link #onTick}); the
  * victim landing any melee hit (retaliation); {@code groundedRunTicks}
- * consecutive grounded ticks; separation past {@code blowoutBlocks}; or an
- * explicit {@link #reset} (retire/disable). A hit from a DIFFERENT attacker
- * abandons the old chain and restarts on the new one.</p>
+ * consecutive grounded ticks — scaled up to the chain's OBSERVED cadence once one
+ * is measured ({@link #effectiveGroundedRunTicks()}, servo-lab 2.4.5), so a
+ * slower-rhythm combo no longer dies mid-gap on its legitimate between-hit ground
+ * time; separation past {@code blowoutBlocks}; or an explicit {@link #reset}
+ * (retire/disable). A hit from a DIFFERENT attacker abandons the old chain and
+ * restarts on the new one.</p>
  *
  * <p>Each mutation returns the {@link ComboTransition}(s) it produced so the core
  * can fire the balanced api start/end events without inspecting internals — a single
@@ -29,6 +33,14 @@ import me.vexmc.mental.kernel.model.TickStamp;
  * the thresholds are deliberately conservative.</p>
  */
 public final class ComboTracker {
+
+    /**
+     * The grounded-run jitter slack (ticks) added onto the observed cadence
+     * (servo-lab 2.4.5): the lab's within-cell cadence spread is ±2 ticks (gap
+     * histograms 12–16 and 17–19), so a rhythm-legitimate grounded stretch can run
+     * two ticks past the smoothed cadence before it means anything.
+     */
+    private static final int CADENCE_RUN_SLACK = 2;
 
     private final ComboRules rules;
 
@@ -44,6 +56,13 @@ public final class ComboTracker {
     private TickStamp activeSince = TickStamp.NO_TICK;
     /** Cached {@code hits >= minHits}: the chain has crossed into an active combo. */
     private boolean active;
+    /**
+     * The per-chain EMA of observed inter-hit gaps ({@link Double#NaN} until the
+     * chain's second hit) — the observed cadence the grounded-run threshold scales
+     * with (servo-lab 2.4.5). Continuation gaps are structurally ≤ {@code
+     * maxGapTicks} (a longer gap resets the chain before it is measured).
+     */
+    private double cadenceEmaTicks = Double.NaN;
 
     public ComboTracker(ComboRules rules) {
         this.rules = rules;
@@ -109,6 +128,11 @@ public final class ComboTracker {
         if (attackerId == null) {
             attackerId = attacker;
             hits = 0;
+        } else if (lastHitTick.known() && tick.known() && tick.value() > lastHitTick.value()) {
+            // A continuation hit (the reset block above kept the chain): fold its
+            // gap into the observed cadence. Gaps here are structurally within
+            // maxGapTicks — a longer one already reset the chain.
+            cadenceEmaTicks = PocketServo.cadenceEma(cadenceEmaTicks, tick.value() - lastHitTick.value());
         }
         hits++;
         lastHitTick = tick;
@@ -163,7 +187,7 @@ public final class ComboTracker {
         } else {
             groundedRun = 0;
         }
-        if (active && groundedRun >= rules.groundedRunTicks()) {
+        if (active && groundedRun >= effectiveGroundedRunTicks()) {
             UUID endedAttacker = attackerId;
             resetChain();
             return ComboTransition.ended(endedAttacker, ComboEndReason.GROUNDED);
@@ -190,7 +214,35 @@ public final class ComboTracker {
         return wasActive ? ComboTransition.ended(endedAttacker, reason) : ComboTransition.NONE;
     }
 
+    /** The chain's observed inter-hit cadence EMA, or {@link Double#NaN} before the second hit. */
+    public double cadenceTicks() {
+        return cadenceEmaTicks;
+    }
+
     /* ------------------------------------------------------------------ */
+
+    /**
+     * The grounded-run threshold scaled to the OBSERVED cadence (servo-lab 2.4.5).
+     * The rule's purpose is "a real touchdown ends it, brief skims survive" — but a
+     * victim launched at cadence {@code c} on an era ~10-tick flight legitimately
+     * sits grounded for {@code c − airTime} ticks before the next re-launch, so a
+     * fixed threshold kills every slower-rhythm combo mid-gap (the lab's 17–20t
+     * cells died GROUNDED at 57% coverage; the reach handicap rides combo state, so
+     * it died with them). Derivation of the bound: the observed cadence plus the
+     * lab's ±2-tick within-cell jitter ({@link #CADENCE_RUN_SLACK}) is the longest
+     * rhythm-legitimate grounded stretch; past {@code maxGapTicks} the gap-expiry
+     * rule owns the end (the two clocks stay ordered — grounded-run never outlives
+     * a gap the chain cannot survive anyway); and the CONFIGURED threshold remains
+     * the floor, so an unmeasured cadence — or an operator's wider setting — is
+     * byte-identical to the pre-round behaviour.
+     */
+    private int effectiveGroundedRunTicks() {
+        if (Double.isNaN(cadenceEmaTicks)) {
+            return rules.groundedRunTicks();
+        }
+        int scaled = (int) Math.round(cadenceEmaTicks) + CADENCE_RUN_SLACK;
+        return Math.max(rules.groundedRunTicks(), Math.min(rules.maxGapTicks(), scaled));
+    }
 
     /** True when both stamps are known and the gap strictly exceeds {@code maxGapTicks}. */
     private boolean gapExceeded(TickStamp now) {
@@ -207,5 +259,6 @@ public final class ComboTracker {
         active = false;
         activeSince = TickStamp.NO_TICK;
         lastHitTick = TickStamp.NO_TICK;
+        cadenceEmaTicks = Double.NaN;
     }
 }

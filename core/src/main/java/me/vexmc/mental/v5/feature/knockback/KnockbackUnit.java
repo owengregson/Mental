@@ -7,7 +7,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.debug.DebugLog;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -18,12 +17,12 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
-import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.model.SprintVerdict;
 import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
@@ -35,10 +34,10 @@ import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.Vectors;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
+import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.delivery.HitIds;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.feature.Feature;
@@ -47,6 +46,7 @@ import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
+import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.rim.BurstSender;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
@@ -83,7 +83,6 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
 
     private final SessionService sessions;
     private final ConnectionDomains domains;
-    private final OcmBinding ocmBinding;
     private final LatencyModel latency;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
@@ -115,13 +114,12 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     private volatile BurstSender blockBurst;
 
     public KnockbackUnit(
-            SessionService sessions, ConnectionDomains domains, OcmBinding ocmBinding,
+            SessionService sessions, ConnectionDomains domains,
             LatencyModel latency, Scheduling scheduling, Supplier<Snapshot> snapshot,
             HitIds ids, TickClock clock, VelocityValve valve, DebugLog.Scoped debug,
             ComboEvents comboEvents, EphemeralDecoration swordBlock) {
         this.sessions = sessions;
         this.domains = domains;
-        this.ocmBinding = ocmBinding;
         this.latency = latency;
         this.scheduling = scheduling;
         this.snapshot = snapshot;
@@ -136,6 +134,17 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     @Override
     public Feature descriptor() {
         return Feature.KNOCKBACK;
+    }
+
+    /**
+     * The attacker's sprint-reset model for the input-driven dynamic chase, read
+     * through the NON-creating {@link ConnectionDomains#peek} (a packetless attacker
+     * has no domain, and {@code domainFor} would poison it) — {@link
+     * ResetModel#UNKNOWN} then, so the servo keeps its measured-ring fallback.
+     */
+    private ResetModel attackerResetModel(UUID attackerId, TickStamp now) {
+        ConnectionDomains.Domain domain = domains.peek(attackerId);
+        return domain != null ? domain.resetModel().modelAt(now) : ResetModel.UNKNOWN;
     }
 
     @Override
@@ -202,13 +211,6 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             desk.withdraw(tx.context().id());
             return;
         }
-        // OCM owns melee knockback for this attacker's modeset — yield entirely.
-        UUID decider = attacker instanceof Player ? attacker.getUniqueId() : victim.getUniqueId();
-        if (!ocmBinding.mentalOwns(MechanicToken.MELEE_KNOCKBACK, decider)) {
-            desk.withdraw(tx.context().id());
-            return;
-        }
-
         boolean sprinting = attackerSprinting(source, tx, attacker);
         // A PARTIAL native block (a negative BLOCKING modifier that still lands
         // damage — the BLOCKS_ATTACKS component tier on 1.21.5+, or the off-hand
@@ -276,12 +278,17 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         PocketServoConfig servo = comboServoFor(session.view(), attacker.getUniqueId());
         // The precision predictor inputs (combo-hold §3.2b) — built from the frozen
         // views + ring + latency, with the live capture positions as the axis source.
+        // Built only when the servo is active; the degraded inputs otherwise.
         PlayerView victimView = session.view();
         PlayerView attackerView = sessions.viewOf(attacker.getUniqueId());
+        // One tick read serves the build AND the window commit below — the post-hit
+        // chase window's gap arithmetic needs both on the same clock instant.
+        TickStamp servoNow = clock.current();
         PredictorInputs inputs = servo.active() && victimView != null
                 ? ComboPredictor.build(attacker.getUniqueId(), victim.getUniqueId(),
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
-                        victimView, attackerView, sessions.positions(), latency)
+                        victimView, attackerView, sessions.positions(), latency, servoNow,
+                        attackerResetModel(attacker.getUniqueId(), servoNow))
                 : PredictorInputs.degraded(victimState.grounded(),
                         victimView != null ? victimView.slipperiness() : Decay.DEFAULT_SLIPPERINESS,
                         victimState.moveSpeedAttr());
@@ -291,21 +298,24 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
-        // The V2 dynamic-target smoothing memory commits whenever the DYNAMIC
-        // target is live — never gated behind the diagnostics sink (interaction
-        // audit; see the pre-send site for the full why). The debug LINE alone
-        // rides the sink gate.
-        boolean dynamicTarget = servo.active() && servo.targetMode() == TargetMode.DYNAMIC;
-        if (servo.active() && (dynamicTarget || debug.active())) {
+        // Commit the post-hit chase window on EVERY active servo hit (servo-lab
+        // 2.4.5): this hit's attacker position/tick anchors the next window's
+        // measurement, and the EMA the inputs carried is persisted. Load-bearing —
+        // never gated behind the diagnostics sink or the dynamic-target mode.
+        if (servo.active()) {
+            ComboPredictor.rememberWindow(victim.getUniqueId(),
+                    attackerState.x(), attackerState.z(), servoNow, inputs);
+        }
+        // The debug sink alone rides the debug gate: the answer-denial boundary
+        // target is computed fresh from geometry each hit (no cross-hit memory to
+        // commit), so under the shipped defaults nothing gameplay-shaping runs
+        // debug-off. The post-hit chase window commit above is the only load-bearing
+        // solve state and is never gated.
+        if (servo.active() && debug.active()) {
             PocketServo.Solution solution = KnockbackEngine.explainServo(
                     attackerState, victimState, profile, compensationY, freshSprint, servo, inputs);
-            if (dynamicTarget) {
-                ComboPredictor.remember(victim.getUniqueId(), solution);
-            }
-            if (debug.active()) {
-                debug.log(() -> ComboPredictor.debugLine(
-                        victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
-            }
+            debug.log(() -> ComboPredictor.debugLine(
+                    victim.getUniqueId(), attacker.getUniqueId(), inputs, solution));
         }
 
         if (freshBlockedKnock) {
@@ -544,7 +554,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             HitSource source, UUID attackerId, UUID victimId, SprintVerdict verdict,
             double paceFactor, double comboFactor) {
         HitContext context = new HitContext(
-                ids.next(), source, attackerId, victimId, verdict, false, false, null, clock.current());
+                ids.next(), source, attackerId, victimId, verdict, false, null, clock.current());
         HitTransaction fresh = new HitTransaction(context);
         fresh.paceFactor(paceFactor); // carry the factors the original applied (D-6)
         fresh.comboFactor(comboFactor);
@@ -601,7 +611,10 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * whose frozen {@code view} is given (combo-hold §3.2). Active only when the
      * module is on AND this attacker is the one the view says holds the victim's
      * active combo — the same gate the netty pre-send uses, off one frozen truth.
-     * Otherwise {@link PocketServoConfig#INACTIVE} (σ = 1.0, byte-identical).
+     * Otherwise {@link PocketServoConfig#INACTIVE} (σ = 1.0, byte-identical). The
+     * config carries the victim's EFFECTIVE answer reach (the era reach folded with
+     * the combo reach handicap when it is live), so the two combo submodules compose
+     * — see {@link #effectiveVictimReach}.
      */
     @SuppressWarnings("unchecked")
     private PocketServoConfig comboServoFor(PlayerView view, UUID attackerId) {
@@ -613,7 +626,28 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         }
         ComboSettings settings = snapshot.get().settings(
                 (SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
-        return settings.servo();
+        return settings.servo(effectiveVictimReach(settings));
+    }
+
+    /**
+     * The victim's EFFECTIVE answer reach for the answer-denial boundary target —
+     * the era reach ({@code combo-hold.victim-reach}), shortened by the combo reach
+     * handicap when that module is enabled AND enforceable on this server (the
+     * client-synced attribute exists, 1.20.5+). The handicap's attribute modifier is
+     * live for exactly the combo's duration, which is exactly when the servo is
+     * active, so lowering {@code R_v} here drops the deny boundary and OPENS the
+     * keepable pocket — the whole reason "the reach nerf is the only thing keeping my
+     * combo." {@code R_a} (the attacker) is never handicapped.
+     */
+    @SuppressWarnings("unchecked")
+    private double effectiveVictimReach(ComboSettings settings) {
+        double base = settings.victimReach();
+        if (snapshot.get().enabled(Feature.COMBO_REACH_HANDICAP) && ComboReachHandicap.leverSupported()) {
+            ReachHandicapSettings handicap = snapshot.get().settings(
+                    (SettingsKey<ReachHandicapSettings>) Feature.COMBO_REACH_HANDICAP.settingsKey());
+            return base * handicap.scale();
+        }
+        return base;
     }
 
     private static int heldKnockbackLevel(Player player) {

@@ -13,6 +13,7 @@ import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
@@ -72,8 +73,9 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p><b>One-hit publish latency.</b> The detector is fed at the delivery fold and
  * the servo reads the frozen view, so a hit's σ uses the combo state published on
- * the PREVIOUS tick. The chain therefore activates on the third shipped hit and
- * the first servo-valued hit is the next one computed after that publish. The
+ * the PREVIOUS tick. The chain therefore activates on the second shipped hit
+ * (minHits 2, the 2.4.5 retune) and the first servo-valued hit is the next one
+ * computed after that publish. The
  * scenarios assert the opener hits are 1.0 and that an established-combo hit is
  * servo-valued and matches the same solve the engine runs — they do not pin a
  * single ordinal, which the latency makes brittle.</p>
@@ -151,11 +153,19 @@ public final class ComboSuite {
                 EntityState attackerState = EntityStates.capture(attacker.player());
                 EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
                 PocketServoConfig servo = comboSettings(mental).servo();
+                // The same tick the region solve will read inside this sync block —
+                // the post-hit chase window's gap arithmetic must match it, and
+                // build() is a pure read (the window commits only at the delivery
+                // seams), so this re-derivation consumes exactly the memory state
+                // the production solve consumes.
                 PredictorInputs inputs = ComboPredictor.build(
                         attacker.uuid(), victim.uuid(),
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
                         view, mental.sessions().viewOf(attacker.uuid()),
-                        mental.sessions().positions(), new LatencyModel());
+                        mental.sessions().positions(), new LatencyModel(), mental.clock().current(),
+                        // Clientless attackers dispatch past the rim (no domain), so production
+                        // reads ResetModel.UNKNOWN and keeps the measured-ring chase — match it.
+                        ResetModel.UNKNOWN);
                 // D-8: the java.util.Random overload keeps a jvmdowngrader RandomGenerator
                 // stub type out of this cross-jar call's descriptor (a RandomGenerator descriptor
                 // resolves a mismatched per-plugin stub and NoSuchMethodErrors on the v52 tier).
@@ -211,11 +221,14 @@ public final class ComboSuite {
     /* ------------------------ scenario 3: a grounded run ends it ------------------- */
 
     /**
-     * The genuine touchdown end (combo-hold §3.1): after a real grounded run of
-     * {@code groundedRunTicks} the held combo releases and the next knock is
-     * era-plain again. This case exercises the REAL threshold (10, un-widened) —
-     * that is its whole point — which forces it to stage the victim's ground state
-     * physically rather than lean on a widened window.
+     * The genuine touchdown end (combo-hold §3.1): after a real grounded run the
+     * held combo releases and the next knock is era-plain again. This case
+     * exercises the REAL configured threshold (10, un-widened) — that is its whole
+     * point — which forces it to stage the victim's ground state physically rather
+     * than lean on a widened window. Since the servo-solve round the effective
+     * threshold rides the chain's OBSERVED cadence (configured floor + observed
+     * gap + 2 jitter ticks), so the touchdown idle below waits on the released
+     * view rather than a fixed tick count.
      *
      * <p><b>Why the physical staging.</b> A clientless fake never moves from a melee
      * knock (send-then-restore), so under the honest combat-ground feed a stationary
@@ -264,8 +277,25 @@ public final class ComboSuite {
                 victim.preTick(() -> victim.setMotion(0.0, 0.0, 0.0));
                 teleportOnOwningThread(mental, victim, groundLoc);
             });
-            // Idle well past grounded-run-ticks (10) so the touchdown end fires.
-            context.awaitTicks(20);
+            // Idle until the touchdown end fires. The threshold is no longer the
+            // flat configured 10: since the servo-solve round it scales with the
+            // chain's OBSERVED cadence (observed + 2 jitter ticks, capped by
+            // max-gap — here 400, so the cap never binds), and the build-up's real
+            // gaps carry scheduling overhead beyond CADENCE_TICKS. Waiting on the
+            // released view instead of a fixed tick count keeps the case honest
+            // for whatever cadence the run actually measured; the cap (60t) is
+            // comfortably past any build-up cadence this staging can produce.
+            context.awaitUntil(() -> {
+                try {
+                    return context.sync(() -> {
+                        CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                        PlayerView view = session == null ? null : session.view();
+                        return view != null && view.comboAttackerId() == null;
+                    });
+                } catch (Exception failure) {
+                    return false;
+                }
+            }, 60, "the grounded run to release the combo");
 
             // The grounded run must have RELEASED the combo before the measured hit —
             // the direct proof that the touchdown, not some other end, did the work.
@@ -369,7 +399,7 @@ public final class ComboSuite {
             buildActiveCombo(mental, context, attacker, victim);
             context.awaitUntil(() -> !captor.starts.isEmpty(), 40, "a ComboStartEvent");
             context.expect(!captor.starts.isEmpty(), "no ComboStartEvent fired for an active combo");
-            context.expect(captor.starts.get(0).getHits() >= 3, "the start event must carry the chain length");
+            context.expect(captor.starts.get(0).getHits() >= 2, "the start event must carry the chain length (minHits 2, the 2.4.5 retune)");
             context.expect(victim.uuid().equals(captor.starts.get(0).getVictim().getUniqueId()),
                     "the start event names the victim");
 
@@ -435,12 +465,14 @@ public final class ComboSuite {
             context.expectNear(base * 0.8, reachValue(context, victim), 1e-6,
                     "the handicap must re-apply on a fresh combo");
             context.syncRun(() -> {
-                mental.overlaySet("modules.combo-hold", false);
+                // Disable the reach-handicap's OWN module — it is standalone since the
+                // 2.4.5 detection/servo split (892da05), so combo-hold no longer owns it.
+                mental.overlaySet("modules.combo-reach-handicap", false);
                 mental.reloadAll();
             });
             context.awaitTicks(3);
             context.expectNear(base, reachValue(context, victim), 1e-9,
-                    "disabling the module mid-combo must restore the interaction range (leg 3)");
+                    "disabling the reach-handicap module mid-combo must restore the interaction range (leg 3)");
         } finally {
             teardownReach(mental, context, attacker, victim);
         }
@@ -788,7 +820,10 @@ public final class ComboSuite {
         context.awaitTicks(2);
     }
 
-    /** Drives three same-attacker hits and waits until the view publishes the active combo. */
+    /**
+     * Drives three same-attacker hits — one past the 2-hit minHits (the 2.4.5 retune),
+     * a publish-latency margin — and waits until the view publishes the active combo.
+     */
     private static void buildActiveCombo(
             MentalPluginV5 mental, TestContext context, FakePlayer attacker, FakePlayer victim) throws Exception {
         for (int hit = 0; hit < 3; hit++) {

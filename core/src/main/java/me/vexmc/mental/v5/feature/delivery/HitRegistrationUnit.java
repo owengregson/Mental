@@ -22,13 +22,14 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
-import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.model.SprintVerdict;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
@@ -72,7 +73,7 @@ import org.bukkit.entity.Player;
  * never a live entity. Player positions for the pre-send direction come from the
  * ring (the owning-thread sampler wrote them); the view lacks horizontal position
  * by design, so the ring is the off-region-safe source. A hit whose pre-send is
- * suppressed (anticheat, OCM ownership, legacy resistance roll, missing views, the
+ * suppressed (anticheat, legacy resistance roll, missing views, the
  * feedback window) still ships hurt and still schedules the authoritative pass; the
  * era vector is computed and shipped there.</p>
  */
@@ -132,6 +133,17 @@ public final class HitRegistrationUnit implements FeatureUnit {
         return Feature.HIT_REGISTRATION;
     }
 
+    /**
+     * The attacker's sprint-reset model for the input-driven dynamic chase, read
+     * through the NON-creating {@link ConnectionDomains#peek} (a packetless attacker
+     * has no domain, and {@code domainFor} would poison it) — {@link
+     * ResetModel#UNKNOWN} then, so the servo keeps its measured-ring fallback.
+     */
+    private ResetModel attackerResetModel(UUID attackerId, TickStamp now) {
+        ConnectionDomains.Domain domain = domains.peek(attackerId);
+        return domain != null ? domain.resetModel().modelAt(now) : ResetModel.UNKNOWN;
+    }
+
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
         BurstSender senders = new BurstSender(modernProtocol);
@@ -161,7 +173,10 @@ public final class HitRegistrationUnit implements FeatureUnit {
      * whose frozen {@code victimView} is given (combo-hold §3.2). Active only when
      * the module is on AND this attacker holds the victim's active combo — the same
      * gate the region path uses, off the one frozen truth, so an adopted pre-send
-     * and a recompute agree. Otherwise {@link PocketServoConfig#INACTIVE}.
+     * and a recompute agree. Otherwise {@link PocketServoConfig#INACTIVE}. The config
+     * carries the victim's EFFECTIVE answer reach (the era reach folded with the
+     * combo reach handicap when it is live) so the two combo submodules compose — the
+     * same fold the region path applies.
      */
     @SuppressWarnings("unchecked")
     private PocketServoConfig comboServoFor(PlayerView victimView, UUID attackerId) {
@@ -173,7 +188,27 @@ public final class HitRegistrationUnit implements FeatureUnit {
         }
         ComboSettings settings = snapshot.get().settings(
                 (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
-        return settings.servo();
+        return settings.servo(effectiveVictimReach(settings));
+    }
+
+    /**
+     * The victim's EFFECTIVE answer reach for the answer-denial boundary target —
+     * the era reach shortened by the combo reach handicap when it is enabled AND
+     * enforceable (1.20.5+ attribute lever). The handicap is live for exactly the
+     * combo's duration, which is exactly when the servo is active, so lowering
+     * {@code R_v} drops the deny boundary and opens the keepable pocket. Netty-safe:
+     * one snapshot read and the class-load-constant lever probe. {@code R_a} (the
+     * attacker) is never handicapped.
+     */
+    @SuppressWarnings("unchecked")
+    private double effectiveVictimReach(ComboSettings settings) {
+        double base = settings.victimReach();
+        if (snapshot.get().enabled(Feature.COMBO_REACH_HANDICAP) && ComboReachHandicap.leverSupported()) {
+            ReachHandicapSettings handicap = snapshot.get().settings(
+                    (SettingsKey<ReachHandicapSettings>) Feature.COMBO_REACH_HANDICAP.settingsKey());
+            return base * handicap.scale();
+        }
+        return base;
     }
 
     /* ---------------------------- the netty listener ---------------------------- */
@@ -286,14 +321,13 @@ public final class HitRegistrationUnit implements FeatureUnit {
             SprintVerdict verdict = sprintVerdict(attackerId);
             PlayerView attackerView = sessions.viewOf(attackerId);
             PlayerView victimView = victimId == null ? null : sessions.viewOf(victimId);
-            boolean ocmOwns = attackerView != null && attackerView.ocmOwnsMeleeKnockback();
             boolean victimHasWire = playerVictim != null
                     && PacketEvents.getAPI().getPlayerManager().getUser(playerVictim) != null;
             Double compensationY = compensationFor(victimId, victimView);
 
             HitContext context = new HitContext(
                     ids.next(), new HitSource.Melee(), attackerId, victimId,
-                    verdict, ocmOwns, victimHasWire, compensationY, clock.current());
+                    verdict, victimHasWire, compensationY, clock.current());
             HitTransaction tx = new HitTransaction(context);
 
             // The pre-send only exists for player victims with published views.
@@ -304,7 +338,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
             KnockbackProfile profile = victimView.profile();
             KnockbackVector vector = null;
-            String suppressed = suppressorFor(ocmOwns, profile, victimView);
+            String suppressed = suppressorFor(profile, victimView);
             if (suppressed == null) {
                 // The pocket servo (combo-hold §3.2): active only when THIS attacker
                 // holds the victim's active combo (read from the victim's frozen view
@@ -312,12 +346,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 // recompute would agree). INACTIVE ⇒ σ = 1.0 (byte-identical).
                 PocketServoConfig servo = comboServoFor(victimView, attackerId);
                 // The precision predictor inputs (combo-hold §3.2b) — frozen views +
-                // ring + latency, built only when the servo is active (zero cost off).
+                // ring + latency, built only when the servo is active; zero cost off.
+                // The attacker position and tick are hoisted so the build and the
+                // post-hit window commit below share one truth.
+                double servoAttackerX = positionX(attackerId);
+                double servoAttackerZ = positionZ(attackerId);
+                TickStamp servoNow = clock.current();
                 PredictorInputs inputs = servo.active()
                         ? ComboPredictor.build(attackerId, victimId,
-                                positionX(attackerId), positionZ(attackerId),
+                                servoAttackerX, servoAttackerZ,
                                 positionX(victimId), positionZ(victimId),
-                                victimView, attackerView, sessions.positions(), latency)
+                                victimView, attackerView, sessions.positions(), latency, servoNow,
+                                attackerResetModel(attackerId, servoNow))
                         : PredictorInputs.degraded(
                                 victimView.grounded(), victimView.slipperiness(), victimView.moveSpeedAttr());
                 EntityState preAttacker = preAttackerState(attackerId, attackerView, verdict);
@@ -329,29 +369,28 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 vector = paced.vector();
                 tx.paceFactor(paced.paceFactor()); // journal the factors the pre-send applied (D-6)
                 tx.comboFactor(paced.comboFactor());
-                // The V2 dynamic-target smoothing memory (target-v2 repair #2) commits
-                // whenever the DYNAMIC target is live — a gameplay-shaping input must
-                // never be gated behind the diagnostics sink (interaction audit: with
-                // target-mode: dynamic and debug off, the memory stayed NaN and every
-                // hit re-solved memoryless, the exact knife-edge the EMA/slew exists
-                // to kill; flipping debug on changed combat). The debug LINE alone
-                // stays under the sink gate; under the shipped ANCHOR default the
-                // dynamic value is journaled-not-used, so no solve runs debug-off.
-                boolean dynamicTarget = servo.active() && servo.targetMode() == TargetMode.DYNAMIC;
-                if (servo.active() && (dynamicTarget || debug.active())) {
+                // Commit the post-hit chase window on EVERY active servo hit
+                // (servo-lab 2.4.5) — load-bearing solve state, never gated behind
+                // the sink or the target mode. A suppressed velocity later in this
+                // method leaves the region recompute to re-solve this hit; its own
+                // commit lands under the minimum window gap, so no double-advance.
+                if (servo.active()) {
+                    ComboPredictor.rememberWindow(victimId, servoAttackerX, servoAttackerZ, servoNow, inputs);
+                }
+                // The debug sink alone rides the debug gate: the answer-denial
+                // boundary target is computed fresh from geometry each hit, with no
+                // cross-hit memory to commit, so nothing gameplay-shaping runs
+                // debug-off. The post-hit chase window commit above is the only
+                // load-bearing solve state and is never gated behind the sink.
+                if (servo.active() && debug.active()) {
                     PocketServo.Solution solution = KnockbackEngine.explainServo(
                             preAttacker, preVictim, profile, compensationY, freshSprint, servo, inputs);
-                    if (dynamicTarget) {
-                        ComboPredictor.remember(victimId, solution);
-                    }
-                    if (debug.active()) {
-                        debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
-                    }
+                    debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
                 }
             }
 
             // B4: the pacing gate paces the VELOCITY component ONLY. A hurt-only
-            // burst (velocity suppressed — a LEGACY resistance roll, OCM ownership,
+            // burst (velocity suppressed — a LEGACY resistance roll or
             // an anticheat force-safe posture) must NEVER debit the budget, or it
             // starves a later eligible velocity pre-send. Compute the velocity
             // eligibility first, then consult the gate only when a velocity would
@@ -505,12 +544,9 @@ public final class HitRegistrationUnit implements FeatureUnit {
     }
 
     /** The velocity-pre-send suppressor reason, or null when the pre-send is eligible. */
-    private String suppressorFor(boolean ocmOwns, KnockbackProfile profile, PlayerView victimView) {
+    private String suppressorFor(KnockbackProfile profile, PlayerView victimView) {
         if (!anticheat.allowVelocityPreSend()) {
             return "anticheat";
-        }
-        if (ocmOwns) {
-            return "ocm";
         }
         if (profile.resistance() == ResistancePolicy.LEGACY && victimView.knockbackResistance() > 0.0) {
             return "resistance-roll";
@@ -559,15 +595,15 @@ public final class HitRegistrationUnit implements FeatureUnit {
     /**
      * The active reach-handicap scale for a swing by the player whose frozen view
      * is {@code attackerView}, or null when the handicap does not shorten their
-     * reach: no combo held against them, COMBO_HOLD off, the sub-feature off, or
-     * the attribute lever absent (below 1.20.5, where vanilla's gate could not
+     * reach: no combo held against them, the sub-feature off, or the attribute lever
+     * absent (below 1.20.5, where vanilla's gate could not
      * enforce it either). Netty-safe: one frozen view read, one snapshot read,
      * and the class-load-constant lever probe.
      */
     @SuppressWarnings("unchecked")
     private Double comboReachHandicapScale(PlayerView attackerView) {
         if (attackerView.comboAttackerId() == null) {
-            return null; // no combo is held against this attacker (implies COMBO_HOLD on)
+            return null; // no combo is held against this attacker (detection runs under either keeper)
         }
         Snapshot current = snapshot.get();
         if (!current.enabled(Feature.COMBO_REACH_HANDICAP) || !ComboReachHandicap.leverSupported()) {
@@ -622,10 +658,10 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 || !isStillAttackable(attacker, target) || !isInReach(attacker, target)) {
             return;
         }
-        // A non-player LivingEntity is legacy-composed like a player victim (no
-        // transaction passed to the shaper, so ownership resolves from the
-        // attacker); a non-living Damageable takes the retired HitApplier's flat 1.0.
-        double amount = target instanceof LivingEntity ? composedAmount(attacker, null) : 1.0;
+        // A non-player LivingEntity is legacy-composed like a player victim off
+        // the attacker's live state; a non-living Damageable takes the retired
+        // HitApplier's flat 1.0.
+        double amount = target instanceof LivingEntity ? composedAmount(attacker) : 1.0;
         // Bracket the ATTACKER's session with the minted Melee transaction (a mob
         // victim has no session of its own) so the per-hit crit gate can tell this
         // fast-path-composed damage apart from a genuine Player#attack landing
@@ -654,7 +690,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             session.activeInbound(tx);
         }
         try {
-            victim.damage(composedAmount(attacker, tx), attacker);
+            victim.damage(composedAmount(attacker), attacker);
         } finally {
             if (session != null) {
                 session.clearActiveInbound();
@@ -672,15 +708,15 @@ public final class HitRegistrationUnit implements FeatureUnit {
     /**
      * The fast-path damage amount (spec §4.6): the {@link me.vexmc.mental.v5.feature.damage.DamageShaper}
      * legacy composition — weapon base → era Strength/Weakness → crit ×1.5 →
-     * Sharpness — off the attacker's live state, or a vanilla-shaped amount when
-     * OCM owns the shaping. {@code simulateCrits}/{@code legacyToolDamage} come
-     * from the hit-reg settings; {@code old-potion-values} from its live toggle.
-     * Owning thread only (the attacker read is region-guarded by the caller).
+     * Sharpness — off the attacker's live state. {@code simulateCrits}/{@code
+     * legacyToolDamage} come from the hit-reg settings; {@code old-potion-values}
+     * from its live toggle. Owning thread only (the attacker read is
+     * region-guarded by the caller).
      */
-    private double composedAmount(Player attacker, HitTransaction tx) {
+    private double composedAmount(Player attacker) {
         HitRegSettings settings = settings();
         return shaper.compose(
-                attacker, tx == null ? null : tx.context(),
+                attacker,
                 settings.simulateCrits(), settings.legacyToolDamage(),
                 snapshot.get().enabled(Feature.POTION_VALUES));
     }

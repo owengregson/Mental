@@ -25,10 +25,13 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p>When a {@link ThrownPotion} whose item is a splash potion is launched by a
  * player looking down more steeply than {@code angle-degrees} (Bukkit pitch >
- * threshold), the launch velocity is re-aimed by {@link PotsAim} to land on the
- * thrower's feet — extrapolated over the short flight from the thrower's current
- * per-tick velocity — at {@code speed-multiplier ×} the vanilla launch speed.
- * Shallower throws are left byte-for-byte untouched (zero-touch outside the band),
+ * threshold), the launch velocity is re-aimed by {@link PotsAim}, which solves the
+ * exact discrete potion flight so the burst lands ON the thrower's predicted feet
+ * — extrapolated over the short flight from the thrower's current per-tick velocity
+ * — spending the least speed up to {@code speed-multiplier ×} the vanilla launch
+ * speed (the multiplier is a ceiling, not a fixed speed). The potion's spawn is
+ * never moved; only its velocity is solved. Shallower throws are left byte-for-byte
+ * untouched (zero-touch outside the band),
  * and LINGERING potions are excluded (their item is {@code LINGERING_POTION}, not
  * {@code SPLASH_POTION}) — this aids the instant splash self-heal, not the ground
  * cloud. What counts as a splash potion is {@link #splashItem(String)} — including
@@ -113,20 +116,22 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
     /**
      * The redirected launch velocity for a fast pot — public and production-derived
      * so the integration suite asserts against exactly this, not a re-derivation.
-     * The target speed is {@code multiplier × vanillaSpeed}; the direction is
-     * {@link PotsAim}'s aim at the thrower's predicted feet.
+     * {@link PotsAim} solves the exact discrete potion flight to land the burst ON
+     * the thrower's predicted feet, spending the least launch speed up to the cap
+     * {@code multiplier × vanillaSpeed} (the multiplier is a ceiling, not a fixed
+     * speed — the returned magnitude is {@code ≤} the cap).
      */
     public static @NotNull Vector redirect(
             @NotNull Location launch, @NotNull Player thrower, double vanillaSpeed,
             @NotNull FastPotsSettings settings) {
         Location feet = thrower.getLocation();
         Vector throwerVelocity = thrower.getVelocity();
-        double targetSpeed = vanillaSpeed * settings.speedMultiplier();
+        double speedCap = vanillaSpeed * settings.speedMultiplier();
         PotsAim.Aim aim = PotsAim.aim(
                 launch.getX(), launch.getY(), launch.getZ(),
                 feet.getX(), feet.getY(), feet.getZ(),
                 throwerVelocity.getX(), throwerVelocity.getY(), throwerVelocity.getZ(),
-                targetSpeed);
+                speedCap);
         return new Vector(aim.x(), aim.y(), aim.z());
     }
 

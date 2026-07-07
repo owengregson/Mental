@@ -4,11 +4,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.math.RodLaunchMath;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.v5.Vectors;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -33,12 +31,10 @@ public final class RodVelocityUnit implements FeatureUnit, Listener {
 
     private static final double GRAVITY_ADJUSTMENT = 0.01;
 
-    private final OcmBinding ocmBinding;
     private final Scheduling scheduling;
     private final Set<TaskHandle> gravityTasks = ConcurrentHashMap.newKeySet();
 
-    public RodVelocityUnit(OcmBinding ocmBinding, Scheduling scheduling) {
-        this.ocmBinding = ocmBinding;
+    public RodVelocityUnit(Scheduling scheduling) {
         this.scheduling = scheduling;
     }
 
@@ -59,9 +55,6 @@ public final class RodVelocityUnit implements FeatureUnit, Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onCast(PlayerFishEvent event) {
         if (event.getState() != PlayerFishEvent.State.FISHING) {
-            return;
-        }
-        if (!ocmBinding.mentalOwns(MechanicToken.FISHING_ROD_VELOCITY, event.getPlayer().getUniqueId())) {
             return;
         }
         FishHook hook = event.getHook();

@@ -3,7 +3,6 @@ package me.vexmc.mental.v5.feature.knockback;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.EntityState;
@@ -16,7 +15,6 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.Vectors;
-import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.config.ReelInPolicy;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -60,7 +58,6 @@ public final class FishingKnockbackUnit implements FeatureUnit, Listener {
     private static final double REEL_LIFT_FACTOR = 0.08;
 
     private final SessionService sessions;
-    private final OcmBinding ocmBinding;
     private final Scheduling scheduling;
     private final Supplier<Snapshot> snapshot;
     private final HitIds ids;
@@ -68,10 +65,9 @@ public final class FishingKnockbackUnit implements FeatureUnit, Listener {
     private final boolean folia;
 
     public FishingKnockbackUnit(
-            SessionService sessions, OcmBinding ocmBinding, Scheduling scheduling,
+            SessionService sessions, Scheduling scheduling,
             Supplier<Snapshot> snapshot, HitIds ids, TickClock clock, boolean folia) {
         this.sessions = sessions;
-        this.ocmBinding = ocmBinding;
         this.scheduling = scheduling;
         this.snapshot = snapshot;
         this.ids = ids;
@@ -113,9 +109,6 @@ public final class FishingKnockbackUnit implements FeatureUnit, Listener {
         if (!(event.getEntity() instanceof FishHook)
                 || !(event.getEntity().getShooter() instanceof Player rodder)
                 || !(event.getHitEntity() instanceof LivingEntity victim)) {
-            return;
-        }
-        if (!ocmBinding.mentalOwns(MechanicToken.FISHING_KNOCKBACK, rodder.getUniqueId())) {
             return;
         }
         if (victim.getUniqueId().equals(rodder.getUniqueId())
@@ -180,9 +173,6 @@ public final class FishingKnockbackUnit implements FeatureUnit, Listener {
         if (caught == null || settings.reelIn() == ReelInPolicy.VANILLA) {
             return;
         }
-        if (!ocmBinding.mentalOwns(MechanicToken.FISHING_KNOCKBACK, event.getPlayer().getUniqueId())) {
-            return;
-        }
         event.setCancelled(true);
         event.getHook().remove();
         if (settings.reelIn() == ReelInPolicy.CANCEL) {
@@ -195,7 +185,7 @@ public final class FishingKnockbackUnit implements FeatureUnit, Listener {
     private HitTransaction mintRodPull(Player rodder, LivingEntity victim) {
         HitContext context = new HitContext(
                 ids.next(), new HitSource.RodPull(), rodder.getUniqueId(), victim.getUniqueId(),
-                new SprintVerdict(false, null, clock.current()), false, false, null, clock.current());
+                new SprintVerdict(false, null, clock.current()), false, null, clock.current());
         return new HitTransaction(context);
     }
 
@@ -216,7 +206,7 @@ public final class FishingKnockbackUnit implements FeatureUnit, Listener {
             }
             HitTransaction fresh = new HitTransaction(new HitContext(
                     ids.next(), tx.context().source(), tx.context().attackerId(), victim.getUniqueId(),
-                    new SprintVerdict(false, null, clock.current()), false, false, null, clock.current()));
+                    new SprintVerdict(false, null, clock.current()), false, null, clock.current()));
             session.desk().submit(fresh, base);
             session.desk().awaitVelocityEvent(fresh);
             victim.setVelocity(Vectors.toBukkit(base));

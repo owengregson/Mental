@@ -182,4 +182,133 @@ class SprintWireTest {
         assertEquals(Boolean.FALSE, verdict.fresh());
         assertTrue(wire.clientSprinting(), "even the unconditional clear never touches the raw client flag");
     }
+
+    /* ── the universal blockhit contract (held-block sprint reset) ───────── */
+
+    @Test
+    void heldBlockResetKeepsEveryComboHitFreshAcrossTheServerClear() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();       // sprinting toward the target
+        wire.onBlockSprintReset();  // right-click block: the sticky held-block reset
+
+        // Hit #1 while holding the block — fresh, exactly like a w-tap.
+        SprintVerdict first = wire.verdictAt(new TickStamp(5));
+        assertTrue(first.sprinting());
+        assertEquals(Boolean.TRUE, first.fresh());
+
+        // The accepted bonus hit clears the wire (the post-hit onServerClear) — but
+        // the block is still held, so the freshness the first hit spent must survive.
+        wire.onServerClear(new TickStamp(5));
+
+        // Hit #2 while STILL holding the block — the defect this contract fixes:
+        // pre-change this read non-sprint (armed dropped, no re-arm without a new
+        // right-click). It now ships the FULL fresh sprint knock.
+        SprintVerdict second = wire.verdictAt(new TickStamp(5));
+        assertTrue(second.sprinting(), "a held-block combo's second hit still ships the sprint knock");
+        assertEquals(Boolean.TRUE, second.fresh(), "and it ships the full fresh stamp, not a decayed one");
+    }
+
+    @Test
+    void withoutABlockEngagementTheServerClearStillDropsFreshness() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                 // a plain sprinter, NO block engagement
+        wire.onServerClear(new TickStamp(5)); // the first hit spends the freshness
+
+        // The contrast pin: a stale-sprint hit with no block reset is NEVER
+        // freshened — the blockhit contract must not blanket-freshen ordinary hits.
+        SprintVerdict second = wire.verdictAt(new TickStamp(5));
+        assertFalse(second.sprinting(), "no block reset ⇒ a stale-sprint hit stays exactly as before");
+        assertEquals(Boolean.FALSE, second.fresh());
+    }
+
+    @Test
+    void blockReleaseEndsTheResetSoAPostReleaseHitFallsBackToTheWire() {
+        Clock clock = new Clock();
+        clock.tick = 3;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();
+        wire.onBlockSprintReset();
+        wire.onServerClear(new TickStamp(3)); // a hit spent the freshness; block still held
+        assertTrue(wire.verdictAt(new TickStamp(3)).sprinting(), "held block: fresh");
+
+        // Release the block button (the client's RELEASE_USE_ITEM) — the "while
+        // currently blocking" boundary. The sticky reset drops; the underlying wire
+        // (cleared by the hit) governs again, so a post-release hit is not a sprint
+        // hit until a real re-tap.
+        wire.onBlockReleased();
+        SprintVerdict afterRelease = wire.verdictAt(new TickStamp(3));
+        assertFalse(afterRelease.sprinting(), "after the block releases the ordinary wire verdict returns");
+        assertEquals(Boolean.FALSE, afterRelease.fresh());
+    }
+
+    @Test
+    void reEngagingTheBlockAfterAReleaseReArmsTheReset() {
+        Clock clock = new Clock();
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();
+        wire.onBlockSprintReset();
+        wire.onServerClear(new TickStamp(0));
+        wire.onBlockReleased();
+        assertFalse(wire.verdictAt(new TickStamp(0)).sprinting());
+
+        // Press the block again (W still held → the raw client flag is up) — fresh.
+        clock.tick = 2;
+        wire.onBlockSprintReset();
+        SprintVerdict reEngaged = wire.verdictAt(new TickStamp(2));
+        assertTrue(reEngaged.sprinting());
+        assertEquals(Boolean.TRUE, reEngaged.fresh());
+    }
+
+    @Test
+    void aStopSprintDuringAHeldBlockGatesTheResetUntilSprintResumes() {
+        Clock clock = new Clock();
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();
+        wire.onBlockSprintReset();
+        wire.onServerClear(new TickStamp(0)); // held-block, fresh
+        assertTrue(wire.verdictAt(new TickStamp(0)).sprinting());
+
+        // Release the sprint key while still holding the block: a STOP lowers the
+        // raw client flag → the reset is gated. You are no longer moving at sprint
+        // speed, so no phantom sprint bonus (the resetSprintForBlock gate's spirit).
+        clock.tick = 1;
+        wire.onSprintStop();
+        assertFalse(wire.verdictAt(new TickStamp(1)).sprinting(),
+                "a STOP ends the held-block reset — no phantom bonus while standing");
+
+        // Re-press sprint (still block-holding): the reset governs again.
+        clock.tick = 2;
+        wire.onSprintStart();
+        assertTrue(wire.verdictAt(new TickStamp(2)).sprinting());
+        assertEquals(Boolean.TRUE, wire.verdictAt(new TickStamp(2)).fresh());
+    }
+
+    @Test
+    void blockReleaseIsANoOpWhenNoResetIsHeld() {
+        Clock clock = new Clock();
+        clock.tick = 4;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart(); // a plain sprinter, never block-engaged
+
+        // A RELEASE_USE_ITEM from any other item use (eating, drawing a bow) must
+        // not churn the wire — the verdict is byte-identical either way (the
+        // always-inbound RELEASE packets stay zero-touch).
+        SprintVerdict before = wire.verdictAt(new TickStamp(4));
+        wire.onBlockReleased();
+        SprintVerdict after = wire.verdictAt(new TickStamp(4));
+        assertEquals(before.sprinting(), after.sprinting());
+        assertEquals(before.fresh(), after.fresh());
+        assertTrue(after.sprinting());
+        assertEquals(Boolean.TRUE, after.fresh());
+    }
 }

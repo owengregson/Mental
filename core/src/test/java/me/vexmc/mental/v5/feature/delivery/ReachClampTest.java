@@ -65,13 +65,13 @@ class ReachClampTest {
 
     @Test
     void handicapCentreThresholdBindsWhenTheBoxFloorIsInside() {
-        // scale 0.8 → centre threshold 0.8*(3.0+0.4)=2.72, box floor 0.8*3.0=2.4.
-        // Eye at chest-centre height, horizontal ray, so box = z - 0.3: at z past 2.72
-        // the box (2.42) already sits past the 2.4 floor, so the CENTRE threshold is the
-        // binding bound — 2.71 passes (centre 2.71<=2.72), 2.73 is rejected (centre
-        // 2.73>2.72 AND box 2.43>2.4).
-        assertTrue(ReachClamp.passes(0, CENTER, 2.71, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8));
-        assertFalse(ReachClamp.passes(0, CENTER, 2.73, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8));
+        // scale 0.87 (the 2.4.5 default) → centre threshold 0.87*(3.0+0.4)=2.958, box
+        // floor 0.87*3.0=2.61. Eye at chest-centre height, horizontal ray, so box = z - 0.3:
+        // at z past 2.91 the box (z-0.3) already sits past the 2.61 floor, so the CENTRE
+        // threshold is the binding bound — 2.95 passes (centre 2.95<=2.958), 2.97 is
+        // rejected (centre 2.97>2.958 AND box 2.67>2.61).
+        assertTrue(ReachClamp.passes(0, CENTER, 2.95, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.87));
+        assertFalse(ReachClamp.passes(0, CENTER, 2.97, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.87));
     }
 
     @Test
@@ -88,36 +88,39 @@ class ReachClampTest {
 
     @Test
     void handicapHonestBoxFloorPassesASteepAnswerDespiteInflatedCentre() {
-        // The 2.4.4 fix. A STEEP honest answer: attacker eye 4.0 directly above the
-        // victim column. eye-to-box (to the 1.8 top face) = 2.2, INSIDE the honest floor
-        // scale*maxReach = 2.4; but eye-to-centre = 4.0 - 0.9 = 3.1, well past 2.72. The
-        // centre-only backstop FALSE-REJECTED this honest handicapped answer (the exact
-        // swing the handicap is documented to still allow); the OR-pass box floor accepts it.
+        // The 2.4.4 fix, pinned at the 2.4.5 default scale. A STEEP honest answer:
+        // attacker eye 4.0 directly above the victim column. eye-to-box (to the 1.8 top
+        // face) = 2.2, INSIDE the honest floor scale*maxReach = 2.61; but eye-to-centre =
+        // 4.0 - 0.9 = 3.1, well past 2.958. The centre-only backstop FALSE-REJECTED this
+        // honest handicapped answer (the exact swing the handicap is documented to still
+        // allow); the OR-pass box floor accepts it.
         assertEquals(2.2, ReachClamp.distanceToBox(0, 4.0, 0, 0, 0, 0), 1.0e-9);
         assertEquals(3.1, ReachClamp.distanceToCenter(0, 4.0, 0, 0, 0, 0), 1.0e-9);
-        assertTrue(ReachClamp.passes(0, 4.0, 0, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8),
-                "a steep honest answer inside the box floor (2.2<=2.4) must pass despite centre 3.1>2.72");
+        assertTrue(ReachClamp.passes(0, 4.0, 0, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.87),
+                "a steep honest answer inside the box floor (2.2<=2.61) must pass despite centre 3.1>2.958");
     }
 
     @Test
     void handicapAcceptsTheHonestCapAndRejectsTheBlindOverReach() {
-        // The honest handicapped cap at eye height (centre = scale*maxReach = 2.4) —
-        // accepted on the centre threshold (2.4<=2.72); its box distance 1.99 also clears
-        // the 2.4 floor, so both bounds agree.
-        double honestZ = Math.sqrt(0.8 * MAX_REACH * (0.8 * MAX_REACH) - V_GAP * V_GAP);
-        assertEquals(0.8 * MAX_REACH,
+        // The honest handicapped cap at eye height (centre = scale*maxReach = 2.61 at the
+        // 2.4.5 default) — accepted on the centre threshold (2.61<=2.958); its box distance
+        // 2.21 also clears the 2.61 floor, so both bounds agree.
+        double honestZ = Math.sqrt(0.87 * MAX_REACH * (0.87 * MAX_REACH) - V_GAP * V_GAP);
+        assertEquals(0.87 * MAX_REACH,
                 ReachClamp.distanceToCenter(0, EYE, honestZ, 0, 0, 0), 1.0e-9);
-        assertTrue(ReachClamp.passes(0, EYE, honestZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8),
+        assertTrue(ReachClamp.passes(0, EYE, honestZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.87),
                 "the honest handicapped cap (centre = scale*maxReach) must pass");
 
         // The attribute-blind client's OWN gate edge (eye->chest-centre = maxReach = 3.0):
-        // centre 3.0>2.72 AND its eye-to-box there (2.6124) exceeds the 2.4 floor, so the
-        // floor does NOT rescue it and it is denied — the bite is intact.
+        // centre 3.0>2.958 AND its eye-to-box there (2.6123) exceeds the 2.61 floor, so the
+        // floor does NOT rescue it and it is denied — the bite is intact. (At 0.87 the floor
+        // 2.61 sits just below this 2.6123 edge; 0.8708 is where the floor would start
+        // admitting it, so 0.87 keeps the bite with a ~0.0023-block margin.)
         double blindZ = Math.sqrt(MAX_REACH * MAX_REACH - V_GAP * V_GAP);
         assertEquals(MAX_REACH, ReachClamp.distanceToCenter(0, EYE, blindZ, 0, 0, 0), 1.0e-9);
-        assertTrue(ReachClamp.distanceToBox(0, EYE, blindZ, 0, 0, 0) > 0.8 * MAX_REACH,
+        assertTrue(ReachClamp.distanceToBox(0, EYE, blindZ, 0, 0, 0) > 0.87 * MAX_REACH,
                 "the blind edge's eye-to-box must exceed the honest floor (so the floor cannot rescue it)");
-        assertFalse(ReachClamp.passes(0, EYE, blindZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8),
+        assertFalse(ReachClamp.passes(0, EYE, blindZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.87),
                 "the blind client's own reach edge (centre = maxReach) must be denied when handicapped");
     }
 
@@ -128,37 +131,38 @@ class ReachClampTest {
         double eyeZ = 3.0; // box distance = 3.0 - 0.3 = 2.7
         assertEquals(2.7, ReachClamp.distanceToBox(0, EYE, eyeZ, 0, 0, 0), 1.0e-9);
 
-        // NEW (handicapped, eye-to-centre, threshold 2.72): rejected.
-        assertFalse(ReachClamp.passes(0, EYE, eyeZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.8),
+        // NEW (handicapped, eye-to-centre, threshold 2.958 at the 2.4.5 default): rejected
+        // (centre 3.085>2.958 AND box 2.7>2.61 floor).
+        assertFalse(ReachClamp.passes(0, EYE, eyeZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.87),
                 "a 2.7 eye-to-box send must be rejected by the handicapped backstop");
         // PLAIN (handicap off): the byte-identical box window (3.4) accepts it.
         assertTrue(ReachClamp.passes(0, EYE, eyeZ, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, null),
                 "the same send must pass with the handicap off");
 
         // The DEFECT it fixes: the audit's clamp was eye-to-box scale*maxReach +
-        // leniency = 0.8*3.0 + 0.4 = 2.8 — ABOVE the 2.7 box distance, so it waved
+        // leniency = 0.87*3.0 + 0.4 = 3.01 — ABOVE the 2.7 box distance, so it waved
         // this over-reach through. Pinned so a regression to the box shape is caught.
-        double oldClamp = 0.8 * MAX_REACH + LENIENCY; // 2.8, eye-to-box
+        double oldClamp = 0.87 * MAX_REACH + LENIENCY; // 3.01, eye-to-box
         assertTrue(ReachClamp.distanceToBox(0, EYE, eyeZ, 0, 0, 0) <= oldClamp,
-                "the old eye-to-box clamp (2.8) sat above the 2.7 over-reach — the no-op the fix closes");
+                "the old eye-to-box clamp (3.01) sat above the 2.7 over-reach — the no-op the fix closes");
     }
 
     @Test
     void handicapHonoursTheClosestRewoundCandidate() {
         // Attacker eye at the origin; the victim's live position has fled to 8 blocks
-        // out (far), but a rewound sample was inside the 2.72 handicapped window —
+        // out (far), but a rewound sample was inside the 2.958 handicapped window —
         // the closest candidate decides (the ClubSpigot-lite leniency the plain shape
         // keeps too). Sample at z=2.0: centre = sqrt(2^2 + 0.72^2) = 2.1256.
         List<PositionRing.Sample> history = List.of(
                 new PositionRing.Sample(0, 0, 7.5, 1L),
                 new PositionRing.Sample(0, 0, 2.0, 2L));
-        assertTrue(ReachClamp.passes(0, EYE, 0, history, 0, 0, 8, MAX_REACH, LENIENCY, 0.8),
+        assertTrue(ReachClamp.passes(0, EYE, 0, history, 0, 0, 8, MAX_REACH, LENIENCY, 0.87),
                 "a historical candidate within the handicapped window passes");
 
         // With every candidate beyond the window, it fails.
         List<PositionRing.Sample> allFar = List.of(
                 new PositionRing.Sample(0, 0, 5.0, 1L),
                 new PositionRing.Sample(0, 0, 6.0, 2L));
-        assertFalse(ReachClamp.passes(0, EYE, 0, allFar, 0, 0, 8, MAX_REACH, LENIENCY, 0.8));
+        assertFalse(ReachClamp.passes(0, EYE, 0, allFar, 0, 0, 8, MAX_REACH, LENIENCY, 0.87));
     }
 }

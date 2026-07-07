@@ -12,7 +12,7 @@
 #
 #  Everything here is managed in-game through the Mental menu — run /mental
 #  (op only): module switches, the server-wide knockback profile, anticheat
-#  and OCM coordination, and debug. Changes apply atomically — no hit is ever
+#  posture, and debug. Changes apply atomically — no hit is ever
 #  processed against a half-applied config. The console can still reload with
 #  /mental reload. Editing files by hand still works; reload to apply.
 # ──────────────────────────────────────────────────────────────────────────
@@ -110,9 +110,9 @@ modules:
   # deterministically (no per-hit randomness) since clients never predict armour,
   # so the jitter is invisible. Era values pinned from decompiled 1.8.9 (pr.java/
   # acr.java/ack.java). Implemented by overriding the granular damage modifiers
-  # (ARMOR/RESISTANCE/MAGIC/ABSORPTION) at LOWEST priority — the same proven
-  # cross-version mechanism OCM uses (the deprecated modifier setter only throws
-  # when a modifier is absent, so we only ever write applicable ones).
+  # (ARMOR/RESISTANCE/MAGIC/ABSORPTION) at LOWEST priority — the deprecated
+  # modifier setter only throws when a modifier is absent, so we only ever write
+  # applicable ones.
   # Default OFF (era-exact no-op when disabled).
   old-armour-strength: false
   # Restores the 1.8 armour-durability Unbreaking skip: worn armour takes its
@@ -120,19 +120,18 @@ modules:
   # hits as Unbreaking rises), in place of modern armour's generic
   # level/(level+1). The per-hit wear MAGNITUDE is left at vanilla's
   # max(1, floor(damage/4)) — identical 1.8<->modern, so it is never changed
-  # (OCM's flat-1 override is NOT era-exact). At Unbreaking 0 nothing skips, as in
+  # (a flat-1 override would NOT be era-exact). At Unbreaking 0 nothing skips, as in
   # 1.8 NMS. Only currently-worn armour pieces are affected (elytra excluded).
-  # Era values pinned from decompiled 1.8.9 (acg.java/wm.java); mirrors OCM's
-  # ModuleOldArmourDurability. Implemented on PlayerItemDamageEvent at LOWEST
+  # Era values pinned from decompiled 1.8.9 (acg.java/wm.java). Implemented on
+  # PlayerItemDamageEvent at LOWEST
   # priority, on the player's region thread (Folia-safe, no scheduler).
   # Default OFF (era-exact no-op when disabled).
   old-armour-durability: false
   # Restores the pre-1.9 (1.8) potion DURATIONS. 1.9 shortened many potion
   # durations; this rewrites a potion's effect back to its 1.8 length when a
   # player drinks it (PlayerItemConsumeEvent), throws a splash/lingering potion
-  # (right-click), or a dispenser fires one (BlockDispenseEvent) — the same three
-  # hooks OCM's old-potion-effects uses. The duration table is OCM's
-  # old-potion-effects.potion-durations (drink/splash, in seconds), converted to
+  # (right-click), or a dispenser fires one (BlockDispenseEvent). The era
+  # duration table (drink/splash, in seconds) is converted to
   # ticks: Strength 180/135 s, Swiftness 180/135 s, Fire Resistance 180 s,
   # Weakness 90 s, Poison 45/33 s, Regeneration 45/33 s, Night Vision 180 s,
   # Invisibility 180/135 s, Water Breathing 180/135 s, Slowness 90/67 s, Leaping
@@ -149,14 +148,12 @@ modules:
   # weapon base (factor 1 + 2.5*(amp+1) — Strength I x3.5, Strength II x6.0, far
   # stronger than 1.9's flat +3*(amp+1)), and era Weakness subtracted only
   # 2.0*(amp+1) (1.9 doubled it to 4.0*(amp+1)). Era values pinned from
-  # decompiled 1.8.9 (pe.java/rv.java); OCM's own defaults (Strength 1.3,
-  # Weakness -0.5) are NOT era-exact and are deliberately not used. Applied to
+  # decompiled 1.8.9 (pe.java/rv.java). Applied to
   # the weapon base BEFORE the crit x1.5 and BEFORE the Sharpness additive
   # (era order, wn.java:761-764), clamped >= 0. Implemented in the fast-path
   # DamageCalculator. SCOPE: fast-path PvP melee only (the dominant case) — mob
-  # attacks and fast-path-off hits keep vanilla Strength/Weakness, and when OCM
-  # shapes the damage these era values are skipped. This is the VALUES half only;
-  # potion DURATIONS are the separate old-potion-durations module.
+  # attacks and fast-path-off hits keep vanilla Strength/Weakness. This is the
+  # VALUES half only; potion DURATIONS are the separate old-potion-durations module.
   # Default OFF (era-exact no-op when disabled).
   old-potion-values: false
   # Applies the 1.8 era critical-hit multiplier (x1.5 on attack damage) for
@@ -170,9 +167,8 @@ modules:
   # player melee only — when Mental's fast path is ON, DamageCalculator already
   # applies the era crit with the correct ordering (weapon base before Sharpness);
   # this module is a no-op when the fast path is ON. Fast-path-off is a minority
-  # case: most PvP hits on a Mental server go through the fast path. When OCM owns
-  # old-critical-hits for the attacker, OCM handles the crit — this module does
-  # not double-apply. Default OFF (era-exact no-op when disabled).
+  # case: most PvP hits on a Mental server go through the fast path.
+  # Default OFF (era-exact no-op when disabled).
   old-critical-hits: false
   # Restores weapon durability loss on Mental's fast-path melee hits, which the
   # fast path otherwise OMITS by design: the fast path applies damage via a direct
@@ -277,12 +273,12 @@ modules:
   combo-hold: false
   # combo-reach-handicap: while a victim is held in a combo, scale DOWN their
   # entity-interaction-range attribute so their own client raycast shortens and they
-  # cannot answer. It DEPENDS on combo-hold (it only engages while a combo is held —
-  # enabling it alone warns on reload and does nothing) and is a SECONDARY lever: the
-  # servo steers spacing, this tightens retaliation. 1.20.5+ ONLY (the attribute is
-  # client-synced there). For the SERVER-SIDE enforcement leg against attribute-blind
-  # clients you must ALSO enable hit-registration.reach-validation. Tuned in the
-  # combo-reach-handicap section below. Default OFF (era-exact no-op).
+  # cannot answer. Since 2.4.5 it runs STANDALONE — it drives combo detection itself,
+  # so it engages with combo-hold off (and composes with the servo when both are on:
+  # a shorter victim reach opens the servo's keepable pocket). 1.20.5+ ONLY (the
+  # attribute is client-synced there). For the SERVER-SIDE enforcement leg against
+  # attribute-blind clients you must ALSO enable hit-registration.reach-validation.
+  # Tuned in the combo-reach-handicap section below. Default OFF (era-exact no-op).
   #
   # (Moved in 2.4.4: this was the nested combo-hold.reach-handicap.enabled sub-knob.
   # An upgraded config with the old nested key still works for one release — it is
@@ -332,7 +328,8 @@ modules:
 #
 # ── Detector: when is a combo "active"? ────────────────────────────────────
 #   min-hits            hits from ONE attacker before the servo engages (the
-#                       first two confirm intent; the servo helps from the third).
+#                       first develops the chain; the second confirms intent and
+#                       engages the servo — two hits, no retaliation = in combo).
 #   max-gap-ticks       an inter-hit gap longer than this ends the chain — era
 #                       sweet-spot cadence is ~10-12 ticks, so 20 is generous.
 #   grounded-run-ticks  consecutive grounded ticks that end the combo: brief
@@ -342,14 +339,14 @@ modules:
 # so these thresholds err toward NOT detecting a combo.
 #
 # ── Servo: where does the victim land? ─────────────────────────────────────
-#   target       the separation (blocks) the servo steers the victim toward at
-#                the next swing. 2.85 is the DATA-BACKED anchor from the lab's
-#                71-combo round: every one of the five longest combos (120-173
-#                hits) held 2.81-2.86, the [2.8, 2.92) band broke combos 1.3% per
-#                hit vs 5.9% at the cap edge, and the old reach-triangle 2.75 was
-#                unreachable at signature scale (the 0.8 clamp) so it never
-#                regulated. Vertical is deliberately never touched — the profile's
-#                launch height is what buys that margin.
+# The 2.4.5 redesign lands the victim right at the ANSWER-DENIAL BOUNDARY: the
+# separation where, at the moment they could first swing back (their ping + the
+# turn they'd need), their reach-back is denied by a hair while YOU can still reach
+# them. It PUSHES OUT to that edge and only pulls IN if the natural knock would
+# eject them past your own reach — the opposite of the old "pull into the least
+# separation" servo, which dragged the victim into their own retaliation range.
+# Vertical is deliberately never touched — the profile's launch height buys the
+# vertical margin the geometry reads.
 #   gain         blends toward the full exact solve (1.0 = exact; lower softens).
 #   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
 #   max-factor   } stronger hold; past them the pocket is honestly lost and era
@@ -359,35 +356,53 @@ modules:
 #                vertical stamp's air-time, ping horizons and the ground tail into
 #                the window; this is the base cadence they shift from.
 #
-# ── Precision predictor (§3.2b): the solve now folds the victim's launch ground
-#    state (the mandatory grounded/air drag branch), measured mid-air steering,
-#    both parties' ping horizons and the ground tail into that same window — no
-#    knobs; every input degrades to a no-op when unavailable. The one knob pair:
-#   target-mode  anchor | dynamic. ANCHOR (default) always steers to `target`; the
-#                exposure-budget DYNAMIC target (facing- and ping-aware, relaxing
-#                between `target` and `hit-cap`) is COMPUTED and logged to the
-#                debug sink either way, so you can field-calibrate it before flipping
-#                the default. Leave it `anchor` until a lab round validates dynamic.
-#   hit-cap      the dynamic target's upper clamp — the practical hittable edge
-#                (2.95). Only consulted under `target-mode: dynamic`.
+# ── The boundary geometry (the target knobs) ───────────────────────────────
+#   target-mode  boundary | static. BOUNDARY (default) computes the geometric
+#                answer-denial target from the reach geometry below. STATIC pins the
+#                servo to a fixed `target` separation regardless of facing.
+#                (Migration: an old `anchor` reads as STATIC, an old `dynamic` reads
+#                as BOUNDARY, each with a loud reload notice.)
+#   target       the STATIC-mode / no-facing FALLBACK separation (2.85, the lab's
+#                held-separation equilibrium). Used whenever the geometry can't be
+#                measured (the victim's facing is unknown) or under target-mode:
+#                static. (This is the old `target` key, reused — a tuned value carries
+#                over.)
+#   victim-reach the victim's era answer reach in blocks (R_v, 3.0). The combo reach
+#                handicap, when live, SHORTENS this for the held combo — a shorter
+#                victim reach drops the deny boundary and OPENS the keepable pocket
+#                (this is why the reach nerf keeps a combo).
+#   attacker-reach   YOUR era reach (R_a, 3.0) — never handicapped.
+#   deny-margin  the hair past the victim's deny boundary the servo aims for, so
+#                jitter can't let them answer (0.02).
+#   jitter-margin    the slack below your reach the target keeps, so you reliably
+#                connect (0.15).
+#   target-floor the closest the servo will EVER pull the victim in (2.5).
+# (The pre-2.4.5 `hit-cap` knob is gone with the exposure-budget dynamic target; an
+# upgraded config that still sets it gets one reload notice, then it is ignored.)
 #
 # ── Reach handicap ─────────────────────────────────────────────────────────
 # The reach handicap moved to its OWN module in 2.4.4 — modules.combo-reach-handicap
-# above, tuned in the combo-reach-handicap section below. (It used to live here as a
-# nested combo-hold.reach-handicap block; an upgraded config with that old block still
-# works for one release — honoured with a loud reload notice — but move it.)
+# above, tuned in the combo-reach-handicap section below. Since 2.4.5 it drives combo
+# DETECTION itself, so it works STANDALONE (combo-hold off) AND composes with the
+# servo when both are on. (It used to live here as a nested combo-hold.reach-handicap
+# block; an upgraded config with that old block still works for one release — honoured
+# with a loud reload notice — but move it.)
 #combo-hold:
-#  min-hits: 3
+#  min-hits: 2
 #  max-gap-ticks: 20
 #  grounded-run-ticks: 10
 #  blowout-blocks: 6.0
-#  target: 2.85
 #  gain: 1.0
 #  min-factor: 0.8
 #  max-factor: 1.2
 #  window-ticks: 10
-#  target-mode: anchor
-#  hit-cap: 2.95
+#  target-mode: boundary
+#  target: 2.85
+#  victim-reach: 3.0
+#  attacker-reach: 3.0
+#  deny-margin: 0.02
+#  jitter-margin: 0.15
+#  target-floor: 2.5
 
 # Combo reach handicap, active when modules.combo-reach-handicap is true.
 # While a victim is held in a combo, scale DOWN their entity-interaction-range
@@ -397,8 +412,8 @@ modules:
 # fully reversible, and swept clean on join / enable / disable so a crash never leaves
 # a shortened reach in a saved profile.
 #
-#   DEPENDS ON combo-hold. It only engages while a combo is held, so with combo-hold
-#   off it never applies (enabling it alone warns on reload).
+#   STANDALONE since 2.4.5. It drives combo detection itself, so it engages with
+#   combo-hold off (and composes with the servo when both are on).
 #
 #   1.20.5+ ONLY. The interaction-range attribute is client-synced from 1.20.5, so
 #   shortening it makes the client's OWN raycast shorten (no phantom misses). Below
@@ -412,11 +427,12 @@ modules:
 #   hit-registration.reach-validation.enabled: true. With reach-validation off, the
 #   handicap is purely the client-synced attribute shrink (honest clients only).
 #
-#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.8 → 2.4
-#                blocks; an out-of-range value warns on reload and 0.8 stands. It
-#                only ever SHORTENS reach (a handicap never inflates it).
+#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.87 → 2.61
+#                blocks; an out-of-range value warns on reload and 0.87 stands. It
+#                only ever SHORTENS reach (a handicap never inflates it). (The 2.4.5
+#                retune lifted the floor from 0.8/2.4 — that bottom end was too severe.)
 #combo-reach-handicap:
-#  reach-scale: 0.8
+#  reach-scale: 0.87
 
 # Items that become uncraftable when modules.disable-crafting is true.
 # Any material name recognised by Bukkit's Material.matchMaterial() is valid.
@@ -490,26 +506,10 @@ anticheat:
     - GrimAC
     - Vulcan
 
-# Coexistence with combat-rules plugins.
-compatibility:
-  # OldCombatMechanics divides combat with Mental: OCM owns the rules
-  # (attack cooldown, sword blocking, regen, armour, golden apples), Mental
-  # owns knockback and hit delivery. Where OCM's own modules reach into
-  # Mental's half — old-player-knockback, old-fishing-knockback,
-  # fishing-rod-velocity, projectile-knockback, old-tool-damage,
-  # old-critical-hits — Mental yields exactly the interactions OCM is
-  # configured to handle, per player modeset when OCM's API is available.
-  # To give a mechanic to Mental, disable the corresponding OCM module (or
-  # drop it from the modeset); Mental's combos, positional projectile
-  # knockback and ping compensation apply to interactions Mental owns.
-  #   auto   — coordinate as described (recommended).
-  #   ignore — pretend OCM is absent; both plugins will fight. Not advised.
-  old-combat-mechanics: auto
-
 # Anonymous usage statistics via bStats (https://bstats.org/plugin/bukkit, id
 # 31788). No player data is collected — only aggregate counts (server software,
-# Mental's anticheat mode, latency probe strategy, scheduling backend, and OCM
-# coordination mode). Set to false to opt out entirely.
+# Mental's anticheat mode, latency probe strategy, and scheduling backend). Set
+# to false to opt out entirely.
 metrics:
   enabled: true
 

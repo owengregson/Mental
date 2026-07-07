@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.GroundFsm;
+import me.vexmc.mental.kernel.wire.ResetModelWire;
 import me.vexmc.mental.kernel.wire.SprintWire;
 
 /**
@@ -14,15 +15,17 @@ import me.vexmc.mental.kernel.wire.SprintWire;
  *
  * <p>The {@link GroundFsm} is single-writer by ownership — only its connection
  * thread mutates it. The {@link SprintWire} is the ONE exception: besides its
- * connection thread (packet START/STOP, reconcile, verdict reads) it is written
- * by exactly two other sanctioned threads — {@code KnockbackUnit} on the VICTIM's
- * region thread (the post-hit {@code onServerClear}) and {@code SwordBlockingUnit}
- * on the ATTACKER's thread (the block-hit re-arm + {@code clientSprinting} read).
- * That is licensed because {@code SprintWire} holds its whole state in one
- * immutable snapshot swapped by CAS ({@code AtomicReference}), so every
- * cross-thread read sees a coherent atomic value and each write happens-before the
- * next read — no torn mix, no lost update. Do not add a fourth writer without
- * preserving that atomicity.</p>
+ * connection thread (packet START/STOP, {@code onBlockReleased}, reconcile,
+ * verdict reads) it is written by two other sanctioned writers — {@code
+ * KnockbackUnit} on the VICTIM's region thread (the post-hit {@code onServerClear})
+ * and {@code SwordBlockingUnit} on the ATTACKER's region thread (the block-hit
+ * re-arm {@code onBlockSprintReset} + {@code clientSprinting} read; its own
+ * RELEASE_USE_ITEM {@code onBlockReleased} runs on the ATTACKER's netty thread,
+ * i.e. the connection thread above). That is licensed because {@code SprintWire}
+ * holds its whole state in one immutable snapshot swapped by CAS ({@code
+ * AtomicReference}), so every cross-thread read sees a coherent atomic value and
+ * each write happens-before the next read — no torn mix, no lost update. Do not add
+ * a further writer without preserving that atomicity.</p>
  *
  * <p>Domains are created lazily on the first Play packet a connection sends (the
  * UUID is stable only post-login, and the rim is Play-only anyway) and forgotten
@@ -35,6 +38,7 @@ public final class ConnectionDomains {
 
         private final SprintWire sprint;
         private final GroundFsm ground;
+        private final ResetModelWire resetModel;
         // Volatile: written by this connection's own netty thread (the rim yaw tap)
         // and read cross-thread — the attacker's netty thread at hit-plan time (the
         // hurt-yaw tilt) and, with the pocket-servo precision round, the dynamic
@@ -47,6 +51,7 @@ public final class ConnectionDomains {
         Domain(TickClock clock) {
             this.sprint = new SprintWire(clock);
             this.ground = new GroundFsm(clock);
+            this.resetModel = new ResetModelWire(clock);
         }
 
         public SprintWire sprint() {
@@ -55,6 +60,11 @@ public final class ConnectionDomains {
 
         public GroundFsm ground() {
             return ground;
+        }
+
+        /** The attacker's sprint-reset model — the dynamic-chase phase/technique signal (D1). */
+        public ResetModelWire resetModel() {
+            return resetModel;
         }
 
         /** The last rotation-bearing yaw, tracked for the sprint-jump facing push. */

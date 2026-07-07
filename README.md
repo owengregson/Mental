@@ -46,7 +46,7 @@ Pick one in-game under **`/mental` → Knockback**, or set `knockback.profile` i
 | --- | --- |
 | **Server** | Paper 1.9.4 → 26.x · Folia 1.19.4+ — every version, **1.14.4 included** |
 | **Java** | Whatever your server runs — **Java 8 or newer**. Mental's one jar loads on all of it. |
-| **Dependencies** | None — Mental is a self-contained 1.8 combat suite. OldCombatMechanics is optional. |
+| **Dependencies** | None — Mental is a self-contained 1.8 combat suite. |
 
 **One jar, every version — no flags, no per-version builds.** Mental ships a single **Multi-Release jar**: legacy JVMs read a Java-8 bytecode tree, modern JVMs (1.17+) read the original Java-17 tree — same plugin, same behaviour, whichever your server picks. So there is nothing to match to your Minecraft version and no `IgnoreJavaVersion` flag to set: drop the one jar into `plugins/` and run **whatever Java your server itself wants**, from Java 8 up. Run the newest Java your server build accepts flagless and you get its full GC/JIT performance for free.
 
@@ -79,11 +79,11 @@ That's it — the defaults already give you the classic combat. Everything else 
 
 Run **`/mental`** (or `/mtl`) to open one unified, hand-designed menu — it works on every supported version and on Folia. Changes apply atomically the instant you click: no restart, safe mid-combat.
 
-The dashboard shows a live status plate (version, platform, scheduling backend, active profile, modules, anticheat & OCM posture) and one screen per area:
+The dashboard shows a live status plate (version, platform, scheduling backend, active profile, modules, anticheat posture) and one screen per area:
 
 - **Knockback** — pick the server-wide profile (the active one glows, each tile previews its values) and toggle the sources (fishing, projectile, rod).
 - **Hit Registration · Combat Rules · Damage · Potions & Food · Player** — flip any module on or off live.
-- **Compatibility** — cycle the anticheat posture and OldCombatMechanics coordination.
+- **Compatibility** — cycle the anticheat posture.
 - **Debug** — toggle any of ten verbose-logging channels and stream them to your chat.
 
 Prefer YAML? Editing the files by hand still works — the one surviving command is **`/mental reload`** (the console can't open a menu), mirrored by the dashboard's reload button.
@@ -96,7 +96,7 @@ Split by concern under `plugins/Mental/`, every option explained in its file:
 
 | File | What lives there |
 | --- | --- |
-| `config.yml` | The control panel: module switches, anticheat policy, OCM coordination, debug. |
+| `config.yml` | The control panel: module switches, anticheat policy, debug. |
 | `knockback.yml` | Which profile applies where (default + per-world), plus rod, fishing and projectile mechanics. |
 | `hit-registration.yml` | The async hit pipeline, its fast path, and reach validation. |
 | `latency-compensation.yml` | Ping-aware knockback correction. |
@@ -136,7 +136,7 @@ Mental ships 16 combat-rule modules ported from OldCombatMechanics, **all defaul
 | `sword-blocking` | 1.7-style right-click sword blocking (a data-component pose on 1.21+, off-hand-shield fallback on 1.17.1–1.20.6). |
 | `old-hitboxes` | Era melee reach + hitbox margin (entity attribute on 1.20.5+, `AttackRange` component on 1.21.5+; no-op below). |
 
-All 16 are Folia-correct. They're **OCM-agnostic** — if you run OldCombatMechanics too, enable each rule in *one* plugin only, or it double-applies.
+All 16 are Folia-correct and standalone. If you run another combat-rules plugin too, enable each rule in *one* plugin only, or it double-applies.
 
 ## FAQ
 
@@ -149,11 +149,8 @@ No. Mental deals damage through the standard Bukkit event chain, so anything tha
 **Does it remove the 1.9 attack cooldown?**
 Enable the `attack-cooldown` module (default OFF). It removes the cooldown *and* hides the charge meter and greyed swing client-side. Mental never scales damage by charge anyway, so hits already feel instant — the module just cleans up the visual.
 
-**Can I run without OldCombatMechanics?**
-Yes — Mental's 16 optional modules cover the full 1.8 ruleset, so it's a self-contained 1.8 combat suite.
-
-**Can I run it *alongside* OldCombatMechanics?**
-Yes. Mental detects OCM and auto-yields (via `OcmGate`) for the mechanics OCM owns — knockback, fishing and projectiles step aside per player modeset so nothing applies twice. The new rules modules are OCM-agnostic, though, so pick one plugin per rule. Full ownership table in [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+**Is it a standalone combat suite?**
+Yes — Mental's 16 optional modules cover the full 1.8 ruleset, so it's a self-contained 1.8 combat suite with no companion plugin required. Enabling the same rule here *and* in another combat-rules plugin double-applies it, so pick one plugin per rule.
 
 **Why doesn't the projectile module do anything on my 1.21.2+ server?**
 Because it doesn't need to — Mojang restored projectile knockback against players in vanilla 1.21.2.
@@ -179,7 +176,7 @@ Mental is a multi-module Gradle build:
 
 `core` compiles against the Paper 1.17.1 API floor, so the common path is binary-safe across the modern range; anything newer lives in a `compat-*` module behind runtime feature detection. Support reaches down to Paper 1.9.4 at *runtime* — every API absent below the 1.17.1 compile floor is reached through a boot-time resolver that picks the era-correct fallback and prints its choice in the boot report (the same pattern that absorbs the 1.21.3 `Attribute` change and the 1.20.5 enchantment renames). Legacy material and text names are normalised once at the platform seam, so the kernel's vocabulary stays modern and version-blind.
 
-Deeper reading: [docs/fast-path.md](docs/fast-path.md) (packet → knockback pipeline), [docs/legacy-combat.md](docs/legacy-combat.md) (what "1.7.10 combat" means precisely), [docs/knockback-profiles.md](docs/knockback-profiles.md) (presets, provenance, the divisor↔multiplier porting hazard), [docs/ocm-coexistence.md](docs/ocm-coexistence.md).
+Deeper reading: [docs/fast-path.md](docs/fast-path.md) (packet → knockback pipeline), [docs/legacy-combat.md](docs/legacy-combat.md) (what "1.7.10 combat" means precisely), [docs/knockback-profiles.md](docs/knockback-profiles.md) (presets, provenance, the divisor↔multiplier porting hazard).
 
 The single jar loads on Java 8 up because it is a **Multi-Release mega-jar** — the Java-17 build is downgraded to a Java-8 (class v52) base tree by [JVMDowngrader](https://github.com/unimined/JVMDowngrader), with the original v61 classes kept under `META-INF/versions/17` for modern JVMs. Mental is MIT-licensed; the bundled third-party runtimes it shades (PacketEvents, bStats, Adventure, JVMDowngrader) keep their own licenses — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 

@@ -45,8 +45,8 @@ public final class AttackChargeReset {
 
     /**
      * Any captured base at or above this is treated as an already-inflated
-     * cooldown-removal value (a crashed-Mental {@code 1024}, OCM's {@code 40}, or
-     * a third-party plugin), NOT a genuine original — the vanilla default is
+     * cooldown-removal value (a crashed-Mental {@code 1024} or another plugin's
+     * inflated base), NOT a genuine original — the vanilla default is
      * captured instead so a later restore can never write back the spoofed base.
      */
     static final double MAX_CAPTURABLE_BASE = 16.0;

@@ -13,10 +13,10 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Hand-computed pins for the combo detector state machine (combo-hold §3.1).
- * Defaults: minHits 3, maxGapTicks 20, groundedRunTicks 10, blowoutBlocks 6.0.
- * Every boundary (activation on the third hit, gap expiry at exactly gap+1,
- * attacker-switch restart, retaliation, grounded-run, blowout, NaN separation)
- * is asserted so the machine can never drift silently.
+ * Defaults: minHits 2, maxGapTicks 20, groundedRunTicks 10, blowoutBlocks 6.0.
+ * Every boundary (activation on the second hit — the 2.4.5 retune, gap expiry at
+ * exactly gap+1, attacker-switch restart, retaliation, grounded-run, blowout, NaN
+ * separation) is asserted so the machine can never drift silently.
  */
 class ComboTrackerTest {
 
@@ -32,11 +32,16 @@ class ComboTrackerTest {
         return new ComboTracker(RULES);
     }
 
-    /** Drive three same-attacker hits at a 10-tick cadence to an active combo. */
+    /**
+     * Drive three same-attacker hits at a 10-tick cadence to an active combo. The
+     * combo goes active on the SECOND hit (minHits 2); the third continues it and
+     * leaves {@code lastHitTick} at t(20) — the gap clock the downstream gap/grounded
+     * pins measure their offsets from.
+     */
     private static ComboTracker active() {
         ComboTracker tracker = tracker();
         tracker.onKnockShipped(A, t(0));
-        tracker.onKnockShipped(A, t(10));
+        tracker.onKnockShipped(A, t(10)); // second hit → active
         tracker.onKnockShipped(A, t(20));
         return tracker;
     }
@@ -48,7 +53,8 @@ class ComboTrackerTest {
     }
 
     @Test
-    void activatesExactlyOnTheThirdHit() {
+    void activatesExactlyOnTheSecondHit() {
+        // The 2.4.5 retune: minHits 2, so the SECOND shipped hit fires COMBO START.
         ComboTracker tracker = tracker();
 
         ComboTransition first = one(tracker.onKnockShipped(A, t(0)));
@@ -57,28 +63,31 @@ class ComboTrackerTest {
         assertNull(tracker.snapshot().attackerId(), "developing chain publishes no attacker");
 
         ComboTransition second = one(tracker.onKnockShipped(A, t(10)));
-        assertEquals(ComboTransition.Kind.NONE, second.kind(), "hit 2 does not activate");
-        assertFalse(tracker.active());
-
-        ComboTransition third = one(tracker.onKnockShipped(A, t(20)));
-        assertTrue(third.started(), "hit 3 activates the combo");
-        assertEquals(A, third.attacker());
-        assertEquals(3, third.hits());
+        assertTrue(second.started(), "hit 2 activates the combo");
+        assertEquals(A, second.attacker());
+        assertEquals(2, second.hits());
         assertTrue(tracker.active());
         assertEquals(A, tracker.snapshot().attackerId());
-        assertEquals(t(20), tracker.snapshot().activeSince());
+        assertEquals(t(10), tracker.snapshot().activeSince());
+
+        // A third same-attacker hit continues the active chain — no fresh START.
+        ComboTransition third = one(tracker.onKnockShipped(A, t(20)));
+        assertEquals(ComboTransition.Kind.NONE, third.kind(), "hit 3 does not re-start an active combo");
+        assertTrue(tracker.active());
+        assertEquals(t(10), tracker.snapshot().activeSince(), "activeSince stays the second hit's tick");
     }
 
     @Test
     void gapExpiresAtExactlyMaxGapPlusOne() {
-        // Two hits at 0 and 20 (gap 20 == maxGap) keep the developing chain alive;
-        // a hit at 40 (gap 20) then a hit at 61 (gap 21 > maxGap) restarts it.
+        // Two hits at 0 and 20 (gap 20 == maxGap) activate the chain (minHits 2);
+        // a third at 40 (gap 20) continues it, then a tick at 61 (gap 21 > maxGap) ends it.
         ComboTracker tracker = tracker();
         tracker.onKnockShipped(A, t(0));
-        assertEquals(ComboTransition.Kind.NONE, one(tracker.onKnockShipped(A, t(20))).kind());
-        // The chain now has two hits (gaps all == 20, none expired). A third at 40
-        // (gap 20) activates it.
-        assertTrue(one(tracker.onKnockShipped(A, t(40))).started());
+        // The second hit at 20 (gap 20 == maxGap, not expired) activates it.
+        assertTrue(one(tracker.onKnockShipped(A, t(20))).started());
+        assertTrue(tracker.active());
+        // A third at 40 (gap 20) continues the active chain — no transition, lastHit → 40.
+        assertEquals(ComboTransition.Kind.NONE, one(tracker.onKnockShipped(A, t(40))).kind());
         assertTrue(tracker.active());
 
         // onTick at gap == maxGap (tick 60, lastHit 40) does NOT expire.
@@ -101,9 +110,9 @@ class ComboTrackerTest {
         assertTrue(restart.ended());
         assertEquals(ComboEndReason.EXPIRED, restart.reason());
         assertFalse(tracker.active(), "the fresh chain is developing, not active");
-        // Two more within the window re-activate.
-        assertEquals(ComboTransition.Kind.NONE, one(tracker.onKnockShipped(A, t(51))).kind());
-        assertTrue(one(tracker.onKnockShipped(A, t(61))).started());
+        // One more within the window re-activates (minHits 2: the second hit of the fresh chain).
+        assertTrue(one(tracker.onKnockShipped(A, t(51))).started());
+        assertTrue(tracker.active());
     }
 
     @Test
@@ -113,9 +122,8 @@ class ComboTrackerTest {
         assertTrue(switched.ended(), "A's combo ends when B takes over");
         assertEquals(A, switched.attacker());
         assertFalse(tracker.active());
-        // B now develops its own chain.
-        tracker.onKnockShipped(B, t(30));
-        ComboTransition bActive = one(tracker.onKnockShipped(B, t(35)));
+        // B now develops its own chain; its SECOND hit activates it (minHits 2).
+        ComboTransition bActive = one(tracker.onKnockShipped(B, t(30)));
         assertTrue(bActive.started());
         assertEquals(B, bActive.attacker());
         assertEquals(B, tracker.snapshot().attackerId());
@@ -158,8 +166,7 @@ class ComboTrackerTest {
     @Test
     void ownHitOnADevelopingChainResetsSilently() {
         ComboTracker tracker = tracker();
-        tracker.onKnockShipped(A, t(0));
-        tracker.onKnockShipped(A, t(10)); // two hits, not yet active
+        tracker.onKnockShipped(A, t(0)); // one hit, still developing (minHits 2 not reached)
         ComboTransition reset = tracker.onOwnHitLanded(t(12));
         assertEquals(ComboTransition.Kind.NONE, reset.kind(), "no START had fired — no END to balance");
         assertFalse(tracker.active());
@@ -167,19 +174,96 @@ class ComboTrackerTest {
     }
 
     @Test
-    void groundedRunEndsExactlyOnTheTenthGroundedTick() {
-        ComboTracker tracker = active(); // active, lastHit tick 20
-        // Nine grounded ticks (21..29, gaps 1..9 <= maxGap) do NOT end the combo.
-        for (int tick = 21; tick <= 29; tick++) {
+    void groundedRunAtEraCadenceEndsOnTheTwelfthGroundedTick() {
+        // The gap-aware grounded run (servo-lab 2.4.5): active() observed a 10-tick
+        // cadence (gaps 10, 10 → EMA 10), so the effective threshold is the observed
+        // cadence plus the ±2-tick jitter slack — max(10, min(20, 10 + 2)) = 12.
+        ComboTracker tracker = active(); // active, lastHit tick 20, cadence EMA 10
+        assertEquals(10.0, tracker.cadenceTicks(), 1.0e-9, "EMA of gaps 10, 10");
+        // Eleven grounded ticks (21..31) are rhythm-legitimate skims.
+        for (int tick = 21; tick <= 31; tick++) {
             assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind(),
                     "grounded tick " + tick + " is a survivable skim");
             assertTrue(tracker.active());
         }
-        // The tenth consecutive grounded tick (30, gap 10) ends it.
-        ComboTransition grounded = tracker.onTick(t(30), true, Double.NaN);
+        // The twelfth consecutive grounded tick (32, still inside the 20-tick gap
+        // window) ends it — a real settle, not a between-hits stretch.
+        ComboTransition grounded = tracker.onTick(t(32), true, Double.NaN);
         assertTrue(grounded.ended());
         assertEquals(ComboEndReason.GROUNDED, grounded.reason());
         assertFalse(tracker.active());
+    }
+
+    @Test
+    void groundedRunScalesWithASlowObservedCadence() {
+        // An 18-tick attacker (the lab's C cells): threshold = max(10, min(20, 18+2))
+        // = 20 — the legitimate ~8-tick between-hit ground time (18t gap − ~10t
+        // flight) can never end the combo mid-gap any more (the lab's 57% coverage
+        // was GROUNDED deaths mid-gap), while gap expiry still owns a rhythm break.
+        ComboTracker tracker = tracker();
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(18)); // second hit → active, cadence seeds at 18
+        tracker.onKnockShipped(A, t(36)); // EMA 0.3·18 + 0.7·18 = 18
+        assertEquals(18.0, tracker.cadenceTicks(), 1.0e-9);
+        // Nineteen grounded ticks (37..55) survive — the old fixed 10 died here.
+        for (int tick = 37; tick <= 55; tick++) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind(),
+                    "grounded tick " + tick + " is inside the observed rhythm");
+            assertTrue(tracker.active());
+        }
+        // The twentieth (56 — gap 20 == maxGap, not yet expired) ends it GROUNDED:
+        // the scaled threshold stays ordered under the gap clock.
+        ComboTransition grounded = tracker.onTick(t(56), true, Double.NaN);
+        assertTrue(grounded.ended());
+        assertEquals(ComboEndReason.GROUNDED, grounded.reason());
+    }
+
+    @Test
+    void groundedRunKeepsTheConfiguredFloorWhenCadenceIsUnknown() {
+        // minHits 1 activates on the FIRST hit — no gap observed yet, so the
+        // threshold is exactly the configured groundedRunTicks (the pre-round
+        // behaviour, byte-identical).
+        ComboTracker tracker = new ComboTracker(new ComboRules(1, 20, 10, 6.0));
+        tracker.onKnockShipped(A, t(0));
+        assertTrue(tracker.active());
+        assertTrue(Double.isNaN(tracker.cadenceTicks()), "one hit — no cadence");
+        for (int tick = 1; tick <= 9; tick++) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind());
+        }
+        ComboTransition grounded = tracker.onTick(t(10), true, Double.NaN);
+        assertTrue(grounded.ended());
+        assertEquals(ComboEndReason.GROUNDED, grounded.reason());
+    }
+
+    @Test
+    void wideConfiguredThresholdStaysTheFloorUnderAFastCadence() {
+        // The suite-staging shape (grounded-run 400 / max-gap 400, an 8-tick fake
+        // chain): the CONFIGURED threshold is the floor — max(400, min(400, 8+2)) =
+        // 400 — so a widened window is never narrowed by the observed cadence.
+        ComboTracker tracker = new ComboTracker(new ComboRules(2, 400, 400, 6.0));
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(8));
+        assertTrue(tracker.active());
+        assertEquals(8.0, tracker.cadenceTicks(), 1.0e-9);
+        for (int tick = 9; tick <= 108; tick += 11) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind(),
+                    "a stationary victim under the widened window never grounds out");
+        }
+        assertTrue(tracker.active());
+    }
+
+    @Test
+    void cadenceEmaSeedsBlendsAndResetsWithTheChain() {
+        // Seed on the first gap, α = 0.3 blend on the next: 0.3·18 + 0.7·14 = 15.2.
+        ComboTracker tracker = tracker();
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(14));
+        assertEquals(14.0, tracker.cadenceTicks(), 1.0e-9, "the first gap seeds the EMA");
+        tracker.onKnockShipped(A, t(32)); // gap 18
+        assertEquals(15.2, tracker.cadenceTicks(), 1.0e-9, "0.3·18 + 0.7·14 = 15.2");
+        // A chain reset (retaliation) forgets the rhythm with the chain.
+        tracker.onOwnHitLanded(t(33));
+        assertTrue(Double.isNaN(tracker.cadenceTicks()), "the cadence is per-chain state");
     }
 
     @Test

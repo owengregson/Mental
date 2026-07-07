@@ -10,7 +10,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
-import me.vexmc.mental.kernel.coexist.MechanicToken;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -40,7 +39,6 @@ class ReconcilerTest {
         @Override public AutoCloseable bukkit(Object listener) { return track(String.valueOf(listener)); }
         @Override public AutoCloseable packets(Object peListener) { return track(String.valueOf(peListener)); }
         @Override public AutoCloseable task(Supplier<AutoCloseable> starter) { return track("task"); }
-        @Override public AutoCloseable rule(MechanicToken token, Runnable reg) { return track("rule"); }
     }
 
     private static final class RecordingUnit implements FeatureUnit {

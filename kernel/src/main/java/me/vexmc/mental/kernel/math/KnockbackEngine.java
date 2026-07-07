@@ -341,6 +341,8 @@ public final class KnockbackEngine {
         double residualCarry =
                 (victim.vx() * profile.friction().x() * ux + victim.vz() * profile.friction().z() * uz)
                         * airHorizontal;
+        // The shipped vertical stamp: the engine's own faithful era replay (the servo
+        // never shapes it, only reads it to bound the flight window).
         double verticalStamp = shippedVertical(victim, profile, victimYOverride, bonus, wtap);
 
         return PocketServo.solve(

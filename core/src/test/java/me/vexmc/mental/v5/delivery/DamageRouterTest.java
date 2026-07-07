@@ -27,7 +27,7 @@ class DamageRouterTest {
     void activeTransactionKeepsItsTypedSourceRegardlessOfCause() {
         HitContext context = new HitContext(
                 new HitId(1), new HitSource.RodPull(), ATTACKER, VICTIM,
-                new SprintVerdict(false, null, TickStamp.NO_TICK), false, false, null, TickStamp.NO_TICK);
+                new SprintVerdict(false, null, TickStamp.NO_TICK), false, null, TickStamp.NO_TICK);
         HitTransaction active = new HitTransaction(context);
 
         // Even though the damage cause is a melee ENTITY_ATTACK, the typed source wins.

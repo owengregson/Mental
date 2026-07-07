@@ -2,7 +2,6 @@ package me.vexmc.mental.v5.feature.damage;
 
 import java.lang.reflect.Method;
 import me.vexmc.mental.kernel.math.DamageTables;
-import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.EffectiveMaterial;
@@ -29,28 +28,14 @@ import org.bukkit.potion.PotionEffectType;
  * <p>The composition is the fixed legacy order — <strong>weapon base (× era
  * strength − era weakness) → crit ×1.5 → + Sharpness(1.25·level)</strong>, crit
  * never multiplying the Sharpness additive — delegated entirely to the pure
- * kernel {@link DamageTables}. When OCM shapes damage for the attacker (the
- * single {@link DamageOwnership} verdict), the shaper instead hands
- * <em>vanilla-shaped</em> damage (live attribute base, 1.9 crit with sprint
- * exclusion, 1.9 Sharpness) so OCM decomposes and re-composes its configured
- * values losslessly (era pin: sharpness-5 diamond = 14.25, never 17.5).</p>
+ * kernel {@link DamageTables} (era pin: sharpness-5 diamond = 14.25, never
+ * 17.5).</p>
  */
 public final class DamageShaper {
 
     /** Strength/Weakness effect types, resolved once (registry key on 1.20.5+, legacy name below). */
     private static final PotionEffectType STRENGTH = resolveEffect("strength", "INCREASE_DAMAGE");
     private static final PotionEffectType WEAKNESS = resolveEffect("weakness", "WEAKNESS");
-
-    private final DamageOwnership ownership;
-
-    public DamageShaper(DamageOwnership ownership) {
-        this.ownership = ownership;
-    }
-
-    /** The shared crit/tool-damage verdict source — identical instance to the crit fallback (mandate §4.6). */
-    public DamageOwnership ownership() {
-        return ownership;
-    }
 
     /* ------------------------------------------------------------------ */
     /*  Pure composition (unit-pinned)                                     */
@@ -71,20 +56,6 @@ public final class DamageShaper {
             damage *= DamageTables.critMultiplier();
         }
         return Math.max(0.0, damage + DamageTables.sharpnessBonus(sharpnessLevel));
-    }
-
-    /**
-     * The vanilla-shaped composition handed to OCM: the live attribute base, the
-     * 1.9 crit rule (sprinting excludes), and the 1.9 Sharpness additive. Never
-     * legacy-composed and never era-potion-shaped — OCM re-composes its values.
-     */
-    public static double composeVanillaShape(
-            double attributeBase, boolean critical, boolean sprinting, int sharpnessLevel) {
-        double damage = attributeBase;
-        if (critical && !sprinting) {
-            damage *= DamageTables.critMultiplier();
-        }
-        return Math.max(0.0, damage + DamageTables.vanillaSharpnessBonus(sharpnessLevel));
     }
 
     /**
@@ -121,19 +92,11 @@ public final class DamageShaper {
      * @param simulateCrits whether the fast path injects the era crit
      */
     public double compose(
-            Player attacker, HitContext context,
+            Player attacker,
             boolean simulateCrits, boolean legacyToolDamage, boolean oldPotionValues) {
-        boolean vanillaShape = context != null
-                ? ownership.ocmShapesDamage(context)
-                : ownership.ocmShapesDamage(attacker.getUniqueId());
         ItemStack weapon = attacker.getInventory().getItemInMainHand();
         int sharpness = sharpnessLevel(weapon);
         boolean critical = simulateCrits && isLegacyCritical(attacker);
-
-        if (vanillaShape) {
-            double attributeBase = Attributes.valueOr(attacker, Attributes.attackDamage(), 1.0);
-            return composeVanillaShape(attributeBase, critical, attacker.isSprinting(), sharpness);
-        }
 
         int strengthAmp = oldPotionValues ? amplifier(attacker, STRENGTH) : -1;
         int weaknessAmp = oldPotionValues ? amplifier(attacker, WEAKNESS) : -1;

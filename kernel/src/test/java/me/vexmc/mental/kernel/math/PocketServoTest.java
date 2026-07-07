@@ -18,7 +18,7 @@ class PocketServoTest {
 
     private static final double EPSILON = 1.0e-9;
 
-    /** The default active servo: target 2.75, gain 1.0, clamps [0.8, 1.2], window 10. */
+    /** The default active servo: static target 2.75, gain 1.0, clamps [0.8, 1.2], window 10. */
     private static final PocketServoConfig SERVO = PocketServoConfig.of(2.75, 1.0, 0.8, 1.2, 10);
 
     /* ── the predictor's pieces (independent of the solve) ─────────────────── */
@@ -92,7 +92,7 @@ class PocketServoTest {
                             continue;
                         }
                         double landed = simulateLanding(d0, residual, sigma, freshEra, attr, stamp);
-                        assertEquals(SERVO.target(), landed, EPSILON,
+                        assertEquals(SERVO.staticTarget(), landed, EPSILON,
                                 "σ must land the victim on target for d0=" + d0 + " residual="
                                         + residual + " stamp=" + stamp + " attr=" + attr);
                         checked++;

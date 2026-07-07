@@ -50,8 +50,8 @@ public final class ConsumableRulesSuite {
 
     // The 1.9+ default Strength DRINK duration is 1800 ticks (90 s) for the base
     // (non-extended, level I) potion. The 1.8 era duration restored by
-    // old-potion-durations is 3600 ticks (180 s), per PotionDurations and the
-    // OCM table in §5 of the ground-truth plan. The safe cross-version assert is
+    // old-potion-durations is 3600 ticks (180 s), per the PotionDurations kernel
+    // table. The safe cross-version assert is
     // "the module lengthened it" — strictly above this modern ceiling.
     private static final int MODERN_STRENGTH_DRINK_TICKS = 1800;
     private static final int ERA_STRENGTH_DRINK_TICKS = 3600;

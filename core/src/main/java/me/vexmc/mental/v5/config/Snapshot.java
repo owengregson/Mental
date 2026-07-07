@@ -27,7 +27,6 @@ public final class Snapshot {
     private final Map<String, KnockbackProfile> profiles;
     private final AnticheatSettings anticheat;
     private final DebugSettings debug;
-    private final OcmCoordination ocmCoordination;
     private final boolean metricsEnabled;
 
     private Snapshot(Builder builder) {
@@ -38,7 +37,6 @@ public final class Snapshot {
         this.profiles = Map.copyOf(builder.profiles);
         this.anticheat = builder.anticheat;
         this.debug = builder.debug;
-        this.ocmCoordination = builder.ocmCoordination;
         this.metricsEnabled = builder.metricsEnabled;
     }
 
@@ -97,10 +95,6 @@ public final class Snapshot {
         return debug;
     }
 
-    public OcmCoordination ocmCoordination() {
-        return ocmCoordination;
-    }
-
     /** Whether bStats metrics reporting is on ({@code metrics.enabled}, default true). */
     public boolean metricsEnabled() {
         return metricsEnabled;
@@ -116,7 +110,6 @@ public final class Snapshot {
                 Map.of(KnockbackProfile.LEGACY_17.name(), KnockbackProfile.LEGACY_17);
         private AnticheatSettings anticheat = AnticheatSettings.DEFAULTS;
         private DebugSettings debug = DebugSettings.DEFAULTS;
-        private OcmCoordination ocmCoordination = OcmCoordination.AUTO;
         private boolean metricsEnabled = true;
 
         Builder enable(Feature feature, boolean on) {
@@ -143,11 +136,6 @@ public final class Snapshot {
 
         Builder debug(DebugSettings debug) {
             this.debug = debug;
-            return this;
-        }
-
-        Builder ocmCoordination(OcmCoordination ocmCoordination) {
-            this.ocmCoordination = ocmCoordination;
             return this;
         }
 

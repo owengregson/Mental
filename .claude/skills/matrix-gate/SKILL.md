@@ -10,22 +10,21 @@ description: Use when running, verifying, or debugging Mental's verification gat
 ```bash
 ./gradlew build                      # compile + unit tests + japicmp (always first)
 scripts/integration-matrix.sh        # LOCAL gate: all paper servers AT ONCE (~2m40s)
-scripts/integration-matrix.sh --versions 1.17.1,26.1.2 --no-ocm   # targeted
+scripts/integration-matrix.sh --versions 1.17.1,26.1.2            # targeted
 ./gradlew integrationTest            # sequential floor+ceiling (paper), CI PR path
 ./gradlew integrationTestMatrix      # sequential ALL paper + folia entries, one machine
 ./gradlew integrationTestFolia       # sequential folia entries only (real Folia server, JDK 25)
-./gradlew integrationTestOcm         # +OCM coexistence; stages the pinned OCM jar (local run/ocm-jar wins)
 ```
 
 The script exists because Gradle serializes tasks within a project. Every
-version, its JDK, its CI lane, and the OCM pin come from `support-matrix.json`
+version, its JDK, and its CI lane come from `support-matrix.json`
 (the single source the build, the script, both workflows, and the release notes
 read). `integrationTestMatrix` now covers **paper + folia** — the Folia entry
 (26.x) is a first-class matrix entry that boots a real Folia server and runs the
 boot suite + the same-region combat smoke. On CI, the auto-release workflow
 (.github/workflows/release.yml) reads the version from `gradle.properties`, runs
-the paper matrix in parallel across runners, and adds the Folia and OCM gates as
-**release-only** jobs (an extra real server each is too costly per PR); it
+the paper matrix in parallel across runners, and adds the Folia gate as a
+**release-only** job (an extra real server is too costly per PR); it
 tags/releases only when the version is bumped (no v<version> tag yet) and fully
 green — pushing a version bump to main IS the release action. Integration jobs
 carry 20-minute timeouts and upload server logs on every outcome: a hung
@@ -34,17 +33,14 @@ paperclip jars (`~/.gradle/caches/run-task-jars/paper/jars`), one port per serve
 from 25600; the plugin is injected via run-paper's `-add-plugin=` on modern
 builds and by COPYING the jars into `plugins/` on legacy builds (whose paperclip
 rejects both `-add-plugin=` and `--nogui` — use the bare `nogui` token
-range-wide). The OCM jar is staged reproducibly —
-`stageOcmJar` uses a local `run/ocm-jar/OldCombatMechanics.jar` fork build AS-IS
-if present, else downloads the release PINNED in `support-matrix.json` (url +
-sha256) and verifies the hash.
+range-wide).
 
 ## The matrix shape, per-entry JDK/tier & suite tiers (the 2026-07-03 full range)
 
-- **Gate shape — 18 live server boots.** `integrationTestMatrix` = **16 entries**:
+- **Gate shape — 16 live server boots.** `integrationTestMatrix` = **16 entries**:
   8 legacy Paper (1.9.4, 1.10.2, 1.11.2, 1.12.2, 1.13.2, **1.14.4**, 1.15.2,
   1.16.5) at `full` + 7 modern Paper (1.17.1 → 26.1.2) at `full` + 1 Folia (26.x)
-  at `combat-smoke`. `integrationTestOcm` adds the OCM pair (2). All 16 matrix
+  at `combat-smoke`. All 16 matrix
   entries fresh-nonce PASS is the zero-regression proof. **1.14.4 is now a
   full-tier entry** — the Multi-Release mega-jar's v52 base loads under its
   Java-13 cap, closing the range's last hole. `serverFlags`/`IgnoreJavaVersion`
@@ -67,7 +63,7 @@ sha256) and verifies the hash.
   line matching the declared `bytecodeTier` is REQUIRED gate evidence, quoted per
   entry alongside the nonce. Map: 1.9.4–1.12.2 → 61 (their loaders honor MR on
   Java 21), 1.13.2/1.14.4/1.15.2/1.16.5 → 52 (their JVMs are < 17), modern/Folia
-  /OCM → 61.
+  → 61.
 - **`suites` tier** (`full | boot | combat-smoke`) reaches the tester via
   `-Dmental.tester.suites=<tier>`. `boot` = the legacy-backport classload/
   boot-safety suite only; `combat-smoke` = the Folia same-region pair; absent
@@ -75,20 +71,14 @@ sha256) and verifies the hash.
   versions are at `full` — none stay at `boot`.
 - **The floor 1.9.4 is on the PR lane** (`ci: "pr"`), so floor classload
   regressions surface per-PR; the other legacy entries stay `release`.
-- **Trap — local `--ocm` vs the Gradle OCM gate diverge on floor.** The Gradle
-  `integrationTestOcm` pins OCM to the FIXED **1.17.1 + 26.1.2** pair (its scope is
-  the ownership split, unchanged by the backport; pinned by version, not
-  positionally). The local `scripts/integration-matrix.sh --ocm` still derives its
-  OCM pair *positionally* (`.[0] + .[-1]` = **1.9.4 + 26.1.2**) — so a local `--ocm`
-  run targets 1.9.4, which OCM does not target. Trust the Gradle gate for OCM.
 
 ## Reading results honestly
 
 - **Never trust "MATRIX PASSED"/"BUILD SUCCESSFUL" alone.** The Gradle gate is
   trustworthy because of the **nonce**: each invocation stamps a fresh UUID into
   every boot (`-Dmental.tester.nonce`), the tester echoes it into
-  `run/<v>/plugins/MentalTester/test-results.txt` (and `run/ocm/<v>/…`,
-  `run/folia/<v>/…`) as `PASS nonce=<n>`, and the paired check task accepts ONLY
+  `run/<v>/plugins/MentalTester/test-results.txt` (and `run/folia/<v>/…`) as
+  `PASS nonce=<n>`, and the paired check task accepts ONLY
   that nonce — a leftover result from an earlier boot fails the check
   structurally, so staleness is impossible and mtimes are no longer the thing to
   eyeball. Confirm the file reads PASS with THIS run's nonce; failures detail in
