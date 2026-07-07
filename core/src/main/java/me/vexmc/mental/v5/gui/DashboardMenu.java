@@ -80,9 +80,13 @@ public final class DashboardMenu extends Menu {
 
     /**
      * Lays the family navigation tiles out balanced and centred: a single centred
-     * row for a small set, or two balanced rows (the top row taking the odd tile)
-     * for a larger one. Every {@link Family} still renders — the catalog is the
-     * registry, so a new family surfaces here with no edit to this method.
+     * row for a small set, or — for a larger one — two centred rows in a downward V
+     * (funnel). The TOP row takes the wider share and the bottom row the narrower
+     * remainder, so the two centred rows taper inward rather than sitting as a full
+     * rectangular block: a block would need a count that fills both rows to the same
+     * width, which the section count never reaches, so the shape opens into a V
+     * instead. Every {@link Family} still renders — the catalog is the registry, so
+     * a new family surfaces here with no edit to this method.
      */
     private void drawSections(@NotNull Player viewer, @NotNull List<Family> sections) {
         int count = sections.size();
@@ -93,7 +97,10 @@ public final class DashboardMenu extends Menu {
             placeSectionRow(viewer, sections, 0, count, SECTION_ROW_TOP);
             return;
         }
-        int top = (count + 1) / 2;
+        // The V-split: the top row takes the wider half (floor(count/2) + 1), the
+        // bottom the narrower remainder — the two centred rows funnel inward. For the
+        // eight families that is 5 over 3, so SUSTAIN rides up into the top row.
+        int top = count / 2 + 1;
         placeSectionRow(viewer, sections, 0, top, SECTION_ROW_TOP);
         placeSectionRow(viewer, sections, top, count, SECTION_ROW_BOTTOM);
     }
