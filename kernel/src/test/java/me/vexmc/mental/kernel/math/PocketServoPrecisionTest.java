@@ -56,6 +56,31 @@ class PocketServoPrecisionTest {
         assertEquals(PocketServo.airTime(0.4), PocketServo.airTime(0.4, 0.0), "height 0 == the v1 sim");
     }
 
+    @Test
+    void dynamicChaseIsConsumedAndTakesPriorityOverTheMeasuredRate() {
+        // Step 1 of the input-driven dynamic chase (spec 2026-07-07): when the reset
+        // model is attached (withDynamicChase), the servo prices the chase via
+        // DynamicChase over the REAL window and it OVERRIDES the flat chaseAlongAxis.
+        // No facing (NaN yaw) → static target; attacker RTT −1 → no ping shift, so
+        // wPrime = the config window (10). drift 0 → constant = d0 − chaseTravel.
+        PredictorInputs base = new PredictorInputs(
+                false, 0.6, 0.6, 0.2,           // airborne launch from +0.2 (a flight window exists)
+                0.0, 0.28, 0.10,                // drift 0; a FLAT measured chase of 0.28 the dynamic must override
+                -1, -1, Double.NaN, Double.NaN, // no ping shift, no pose
+                Double.NaN, Double.NaN, 0,      // no facing → static target
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        PredictorInputs dynamic = base.withDynamicChase(0.28, 0, 0.5);
+        FlightPrediction dyn = PocketServo.predict(SERVO, dynamic, 2.6, 0.0, 0.4, 0.4, 0.28);
+        FlightPrediction flat = PocketServo.predict(SERVO, base, 2.6, 0.0, 0.4, 0.4, 0.28);
+        assertEquals(10, dyn.windowTicks(), "no ping shift ⇒ the config window");
+        // The dynamic branch prices the ramp, not base's flat 0.28·10.
+        assertEquals(2.6 - DynamicChase.projectTravel(0.28, 0, 0.5, 10), dyn.constant(), EPSILON);
+        assertEquals(2.6 - 2.5202734375, dyn.constant(), EPSILON); // hand value (phase-0 ramp deficit)
+        assertEquals(2.6 - 0.28 * 10, flat.constant(), EPSILON);   // base falls to the flat measured chase
+        assertTrue(dyn.constant() > flat.constant(),
+                "the reset ramp closes less than the flat rate, so the victim is placed farther out");
+    }
+
     /* ── the exact-inverse property across the full grid ───────────────────── */
 
     @Test

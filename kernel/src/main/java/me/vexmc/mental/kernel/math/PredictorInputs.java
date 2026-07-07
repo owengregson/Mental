@@ -109,7 +109,34 @@ public record PredictorInputs(
         double priorChaseEma,
         double priorDynamicTarget,
         double launchVerticalVelocity,
-        double cadenceEmaTicks) {
+        double cadenceEmaTicks,
+        // The input-driven dynamic chase (spec 2026-07-07): the attacker's ramp-asymptote
+        // closing speed (b/t; NaN ⇒ no model), ticks since their sprint reset (the ramp
+        // phase), and the per-tick re-accel ramp factor r ∈ (0,1) (NaN ⇒ no model → the
+        // measured-ring / attribute chase). Both NaN sentinels gate the dynamic branch off.
+        double chaseSteadySpeed,
+        int resetPhaseTicks,
+        double chaseRampFactor) {
+
+    /**
+     * The pre-dynamic-chase arity (2026-07-07 servo dynamic chase): every input through
+     * the gap-aware cadence, with NO input-driven chase model — {@code chaseSteadySpeed}
+     * and {@code chaseRampFactor} default to {@link Double#NaN}, so the servo falls back
+     * to the measured-ring / attribute chase. Keeps every caller that predates the
+     * dynamic chase compiling and solving unchanged.
+     */
+    public PredictorInputs(
+            boolean launchGrounded, double launchSlip, double landingSlip, double launchHeight,
+            double driftAlongAxis, double chaseAlongAxis, double victimNormalizedSpeed,
+            int attackerRttMillis, int victimRttMillis, double attackerHeadY, double victimEyeHeight,
+            double victimYawVsAxisDeg, double victimYawRateDegPerTick, int groundedTicks,
+            double priorChaseEma, double priorDynamicTarget, double launchVerticalVelocity,
+            double cadenceEmaTicks) {
+        this(launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
+                victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
+                launchVerticalVelocity, cadenceEmaTicks, Double.NaN, 0, Double.NaN);
+    }
 
     /**
      * The touchdown-branch arity (servo-solve round, step two): the boundary-read
@@ -176,7 +203,24 @@ public record PredictorInputs(
                 driftAlongAxis, chaseAlongAxis, victimNormalizedSpeed,
                 attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
                 victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks,
-                priorChaseEma, priorDynamicTarget, Double.NaN, cadenceEmaTicks);
+                priorChaseEma, priorDynamicTarget, Double.NaN, cadenceEmaTicks,
+                chaseSteadySpeed, resetPhaseTicks, chaseRampFactor);
+    }
+
+    /**
+     * This input set with the input-driven dynamic chase attached (spec 2026-07-07):
+     * the attacker's ramp-asymptote {@code steadySpeed} (already alignment×technique
+     * resolved), the {@code phaseTicks} since their sprint reset, and the re-accel
+     * {@code rampFactor}. The servo then prices the chase via {@link DynamicChase} over
+     * the real flight window instead of a flat rate. A NaN {@code steadySpeed}/{@code
+     * rampFactor} leaves the dynamic branch off (the measured-ring / attribute fallback).
+     */
+    public PredictorInputs withDynamicChase(double steadySpeed, int phaseTicks, double rampFactor) {
+        return new PredictorInputs(
+                launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
+                victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
+                launchVerticalVelocity, cadenceEmaTicks, steadySpeed, phaseTicks, rampFactor);
     }
 
     /**

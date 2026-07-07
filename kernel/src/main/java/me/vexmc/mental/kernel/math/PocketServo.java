@@ -439,17 +439,28 @@ public final class PocketServo {
                         * groundLocomotion(groundTicks, sqLand, INPUT_DAMPING * groundAttr)
                 : 0.0;
 
-        // (4) Chase — the measured attacker-velocity trend, or the 0.2806×attr model.
+        // (4) Chase — the input-driven dynamic chase (ramp-aware, over the ACTUAL
+        // window) when the reset model is present, else the measured attacker-velocity
+        // trend, else the 0.2806×attr model (spec 2026-07-07; the fallback ladder).
         double chaseRate;
+        double chaseTravel;
         boolean chaseMeasured;
-        if (!Double.isNaN(inputs.chaseAlongAxis())) {
+        if (!Double.isNaN(inputs.chaseRampFactor()) && !Double.isNaN(inputs.chaseSteadySpeed())) {
+            // The attacker's ramped re-accel out of their sprint reset, projected over
+            // the flight window from the observed reset phase.
+            chaseTravel = DynamicChase.projectTravel(
+                    inputs.chaseSteadySpeed(), inputs.resetPhaseTicks(), inputs.chaseRampFactor(), wPrime);
+            chaseRate = wPrime > 0 ? chaseTravel / wPrime : 0.0;
+            chaseMeasured = true;
+        } else if (!Double.isNaN(inputs.chaseAlongAxis())) {
             chaseRate = inputs.chaseAlongAxis();
+            chaseTravel = chaseRate * wPrime;
             chaseMeasured = true;
         } else {
             chaseRate = SPRINT_GROUND_SPEED * chaseFactor(attackerNormalizedSpeed);
+            chaseTravel = chaseRate * wPrime;
             chaseMeasured = false;
         }
-        double chaseTravel = chaseRate * wPrime;
 
         // (5) The answer-denial-boundary target (§3.2b; the 2.4.5 redesign) — or the
         // static fallback. t* = tAllow = tPing + turn is the tick the victim could
