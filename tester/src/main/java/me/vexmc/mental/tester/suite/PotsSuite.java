@@ -40,9 +40,9 @@ import org.jetbrains.annotations.Nullable;
  *       are filled with correctly-constructed heal potions (type/meta/glint read
  *       back through the same probe seams); a stubbed economy caps a partial fill;
  *       a zero cost fills every empty slot;</li>
- *   <li><b>fast-pots</b> — a steep (50°) throw is redirected to the predicted feet
- *       at multiplier × the vanilla speed (asserted against the production aim
- *       helper), staged BOTH as a real tagged heal pot ({@link HealPotItems}, the
+ *   <li><b>fast-pots</b> — a steep (50°) throw is redirected to the led predicted
+ *       feet within the [min, max] × vanilla speed band (asserted against the
+ *       production aim helper), staged BOTH as a real tagged heal pot ({@link HealPotItems}, the
  *       production seam) and as a tagless splash stack — the latter reads back as
  *       AIR on 1.16.x–1.20.4, where the server stores a ThrownPotion's item only
  *       when it differs from the entity default or carries a tag, so it live-pins
@@ -451,16 +451,19 @@ public final class PotsSuite {
                 "fast-pot redirect y (predicted feet; " + staging + ")");
         context.expectNear(expected.getZ(), applied.getZ(), 1.0e-4,
                 "fast-pot redirect z (predicted feet; " + staging + ")");
-        // Speed is a budget, not a target (exact-ballistic redesign 2026-07-07):
-        // the aim spends the least speed that lands the burst on the predicted
-        // feet, bounded by multiplier × vanilla. The landing accuracy itself is
-        // exhaustively pinned off-server in PotsAimTest; here we assert the wiring
-        // (x/y/z == the production redirect) and the cap semantics.
-        double cap = vanillaSpeed * settings.speedMultiplier();
-        context.expect(applied.length() <= cap + 1.0e-4,
-                "fast-pot magnitude within the multiplier × vanilla cap (" + staging + ")");
-        context.expect(applied.length() > 1.0e-6,
-                "fast-pot redirect produced a launch (" + staging + ")");
+        // Speed is a bounded band, not a target (exact-ballistic redesign
+        // 2026-07-07; speed-band + lead round same day): the aim spends the least
+        // speed that lands the burst on the LED predicted feet, bounded into
+        // [min, max] × vanilla (the owner's [0.5, 1.5] band by default). The landing
+        // accuracy and the lead are exhaustively pinned off-server in PotsAimTest;
+        // here we assert the wiring (x/y/z == the production redirect) and that the
+        // magnitude stays inside the band.
+        double minSpeed = vanillaSpeed * settings.minSpeedMultiplier();
+        double maxSpeed = vanillaSpeed * settings.maxSpeedMultiplier();
+        context.expect(applied.length() <= maxSpeed + 1.0e-4,
+                "fast-pot magnitude within the max × vanilla ceiling (" + staging + ")");
+        context.expect(applied.length() >= minSpeed - 1.0e-4,
+                "fast-pot magnitude at least the min × vanilla floor (" + staging + ")");
     }
 
     private static int countHealPotions(HealPotItems items, PlayerInventory inventory) {

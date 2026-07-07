@@ -283,7 +283,9 @@ class SnapshotTest {
                   cost-per-potion: 5.0
                 fast-pots:
                   angle-degrees: 50.0
-                  speed-multiplier: 2.5
+                  min-speed-multiplier: 0.4
+                  max-speed-multiplier: 2.5
+                  lead-ticks: 2.0
                 """, "", "", "");
         assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
 
@@ -293,30 +295,42 @@ class SnapshotTest {
 
         FastPotsSettings fastPots = settings(result.snapshot(), Feature.FAST_POTS);
         assertEquals(50.0, fastPots.angleDegrees());
-        assertEquals(2.5, fastPots.speedMultiplier());
+        assertEquals(0.4, fastPots.minSpeedMultiplier());
+        assertEquals(2.5, fastPots.maxSpeedMultiplier());
+        assertEquals(2.0, fastPots.leadTicks());
     }
 
     @Test
     void fastPotsKnobsAreParseClampedToTheirBounds() throws Exception {
-        // Angle above 90 and multiplier above 5 clamp to the nearest bound, each with one warn.
+        // Angle above 90, ceiling above 5, floor above 1 and lead above 5 each clamp
+        // to the nearest bound, one warn apiece.
         SnapshotParser.Result high = parse("""
                 fast-pots:
                   angle-degrees: 120.0
-                  speed-multiplier: 9.0
+                  min-speed-multiplier: 3.0
+                  max-speed-multiplier: 9.0
+                  lead-ticks: 12.0
                 """, "", "", "");
         FastPotsSettings clampedHigh = settings(high.snapshot(), Feature.FAST_POTS);
         assertEquals(FastPotsSettings.MAX_ANGLE, clampedHigh.angleDegrees());
-        assertEquals(FastPotsSettings.MAX_MULTIPLIER, clampedHigh.speedMultiplier());
-        assertEquals(2, high.issues().size(), () -> "issues: " + high.issues());
+        assertEquals(FastPotsSettings.MAX_MIN_MULTIPLIER, clampedHigh.minSpeedMultiplier());
+        assertEquals(FastPotsSettings.MAX_MAX_MULTIPLIER, clampedHigh.maxSpeedMultiplier());
+        assertEquals(FastPotsSettings.MAX_LEAD, clampedHigh.leadTicks());
+        assertEquals(4, high.issues().size(), () -> "issues: " + high.issues());
 
-        // A multiplier below 1.0 clamps up to the floor (never slower than vanilla).
+        // A ceiling below 1.0, a floor below its positive minimum and a negative lead
+        // clamp up to their floors.
         SnapshotParser.Result low = parse("""
                 fast-pots:
-                  speed-multiplier: 0.2
+                  min-speed-multiplier: 0.001
+                  max-speed-multiplier: 0.2
+                  lead-ticks: -3.0
                 """, "", "", "");
         FastPotsSettings clampedLow = settings(low.snapshot(), Feature.FAST_POTS);
-        assertEquals(FastPotsSettings.MIN_MULTIPLIER, clampedLow.speedMultiplier());
-        assertEquals(1, low.issues().size(), () -> "issues: " + low.issues());
+        assertEquals(FastPotsSettings.MIN_MIN_MULTIPLIER, clampedLow.minSpeedMultiplier());
+        assertEquals(FastPotsSettings.MIN_MAX_MULTIPLIER, clampedLow.maxSpeedMultiplier());
+        assertEquals(FastPotsSettings.MIN_LEAD, clampedLow.leadTicks());
+        assertEquals(3, low.issues().size(), () -> "issues: " + low.issues());
     }
 
     @Test

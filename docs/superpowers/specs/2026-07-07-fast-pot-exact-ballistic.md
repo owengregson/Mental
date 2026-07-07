@@ -1,13 +1,23 @@
 # Fast-pot exact-ballistic predictor (Mental 2.4.5-beta)
 
-**Status:** design approved (owner, 2026-07-07). Replaces the direction-only
-`PotsAim` with a full closed-form ballistic solve so a fast pot bursts *exactly*
-on the thrower's predicted feet. Two owner decisions lock the shape:
+**Status:** design approved (owner, 2026-07-07); **speed-band + lead round
+(owner, 2026-07-07, as-built below).** Replaces the direction-only `PotsAim` with
+a full closed-form ballistic solve so a fast pot bursts *exactly* just in front of
+the thrower's predicted feet. The owner decisions that lock the shape:
 
-- **Speed is a CAP/budget, not an exact target.** The magnitude is a free
+- **Speed is a bounded BAND, not an exact target.** The magnitude is a free
   variable: the solver spends the *minimum* speed that lands the burst on the
-  predicted feet, bounded above by `speed-multiplier × vanilla`. (Was: magnitude
-  pinned to `multiplier × vanilla`, direction the only lever.)
+  (led) predicted feet, bounded into **`[min-speed-multiplier, max-speed-multiplier]
+  × vanilla` — the owner's `[0.5×, 1.5×]` band by default** (`min` ceiling 1.0,
+  `max` floor 1.0, so `min ≤ 1 ≤ max` always). The solver can only tune speed up
+  to `1.5×`; for any further trajectory refinement it uses the OTHER variables
+  (`vx/vy/vz`/direction are all already free — the closed form fully determines the
+  velocity vector per `N`). The band's only real restriction is *which impact-tick
+  `N` is reachable*. (Was: a single `speed-multiplier` cap ≈ `[0, 3×]`.)
+- **Lead the target.** The burst is aimed at `feet + throwerVel·(N + leadTicks)`
+  (`lead-ticks` default ≈ **1.0**, clamp `[0, 5]`), landing it slightly *in front
+  of* where the feet will be at impact so a running player moves INTO the cloud.
+  `lead = 0` reproduces the un-led feet (byte-identical to the pre-lead intent).
 - **Velocity-only — the spawn is never moved.** The potion launches from exactly
   where vanilla spawns it; the solve uses the launch velocity alone. Zero visual
   / anticheat surface. (The owner considered but declined spawn-position freedom.)
@@ -78,46 +88,67 @@ v0.y = (yt − L.y + G(N)) / H(N)
 With `d = 0.99`: `H(N) = 99·(1 − 0.99^N)`, `G(N) = 4.95·(N − H(N))`. Worked:
 `H(1)=0.99, G(1)=0.0495`; `H(2)=1.9701, G(2)=0.148005`; `H(3)=2.94040, G(3)=0.29500`.
 
-**Predicted feet** at impact tick `N`: `P(N) = feet + throwerVel·N` (all three
-axes; a grounded thrower has `vel.y ≈ 0`, so `yt = feetY`). Constant-velocity
-extrapolation is the right model here — the thrower is actively inputting motion
-over a 1–3-tick flight, so friction-decay would mispredict.
+**Led predicted feet** at impact tick `N`: `P(N) = feet + throwerVel·(N + lead)`
+(all three axes; a grounded thrower has `vel.y ≈ 0`, so `yt = feetY` regardless of
+the lead). Constant-velocity extrapolation is the right model here — the thrower is
+actively inputting motion over a 1–3-tick flight, so friction-decay would mispredict.
 
-**Objective — smallest feasible N.** Iterate `N = 1 … NMAX`; for each, compute
-`v0(N)` against `P(N)` and its speed. Return the **first (smallest) N** whose
-`|v0(N)| ≤ cap` — the promptest exact-on-feet landing within the speed budget
-(least prediction drift, most "fast-pot"). Every feasible N lands *exactly* on the
-predicted feet by construction; smaller N throws harder (up to the cap) and lands
-sooner. `NMAX = 20` (1 s) is a safe ceiling; realistic N ≤ 6. A grounded target is
-always below the spawn, so a feasible N always exists (in the limit the pot is
-simply dropped).
+**Why the un-led aim landed "behind" (owner playtest).** The un-led target
+`feet + vel·N` places the burst at the tick-`N` feet, but the potion's ground burst
+is *not* an instantaneous tick-`N` event: its collision is a swept/AABB test that
+fires when the potion first dips into the ground block *during* tick `N`'s move — a
+sub-tick moment strictly between `P(N−1)` and `P(N)`, i.e. slightly *behind* the
+tick-`N` position along the thrower's motion. Independently, the owner wants the
+cloud a touch ahead so a moving player runs INTO it. Both pull the same way, so one
+knob covers both: `leadTicks` (≈ 1 tick of thrower motion) absorbs the sub-tick lag
+and delivers the forward bias. It is the owner-facing lever; the sub-tick term is a
+sub-`leadTicks` fraction folded into it (no separate correction).
 
-**Fallback (no feasible N ≤ cap** — thrower outrunning the pot at the cap): take
-the minimum-required-speed candidate and scale its velocity to the cap (direction
-preserved) — the closest reachable throw toward the predicted lead. Rare at the
-default `multiplier 3` (cap ≈ 1.5 b/t vs a 0.28 b/t sprint is comfortably
-feasible at N≈2); documented best-effort.
+**Objective — smallest in-band N on the direct-throw arm.** Walk `N = 1 … NMAX`;
+for each, compute `v0(N)` against `P(N)` and its speed. Increasing `N` monotonically
+*lowers* the required speed until the geometric minimum, past which the closed form
+only yields slow **upward-arc lobs** (the pot thrown *up* to fall back onto the
+feet) — never wanted for a self-heal — so the walk **stops at the first rise**.
+Return the **first (smallest) N** whose `minSpeed ≤ |v0(N)| ≤ maxSpeed` — the
+promptest exact-on-led-feet landing within the band (least prediction drift, most
+"fast-pot"). Every in-band N lands *exactly* on the led feet by construction;
+smaller N throws harder (up to the ceiling) and lands sooner. `NMAX = 20` (1 s) is a
+safe ceiling; realistic N ≤ 6. A grounded target is always below the spawn, so an
+in-band N normally exists.
 
-**Degenerate:** `cap ≤ 0` ⇒ `(0,0,0)` (unchanged).
+**Fallback (no in-band N on the direct arm** — thrower outrunning the pot at the
+ceiling, or a barely-below drop needing less than the floor): take the direct-arm
+candidate whose required speed is *closest* to the band and clamp its magnitude to
+the near edge — `maxSpeed` if it was too fast (ceiling clamp), `minSpeed` if too
+slow (floor clamp) — the closest reachable direct throw toward the led feet. Rare at
+the defaults; documented best-effort.
 
-## Semantics change: `speed-multiplier` is now a ceiling
+**Degenerate:** `maxSpeed ≤ 0` ⇒ `(0,0,0)` (unchanged).
 
-The redirect magnitude is `≤ multiplier × vanillaSpeed`, no longer `==`. The
-multiplier still bounds the max speed (anticheat + splash-resolution sanity). The
-`PotsSuite` magnitude assertion changes from equality to `≤ cap`, joined by a
-**landing-accuracy** assertion: forward-simulate the discrete physics from the
-redirect for its `N` ticks and assert the burst lands on the predicted feet.
+## Semantics change: a bounded speed band + a forward lead
+
+The redirect magnitude is bounded into `[min, max] × vanillaSpeed`, no longer a
+single `≤ cap`. `min-speed-multiplier` (default `0.5`, clamp `[0.05, 1.0]`) is the
+floor (a fast pot always has punch); `max-speed-multiplier` (default `1.5`, clamp
+`[1.0, 5.0]`) is the ceiling (anticheat + splash-resolution sanity). `lead-ticks`
+(default `1.0`, clamp `[0, 5]`) leads the predicted feet forward. The `PotsSuite`
+magnitude assertion is `min×vanilla ≤ |v| ≤ max×vanilla`, joined by the off-server
+**landing-accuracy** pins (forward-simulate the discrete physics from the redirect
+for its `N` ticks and assert the burst lands on the *led* feet).
 
 ## API / structure
 
-- `PotsAim.aim(Lx,Ly,Lz, Fx,Fy,Fz, Vx,Vy,Vz, speedCap)` returns
-  `Aim(x, y, z, ticks)` — the launch velocity (`|v| ≤ speedCap`) and the chosen
-  impact tick `N` (for observability + pins). Kernel-vocabulary plain doubles,
-  core-level (combat-adjacent gameplay math, not the frozen delivery core),
-  exhaustively unit-pinnable.
+- `PotsAim.aim(Lx,Ly,Lz, Fx,Fy,Fz, Vx,Vy,Vz, minSpeed, maxSpeed, leadTicks)`
+  returns `Aim(x, y, z, ticks)` — the launch velocity (in-band `minSpeed ≤ |v| ≤
+  maxSpeed`, else clamped to the near edge) and the chosen impact tick `N` (for
+  observability + pins). Kernel-vocabulary plain doubles, core-level
+  (combat-adjacent gameplay math, not the frozen delivery core), exhaustively
+  unit-pinnable. All three velocity components are solved independently; the spawn
+  `L` is a pure input, never moved.
 - `FastPotsUnit.redirect(launch, thrower, vanillaSpeed, settings)` unchanged
-  signature, returns a `Vector` (drops `ticks`); `speedCap = vanillaSpeed ×
-  multiplier`. Still reads `thrower.getVelocity()` (owning-thread, region-safe;
+  signature, returns a `Vector` (drops `ticks`); `minSpeed = vanillaSpeed ×
+  minMultiplier`, `maxSpeed = vanillaSpeed × maxMultiplier`, `leadTicks` from
+  settings. Still reads `thrower.getVelocity()` (owning-thread, region-safe;
   fresher published view not worth the coupling for a 1–3-tick aim aid).
 
 ## Invariants
@@ -127,21 +158,31 @@ redirect for its `N` ticks and assert the burst lands on the predicted feet.
   player's own thrown pot).
 - **Core purity:** the solve is plain doubles; all Bukkit reads stay in
   `FastPotsUnit`.
-- **No spawn move:** the potion entity is never teleported — zero anticheat/visual
-  surface.
-- **Multiplier ≥ 1 clamp** stays (never slower than vanilla).
+- **No spawn move / all components free:** the potion entity is never teleported —
+  zero anticheat/visual surface — and the band restricts only which impact tick is
+  reachable, never any velocity component.
+- **Well-ordered band:** `min ≤ 1 ≤ max` holds by the individual clamps (floor
+  ceilinged at 1.0, ceiling floored at 1.0), so no `min ≤ max` reconciliation is
+  needed.
 
 ## Test pins (hand-computed)
 
-- **Resting, cap generous (1.6):** feet directly below the eye ⇒ `N=1`,
-  `aim=(0, −1.5863636, 0)`, `ticks=1`, `|v| = 1.5863636 ≤ 1.6` (cap is a ceiling,
-  not the magnitude).
-- **Moving thrower (vx=0.2), cap 1.5:** `N=1` needs 1.599 > cap ⇒ picks `N=2`,
-  `aim=(0.20304, −0.74716, 0)`, `ticks=2`; the forward-sim lands at `(0.4, 0, 0) =
-  P(2)`.
-- **Landing accuracy (load-bearing):** for several geometries, forward-simulate
-  `vy −= 0.05; v ×= 0.99; pos += v` for `ticks` steps from the aim and assert the
-  final position equals `feet + vel·ticks` within `1e-6`.
-- **Magnitude ≤ cap** for arbitrary asymmetric geometry/motion.
-- **`cap ≤ 0` ⇒ zero.**
-- **Smallest-N:** a fast mover picks `ticks > 1` and `N−1` would exceed the cap.
+- **Resting, band `[0.5, 1.6]`, lead 0:** feet directly below the eye ⇒ `N=1`,
+  `aim=(0, −1.5863636, 0)`, `ticks=1`, `|v| = 1.5863636 ∈ [0.5, 1.6]` (the band is
+  a budget, not the magnitude).
+- **Moving thrower (vx=0.2), band `[0.5, 1.5]`, lead 0:** `N=1` needs 1.599 > 1.5
+  ⇒ picks `N=2`, `aim=(0.2030353, −0.747167, 0)`, `ticks=2`; the forward-sim lands
+  at the un-led `(0.4, 0, 0) = feet + vel·N` (byte-identical to the pre-lead intent).
+- **Lead ahead (vx=0.2), band `[0.5, 1.5]`, lead 1.0:** same `ticks=2`,
+  `aim=(0.3045531, −0.7471677, 0)`; the forward-sim lands at `0.6 = feet + vel·(N+1)`,
+  exactly `vx·lead = 0.2` **in front of** the un-led feet-at-impact `0.4`.
+- **Landing accuracy (load-bearing), lead 1.0:** asymmetric geometry/motion;
+  forward-simulate `vy −= 0.05; v ×= 0.99; pos += v` for `ticks` steps from the aim
+  and assert the final position equals `feet + vel·(ticks + lead)` within `1e-6`.
+- **Ceiling clamp:** fast mover (vx=2.5), band `[0.5, 1.0]` ⇒ no in-band N; the
+  direct-arm minimum `N=4` clamps down to the ceiling, `|v| == 1.0`.
+- **Floor clamp:** resting 1.62-drop, narrow band `[0.46, 0.55]` in the gap between
+  `N=2 (0.7472)` and `N=3 (0.4506)` ⇒ closest candidate `N=3` clamps UP to the
+  floor, `aim=(0, −0.46, 0)`, `|v| == 0.46`.
+- **`maxSpeed ≤ 0` ⇒ zero.**
+- **Smallest-N:** a fast mover picks `ticks > 1` and `N−1` would exceed the ceiling.
