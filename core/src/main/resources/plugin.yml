@@ -12,7 +12,7 @@ softdepend: [OldCombatMechanics]
 
 commands:
   mental:
-    description: Open the Mental management menu in-game; reload the config from the console.
+    description: Open the Mental management menu in-game; reload the config from the console; /mental debug subscribe streams debug output to your chat.
     aliases: [mtl]
     permission: mental.command.use
 
@@ -23,6 +23,7 @@ permissions:
     children:
       mental.command.use: true
       mental.command.reload: true
+      mental.command.debug: true
   mental.command.use:
     # Opens the in-game management menu — every setting (modules, the global
     # knockback profile, compatibility, debug) is administered there.
@@ -30,4 +31,10 @@ permissions:
     default: op
   mental.command.reload:
     description: Reload the configuration (console fallback — the menu has a reload button).
+    default: op
+  mental.command.debug:
+    # Streams verbose debug lines to the admin's own chat (/mental debug
+    # subscribe, or the Debug menu tile) — the player-facing half of the debug
+    # sink model. Cleared on quit.
+    description: Subscribe your chat to Mental's verbose debug output.
     default: op

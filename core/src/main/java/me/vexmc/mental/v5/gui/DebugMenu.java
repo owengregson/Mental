@@ -36,6 +36,9 @@ public final class DebugMenu extends Menu {
 
     private static final int[] CATEGORY_SLOTS = {20, 21, 22, 23, 24, 29, 30, 31, 32, 33};
 
+    /** Row-4 centre: the "stream to my chat" toggle, set apart from the log-channel grid. */
+    private static final int SUBSCRIBE_SLOT = 40;
+
     public DebugMenu(@NotNull MenuContext ctx) {
         super(ctx);
     }
@@ -71,6 +74,16 @@ public final class DebugMenu extends Menu {
                         ctx.management().reload();
                     }));
         }
+
+        // The player-facing sink toggle: route the active channels above to the
+        // viewer's OWN chat (the /mental debug subscribe surface, in menu form).
+        // The subscription lives in memory on the PlayerDebugSink — not the config
+        // overlay — so this toggles the sink directly and repaints; nothing is
+        // written to disk and no reload is needed. Cleared when the viewer quits.
+        boolean subscribed = ctx.plugin().playerDebugSink().isSubscribed(viewer);
+        set(SUBSCRIBE_SLOT, Buttons.toggle("NAME_TAG", "Stream to my chat", subscribed,
+                "Send the active debug channels to your own chat. In-memory and per-session — cleared when you quit."),
+                click -> apply(viewer, () -> ctx.plugin().playerDebugSink().toggle(viewer)));
 
         set(49, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
     }

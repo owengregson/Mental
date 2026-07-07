@@ -39,6 +39,7 @@ import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.coexist.OcmBinding;
 import me.vexmc.mental.v5.command.MentalCommand;
+import me.vexmc.mental.v5.debug.PlayerDebugSink;
 import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.v5.gui.MenuManager;
 import me.vexmc.mental.v5.manage.Management;
@@ -145,6 +146,8 @@ public final class MentalPluginV5 extends JavaPlugin {
 
     /** The verbose debug seam (zero-cost when off) — config-driven, re-applied on reload. */
     private final DebugLog debug = new DebugLog();
+    /** The player-facing debug sink — streams to opted-in admins; empty-set zero-touch. */
+    private PlayerDebugSink playerDebugSink;
 
     private TickClock clock;
     private CounterTickClock counterClock;
@@ -238,6 +241,14 @@ public final class MentalPluginV5 extends JavaPlugin {
         // debug section and are re-applied on every reload.
         debug.addSink((category, message) ->
                 getLogger().info("[debug/" + category.key() + "] " + message));
+        // The player-facing half of the design's two-sink model (rewrite design
+        // §4.7 — console AND opted-in admins). The v5 rewrite shipped only the
+        // console sink; this restores the chat stream for admins who opt in via
+        // /mental debug subscribe or the GUI tile. Zero-cost until someone
+        // subscribes (empty-set early return) and Folia-correct per line; the
+        // subscription clears on quit through the forget hook registered below.
+        this.playerDebugSink = new PlayerDebugSink(scheduling);
+        debug.addSink(playerDebugSink);
         applyDebug(snapshot.debug());
 
         // The tick clock — the only clock currency in the delivery core. Modern
@@ -298,6 +309,9 @@ public final class MentalPluginV5 extends JavaPlugin {
         sessions.addForgetHook(domains::forget);
         sessions.addForgetHook(latency::forget);
         sessions.addForgetHook(valve::forget);
+        // "Cleared on quit": a subscription is a live-session convenience, not a
+        // persisted preference — drop it when the player leaves.
+        sessions.addForgetHook(playerDebugSink::forget);
         PacketEvents.getAPI().getEventManager().registerListener(new PacketTap(domains, sessions, clock));
         PacketEvents.getAPI().getEventManager().registerListener(new ValveListener(valve));
         // Exactly ONE latency-probe receive rim, chosen by the effective transport
@@ -504,6 +518,11 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** The velocity valve — armed by the desk, consumed by the rim's outbound listener. */
     public @NotNull VelocityValve valve() {
         return valve;
+    }
+
+    /** The player-facing debug sink — the {@code /mental debug subscribe} surface and the GUI tile toggle it. */
+    public @NotNull PlayerDebugSink playerDebugSink() {
+        return playerDebugSink;
     }
 
     /** The live OCM arbiter binding — the routers' frozen ownership source. */
