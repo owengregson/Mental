@@ -65,6 +65,8 @@ public final class BlockingSuite {
                         runBlockedReduction(mental, tester, context)),
                 new TestCase("block: a fresh partial block ships the FULL era knock (journal SHIP, no silent drop)",
                         context -> runBlockedKnockDelivery(mental, tester, context)),
+                new TestCase("block: a hit while STILL HOLDING the block ships the fresh sprint knock (universal blockhit)",
+                        context -> runHeldBlockFreshSprint(mental, tester, context)),
                 new TestCase("block: a temp-shield vanilla FULL block keeps era half damage + the era knock (off-hand tier)",
                         context -> runTempShieldFullBlock(mental, tester, context)),
                 new TestCase("block: the off-hand shield decoration reverts on an exit trigger (B12)", context ->
@@ -206,6 +208,77 @@ public final class BlockingSuite {
                 blocker.remove();
             });
             captors.unregister();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Case 6 — the universal blockhit contract (held-block fresh sprint) */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The owner's universal blockhit contract: a hit delivered WHILE STILL HOLDING
+     * a sword block that reset sprint ships the FRESH sprint knock — the second and
+     * later hits of a held-block combo included, where the prior hit's post-hit
+     * sprint clear (the server half of the w-tap) would otherwise have dropped the
+     * freshness. The whole mechanic lives in the connection domain's
+     * {@code SprintWire}: the block right-click raises a sticky {@code blockReset}
+     * ({@code onBlockSprintReset}) that survives {@code onServerClear} and overrides
+     * the verdict while the raw client sprint flag holds, ended by the client's
+     * RELEASE_USE_ITEM ({@code onBlockReleased}) or a STOP_SPRINTING.
+     *
+     * <p><b>Clientless honesty:</b> the contract is decided entirely by the
+     * arrival-order {@code SprintWire}, which a {@link FakePlayer} has no client to
+     * feed — it never creates a connection domain, so {@code resetSprintForBlock}
+     * finds no wire to re-arm and a synthetic melee resolves as a server-side hit
+     * that reads the live sprint flag, never the wire verdict. There is therefore
+     * no clientless staging of the held-block reset end to end; the full state
+     * table (engage → hit → post-hit clear → still-fresh → release/STOP boundaries →
+     * re-engage) is exhaustively unit-pinned in the kernel {@code SprintWireTest}.
+     * This case verifies the module enables and stages the block, then note-SKIPs
+     * the wire-dependent assertion — the established honesty pattern for a
+     * clientless gap (never a false PASS, never a false regression).</p>
+     */
+    private static void runHeldBlockFreshSprint(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer blocker = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            toggleModule(context, "sword-blocking", true);
+            context.expect(moduleActive(mental, "sword-blocking"),
+                    "sword-blocking module failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                blocker.spawn(Arena.offset(centre, 3, 2));
+                attacker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+            });
+            context.awaitTicks(5);
+
+            // Stage the block engagement on the ATTACKER (the block-hitter). On a
+            // real client this raises the held-block sprint reset over the wire; a
+            // synthetic player has no wire, so the re-arm has no domain to write.
+            context.syncRun(() -> {
+                attacker.player().setSprinting(true);
+                Bukkit.getPluginManager().callEvent(new PlayerInteractEvent(
+                        attacker.player(), Action.RIGHT_CLICK_AIR,
+                        attacker.player().getInventory().getItemInMainHand(),
+                        null, BlockFace.SELF, EquipmentSlot.HAND));
+            });
+            context.awaitTicks(2);
+
+            context.note("the held-block fresh-sprint contract is decided by the connection-domain "
+                    + "SprintWire, which a clientless FakePlayer has no packets to drive (no wire → "
+                    + "resetSprintForBlock has nothing to re-arm, and a synthetic melee reads the live "
+                    + "sprint flag, not the wire verdict) — the full engage/clear/hit/release/STOP/re-engage "
+                    + "state table is unit-pinned in kernel SprintWireTest");
+        } finally {
+            toggleModule(context, "sword-blocking", false);
+            context.syncRun(() -> {
+                attacker.remove();
+                blocker.remove();
+            });
         }
     }
 

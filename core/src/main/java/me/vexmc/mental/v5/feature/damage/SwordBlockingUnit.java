@@ -1,5 +1,12 @@
 package me.vexmc.mental.v5.feature.damage;
 
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketListenerPriority;
+import com.github.retrooper.packetevents.event.PacketReceiveEvent;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.player.DiggingAction;
+import com.github.retrooper.packetevents.protocol.player.User;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
 import java.util.UUID;
 import java.util.function.Supplier;
 import me.vexmc.mental.kernel.math.SwordBlockReduction;
@@ -78,6 +85,12 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
         scope.listen(this);
+        // The block-release boundary of the universal blockhit contract: a netty
+        // observation of the client's RELEASE_USE_ITEM drops the held-block sprint
+        // reset (feature-scoped — nothing observes RELEASE while sword-blocking is
+        // off, so zero-touch holds). The engage side (onBlockSprintReset) rides the
+        // Bukkit interact on the region thread; both write the one CAS-atomic wire.
+        scope.packets(new BlockReleaseListener());
         // Eager component application on enable (a plain sword must already carry
         // the block component or the client swallows the first air right-click),
         // and guaranteed teardown of every decoration on disable (B12).
@@ -85,6 +98,47 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
             decoration.enableAll();
             return decoration::disableAll;
         });
+    }
+
+    /**
+     * Drops the held-block sprint reset ({@link SprintWire#onBlockReleased}) when
+     * the attacker releases the block button — the client's RELEASE_USE_ITEM,
+     * observed on that connection's own netty thread (D1). Netty-safe: identity is
+     * the PacketEvents {@link User}'s UUID and the domain is reached through the
+     * NON-creating {@link ConnectionDomains#peek} (never {@code domainFor} — a
+     * packetless player must not be materialised by a read, the 2.4.4
+     * domain-poisoning trap), touching no live entity. Packet types are compared by
+     * REFERENCE against the {@code Play.Client} constant (this listener fires for
+     * every connection state, so a pre-Play packet must never be downcast).
+     */
+    private final class BlockReleaseListener extends PacketListenerAbstract {
+
+        BlockReleaseListener() {
+            super(PacketListenerPriority.MONITOR);
+        }
+
+        @Override
+        public void onPacketReceive(PacketReceiveEvent event) {
+            try {
+                if (event.getPacketType() != PacketType.Play.Client.PLAYER_DIGGING) {
+                    return;
+                }
+                if (new WrapperPlayClientPlayerDigging(event).getAction() != DiggingAction.RELEASE_USE_ITEM) {
+                    return;
+                }
+                User user = event.getUser();
+                UUID id = user == null ? null : user.getUUID();
+                if (id == null) {
+                    return;
+                }
+                ConnectionDomains.Domain domain = domains.peek(id);
+                if (domain != null) {
+                    domain.sprint().onBlockReleased();
+                }
+            } catch (Throwable ignored) {
+                // An observation listener must never break the inbound pipeline.
+            }
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -268,7 +322,14 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
             // and lose the block-hit re-arm; a defensive block still earns no bonus.
             return;
         }
-        wire.onSprintStart(); // the block-release re-engage IS the w-tap signal — re-arm freshness
+        // Re-arm freshness AND raise the sticky held-block reset (the owner's
+        // universal blockhit contract): while this SAME block engagement is held,
+        // every hit — the second and later ones of a held-block combo included —
+        // ships the FRESH sprint knock, where the prior hit's post-hit onServerClear
+        // would otherwise have dropped the freshness it spent. The reset ends when
+        // the block button releases (the RELEASE_USE_ITEM listener below) or a
+        // STOP_SPRINTING lowers the raw client flag.
+        wire.onBlockSprintReset();
         if (!player.isSprinting()) {
             player.setSprinting(true);
         }
