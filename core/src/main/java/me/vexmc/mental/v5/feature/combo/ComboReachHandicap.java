@@ -24,10 +24,13 @@ import org.jetbrains.annotations.NotNull;
  * The combo reach handicap (design §1) — its own {@code modules.combo-reach-handicap}
  * feature (2.4.4; it appears and toggles in the GUI like every other feature) that
  * scales DOWN a victim's interaction range WHILE their combo is active, so a launched
- * victim's own raycast shortens and cannot answer. It depends on COMBO_HOLD: it rides
- * the combo transition point that fires the api events ({@link ComboEvents}) — applied
- * on combo START, removed on EVERY end reason, both on the victim's owning region
- * thread — so with no combos held it never engages.
+ * victim's own raycast shortens and cannot answer. It rides the combo transition point
+ * that fires the api events ({@link ComboEvents}) — applied on combo START, removed on
+ * EVERY end reason, both on the victim's owning region thread — so with no combos held
+ * it never engages. It depends on combo DETECTION, not on the pocket servo: since the
+ * 2.4.5 detection/servo split its own module retains detection, so it engages
+ * STANDALONE with combo-hold off (composing with the servo when both are on — a shorter
+ * victim reach drops the servo's deny boundary and opens the keepable pocket).
  *
  * <h2>Version tier (1.20.5+ only)</h2>
  * <p>The {@code ENTITY_INTERACTION_RANGE} attribute is client-synced from 1.20.5,

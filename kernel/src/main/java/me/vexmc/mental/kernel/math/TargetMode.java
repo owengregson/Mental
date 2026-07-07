@@ -2,28 +2,35 @@ package me.vexmc.mental.kernel.math;
 
 /**
  * How the pocket servo picks the separation it steers the victim toward
- * (combo-hold §3.2b / precision-derivation §3; the target-v2 round).
+ * (combo-hold §3.2b; the 2.4.5 answer-denial-boundary redesign).
  *
  * <ul>
- *   <li>{@link #ANCHOR} — the static config {@code target} (2.85 after the
- *       data-backed retune; see {@code PocketServoConfig}). <b>The shipped
- *       default.</b> The {@link #DYNAMIC} value is still evaluated and pushed to the
- *       debug sink per hit, but the anchor is what the solve uses, so a lab round
- *       can calibrate the exposure-budget geometry before anyone flips it.</li>
- *   <li>{@link #DYNAMIC} — the <b>V2 exposure-budget target</b> ({@link
- *       PocketServo#dynamicTarget}, the forensics/verifier repairs). It picks the
- *       LEAST-aggressive separation {@code T ∈ [anchor, capEff]} whose terminal
- *       exposure integral {@code e(T)} stays within the victim's continuous
- *       retaliation budget {@code tAllow = tPing + turn} — the honest {@code min}
- *       selection (repair #1). An out-drifting victim ({@code closing ≤ 0}) keeps
- *       the anchor (pull-in posture, repair #2); the chase is EMA-smoothed and the
- *       emitted target slew-limited so the noisy estimate no longer coin-flips the
- *       target across the old cliff. Falls back to the anchor whenever a geometry
- *       input is missing. (The v1 single-instant target was journal-only and never
- *       applied — replaced outright.)</li>
+ *   <li>{@link #BOUNDARY} — the <b>geometric answer-denial target</b> ({@link
+ *       PocketServo#boundaryTarget}). <b>The shipped default.</b> It lands the
+ *       victim right at the separation where, at the moment they could first swing
+ *       back ({@code t* = tPing + turn}), their reach-back is denied by a hair
+ *       ({@code sepDeny + denyMargin}) while the attacker can still reach them
+ *       ({@code sepReach − jitterMargin}), never pulling in below {@code
+ *       targetFloor}. It is computed from ONE unified reach geometry (feet-to-feet
+ *       separation, eye→AABB reach) evaluated at the victim's predicted arc height
+ *       at {@code t*}, folding in the effective (possibly reach-handicapped) victim
+ *       reach. When the geometry is unmeasurable — no facing — the target degrades
+ *       to {@link #STATIC}'s fixed separation.</li>
+ *   <li>{@link #STATIC} — a fixed config separation ({@code staticTarget}), the
+ *       degrade/fallback when the geometry cannot be measured (no facing, no RTT,
+ *       an ice landing or a collapsed window — the last two decline the servo
+ *       outright). Set this mode to pin the servo to one separation regardless of
+ *       facing.</li>
  * </ul>
+ *
+ * <p>The pre-2.4.5 {@code ANCHOR}/{@code DYNAMIC} modes are gone: {@code ANCHOR}
+ * (a fixed anchor separation) became {@link #STATIC}, and the exposure-budget
+ * {@code DYNAMIC} target — which minimised toward the LEAST separation still
+ * un-answerable, dragging the victim into their own retaliation range — was
+ * replaced by the {@link #BOUNDARY} target, which pushes OUT to the denial edge.
+ * The config parser migrates the old keys (see {@code SnapshotParser}).</p>
  */
 public enum TargetMode {
-    ANCHOR,
-    DYNAMIC
+    BOUNDARY,
+    STATIC
 }

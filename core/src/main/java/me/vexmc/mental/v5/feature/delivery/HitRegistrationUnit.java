@@ -22,7 +22,6 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
-import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
@@ -162,7 +161,10 @@ public final class HitRegistrationUnit implements FeatureUnit {
      * whose frozen {@code victimView} is given (combo-hold §3.2). Active only when
      * the module is on AND this attacker holds the victim's active combo — the same
      * gate the region path uses, off the one frozen truth, so an adopted pre-send
-     * and a recompute agree. Otherwise {@link PocketServoConfig#INACTIVE}.
+     * and a recompute agree. Otherwise {@link PocketServoConfig#INACTIVE}. The config
+     * carries the victim's EFFECTIVE answer reach (the era reach folded with the
+     * combo reach handicap when it is live) so the two combo submodules compose — the
+     * same fold the region path applies.
      */
     @SuppressWarnings("unchecked")
     private PocketServoConfig comboServoFor(PlayerView victimView, UUID attackerId) {
@@ -174,7 +176,27 @@ public final class HitRegistrationUnit implements FeatureUnit {
         }
         ComboSettings settings = snapshot.get().settings(
                 (me.vexmc.mental.v5.feature.SettingsKey<ComboSettings>) Feature.COMBO_HOLD.settingsKey());
-        return settings.servo();
+        return settings.servo(effectiveVictimReach(settings));
+    }
+
+    /**
+     * The victim's EFFECTIVE answer reach for the answer-denial boundary target —
+     * the era reach shortened by the combo reach handicap when it is enabled AND
+     * enforceable (1.20.5+ attribute lever). The handicap is live for exactly the
+     * combo's duration, which is exactly when the servo is active, so lowering
+     * {@code R_v} drops the deny boundary and opens the keepable pocket. Netty-safe:
+     * one snapshot read and the class-load-constant lever probe. {@code R_a} (the
+     * attacker) is never handicapped.
+     */
+    @SuppressWarnings("unchecked")
+    private double effectiveVictimReach(ComboSettings settings) {
+        double base = settings.victimReach();
+        if (snapshot.get().enabled(Feature.COMBO_REACH_HANDICAP) && ComboReachHandicap.leverSupported()) {
+            ReachHandicapSettings handicap = snapshot.get().settings(
+                    (SettingsKey<ReachHandicapSettings>) Feature.COMBO_REACH_HANDICAP.settingsKey());
+            return base * handicap.scale();
+        }
+        return base;
     }
 
     /* ---------------------------- the netty listener ---------------------------- */
@@ -343,24 +365,15 @@ public final class HitRegistrationUnit implements FeatureUnit {
                 if (servo.active()) {
                     ComboPredictor.rememberWindow(victimId, servoAttackerX, servoAttackerZ, servoNow, inputs);
                 }
-                // The V2 dynamic-target smoothing memory (target-v2 repair #2) commits
-                // whenever the DYNAMIC target is live — a gameplay-shaping input must
-                // never be gated behind the diagnostics sink (interaction audit: with
-                // target-mode: dynamic and debug off, the memory stayed NaN and every
-                // hit re-solved memoryless, the exact knife-edge the EMA/slew exists
-                // to kill; flipping debug on changed combat). The debug LINE alone
-                // stays under the sink gate; under the shipped ANCHOR default the
-                // dynamic value is journaled-not-used, so no solve runs debug-off.
-                boolean dynamicTarget = servo.active() && servo.targetMode() == TargetMode.DYNAMIC;
-                if (servo.active() && (dynamicTarget || debug.active())) {
+                // The debug sink alone rides the debug gate: the answer-denial
+                // boundary target is computed fresh from geometry each hit, with no
+                // cross-hit memory to commit, so nothing gameplay-shaping runs
+                // debug-off. The post-hit chase window commit above is the only
+                // load-bearing solve state and is never gated behind the sink.
+                if (servo.active() && debug.active()) {
                     PocketServo.Solution solution = KnockbackEngine.explainServo(
                             preAttacker, preVictim, profile, compensationY, freshSprint, servo, inputs);
-                    if (dynamicTarget) {
-                        ComboPredictor.remember(victimId, solution);
-                    }
-                    if (debug.active()) {
-                        debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
-                    }
+                    debug.log(() -> ComboPredictor.debugLine(victimId, attackerId, inputs, solution));
                 }
             }
 

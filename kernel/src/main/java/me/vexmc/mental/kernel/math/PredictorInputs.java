@@ -62,15 +62,15 @@ package me.vexmc.mental.kernel.math;
  * @param groundedTicks           consecutive grounded ticks the victim has held
  *                                (published context; carried for the debug sink and
  *                                launch-state coherence, never a solve lever on its own).
- * @param priorChaseEma           the per-combo chase EMA carried from the victim's
- *                                previous hit ({@link Double#NaN} on the first) — the
- *                                V2 dynamic-target path smooths the noisy chase
- *                                estimate through it (target-v2 repair #2). Never
- *                                touches the σ* placement solve.
- * @param priorDynamicTarget      the emitted dynamic target from the previous hit
- *                                ({@link Double#NaN} on the first) — the V2 target is
- *                                slew-limited to ±0.05 of it, killing the cliff
- *                                coin-flip (target-v2 repair #2).
+ * @param priorChaseEma           <b>Unused since 2.4.5</b> — fed the removed
+ *                                exposure-budget dynamic-target smoothing; retained
+ *                                so the predictor-input arity and every caller/pin
+ *                                stay stable across the answer-denial-boundary
+ *                                redesign (the boundary target needs no cross-hit
+ *                                prior). Pass {@link Double#NaN}.
+ * @param priorDynamicTarget      <b>Unused since 2.4.5</b> — fed the removed
+ *                                dynamic-target slew limit; retained for arity
+ *                                stability. Pass {@link Double#NaN}.
  * @param launchVerticalVelocity  the victim's per-tick vertical motion at the
  *                                boundary read (the same end-of-previous-tick view
  *                                the residual rides). The touchdown-aware launch

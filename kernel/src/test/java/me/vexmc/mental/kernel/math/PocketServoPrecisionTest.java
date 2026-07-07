@@ -8,14 +8,15 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Pins for the precision-round pocket servo (combo-hold §3.2b;
- * precision-derivation §7.1). The load-bearing test is {@link #gridLandsExactlyOnTarget()}:
- * across the grounded/air launch branches, vertical stamps, separations, residuals,
- * drift and ping cells the derivation names, the raw σ* the solve returns — fed
- * through an INDEPENDENT tick-by-tick era flight fold (never the production sum
- * code) — lands the victim within 1e-9 of the (possibly dynamic) target. The
- * closed forms (D_g / D_a / S2 / ground locomotion), the ping-shift arithmetic, the
- * ice decline, the degenerate guards and the dynamic-target function are hand-pinned
- * separately so the fold can never drift from the physics it inverts.
+ * precision-derivation §7.1; the 2.4.5 answer-denial-boundary redesign). The
+ * load-bearing test is {@link #gridLandsExactlyOnTarget()}: across the grounded/air
+ * launch branches, vertical stamps, separations, residuals, drift and ping cells the
+ * derivation names, the raw σ* the solve returns — fed through an INDEPENDENT
+ * tick-by-tick era flight fold (never the production sum code) — lands the victim
+ * within 1e-9 of the resolved target. The closed forms (D_g / D_a / S2 / ground
+ * locomotion), the answer-denial-boundary geometry, the ping-shift arithmetic, the
+ * ice decline and the degenerate guards are hand-pinned separately so the fold can
+ * never drift from the physics it inverts.
  */
 class PocketServoPrecisionTest {
 
@@ -71,6 +72,8 @@ class PocketServoPrecisionTest {
                 for (double d0 : separations) {
                     for (double residual : residuals) {
                         for (double drift : drifts) {
+                            // No facing (NaN yaw) → the boundary target degrades to the
+                            // config static target, so the whole grid steers to 2.75.
                             PredictorInputs in = new PredictorInputs(
                                     grounded, 0.6, 0.6, launchHeight,
                                     drift, Double.NaN, PocketServo.WALK_BASELINE,
@@ -78,6 +81,8 @@ class PocketServoPrecisionTest {
                             PocketServo.Solution s = PocketServo.solve(
                                     SERVO, in, d0, residual, freshEra, stamp, 0.10);
                             assertFalse(s.declined(), "the core grid never declines");
+                            assertEquals(SERVO.staticTarget(), s.target(), EPSILON,
+                                    "no facing → the static target");
                             double landed = independentLanding(
                                     in, d0, residual, freshEra, s.sigmaStar(), stamp, 0.10, 10);
                             assertEquals(s.target(), landed, EPSILON,
@@ -92,9 +97,128 @@ class PocketServoPrecisionTest {
         assertEquals(600, checked, "the full 2×5×5×4×3 cross exercised");
     }
 
+    /* ── the answer-denial-boundary geometry (§3.1/§3.2b; the 2.4.5 pin table) ─ */
+
+    @Test
+    void sepDenyIsTheVictimAnswerBoundary() {
+        // w0=0.3, eyeV=1.62, PLAYER_HEIGHT=1.8 ⇒ dvertV = max(0, h − 0.18);
+        // sepDeny = 0.3 + √(R_v² − dvertV²).
+        assertEquals(3.290385, PocketServo.sepDeny(0.42, 3.0), 1.0e-6, "h 0.42, R_v 3.0");
+        assertEquals(2.898942, PocketServo.sepDeny(0.42, 2.61), 1.0e-6, "h 0.42, handicap R_v 2.61");
+        assertEquals(3.107247, PocketServo.sepDeny(1.238, 3.0), 1.0e-6, "h 1.238, R_v 3.0");
+        assertEquals(2.685946, PocketServo.sepDeny(1.238, 2.61), 1.0e-6, "h 1.238, handicap R_v 2.61");
+        assertEquals(2.170749, PocketServo.sepDeny(2.0, 2.61), 1.0e-6, "h 2.0, handicap R_v 2.61");
+        // Eye above the head by ≥ R_v ⇒ the victim can never answer ⇒ no boundary.
+        assertTrue(Double.isInfinite(PocketServo.sepDeny(5.0, 3.0)), "dvertV ≥ R_v collapses the boundary");
+    }
+
+    @Test
+    void sepReachIsTheAttackerReachCap() {
+        // Attacker eye 1.62; dvertA = max(0, h − 1.62, 1.62 − (h+1.8));
+        // sepReach = 0.3 + √(R_a² − dvertA²).
+        assertEquals(3.30, PocketServo.sepReach(0.42, 3.0), EPSILON, "h below the eye ⇒ dvertA 0");
+        assertEquals(3.30, PocketServo.sepReach(1.238, 3.0), EPSILON, "h 1.238 still below the eye ⇒ dvertA 0");
+        assertEquals(3.275836, PocketServo.sepReach(2.0, 3.0), 1.0e-6, "h 2.0 ⇒ dvertA 0.38");
+    }
+
+    @Test
+    void boundaryTargetIsTheAnswerDenialSeparation() {
+        // The FINAL 2.4.5 pin table: denyMargin 0.02, jitterMargin 0.15, floor 2.5,
+        // R_a 3.0, eyeV 1.62. target = min(sepReach − jitter, max(floor, sepDeny + deny)).
+        // low elevation, no handicap — the razor pocket: deny+0.02 (3.310385) exceeds
+        // reach−0.15 (3.15), so reachability clamps and denial defers to the submodule.
+        assertEquals(3.15, PocketServo.boundaryTarget(0.42, 3.0, 3.0, 0.02, 0.15, 2.5), 1.0e-6);
+        // low elevation, handicap 0.87 — held just past the deny boundary, wide pocket.
+        assertEquals(2.918942, PocketServo.boundaryTarget(0.42, 2.61, 3.0, 0.02, 0.15, 2.5), 1.0e-6);
+        // mid elevation, no handicap — lift drops deny below reach even unhandicapped.
+        assertEquals(3.127247, PocketServo.boundaryTarget(1.238, 3.0, 3.0, 0.02, 0.15, 2.5), 1.0e-6);
+        // mid elevation, handicap 0.87.
+        assertEquals(2.705946, PocketServo.boundaryTarget(1.238, 2.61, 3.0, 0.02, 0.15, 2.5), 1.0e-6);
+        // high launch, handicap 0.87 — deny+0.02 (2.190749) is below the floor, so
+        // max() clamps up to 2.5: the servo never pulls IN below the floor.
+        assertEquals(2.5, PocketServo.boundaryTarget(2.0, 2.61, 3.0, 0.02, 0.15, 2.5), EPSILON);
+    }
+
+    @Test
+    void emptyPocketFavoursReachability() {
+        // When the deny boundary sits ABOVE the reach cap (a shallow launch at equal
+        // reach) the min() picks reach − jitter: keep the victim hittable, defer denial
+        // to the reach-handicap/vertical submodule.
+        double sepDeny = PocketServo.sepDeny(0.42, 3.0);   // 3.290385
+        double sepReach = PocketServo.sepReach(0.42, 3.0); // 3.30
+        assertTrue(sepDeny < sepReach, "sanity: at h 0.42 with equal reach the deny sits just under reach");
+        // deny+0.02 = 3.310385 > reach−0.15 = 3.15, so reachability wins.
+        assertEquals(sepReach - 0.15, PocketServo.boundaryTarget(0.42, 3.0, 3.0, 0.02, 0.15, 2.5), 1.0e-9);
+        // A collapsed deny boundary (victim can never answer) also clamps to reach − jitter.
+        assertEquals(PocketServo.sepReach(5.0, 3.0) - 0.15,
+                PocketServo.boundaryTarget(5.0, 3.0, 3.0, 0.02, 0.15, 2.5), 1.0e-9);
+    }
+
+    /* ── the boundary target driving the full solve ────────────────────────── */
+
+    /** A BOUNDARY-mode config with the given effective victim reach (the handicap fold). */
+    private static PocketServoConfig boundary(double victimReach) {
+        return PocketServoConfig.of(2.85, 1.0, 0.8, 1.2, 10,
+                TargetMode.BOUNDARY, victimReach, 3.0, 0.02, 0.15, 2.5);
+    }
+
+    @Test
+    void boundaryTargetDrivesTheSolveWithFacing() {
+        // A facing victim (yaw 0 → turn 0), no ping (t* = 0 → arc height = the grounded
+        // launch's 0), handicap-effective reach 2.61: the solve reads the geometry at
+        // the arc height at t* and steers there, and σ* lands there through the fold.
+        PredictorInputs facing = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
+                -1, -1, Double.NaN, Double.NaN, /*yaw*/0.0, Double.NaN, 0);
+        PocketServo.Solution s = PocketServo.solve(boundary(2.61), facing, 2.35, 0.0, 0.4, 0.35716, 0.10);
+        assertFalse(s.declined());
+        assertEquals(0.0, s.arcHeightTStar(), EPSILON, "t* = 0 (facing, no ping) → the launch height");
+        double expected = PocketServo.boundaryTarget(
+                s.arcHeightTStar(), 2.61, 3.0, 0.02, 0.15, 2.5);
+        assertEquals(expected, s.target(), EPSILON, "the solve steers to the geometric boundary target");
+        double landed = independentLanding(facing, 2.35, 0.0, 0.4, s.sigmaStar(), 0.35716, 0.10, 10);
+        assertEquals(s.target(), landed, EPSILON, "σ* lands exactly on the boundary target");
+    }
+
+    @Test
+    void handicapOpensTheKeepablePocket() {
+        // The composition invariant: at the same geometry a SHORTER effective victim
+        // reach lowers the deny boundary, so the boundary target moves IN (a keepable
+        // pocket the attacker still reaches). This is why the reach nerf keeps a combo.
+        PredictorInputs facing = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
+                -1, -1, Double.NaN, Double.NaN, /*yaw*/0.0, Double.NaN, 0);
+        double noHandicap = PocketServo.solve(boundary(3.0), facing, 2.35, 0.0, 0.4, 0.35716, 0.10).target();
+        double handicapped = PocketServo.solve(boundary(2.61), facing, 2.35, 0.0, 0.4, 0.35716, 0.10).target();
+        assertTrue(handicapped < noHandicap,
+                "a shortened victim reach lowers the target (" + handicapped + " < " + noHandicap + ")");
+    }
+
+    @Test
+    void boundaryFallsBackToStaticTargetWithoutFacing() {
+        // No facing (NaN yaw) → the geometry is unmeasurable → the STATIC fallback.
+        PredictorInputs noYaw = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, 0.2806, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
+        PocketServo.Solution s = PocketServo.solve(boundary(2.61), noYaw, 2.35, 0.0, 0.4, 0.35716, 0.10);
+        assertEquals(2.85, s.target(), 0.0, "NaN yaw → the config static target (2.85)");
+    }
+
+    @Test
+    void staticModePinsTheTargetRegardlessOfFacing() {
+        // STATIC mode ignores the geometry even WITH facing: the fixed separation stands.
+        PocketServoConfig staticCfg = PocketServoConfig.of(2.70, 1.0, 0.8, 1.2, 10,
+                TargetMode.STATIC, 2.61, 3.0, 0.02, 0.15, 2.5);
+        PredictorInputs facing = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
+                -1, -1, Double.NaN, Double.NaN, /*yaw*/0.0, Double.NaN, 0);
+        PocketServo.Solution s = PocketServo.solve(staticCfg, facing, 2.35, 0.0, 0.4, 0.35716, 0.10);
+        assertEquals(2.70, s.target(), 0.0, "STATIC mode holds the fixed target");
+    }
+
     /* ── the touchdown-aware launch branch (servo-lab 2.4.5) ───────────────── */
 
-    /** The SHIPPED anchor (2.85, the target-v2 retune) — the lab pins below derive against it. */
+    /** The shipped static fallback (2.85) — the lab pins below have NaN facing, so it is the target. */
     private static final PocketServoConfig SHIPPED_ANCHOR = PocketServoConfig.of(2.85, 1.0, 0.8, 1.2, 10);
 
     @Test
@@ -112,7 +236,7 @@ class PocketServoPrecisionTest {
         assertEquals(PocketServo.groundedLaunchDragSum(10, 0.6 * Q), s.dragSum(), EPSILON,
                 "the drag schedule takes the grounded launch branch: D_g(10) = 1 + 0.546·geo(9)");
         // Hand pin, the lab's counterfactual: d0 2.55, R 0.02, F 0.325 (plain
-        // stance), measured chase 0.116 b/t, target 2.85, w' 10.
+        // stance), measured chase 0.116 b/t, static target 2.85 (NaN facing), w' 10.
         //   σ* = (2.85 − (2.55 − 1.16) − 4.470559213·0.02) / (0.325·4.470559213)
         //      = 1.370588824 / 1.452931744 = 0.943326362 — interior, ≈ 1 (the σ=1
         //        counterfactual the lab measured settling in the pocket).
@@ -231,7 +355,7 @@ class PocketServoPrecisionTest {
         // cadence 18 → w' 18 → G = 8 post-touchdown ticks inside the window; the
         // victim holds toward the attacker (â = −0.0196) at sprint attribute 0.13;
         // measured window chase 0.0972 b/t (the lab's 1.75 blocks / 18t); d0 2.5,
-        // R 0.02, F 0.325, anchor 2.85.
+        // R 0.02, F 0.325, static target 2.85 (NaN facing).
         //   drag schedule: Π grounded launch, air 2..10, ground tail 11..18
         //                  → D(18) = 4.981141159
         //   drift  = −0.0196 · S2(min(18, 10)) = −0.0196 · 42.514650307 = −0.833287146
@@ -298,6 +422,11 @@ class PocketServoPrecisionTest {
         PocketServo.Solution s = PocketServo.solve(SERVO, ice, 2.35, 0.0, 0.4, 0.35716, 0.10);
         assertTrue(s.declined());
         assertEquals(1.0, s.sigma(), 0.0);
+        // The geometry is not evaluated on a declined solve (the 0 sentinel = N/A);
+        // the static target is reported for reference.
+        assertEquals(0.0, s.sepDeny(), 0.0);
+        assertEquals(0.0, s.sepReach(), 0.0);
+        assertEquals(SERVO.staticTarget(), s.target(), 0.0);
     }
 
     @Test
@@ -323,16 +452,10 @@ class PocketServoPrecisionTest {
                 "no fresh horizontal — no lever");
     }
 
-    /* ── the V2 dynamic target (§3.3; target-v2 repairs #1–#4) ─────────────── */
-
-    /** A wide-interval synthetic config so the exposure min-selection is exercisable
-     *  (at signature-knock scale capEff collapses to the anchor — see below). */
-    private static final PocketServoConfig WIDE =
-            PocketServoConfig.of(2.30, 1.0, 0.8, 1.2, 10, TargetMode.DYNAMIC, 3.20);
+    /* ── the retaliation-budget geometry that sizes t* (§3.1/§4) ───────────── */
 
     @Test
     void turnIsContinuousAndFlickAware() {
-        // repair #4: 0 within 60° of the axis; else (|yaw|−60)/max(rate, 30°/t).
         assertEquals(0.0, PocketServo.turn(30.0, Double.NaN), EPSILON, "facing (≤60°) → 0");
         assertEquals(0.0, PocketServo.turn(60.0, Double.NaN), EPSILON, "exactly 60° → 0");
         assertEquals(1.0, PocketServo.turn(90.0, Double.NaN), EPSILON, "90°, unknown rate → (30)/30 = 1.0");
@@ -343,8 +466,7 @@ class PocketServoPrecisionTest {
 
     @Test
     void tAllowIsContinuousPingPlusTurn() {
-        // repair #4: tPing = rttV/100 (real ticks, no floor) + turn. The three journal
-        // examples' budgets, recomputed exactly from the constants.
+        // tPing = rttV/100 (real ticks, no floor) + turn. The journal examples' budgets.
         assertEquals(3.8, PocketServo.tAllow(80, 150.0, 10.0), EPSILON,
                 "faced-away high-ping: 80/100 + 90/30 = 0.8 + 3.0");
         assertEquals(1.4, PocketServo.tAllow(40, 90.0, Double.NaN), EPSILON,
@@ -356,26 +478,9 @@ class PocketServoPrecisionTest {
     }
 
     @Test
-    void capEffIsChaseAwareAndClampedAboveAnchor() {
-        // repair #3: capEff = hitEdge(3.0) − 0.5·chaseEma − landingSlack(0.17), clamped
-        // to [anchor, hitCap]. A wide-anchor config exposes the raw value; the shipped
-        // signature anchor clamps it up (the verifier's hole-12 inverted interval).
-        double raw = PocketServo.HIT_EDGE - 0.5 * 0.12 - PocketServo.LANDING_SLACK; // 2.77
-        assertEquals(2.77, raw, 1.0e-9);
-        assertEquals(2.77, PocketServo.capEff(WIDE, 0.12), EPSILON, "raw value inside [2.30, 3.20]");
-        // Signature chase 0.2806 → raw 2.6897 < the shipped 2.85 anchor → clamps to it.
-        PocketServoConfig shipped = PocketServoConfig.of(
-                2.85, 1.0, 0.8, 1.2, 10, TargetMode.DYNAMIC, 2.95);
-        assertEquals(2.85, PocketServo.capEff(shipped, 0.2806), EPSILON,
-                "capEff clamps up to the anchor rather than inverting the interval");
-    }
-
-    @Test
     void windowChaseRateMeasuresThePostHitWindow() {
         // The servo-lab 2.4.5 chase correction: the attacker's displacement over the
-        // just-completed inter-hit gap, axis-projected, per tick. Lab scale: the
-        // slow-cadence cell measured ~1.75 blocks of actual re-chase over an 18-tick
-        // window → 1.746 / 18 = 0.097 b/t exactly.
+        // just-completed inter-hit gap, axis-projected, per tick.
         assertEquals(0.097, PocketServo.windowChaseRate(10.0, 4.0, 11.746, 4.0, 1.0, 0.0, 18), EPSILON,
                 "closing displacement / gap, on-axis");
         // Moving AWAY from the victim (against the axis) reads negative — the w-tap
@@ -385,174 +490,19 @@ class PocketServoPrecisionTest {
         assertEquals(0.12, PocketServo.windowChaseRate(0.0, 0.0, 0.0, 1.8, 0.6, 0.8, 12), EPSILON);
         // A degenerate gap is no window at all.
         assertTrue(Double.isNaN(PocketServo.windowChaseRate(0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0)));
-        // The per-combo EMA rides the same seeded blend as the V2 chase EMA: a NaN
-        // prior seeds to the first window; 0.3·0.15 + 0.7·0.097 = 0.1129 thereafter.
+        // The per-combo EMA rides the seeded blend: a NaN prior seeds to the first
+        // window; 0.3·0.15 + 0.7·0.097 = 0.1129 thereafter.
         assertEquals(0.097, PocketServo.chaseEma(Double.NaN, 0.097), EPSILON, "first window seeds");
         assertEquals(0.1129, PocketServo.chaseEma(0.097, 0.15), EPSILON, "0.3·0.15 + 0.7·0.097");
     }
 
     @Test
     void chaseEmaSeedsThenBlends() {
-        // repair #2: NaN prior seeds to the instantaneous rate; then α=0.3 blend.
+        // NaN prior seeds to the instantaneous rate; then α=0.3 blend.
         assertEquals(0.30, PocketServo.chaseEma(Double.NaN, 0.30), EPSILON, "first hit seeds");
         double blended = PocketServo.CHASE_EMA_ALPHA * 0.50 + (1.0 - PocketServo.CHASE_EMA_ALPHA) * 0.30;
         assertEquals(blended, PocketServo.chaseEma(0.30, 0.50), EPSILON, "0.3·0.5 + 0.7·0.3 = 0.36");
         assertEquals(0.36, blended, 1.0e-9);
-    }
-
-    @Test
-    void dynamicTargetFallsBackToAnchorWithoutFacing() {
-        // No facing → the anchor is the whole answer (the journaled-but-anchored default).
-        PredictorInputs noYaw = new PredictorInputs(
-                true, 0.6, 0.6, 0.0, 0.0, 0.2806, 0.10,
-                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
-        PocketServo.Solution s = PocketServo.solve(SERVO, noYaw, 2.35, 0.0, 0.4, 0.35716, 0.10);
-        assertEquals(SERVO.target(), s.dynamicTarget(), 0.0, "NaN yaw → dynamic target == anchor");
-    }
-
-    @Test
-    void outDriftingVictimKeepsTheAnchor() {
-        // repair #2: closing ≤ 0 (the knock still out-runs the chase at the terminal
-        // tick) keeps the pull-in anchor, never relaxes toward the cap.
-        double[] pi = signatureSchedule();
-        // Weak chase, full signature knock → closingEnd < 0.
-        PocketServo.DynResult r = PocketServo.dynamicTarget(
-                WIDE, facingV2(90.0, Double.NaN, 40, Double.NaN, Double.NaN),
-                10, 0, 0.35716, /*chase*/0.10, /*shippedH1*/0.845, /*drift*/0.0, pi);
-        assertTrue(r.closingEnd() < 0.0, "the victim is out-drifting: " + r.closingEnd());
-        assertEquals(WIDE.target(), r.target(), EPSILON, "out-drift → the anchor");
-    }
-
-    @Test
-    void exposureIsMonotoneNonIncreasingInTarget() {
-        // repair #1: e(T) never rises as T grows (a farther-launched victim sits inside
-        // the answer envelope for no more terminal ticks). The premise the min-rule needs.
-        double[] pi = signatureSchedule();
-        double prev = Double.POSITIVE_INFINITY;
-        for (double t = 2.30; t <= 2.95 + 1.0e-9; t += 0.01) {
-            double e = PocketServo.exposure(t, 10, 0, 0.35716, 0.0, PocketServo.EYE_HEIGHT,
-                    /*chaseEma*/0.50, /*shippedH1*/0.0, /*drift*/0.0, pi);
-            assertTrue(e <= prev + 1.0e-9, "e nondecreasing at T=" + t + " (" + e + " > " + prev + ")");
-            prev = e;
-        }
-    }
-
-    @Test
-    void minSelectionEmptySetFallsBackToCapEff() {
-        // repair #1: no T bounds the exposure (tiny budget) → capEff, the least exposed.
-        double[] pi = signatureSchedule();
-        double chaseEma = 0.50;
-        double capEff = PocketServo.capEff(WIDE, chaseEma);
-        PocketServo.DynResult r = PocketServo.dynamicTarget(
-                WIDE, facingV2(30.0, Double.NaN, 10, Double.NaN, Double.NaN),
-                10, 0, 0.35716, chaseEma, /*shippedH1*/0.0, 0.0, pi);
-        assertEquals(0.1, r.tAllow(), EPSILON);
-        double eCap = PocketServo.exposure(capEff, 10, 0, 0.35716, 0.0, PocketServo.EYE_HEIGHT,
-                chaseEma, 0.0, 0.0, pi);
-        assertTrue(eCap > r.tAllow(), "even capEff is over budget → infeasible");
-        assertEquals(capEff, r.target(), EPSILON, "infeasible → capEff (least-exposed)");
-    }
-
-    @Test
-    void minSelectionWithinBudgetReturnsAnchor() {
-        // repair #1: even the anchor already fits the budget (huge tAllow) → the anchor.
-        double[] pi = signatureSchedule();
-        double chaseEma = 0.50;
-        PocketServo.DynResult r = PocketServo.dynamicTarget(
-                WIDE, facingV2(150.0, 10.0, 800, Double.NaN, Double.NaN),
-                10, 0, 0.35716, chaseEma, /*shippedH1*/0.0, 0.0, pi);
-        double eAnchor = PocketServo.exposure(WIDE.target(), 10, 0, 0.35716, 0.0,
-                PocketServo.EYE_HEIGHT, chaseEma, 0.0, 0.0, pi);
-        assertTrue(eAnchor <= r.tAllow(), "the anchor is within budget");
-        assertEquals(WIDE.target(), r.target(), EPSILON, "within budget → the anchor");
-    }
-
-    @Test
-    void minSelectionInteriorCrossingBisects() {
-        // repair #1: a budget strictly between e(capEff) and e(anchor) selects the
-        // interior crossing e(T*) == tAllow — the honest min, found by bisection.
-        double[] pi = signatureSchedule();
-        double chaseEma = 0.50;
-        // tAllow 1.5 comes from yaw 90 (turn 1.0, NaN rate) + rttV 50 (tPing 0.5).
-        PredictorInputs in = facingV2(90.0, Double.NaN, 50, Double.NaN, Double.NaN);
-        PocketServo.DynResult r = PocketServo.dynamicTarget(
-                WIDE, in, 10, 0, 0.35716, chaseEma, /*shippedH1*/0.0, 0.0, pi);
-        assertEquals(1.5, r.tAllow(), EPSILON);
-        double capEff = PocketServo.capEff(WIDE, chaseEma);
-        assertTrue(r.target() > WIDE.target() + 1.0e-6 && r.target() < capEff - 1.0e-6,
-                "the solution is strictly interior: " + r.target());
-        double eAt = PocketServo.exposure(r.target(), 10, 0, 0.35716, 0.0, PocketServo.EYE_HEIGHT,
-                chaseEma, 0.0, 0.0, pi);
-        assertEquals(r.tAllow(), eAt, 1.0e-4, "e(T*) == tAllow at the crossing");
-        double eJustBelow = PocketServo.exposure(r.target() - 0.02, 10, 0, 0.35716, 0.0,
-                PocketServo.EYE_HEIGHT, chaseEma, 0.0, 0.0, pi);
-        assertTrue(eJustBelow > r.tAllow(), "it is the MINIMUM feasible T (below it is over budget)");
-    }
-
-    @Test
-    void facingOrdersTheTargetFacedAwayLowFacingHigh() {
-        // The three journal examples' INTENT, recomputed from the final constants in an
-        // open-interval regime: faced-away+laggy relaxes toward the anchor, a facing
-        // low-ping victim is pushed to capEff, perpendicular lands between. (At the
-        // signature knock scale this interval collapses to the anchor — see the
-        // shipped-anchor test; the ordering here is the mechanism, exercised open.)
-        double[] pi = signatureSchedule();
-        double chaseEma = 0.50;
-        double capEff = PocketServo.capEff(WIDE, chaseEma);
-        double facedAway = PocketServo.dynamicTarget(
-                WIDE, facingV2(150.0, 10.0, 80, Double.NaN, Double.NaN),
-                10, 0, 0.35716, chaseEma, 0.0, 0.0, pi).target();
-        double perpendicular = PocketServo.dynamicTarget(
-                WIDE, facingV2(90.0, Double.NaN, 40, Double.NaN, Double.NaN),
-                10, 0, 0.35716, chaseEma, 0.0, 0.0, pi).target();
-        double facing = PocketServo.dynamicTarget(
-                WIDE, facingV2(30.0, Double.NaN, 10, Double.NaN, Double.NaN),
-                10, 0, 0.35716, chaseEma, 0.0, 0.0, pi).target();
-        assertEquals(WIDE.target(), facedAway, EPSILON, "faced-away high-ping → the anchor");
-        assertEquals(capEff, facing, EPSILON, "facing low-ping → capEff-bound");
-        assertTrue(perpendicular > facedAway + 1.0e-6 && perpendicular < facing - 1.0e-6,
-                "perpendicular lands strictly between: " + perpendicular);
-    }
-
-    @Test
-    void chaseEmaAndSlewKillTheCoinFlip() {
-        // repair #2: the v1 cliff moved the target by the full 0.20 on ±chase noise.
-        // With the EMA + the ≤0.05/hit slew, an oscillating chase can never move the
-        // EMITTED target more than the slew limit between consecutive hits.
-        double[] pi = signatureSchedule();
-        double[] noisyChase = {0.20, 0.60, 0.22, 0.58, 0.25, 0.55, 0.30, 0.50, 0.35, 0.45};
-        double priorEma = Double.NaN;
-        double priorTarget = Double.NaN;
-        double last = Double.NaN;
-        for (double chase : noisyChase) {
-            PredictorInputs in = facingV2(90.0, Double.NaN, 50, priorEma, priorTarget);
-            PocketServo.DynResult r = PocketServo.dynamicTarget(
-                    WIDE, in, 10, 0, 0.35716, chase, /*shippedH1*/0.0, 0.0, pi);
-            if (!Double.isNaN(last)) {
-                assertTrue(Math.abs(r.target() - last) <= PocketServo.TARGET_SLEW_LIMIT + EPSILON,
-                        "the target cannot jump the old cliff: Δ=" + Math.abs(r.target() - last));
-            }
-            last = r.target();
-            priorEma = r.chaseEma();
-            priorTarget = r.target();
-        }
-    }
-
-    @Test
-    void shippedAnchorCollapsesDynamicToTheAnchor() {
-        // The honest recomputation of the journal examples at the SHIPPED constants:
-        // anchor 2.85 + signature chase makes capEff ≤ the anchor (the flatness the
-        // verifier predicted), so V2 rides the anchor — DYNAMIC ≡ ANCHOR at signature
-        // scale, exactly the feel verdict's "an honest ~2.85 target".
-        PocketServoConfig shipped = PocketServoConfig.of(
-                2.85, 1.0, 0.8, 1.2, 10, TargetMode.DYNAMIC, 2.95);
-        double[] pi = signatureSchedule();
-        for (double yaw : new double[] {30.0, 90.0, 150.0}) {
-            PocketServo.DynResult r = PocketServo.dynamicTarget(
-                    shipped, facingV2(yaw, Double.NaN, 40, Double.NaN, Double.NaN),
-                    10, 0, 0.35716, /*chase*/0.2806, /*shippedH1*/0.845, 0.0, pi);
-            assertEquals(2.85, r.target(), EPSILON, "capEff collapses to the anchor at signature scale");
-        }
     }
 
     /* ── independent fold + brute references (never the production sum code) ─── */
@@ -656,26 +606,5 @@ class PocketServoPrecisionTest {
                 true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
                 rttA, rttV, Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
         return PocketServo.solve(SERVO, in, 2.35, 0.0, 0.4, 0.4607, 0.10);
-    }
-
-    /** A facing/ping/per-combo-memory input for the V2 dynamic-target pins. */
-    private static PredictorInputs facingV2(
-            double yawDeg, double yawRate, int rttV, double priorEma, double priorTarget) {
-        return new PredictorInputs(
-                true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
-                -1, rttV, Double.NaN, Double.NaN, yawDeg, yawRate, 0, priorEma, priorTarget);
-    }
-
-    /** The σ-invariant Π(k) schedule for a grounded signature 10-tick flight (tLand 10). */
-    private static double[] signatureSchedule() {
-        double[] pi = new double[10];
-        double p = 1.0;
-        double sq = 0.6 * Q; // stone ground drag 0.546
-        for (int k = 1; k <= 10; k++) {
-            pi[k - 1] = p;
-            boolean groundedPre = (k == 1) || (k > 10); // grounded launch, airborne through the window
-            p *= (groundedPre ? sq : Q);
-        }
-        return pi;
     }
 }

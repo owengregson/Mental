@@ -8,6 +8,21 @@ package me.vexmc.mental.kernel.math;
  * equations</b> (owner directive 2026-07-04: the victim must land in a very
  * specific position), then clamped.
  *
+ * <h2>The target: the answer-denial boundary (2.4.5 redesign)</h2>
+ * <p>The steered separation is the <b>answer-denial boundary</b>: land the victim
+ * right at the separation where, at the moment they could first swing back
+ * ({@code t* = tPing + turn}), their reach-back is denied by a hair while the
+ * attacker can still reach them. Push OUT to that boundary; pull IN only if the
+ * natural knock would eject them past the attacker's own reach, and never below
+ * {@code targetFloor}. The geometry ({@link #boundaryTarget}) is evaluated at the
+ * victim's predicted arc height at {@code t*} ({@link #arcHeight}), folding in the
+ * EFFECTIVE (possibly reach-handicapped) victim reach the caller supplies. When
+ * the geometry is unmeasurable (no facing) the target degrades to the config's
+ * {@code staticTarget}; {@link TargetMode#STATIC} pins it there unconditionally.
+ * The pre-2.4.5 exposure-budget target — which MINIMISED toward the least
+ * separation still un-answerable, dragging the victim into their own retaliation
+ * range — is gone.</p>
+ *
  * <h2>The v1 solve (byte-identical, still the fallback seam)</h2>
  * <p>After a knock the victim carries {@code residualCarry + σ·freshEra} of
  * horizontal speed along the attacker→victim axis (the ledger residual is never
@@ -16,8 +31,9 @@ package me.vexmc.mental.kernel.math;
  * the sprinting attacker closes {@code chase}; the servo picks {@code σ*} so
  * {@code dNext == target}. The four-input v1 form ({@link #sigma(PocketServoConfig,
  * double, double, double, double, double)}) uses the pure air-drag geometric sum
- * and assumes a ground-level launch — kept verbatim for the v1 pins and the
- * degenerate short-circuits.</p>
+ * and assumes a ground-level launch, steering to the config {@code staticTarget}
+ * (it has no facing geometry) — kept verbatim for the v1 pins and the degenerate
+ * short-circuits.</p>
  *
  * <h2>The precision solve (§3.2b; precision-derivation)</h2>
  * <p>{@link #solve} extends the SAME affine inversion with, per the derivation:</p>
@@ -34,9 +50,8 @@ package me.vexmc.mental.kernel.math;
  *   <li>the <b>ground tail</b> (§5): grounded ticks inside the window fold the
  *       victim's own locomotion (their move-speed attribute) into the drift and the
  *       knock's ground-drag tail into the schedule;</li>
- *   <li>the <b>exposure-budget dynamic target</b> (§3), behind the config's
- *       {@link TargetMode} — anchor by default, the computed value journaled to the
- *       debug sink for the lab round.</li>
+ *   <li>the <b>answer-denial-boundary target</b>, behind the config's
+ *       {@link TargetMode}.</li>
  * </ul>
  * <p>Ice landings ({@code landingSlip > 0.7}) decline the servo entirely
  * (σ = 1) — the pocket geometry itself changes there (§6 issue 6).</p>
@@ -105,65 +120,35 @@ public final class PocketServo {
     /** Vanilla player height (head-top above feet) — the attacker's answer geometry (§3.1). */
     public static final double PLAYER_HEIGHT = 1.8;
 
-    /** Vanilla standing eye height above feet — the victim's answer geometry (§3.1). */
+    /** Vanilla standing eye height above feet — the shared eye→AABB reach basis (§3.1). */
     public static final double EYE_HEIGHT = 1.62;
 
-    /** The victim's practical answer reach (§3.1, RV ≈ 2.9 — a lab-calibration constant). */
-    public static final double VICTIM_REACH = 2.9;
-
-    /** The AABB half-width the two players' reach requirements cancel over (§3.1). */
+    /** The AABB half-width the feet-to-feet separation folds in (§3.1, w0 = 0.3). */
     public static final double HALF_WIDTH = 0.3;
 
-    /* ── V2 dynamic-target constants (target-v2; the forensics/verifier repairs) ─ */
+    /* ── the per-combo chase EMA (servo-lab 2.4.5, the load-bearing chase channel) ─ */
 
     /**
-     * The attacker's practical reach along the axis (repair #3) — {@code capEff}'s
-     * base. The eye→AABB margin the anchor's 2.95 basis folds in is carried by
-     * {@link #LANDING_SLACK}, so this is the flat era survival reach, not the
-     * inflated eye→AABB 3.3.
-     */
-    public static final double HIT_EDGE = 3.0;
-
-    /**
-     * The servo's own in-band landing p95 (repair #3, lab VERDICT-cited ≈ 0.17):
-     * one-tick cadence-jitter slack subtracted from {@link #HIT_EDGE} so a
-     * chase-aware {@code capEff} never asks for a separation the jitter can't hold.
-     */
-    public static final double LANDING_SLACK = 0.17;
-
-    /**
-     * The per-combo chase EMA weight α (repair #2, ≈ 0.3): the dynamic-target path
-     * reads this smoothed chase, killing the v1 knife-edge coin-flip the noisy
-     * 3-delta estimate drove. The σ* placement solve keeps the INSTANTANEOUS chase.
+     * The per-combo chase EMA weight α (≈ 0.3): the σ* placement solve prices the
+     * smoothed POST-hit chase window (see {@link #windowChaseRate}), so the noisy
+     * per-window estimate no longer coin-flips the shipped σ.
      */
     public static final double CHASE_EMA_ALPHA = 0.3;
 
-    /**
-     * The emitted dynamic-target slew limit per hit (repair #2, ≤ 0.05): the same
-     * inputs perturbed by ±0.05 of chase noise move the target ≤ this — the cliff
-     * coin-flip cannot resurface through the smoothed cap either.
-     */
-    public static final double TARGET_SLEW_LIMIT = 0.05;
+    /* ── the retaliation-budget geometry (§3.1/§4; the t* that sizes the target) ─ */
 
-    /** Below this |yawVsAxis| the victim needs no turn to answer (repair #4). */
+    /** Below this |yawVsAxis| the victim needs no turn to answer. */
     private static final double TURN_FREE_YAW = 60.0;
 
     /**
-     * The conservative yaw-slew divisor floor (deg/tick, repair #4): a slow or
-     * unknown turner is bounded here (a faster measured flick divides by its own,
-     * larger rate → a smaller turn cost), so {@code turn} is honestly boundable.
+     * The conservative yaw-slew divisor floor (deg/tick): a slow or unknown turner
+     * is bounded here (a faster measured flick divides by its own, larger rate → a
+     * smaller turn cost), so {@code turn} is honestly boundable.
      */
     private static final double TURN_RATE_FLOOR = 30.0;
 
-    /** Real-valued victim ping ticks per ms of RTT (repair #4): {@code tPing = rtt/100 = (rtt/2)/50}, NO floor. */
+    /** Real-valued victim ping ticks per ms of RTT: {@code tPing = rtt/100 = (rtt/2)/50}, NO floor. */
     private static final double PING_TICKS_PER_MS = 1.0 / 100.0;
-
-    /** A closing-rate floor so a near-zero terminal closing cannot blow up an exposure fraction. */
-    private static final double CLOSING_FLOOR = 1.0e-4;
-
-    /** The exposure-integral min-selection bisection tolerance / iteration cap (repair #1). */
-    private static final double TARGET_BISECT_TOLERANCE = 1.0e-7;
-    private static final int TARGET_BISECT_ITERS = 40;
 
     private PocketServo() {}
 
@@ -178,7 +163,8 @@ public final class PocketServo {
      * honestly steer the victim leaves the era stamp untouched. Kept verbatim as
      * the pure-air-drag fallback and the v1 pin surface; production callers use the
      * precision {@link #sigma(PocketServoConfig, PredictorInputs, double, double,
-     * double, double, double)} overload.
+     * double, double, double)} overload. Steers to {@code staticTarget} (the v1
+     * form has no facing geometry).
      */
     public static double sigma(
             PocketServoConfig config,
@@ -199,7 +185,7 @@ public final class PocketServo {
             return 1.0; // window' == 0: the victim lands this tick, no travel to shape
         }
         double sigmaStar =
-                (config.target() - prediction.constant() - slope * residualCarry) / (freshEra * slope);
+                (config.staticTarget() - prediction.constant() - slope * residualCarry) / (freshEra * slope);
         double blended = 1.0 + config.gain() * (sigmaStar - 1.0);
         return Math.max(config.min(), Math.min(config.max(), blended));
     }
@@ -261,44 +247,24 @@ public final class PocketServo {
      * {@code launchGrounded} is the EFFECTIVE launch state the solve priced;
      * {@code launchRepriced} marks the touchdown-aware branch having promoted a
      * descending boundary capture to a grounded launch (servo-lab 2.4.5).
+     *
+     * <p>The target geometry (2.4.5): {@code target} is the applied steered
+     * separation; {@code staticTarget} the config fallback; {@code sepDeny}/{@code
+     * sepReach} the victim's deny boundary and the attacker's reach cap at {@code
+     * arcHeightTStar} (the victim's feet height at the retaliation tick {@code t* =
+     * tAllow = tPing + turn}). A declined solve reports the geometry as {@code 0}
+     * (not evaluated).</p>
      */
     public record Solution(
             double sigma, double sigmaStar,
-            double target, double dynamicTarget, double anchor,
+            double target, double staticTarget, double sepDeny, double sepReach, double arcHeightTStar,
             int windowTicks, int horizonTicks, int shiftVictimTicks, int airTicks, int landTick,
             double dragSum, double driftTravel, double chaseTravel, double chaseRate, boolean chaseMeasured,
             double d0, double residualCarry, double freshEra, double verticalStamp,
             boolean launchGrounded, double launchSlip, boolean declined,
             double predictedDNext,
-            double chaseEma, double tAllow, double turn, double closingEnd,
+            double tAllow, double turn,
             boolean launchRepriced) {
-
-        /** The pre-2.4.5 arity — no touchdown repricing flag (never repriced). */
-        public Solution(
-                double sigma, double sigmaStar,
-                double target, double dynamicTarget, double anchor,
-                int windowTicks, int horizonTicks, int shiftVictimTicks, int airTicks, int landTick,
-                double dragSum, double driftTravel, double chaseTravel, double chaseRate, boolean chaseMeasured,
-                double d0, double residualCarry, double freshEra, double verticalStamp,
-                boolean launchGrounded, double launchSlip, boolean declined,
-                double predictedDNext,
-                double chaseEma, double tAllow, double turn, double closingEnd) {
-            this(sigma, sigmaStar, target, dynamicTarget, anchor,
-                    windowTicks, horizonTicks, shiftVictimTicks, airTicks, landTick,
-                    dragSum, driftTravel, chaseTravel, chaseRate, chaseMeasured,
-                    d0, residualCarry, freshEra, verticalStamp,
-                    launchGrounded, launchSlip, declined, predictedDNext,
-                    chaseEma, tAllow, turn, closingEnd, false);
-        }
-    }
-
-    /**
-     * One V2 dynamic-target evaluation (target-v2 repairs #1–#4): the chosen {@code
-     * target} (already EMA-smoothed and slew-limited), the advanced per-combo {@code
-     * chaseEma} the caller persists for the next hit, and the debug quantities
-     * ({@code tAllow}, {@code turn}, {@code closingEnd}) the forensics gap named.
-     */
-    public record DynResult(double target, double chaseEma, double tAllow, double turn, double closingEnd) {
     }
 
     /**
@@ -316,8 +282,8 @@ public final class PocketServo {
 
     /**
      * The precision inverse solve — folds the launch-branch drag schedule, victim
-     * self-drift, ground-tail locomotion, ping horizons and the (optional) dynamic
-     * target into the affine prediction, then inverts it for σ (§3.2b;
+     * self-drift, ground-tail locomotion, ping horizons and the answer-denial
+     * boundary target into the affine prediction, then inverts it for σ (§3.2b;
      * precision-derivation §8). Every degenerate case (inactive, no fresh lever,
      * air-time too brief, ice landing, collapsed window) declines to σ = 1.
      */
@@ -325,14 +291,13 @@ public final class PocketServo {
             PocketServoConfig config, PredictorInputs inputs,
             double d0, double residualCarry, double freshEra,
             double verticalStampShipped, double attackerNormalizedSpeed) {
-        double anchor = config.target();
         if (!config.active() || !(freshEra > EPSILON)) {
-            return declined(config, d0, residualCarry, freshEra, verticalStampShipped, inputs, anchor);
+            return declined(config, d0, residualCarry, freshEra, verticalStampShipped, inputs);
         }
         Fold fold = simulate(config, inputs, d0, residualCarry, freshEra,
                 verticalStampShipped, attackerNormalizedSpeed);
         if (fold.declined || !(fold.dragSum > EPSILON)) {
-            return declined(config, d0, residualCarry, freshEra, verticalStampShipped, inputs, anchor);
+            return declined(config, d0, residualCarry, freshEra, verticalStampShipped, inputs);
         }
         double slope = fold.dragSum;
         double sigmaStar = (fold.target - fold.constant - slope * residualCarry) / (freshEra * slope);
@@ -340,12 +305,13 @@ public final class PocketServo {
         double sigma = Math.max(config.min(), Math.min(config.max(), blended));
         double predictedDNext = fold.constant + slope * (residualCarry + sigma * freshEra);
         return new Solution(
-                sigma, sigmaStar, fold.target, fold.dynamicTarget, anchor,
+                sigma, sigmaStar,
+                fold.target, fold.staticTarget, fold.sepDeny, fold.sepReach, fold.arcHeightTStar,
                 fold.wPrime, fold.tStar, fold.shiftV, fold.airTime, fold.tLand,
                 fold.dragSum, fold.driftTravel, fold.chaseTravel, fold.chaseRate, fold.chaseMeasured,
                 d0, residualCarry, freshEra, verticalStampShipped,
                 fold.launchGrounded, inputs.launchSlip(), false, predictedDNext,
-                fold.chaseEma, fold.tAllow, fold.turn, fold.closingEnd, fold.launchRepriced);
+                fold.tAllow, fold.turn, fold.launchRepriced);
     }
 
     /**
@@ -370,8 +336,8 @@ public final class PocketServo {
     private record Fold(
             boolean declined, int wPrime, int tStar, int shiftV, int airTime, int tLand,
             double dragSum, double driftTravel, double chaseRate, double chaseTravel, boolean chaseMeasured,
-            double target, double dynamicTarget, double constant,
-            double chaseEma, double tAllow, double turn, double closingEnd,
+            double target, double staticTarget, double sepDeny, double sepReach, double arcHeightTStar,
+            double constant, double tAllow, double turn,
             boolean launchGrounded, boolean launchRepriced) {
     }
 
@@ -399,7 +365,7 @@ public final class PocketServo {
             inputs = inputs.asGroundedLaunch();
         }
 
-        double anchor = config.target();
+        double staticTarget = config.staticTarget();
         // The gap-aware window (servo-lab 2.4.5): the cadence horizon follows the
         // attacker's MEASURED rhythm (the per-combo inter-hit gap EMA) instead of
         // the fixed config cadence. The lab's 12–19-tick attackers were priced over
@@ -428,8 +394,9 @@ public final class PocketServo {
         if (airTime < MIN_AIR_TICKS_FOR_SERVO || tStar < 1
                 || inputs.landingSlip() > ICE_DECLINE_SLIP) {
             return new Fold(true, Math.max(0, tStar), tStar, shiftV, airTime,
-                    shiftV + airTime, 0.0, 0.0, 0.0, 0.0, false, anchor, anchor, d0,
-                    Double.NaN, 0.0, 0.0, 0.0,
+                    shiftV + airTime, 0.0, 0.0, 0.0, 0.0, false,
+                    staticTarget, staticTarget, 0.0, 0.0, 0.0,
+                    d0, 0.0, 0.0,
                     inputs.launchGrounded(), launchRepriced);
         }
         int wPrime = tStar;
@@ -443,9 +410,7 @@ public final class PocketServo {
         // touchdown (folded in exactly — the §5 first bullet).
         double pi = 1.0;              // Π(k), the knock move factor at tick k
         double dragSum = 0.0;         // Σ Π — separation per unit shipped speed
-        double[] piByTick = new double[wPrime]; // Π(k) per tick — the V2 exposure's σ-invariant seam
         for (int k = 1; k <= wPrime; k++) {
-            piByTick[k - 1] = pi;
             dragSum += pi;
             boolean groundedPre = (k == 1) ? inputs.launchGrounded() : (k > tLand);
             double drag = groundedPre ? (k == 1 ? sqLaunch : sqLand) : Q;
@@ -486,166 +451,113 @@ public final class PocketServo {
         }
         double chaseTravel = chaseRate * wPrime;
 
-        // (5) The V2 exposure-budget dynamic target (§3; target-v2 repairs #1–#4),
-        // or the anchor (the shipped default). The σ=1 shipped horizontal (R + F,
-        // NOT the σ* solve's) and the air drift rate feed the per-tick terminal
-        // closing the exposure integral walks; the σ* solve keeps the instantaneous
-        // chase (repair #2 — the lab-validated placement math is untouched).
-        DynResult dyn = dynamicTarget(
-                config, inputs, wPrime, shiftV, verticalStampShipped, chaseRate,
-                residualCarry + freshEra, inputs.driftAlongAxis(), piByTick);
-        double target = config.targetMode() == TargetMode.DYNAMIC ? dyn.target() : anchor;
+        // (5) The answer-denial-boundary target (§3.2b; the 2.4.5 redesign) — or the
+        // static fallback. t* = tAllow = tPing + turn is the tick the victim could
+        // FIRST retaliate; the geometry is read at the victim's feet height on the
+        // arc THERE. victimReach is the EFFECTIVE (handicap-folded) reach the caller
+        // supplied. No facing (NaN yaw) ⇒ the geometry is unmeasurable ⇒ the static
+        // fallback; TargetMode.STATIC pins it there unconditionally.
+        double turn = turn(inputs.victimYawVsAxisDeg(), inputs.victimYawRateDegPerTick());
+        double tAllow = tAllow(inputs.victimRttMillis(),
+                inputs.victimYawVsAxisDeg(), inputs.victimYawRateDegPerTick());
+        int tStarArc = Math.max(0, (int) Math.round(tAllow));
+        double arcH = arcHeight(verticalStampShipped, inputs.launchHeight(), tStarArc);
+        double eyeV = Double.isNaN(inputs.victimEyeHeight()) ? EYE_HEIGHT : inputs.victimEyeHeight();
+        double sepDeny = sepDeny(arcH, config.victimReach(), eyeV);
+        double sepReach = sepReach(arcH, config.attackerReach());
+        boolean boundaryMeasurable = config.targetMode() == TargetMode.BOUNDARY
+                && !Double.isNaN(inputs.victimYawVsAxisDeg());
+        double target = boundaryMeasurable
+                ? boundaryTarget(arcH, config.victimReach(), config.attackerReach(), eyeV,
+                        config.denyMargin(), config.jitterMargin(), config.targetFloor())
+                : staticTarget;
 
         // constant = d0 − chase + drift + ground tail (all σ-independent); slope = Σ Π.
         double constant = d0 - chaseTravel + driftTravel + tail;
         return new Fold(false, wPrime, tStar, shiftV, airTime, tLand,
                 dragSum, driftTravel + tail, chaseRate, chaseTravel, chaseMeasured,
-                target, dyn.target(), constant,
-                dyn.chaseEma(), dyn.tAllow(), dyn.turn(), dyn.closingEnd(),
+                target, staticTarget, sepDeny, sepReach, arcH,
+                constant, tAllow, turn,
                 inputs.launchGrounded(), launchRepriced);
     }
 
-    /**
-     * The V2 exposure-budget dynamic target (§3.3; target-v2 repairs #1–#4). Picks
-     * the LEAST-aggressive separation {@code T ∈ [anchor, capEff]} whose terminal
-     * exposure integral {@code e(T)} stays within the victim's retaliation budget
-     * {@code tAllow} — the honest {@code min}-selection (repair #1), NOT the
-     * degenerate {@code max} that would just move the saturation to {@code capEff}.
-     *
-     * <p>Decisions, all documented:</p>
-     * <ul>
-     *   <li><b>closing ≤ 0 (out-drifting victim) → the ANCHOR</b> (repair #2): the
-     *       combo is being lost outward; relaxing toward the cap would accelerate
-     *       the loss, so the servo keeps its pull-in posture. This is the 69.6%
-     *       dominant population the v1 gate also sent to the anchor.</li>
-     *   <li><b>facing unavailable / collapsed cap interval → the ANCHOR</b>: no
-     *       geometry to budget, so the anchor is the whole answer.</li>
-     *   <li><b>no T bounds the exposure (infeasible) → {@code capEff}</b>, the
-     *       least-exposed choice (repair #1's empty-set fallback); <b>even the
-     *       anchor is within budget → the anchor</b> (already relaxed enough).</li>
-     * </ul>
-     *
-     * <p>The chase enters through the per-combo EMA (repair #2) so the noisy
-     * 3-delta estimate no longer coin-flips the target; the emitted target is
-     * slew-limited to {@link #TARGET_SLEW_LIMIT}/hit. Always evaluated so the debug
-     * sink can log it; only USED when {@link TargetMode#DYNAMIC}.</p>
-     *
-     * @param shippedHorizontalSigma1 the σ=1 shipped horizontal {@code R + F} (NOT
-     *                                the σ* solve's) — the exposure's knock rate.
-     * @param piByTick                {@code Π(k)} for {@code k = 1..wPrime}, the
-     *                                σ-invariant per-tick drag the fold already walked.
-     */
-    public static DynResult dynamicTarget(
-            PocketServoConfig config, PredictorInputs inputs,
-            int wPrime, int shiftV, double verticalStampShipped,
-            double chaseRate, double shippedHorizontalSigma1, double driftAlongAxis,
-            double[] piByTick) {
-        double anchor = config.target();
-        // Repair #2: the dynamic-target path reads the EMA-smoothed chase (the σ*
-        // solve keeps the instantaneous one); on the first hit the prior is NaN so
-        // the EMA seeds to the instantaneous rate.
-        double chaseEma = chaseEma(inputs.priorChaseEma(), chaseRate);
-        double turn = turn(inputs.victimYawVsAxisDeg(), inputs.victimYawRateDegPerTick());
-        double tAllow = tAllow(inputs.victimRttMillis(), inputs.victimYawVsAxisDeg(),
-                inputs.victimYawRateDegPerTick());
-        double eye = Double.isNaN(inputs.victimEyeHeight()) ? EYE_HEIGHT : inputs.victimEyeHeight();
-        double capEff = capEff(config, chaseEma);
-        // The terminal closing at w' (σ=1, EMA chase) — the out-drift gate and a debug field.
-        double closingEnd = wPrime >= 1 && piByTick.length >= wPrime
-                ? chaseEma - shippedHorizontalSigma1 * piByTick[wPrime - 1] - driftAlongAxis * geo(wPrime)
-                : 0.0;
+    /* ── the answer-denial-boundary target geometry (§3.1/§3.2b) ──────────── */
 
-        double raw;
-        if (Double.isNaN(inputs.victimYawVsAxisDeg())
-                || wPrime < 1 || piByTick.length < wPrime
-                || !(capEff > anchor + EPSILON)) {
-            raw = anchor; // facing unavailable, degenerate window, or a collapsed [anchor, capEff]
-        } else if (!(closingEnd > 0.0)) {
-            raw = anchor; // repair #2: out-drifting victim keeps the pull-in anchor
-        } else {
-            raw = selectTarget(anchor, capEff, tAllow, wPrime, shiftV,
-                    verticalStampShipped, inputs.launchHeight(), eye,
-                    chaseEma, shippedHorizontalSigma1, driftAlongAxis, piByTick);
+    /**
+     * The victim's DENY boundary at feet height {@code feetHeight} above the
+     * attacker's ground (§3.1; the 2.4.5 answer-denial geometry): the maximum
+     * feet-to-feet separation at which the victim, with effective eye→AABB reach
+     * {@code victimReach}, can still land a hit back on the grounded attacker. Past
+     * it the victim's answer is denied. Uses the vanilla standing eye height.
+     */
+    public static double sepDeny(double feetHeight, double victimReach) {
+        return sepDeny(feetHeight, victimReach, EYE_HEIGHT);
+    }
+
+    /** {@link #sepDeny(double, double)} with a pose-aware victim eye height. */
+    public static double sepDeny(double feetHeight, double victimReach, double victimEye) {
+        // The victim's eye above the attacker's head-top (the nearest point of the
+        // attacker's [0, 1.8] box the victim aims down at); 0 while level or below.
+        double dvertV = Math.max(0.0, feetHeight + victimEye - PLAYER_HEIGHT);
+        if (dvertV >= victimReach) {
+            return Double.POSITIVE_INFINITY; // too high to ever answer — no deny boundary
         }
-        double target = slew(inputs.priorDynamicTarget(), raw, TARGET_SLEW_LIMIT);
-        return new DynResult(target, chaseEma, tAllow, turn, closingEnd);
+        return HALF_WIDTH + Math.sqrt(victimReach * victimReach - dvertV * dvertV);
     }
 
     /**
-     * The min-selection over the monotone exposure integral (repair #1): {@code
-     * e(T)} is non-increasing in {@code T} (a farther-launched victim sits inside
-     * the answer envelope for fewer terminal ticks), so the feasible set {@code
-     * {T : e(T) ≤ tAllow}} is the upper interval {@code [T*, capEff]}. The minimum
-     * over {@code [anchor, capEff]} is the anchor when it already fits the budget,
-     * {@code capEff} when nothing does, else the crossing {@code T*} by bisection.
+     * The attacker's REACH cap at victim feet height {@code feetHeight} (§3.1): the
+     * maximum feet-to-feet separation at which the grounded attacker, with eye→AABB
+     * reach {@code attackerReach}, can still land a hit on the elevated victim. The
+     * attacker's eye is the vanilla standing 1.62; {@code dvertA} is the eye's
+     * distance to the nearest point of the victim's [h, h+1.8] box (usually
+     * {@code max(0, h − 1.62)}).
      */
-    private static double selectTarget(
-            double anchor, double capEff, double tAllow, int wPrime, int shiftV,
-            double verticalStampShipped, double launchHeight, double eye,
-            double chaseEma, double shippedHorizontalSigma1, double driftAlongAxis,
-            double[] piByTick) {
-        if (exposure(anchor, wPrime, shiftV, verticalStampShipped, launchHeight, eye,
-                chaseEma, shippedHorizontalSigma1, driftAlongAxis, piByTick) <= tAllow) {
-            return anchor; // even the least-launched target is within budget
+    public static double sepReach(double feetHeight, double attackerReach) {
+        double dvertA = Math.max(0.0,
+                Math.max(feetHeight - EYE_HEIGHT, EYE_HEIGHT - (feetHeight + PLAYER_HEIGHT)));
+        if (dvertA >= attackerReach) {
+            return HALF_WIDTH; // the attacker cannot reach at this height — the degenerate minimum
         }
-        if (exposure(capEff, wPrime, shiftV, verticalStampShipped, launchHeight, eye,
-                chaseEma, shippedHorizontalSigma1, driftAlongAxis, piByTick) > tAllow) {
-            return capEff; // infeasible — the least-exposed choice (empty-set fallback)
-        }
-        double lo = anchor; // e(lo) > tAllow
-        double hi = capEff; // e(hi) ≤ tAllow
-        for (int i = 0; i < TARGET_BISECT_ITERS && (hi - lo) > TARGET_BISECT_TOLERANCE; i++) {
-            double mid = 0.5 * (lo + hi);
-            double e = exposure(mid, wPrime, shiftV, verticalStampShipped, launchHeight, eye,
-                    chaseEma, shippedHorizontalSigma1, driftAlongAxis, piByTick);
-            if (e <= tAllow) {
-                hi = mid; // mid feasible — the crossing is at or below it
-            } else {
-                lo = mid;
-            }
-        }
-        return hi; // the smallest feasible T within tolerance
+        return HALF_WIDTH + Math.sqrt(attackerReach * attackerReach - dvertA * dvertA);
     }
 
     /**
-     * The terminal-window exposure integral {@code e(T)} (repair #1): the summed
-     * fractional time the victim sits inside their answer envelope over the terminal
-     * ticks — those, walking back from {@code w'}, where the attacker is net-closing
-     * ({@code closing > 0}). The trajectory is anchored at the landing separation
-     * {@code T} and walked backward at the per-tick closing (built from the
-     * σ-invariant {@code Π} schedule and the σ=1 shipped horizontal — so this is
-     * independent of the σ* solve), which makes {@code e(T)} monotone non-increasing
-     * in {@code T}. Each tick's fraction is {@code clamp01((h_safe − h)/closing)} —
-     * the share of the tick the victim spends inside {@code h_safe(t)} before the
-     * closing carries them out; an un-answerable tick ({@code Δ ≥ reach}) adds 0.
+     * The answer-denial-boundary target at victim feet height {@code feetHeight}
+     * (§3.2b; the 2.4.5 redesign), using the vanilla standing eye.
      */
-    public static double exposure(
-            double target, int wPrime, int shiftV,
-            double verticalStampShipped, double launchHeight, double eye,
-            double chaseEma, double shippedHorizontalSigma1, double driftAlongAxis,
-            double[] piByTick) {
-        double e = 0.0;
-        double backSum = 0.0; // Σ closing over the terminal ticks already walked (T-independent)
-        for (int t = wPrime; t >= 1; t--) {
-            double closing = chaseEma - shippedHorizontalSigma1 * piByTick[t - 1]
-                    - driftAlongAxis * geo(t);
-            if (!(closing > 0.0)) {
-                break; // the separation peak — the terminal answer window ends here
-            }
-            double h = target + backSum;
-            double feetY = arcHeight(verticalStampShipped, launchHeight, Math.max(0, t - shiftV));
-            double dEnd = Math.max(0.0, feetY + eye - PLAYER_HEIGHT);
-            if (dEnd < VICTIM_REACH) {
-                double hSafe = HALF_WIDTH + Math.sqrt(VICTIM_REACH * VICTIM_REACH - dEnd * dEnd);
-                e += clamp01((hSafe - h) / Math.max(closing, CLOSING_FLOOR));
-            } // else geometrically un-answerable this tick — no exposure
-            backSum += closing;
-        }
-        return e;
+    public static double boundaryTarget(
+            double feetHeight, double victimReach, double attackerReach,
+            double denyMargin, double jitterMargin, double targetFloor) {
+        return boundaryTarget(feetHeight, victimReach, attackerReach, EYE_HEIGHT,
+                denyMargin, jitterMargin, targetFloor);
     }
 
     /**
-     * The retaliation turn cost in real-valued ticks (repair #4): {@code 0} within
+     * The answer-denial-boundary target (pose-aware victim eye). Aims just past the
+     * victim's deny boundary ({@code sepDeny + denyMargin}, so jitter can't let them
+     * answer) but never past the attacker's own reach ({@code sepReach −
+     * jitterMargin}, so the attacker reliably connects), and never pulls IN below
+     * {@code targetFloor}:
+     * {@code min(sepReach − jitter, max(targetFloor, sepDeny + deny))}. When the
+     * victim can never answer at this height (the deny boundary collapses) the deny
+     * term vanishes and the target clamps to reachability — keep them hittable so
+     * the combo continues (denial is the reach-handicap/vertical submodule's job
+     * there).
+     */
+    public static double boundaryTarget(
+            double feetHeight, double victimReach, double attackerReach, double victimEye,
+            double denyMargin, double jitterMargin, double targetFloor) {
+        double sepDeny = sepDeny(feetHeight, victimReach, victimEye);
+        double denyBound = Double.isInfinite(sepDeny)
+                ? Double.POSITIVE_INFINITY                  // no deny — favour reachability
+                : Math.max(targetFloor, sepDeny + denyMargin);
+        double reachBound = sepReach(feetHeight, attackerReach) - jitterMargin;
+        return Math.min(reachBound, denyBound);
+    }
+
+    /**
+     * The retaliation turn cost in real-valued ticks: {@code 0} within
      * {@link #TURN_FREE_YAW} of the axis, else {@code (|yaw| − 60)/max(yawRateHat,
      * 30°/tick)} — a genuinely faster measured flick divides by its own rate (a
      * smaller cost); a slow or unavailable ({@link Double#NaN}) rate falls back to
@@ -666,28 +578,16 @@ public final class PocketServo {
     }
 
     /**
-     * The victim's earliest-retaliation budget in real-valued ticks (repair #4):
-     * {@code tPing + turn}, {@code tPing = rttV/100} (== half-RTT in ticks, NO
-     * floor). An unavailable RTT ({@code < 0}) contributes no ping slack.
+     * The victim's earliest-retaliation budget in real-valued ticks (the target's
+     * {@code t*}): {@code tPing + turn}, {@code tPing = rttV/100} (== half-RTT in
+     * ticks, NO floor). An unavailable RTT ({@code < 0}) contributes no ping slack.
      */
     public static double tAllow(double victimRttMillis, double yawVsAxisDeg, double yawRateDegPerTick) {
         double tPing = victimRttMillis >= 0.0 ? victimRttMillis * PING_TICKS_PER_MS : 0.0;
         return tPing + turn(yawVsAxisDeg, yawRateDegPerTick);
     }
 
-    /**
-     * The chase-aware upper clamp (repair #3): {@code capEff = hitEdge − 0.5·chaseEma
-     * − landingSlack}, clamped to {@code [anchor, hitCap]}. A faster chase tightens
-     * the reachable cap (±1 tick of cadence jitter moves separation by ½ a chase
-     * step); the {@code [anchor, hitCap]} clamp forbids the inverted interval a
-     * literal {@link #HIT_EDGE} would otherwise produce (the verifier's hole #12).
-     */
-    public static double capEff(PocketServoConfig config, double chaseEma) {
-        double raw = HIT_EDGE - 0.5 * chaseEma - LANDING_SLACK;
-        return Math.max(config.target(), Math.min(config.hitCap(), raw));
-    }
-
-    /** The per-combo chase EMA advance (repair #2): a NaN prior seeds to the instantaneous rate. */
+    /** The per-combo chase EMA advance (servo-lab 2.4.5): a NaN prior seeds to the instantaneous rate. */
     public static double chaseEma(double priorChaseEma, double chaseRate) {
         return Double.isNaN(priorChaseEma)
                 ? chaseRate
@@ -733,18 +633,6 @@ public final class PocketServo {
         return ((x - anchorX) * ux + (z - anchorZ) * uz) / gapTicks;
     }
 
-    /** Slew-limit the emitted target to {@code ±limit} of the prior (repair #2); a NaN prior passes through. */
-    private static double slew(double priorTarget, double raw, double limit) {
-        if (Double.isNaN(priorTarget)) {
-            return raw;
-        }
-        return Math.max(priorTarget - limit, Math.min(priorTarget + limit, raw));
-    }
-
-    private static double clamp01(double value) {
-        return value < 0.0 ? 0.0 : (value > 1.0 ? 1.0 : value);
-    }
-
     /* ── shared flight helpers ────────────────────────────────────────────── */
 
     /**
@@ -779,7 +667,7 @@ public final class PocketServo {
     /**
      * The victim's feet height above launch ground after {@code ticks} of the
      * σ-invariant vertical arc (the same integration order as {@link #airTime}),
-     * clamped at the ground once landed — the dynamic target's Δ(t) source.
+     * clamped at the ground once landed — the boundary target's Δ(t) source.
      */
     public static double arcHeight(double verticalStamp, double launchHeight, int ticks) {
         double y = launchHeight;
@@ -854,13 +742,15 @@ public final class PocketServo {
 
     private static Solution declined(
             PocketServoConfig config, double d0, double residualCarry, double freshEra,
-            double verticalStamp, PredictorInputs inputs, double anchor) {
+            double verticalStamp, PredictorInputs inputs) {
+        double staticTarget = config.staticTarget();
         return new Solution(
-                1.0, 1.0, anchor, anchor, anchor,
+                1.0, 1.0,
+                staticTarget, staticTarget, 0.0, 0.0, 0.0,
                 0, 0, 0, 0, 0,
                 0.0, 0.0, 0.0, 0.0, false,
                 d0, residualCarry, freshEra, verticalStamp,
                 inputs.launchGrounded(), inputs.launchSlip(), true, d0,
-                Double.NaN, 0.0, 0.0, 0.0);
+                0.0, 0.0, false);
     }
 }

@@ -73,9 +73,9 @@ class SnapshotTest {
         assertEquals(OffhandSettings.DEFAULTS, settings(snapshot, Feature.OFFHAND));
         ComboSettings combo = settings(snapshot, Feature.COMBO_HOLD);
         assertEquals(ComboSettings.DEFAULTS, combo);
-        // target-v2 data-backed anchor retune: the shipped default is 2.85 (the lab's
-        // held-separation equilibrium), not the old reach-triangle 2.75.
-        assertEquals(2.85, combo.target(), 0.0, "parse-empty combo target is the retuned 2.85 anchor");
+        // The STATIC fallback separation default is 2.85 (the lab's held-separation
+        // equilibrium); the default target mode is the geometric BOUNDARY.
+        assertEquals(2.85, combo.staticTarget(), 0.0, "parse-empty combo static target is 2.85");
         assertEquals(PotFillSettings.DEFAULTS, settings(snapshot, Feature.POT_FILL));
         assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
         // Toggle-only features share the NoSettings singleton default.
@@ -243,9 +243,10 @@ class SnapshotTest {
     }
 
     @Test
-    void comboReachHandicapEnabledWithoutComboHoldWarnsItWillNeverEngage() throws Exception {
-        // The handicap only applies while a combo is held, so on-without-combo-hold is
-        // a dormant lever — the parser says so loudly rather than silently.
+    void comboReachHandicapEngagesStandaloneWithoutComboHold() throws Exception {
+        // Since the 2.4.5 detection/servo split the handicap drives combo DETECTION
+        // itself, so on-without-combo-hold is a fully working feature — no dependency
+        // warning is emitted (the two combo modules toggle independently).
         SnapshotParser.Result result = parse("""
                 modules:
                   combo-hold: false
@@ -253,8 +254,8 @@ class SnapshotTest {
                 """, "", "", "");
 
         assertTrue(result.snapshot().enabled(Feature.COMBO_REACH_HANDICAP));
-        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
-        assertTrue(result.issues().get(0).contains("combo-hold"), () -> result.issues().get(0));
+        assertFalse(result.snapshot().enabled(Feature.COMBO_HOLD));
+        assertTrue(result.issues().isEmpty(), () -> "no dependency warning expected: " + result.issues());
     }
 
     @Test

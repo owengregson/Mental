@@ -298,7 +298,7 @@ public enum Feature {
 
     COMBO_REACH_HANDICAP("combo-reach-handicap", Family.COMBO, "Combo Reach Handicap",
             "Shorten a juggled victim's reach while their combo is held, so a launched victim can't"
-                    + " answer. Requires Combo Hold; 1.20.5+.",
+                    + " answer. Works standalone or with Combo Hold; 1.20.5+.",
             "TRIPWIRE_HOOK", false, Set.of(),
             new Facets(
                     // The attribute lever IS a server-side rule (applied on combo transitions).

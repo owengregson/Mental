@@ -20,9 +20,10 @@ import me.vexmc.mental.kernel.wire.PositionRing;
  * published values and ring samples (never a live entity), so it is safe on the
  * attacker's netty thread as well as the victim's region thread; both sites freeze
  * ONE {@link PredictorInputs} from it, so an adopted pre-send and a region
- * recompute see the same truth. It also carries one small per-victim lab cache
- * ({@link #MEMORY}) — the V2 dynamic target's cross-hit smoothing state (target-v2
- * repair #2) — concurrent because both delivery seams commit to it.
+ * recompute see the same truth. It also carries one small per-victim cache
+ * ({@link #MEMORY}) — the servo-lab 2.4.5 POST-hit chase window (the measured chase
+ * EMA + the observed cadence + the previous hit's attacker anchor) — concurrent
+ * because both delivery seams commit to it.
  *
  * <p>Every term degrades independently to its no-op: a missing ring history drops
  * the drift/chase estimate, an unprobed RTT falls back to the view's Bukkit ping,
@@ -64,16 +65,19 @@ public final class ComboPredictor {
 
     /**
      * The per-victim pocket-servo memory, carried hit-to-hit within one combo and
-     * cleared on every combo END ({@link #forget}). Two tenants: the V2 dynamic
-     * target's smoothing state (target-v2 repair #2 — {@code chaseEma}/{@code
-     * dynamicTarget}, committed by {@link #remember}, meaningful only under
-     * {@code target-mode: dynamic}), and the servo-lab 2.4.5 POST-hit chase window
-     * ({@code windowChaseEma} + the previous hit's attacker anchor, committed by
-     * {@link #rememberWindow} on EVERY active servo hit — this one is
-     * load-bearing: it is the chase the σ* solve prices). Both delivery seams
-     * (netty pre-send D1, region compute D2) read and commit it, hence the
-     * concurrent map; exactly one seam computes any given hit, so commits are
-     * per-hit serialized in practice.
+     * cleared on every combo END ({@link #forget}). It holds the servo-lab 2.4.5
+     * POST-hit chase window ({@code windowChaseEma} + the observed cadence EMA +
+     * the previous hit's attacker anchor, committed by {@link #rememberWindow} on
+     * EVERY active servo hit) — this is load-bearing: {@code windowChaseEma} is the
+     * chase the σ* solve prices and {@code cadenceEmaTicks} is its gap-aware window
+     * horizon. Both delivery seams (netty pre-send D1, region compute D2) read and
+     * commit it, hence the concurrent map; exactly one seam computes any given hit,
+     * so commits are per-hit serialized in practice.
+     *
+     * <p>The pre-2.4.5 dynamic-target smoothing tenants ({@code chaseEma}/{@code
+     * dynamicTarget}) are gone with the exposure-budget target — the answer-denial
+     * boundary target is computed fresh from geometry each hit and needs no
+     * cross-hit smoothing.</p>
      */
     private static final ConcurrentHashMap<UUID, ServoMemory> MEMORY = new ConcurrentHashMap<>();
 
@@ -86,12 +90,11 @@ public final class ComboPredictor {
      * (servo-lab 2.4.5), NaN until a first window is measured.
      */
     private record ServoMemory(
-            double chaseEma, double dynamicTarget,
             double windowChaseEma, double cadenceEmaTicks,
             double anchorX, double anchorZ, int anchorTick) {
 
         static final ServoMemory EMPTY = new ServoMemory(
-                Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0.0, 0.0, Integer.MIN_VALUE);
+                Double.NaN, Double.NaN, 0.0, 0.0, Integer.MIN_VALUE);
     }
 
     private ComboPredictor() {}
@@ -103,12 +106,11 @@ public final class ComboPredictor {
      * ring-latest feet positions of both parties (the axis source); {@code now} is
      * the hit tick — the POST-hit chase window's clock.
      *
-     * <p>Pure read: the victim's per-combo servo memory is consumed here (the V2
-     * dynamic-target smoothing state, target-v2 repair #2, AND the servo-lab 2.4.5
-     * post-hit chase window) but only the seams commit it — {@link #rememberWindow}
-     * for the window anchor/EMA on every active servo hit, {@link #remember} for the
-     * dynamic-target state — so a re-derivation of the same hit (the ComboSuite's
-     * expected-σ build) reads exactly what the production solve read.</p>
+     * <p>Pure read: the victim's per-combo servo memory (the servo-lab 2.4.5
+     * post-hit chase window) is consumed here but only the seams commit it —
+     * {@link #rememberWindow} for the window anchor/EMA on every active servo hit —
+     * so a re-derivation of the same hit (the ComboSuite's expected-σ build) reads
+     * exactly what the production solve read.</p>
      *
      * <p><b>The chase channel (servo-lab 2.4.5).</b> The measured chase fed to the
      * solve is the per-combo EMA of POST-hit windows ({@link
@@ -171,19 +173,18 @@ public final class ComboPredictor {
 
         double yawVsAxis = yawVsAxisDeg(victimView.yaw(), ux, uz);
 
-        double priorChaseEma = memory.chaseEma();
-        double priorDynamicTarget = memory.dynamicTarget();
-
         return new PredictorInputs(
                 launchGrounded, slip, slip, launchHeight,
                 driftAxis, chaseAxis, victimView.moveSpeedAttr(),
                 attackerRtt, victimRtt,
-                Double.NaN,                 // attacker head-top Y: flat-arena constant (dynamic target is OFF by default)
+                Double.NaN,                 // attacker head-top Y: flat-arena constant (the boundary target reads the arc height, not a head Y)
                 victimView.eyeHeight(),
                 yawVsAxis,
-                victimView.yawRateDegPerTick(),   // the measured yaw slew — the V2 turn divisor (target-v2 repair #4)
+                victimView.yawRateDegPerTick(),   // the measured yaw slew — the boundary target's turn-cost divisor
                 victimView.groundedTicks(),
-                priorChaseEma, priorDynamicTarget,
+                // The dynamic-target smoothing memory is gone with the exposure-budget
+                // target (2.4.5) — the answer-denial boundary needs no cross-hit prior.
+                Double.NaN, Double.NaN,
                 // The boundary-read vertical motion — the touchdown-aware launch
                 // branch's trigger (servo-lab 2.4.5): a descending capture whose
                 // remaining height is under one fall tick reprices as grounded.
@@ -199,43 +200,15 @@ public final class ComboPredictor {
      * active servo hit at whichever delivery seam computed it (a suppressed
      * pre-send followed by the region recompute commits twice; the second sits
      * under {@link #MIN_WINDOW_GAP_TICKS}, so the EMA never double-advances).
-     * The V2 dynamic-target tenant is preserved untouched.
      */
     public static void rememberWindow(
             UUID victimId, double attackerX, double attackerZ, TickStamp now, PredictorInputs inputs) {
         if (victimId == null || now == null || !now.known()) {
             return;
         }
-        MEMORY.compute(victimId, (id, prior) -> {
-            ServoMemory base = prior != null ? prior : ServoMemory.EMPTY;
-            return new ServoMemory(
-                    base.chaseEma(), base.dynamicTarget(),
-                    inputs.chaseAlongAxis(), inputs.cadenceEmaTicks(),
-                    attackerX, attackerZ, now.value());
-        });
-    }
-
-    /**
-     * Commits the pocket-servo memory this hit produced (target-v2 repair #2): the
-     * advanced chase EMA and the emitted dynamic target, so the victim's next hit's
-     * V2 target smooths from them. Keyed by victim; a {@link ConcurrentHashMap}
-     * because the two delivery seams (netty pre-send D1, region recompute D2) both
-     * assemble the solve. A declined solve (NaN chaseEma) leaves the memory alone,
-     * so a stray non-combo hit never poisons it. Cleared by {@link #forget} on
-     * session teardown. Only meaningful under {@code target-mode: dynamic}; the
-     * post-hit chase window tenant is preserved untouched.
-     */
-    public static void remember(UUID victimId, PocketServo.Solution solution) {
-        if (victimId == null || Double.isNaN(solution.chaseEma())) {
-            return;
-        }
-        MEMORY.compute(victimId, (id, prior) -> {
-            ServoMemory base = prior != null ? prior : ServoMemory.EMPTY;
-            return new ServoMemory(
-                    solution.chaseEma(), solution.dynamicTarget(),
-                    base.windowChaseEma(), base.cadenceEmaTicks(),
-                    base.anchorX(), base.anchorZ(), base.anchorTick());
-        });
+        MEMORY.compute(victimId, (id, prior) -> new ServoMemory(
+                inputs.chaseAlongAxis(), inputs.cadenceEmaTicks(),
+                attackerX, attackerZ, now.value()));
     }
 
     /** Drops the victim's servo memory (session forget hook / combo teardown). */
@@ -305,17 +278,18 @@ public final class ComboPredictor {
     /* ── the debug sink (precision-derivation §7.2) ──────────────────────────── */
 
     /**
-     * The per-hit debug line the lab round parses (precision-derivation §7.2; the
-     * target-v2 sink extension): every predictor input and the resolved solve,
-     * space-separated {@code key=value} pairs. The dynamic target rides here (NOT
-     * the journal) so the lab can calibrate the exposure-budget geometry before the
-     * default flips; the journal carries only the applied σ (comboFactor).
+     * The per-hit debug line the lab round parses (precision-derivation §7.2),
+     * space-separated {@code key=value} pairs: every predictor input and the
+     * resolved solve. The journal carries only the applied σ (comboFactor); this
+     * line carries the full geometry so the answer-denial boundary target can be
+     * field-verified.
      *
-     * <p>The V2 round adds the fields the forensics attribution gaps named
-     * (open-gaps 1/2): the victim facing (<b>yawVsAxis</b>) and its measured slew
-     * (<b>yawRateHat</b>), the continuous retaliation cost (<b>turn</b>, <b>tAllow
-     * = tPing + turn</b>), the smoothed terminal closing (<b>closingEma</b>), and
-     * the <b>launchHeight</b> that the reconstruction previously had to assume.</p>
+     * <p>The 2.4.5 boundary fields: the victim facing (<b>yawVsAxis</b>) and its
+     * measured slew (<b>yawRateHat</b>), the continuous retaliation cost
+     * (<b>turn</b>, <b>tAllow = tPing + turn</b>, the target's {@code t*}), the
+     * victim's feet height on the arc there (<b>arcHtStar</b>), and the two reach
+     * boundaries it produces (<b>sepDeny</b>, <b>sepReach</b>) alongside the static
+     * fallback (<b>targetStatic</b>) and the applied target (<b>targetUsed</b>).</p>
      */
     public static String debugLine(UUID victimId, UUID attackerId, PredictorInputs inputs, PocketServo.Solution s) {
         return "combo-servo"
@@ -332,9 +306,9 @@ public final class ComboPredictor {
                 + " yawVsAxis=" + fmt(inputs.victimYawVsAxisDeg())
                 + " yawRateHat=" + fmt(inputs.victimYawRateDegPerTick())
                 + " turn=" + fmt(s.turn()) + " tAllow=" + fmt(s.tAllow())
-                + " closingEma=" + fmt(s.closingEnd())
-                + " targetAnchor=" + fmt(s.anchor()) + " targetDyn=" + fmt(s.dynamicTarget())
-                + " targetUsed=" + fmt(s.target())
+                + " arcHtStar=" + fmt(s.arcHeightTStar())
+                + " sepDeny=" + fmt(s.sepDeny()) + " sepReach=" + fmt(s.sepReach())
+                + " targetStatic=" + fmt(s.staticTarget()) + " targetUsed=" + fmt(s.target())
                 + " sigmaStar=" + fmt(s.sigmaStar()) + " sigma=" + fmt(s.sigma())
                 + " dNext=" + fmt(s.predictedDNext()) + " declined=" + s.declined();
     }

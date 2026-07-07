@@ -76,14 +76,10 @@ public final class SnapshotParser {
             builder.put(feature.settingsKey(),
                     settingsFor(feature, main, knockback, hitReg, compensation, issues));
         }
-        // Loud dependency warning: the handicap only ever engages while a combo is
-        // held, so enabling it without combo-hold ships a dormant lever — never
-        // silently, per the zero-touch contract's honesty rule.
-        if (reachHandicapOn && !comboHoldOn) {
-            issues.add("config.yml: modules.combo-reach-handicap is enabled but modules.combo-hold "
-                    + "is off — the reach handicap only applies while a combo is held, so it will "
-                    + "never engage. Enable combo-hold too, or turn combo-reach-handicap off.");
-        }
+        // The reach handicap no longer depends on combo-hold: since the 2.4.5
+        // detection/servo split it drives combo DETECTION itself (either keeper does),
+        // so it engages on its own combos even with the pocket servo off. No
+        // dependency warning is emitted; the two combo modules toggle independently.
 
         builder.profiles(ProfileParser.parseSection(
                 reader(knockback, "knockback", "knockback.yml", issues), profiles, issues));
@@ -226,18 +222,63 @@ public final class SnapshotParser {
             minFactor = d.minFactor();
             maxFactor = d.maxFactor();
         }
+        // A pre-2.4.5 config's `hit-cap` clamped the removed exposure-budget dynamic
+        // target — it is no longer a knob. Note it once so a tuned value is never
+        // silently dropped, then ignore it (the answer-denial boundary is bounded by
+        // victim-reach / attacker-reach / target-floor instead).
+        if (reader.section() != null && reader.section().isSet("hit-cap")) {
+            reader.issues().warn(reader.prefix() + ".hit-cap",
+                    "hit-cap was removed in 2.4.5 with the exposure-budget dynamic target",
+                    "ignored — the answer-denial boundary uses victim-reach/attacker-reach/target-floor");
+        }
         return new ComboSettings(
                 reader.intAtLeast("min-hits", d.minHits(), 1),
                 reader.intAtLeast("max-gap-ticks", d.maxGapTicks(), 1),
                 reader.intAtLeast("grounded-run-ticks", d.groundedRunTicks(), 1),
                 reader.numberAtLeast("blowout-blocks", d.blowoutBlocks(), 0.0),
-                reader.numberAtLeast("target", d.target(), 0.5),
+                // `target` is the STATIC fallback separation — the old anchor key,
+                // reused so an upgraded config's tuned value carries over.
+                reader.numberAtLeast("target", d.staticTarget(), 0.5),
                 reader.numberAtLeast("gain", d.gain(), 0.0),
                 minFactor,
                 maxFactor,
                 reader.intAtLeast("window-ticks", d.windowTicks(), 1),
-                reader.oneOf("target-mode", d.targetMode(), TargetMode.class),
-                reader.numberAtLeast("hit-cap", d.hitCap(), 0.5));
+                parseTargetMode(reader, d.targetMode()),
+                reader.numberInRange("victim-reach", d.victimReach(), 0.5, 6.0),
+                reader.numberInRange("attacker-reach", d.attackerReach(), 0.5, 6.0),
+                reader.numberAtLeast("deny-margin", d.denyMargin(), 0.0),
+                reader.numberAtLeast("jitter-margin", d.jitterMargin(), 0.0),
+                reader.numberAtLeast("target-floor", d.targetFloor(), 0.5));
+    }
+
+    /**
+     * The combo target-mode with the 2.4.5 migration (answer-denial redesign). The
+     * pre-2.4.5 {@code anchor} mode maps to {@link TargetMode#STATIC} (a fixed target
+     * separation) and the exposure-budget {@code dynamic} mode maps to
+     * {@link TargetMode#BOUNDARY} (the geometric answer-denial target), both with a
+     * loud migration note; a new {@code boundary}/{@code static} value parses
+     * straight; anything else warns-and-falls-back to the default. An unset key keeps
+     * the default (BOUNDARY), so {@code parse(empty)} stays the era-exact no-op.
+     */
+    private static TargetMode parseTargetMode(ConfigReader reader, TargetMode def) {
+        ConfigurationSection section = reader.section();
+        if (section == null || !section.isSet("target-mode")) {
+            return def;
+        }
+        String raw = String.valueOf(section.get("target-mode")).trim().toLowerCase(Locale.ROOT);
+        if ("anchor".equals(raw)) {
+            reader.issues().warn(reader.prefix() + ".target-mode",
+                    "the 'anchor' mode became 'static' in 2.4.5 (a fixed target separation)",
+                    "migrated to STATIC");
+            return TargetMode.STATIC;
+        }
+        if ("dynamic".equals(raw)) {
+            reader.issues().warn(reader.prefix() + ".target-mode",
+                    "the exposure-budget 'dynamic' target became the geometric 'boundary' target in 2.4.5",
+                    "migrated to BOUNDARY");
+            return TargetMode.BOUNDARY;
+        }
+        return reader.oneOf("target-mode", def, TargetMode.class);
     }
 
     /**

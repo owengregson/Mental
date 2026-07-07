@@ -718,8 +718,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The reach handicap is its own GUI-visible module (2.4.4, field report 2): it
         // owns the ComboReachHandicap lifecycle (join-sweep + enable/disable restore),
         // while the per-combo apply/remove rides the combo transitions via ComboEvents.
-        // It depends on combo-hold (the parser warns loudly when on without it).
-        reconciler.register(new ComboReachHandicapUnit(comboReachHandicap));
+        // Since the 2.4.5 detection/servo split it drives combo DETECTION itself (it
+        // retains it on the SessionService like the ComboHoldUnit), so it engages
+        // STANDALONE with the pocket servo off — no combo-hold dependency.
+        reconciler.register(new ComboReachHandicapUnit(comboReachHandicap, sessions));
         // The POTS family (owner directive 2026-07-04) — two independently-toggled
         // splash-potion utilities, both default OFF. Pot-fill dynamically registers
         // /potfill on the command map on enable and strips it whole on disable

@@ -277,12 +277,12 @@ modules:
   combo-hold: false
   # combo-reach-handicap: while a victim is held in a combo, scale DOWN their
   # entity-interaction-range attribute so their own client raycast shortens and they
-  # cannot answer. It DEPENDS on combo-hold (it only engages while a combo is held —
-  # enabling it alone warns on reload and does nothing) and is a SECONDARY lever: the
-  # servo steers spacing, this tightens retaliation. 1.20.5+ ONLY (the attribute is
-  # client-synced there). For the SERVER-SIDE enforcement leg against attribute-blind
-  # clients you must ALSO enable hit-registration.reach-validation. Tuned in the
-  # combo-reach-handicap section below. Default OFF (era-exact no-op).
+  # cannot answer. Since 2.4.5 it runs STANDALONE — it drives combo detection itself,
+  # so it engages with combo-hold off (and composes with the servo when both are on:
+  # a shorter victim reach opens the servo's keepable pocket). 1.20.5+ ONLY (the
+  # attribute is client-synced there). For the SERVER-SIDE enforcement leg against
+  # attribute-blind clients you must ALSO enable hit-registration.reach-validation.
+  # Tuned in the combo-reach-handicap section below. Default OFF (era-exact no-op).
   #
   # (Moved in 2.4.4: this was the nested combo-hold.reach-handicap.enabled sub-knob.
   # An upgraded config with the old nested key still works for one release — it is
@@ -343,14 +343,14 @@ modules:
 # so these thresholds err toward NOT detecting a combo.
 #
 # ── Servo: where does the victim land? ─────────────────────────────────────
-#   target       the separation (blocks) the servo steers the victim toward at
-#                the next swing. 2.85 is the DATA-BACKED anchor from the lab's
-#                71-combo round: every one of the five longest combos (120-173
-#                hits) held 2.81-2.86, the [2.8, 2.92) band broke combos 1.3% per
-#                hit vs 5.9% at the cap edge, and the old reach-triangle 2.75 was
-#                unreachable at signature scale (the 0.8 clamp) so it never
-#                regulated. Vertical is deliberately never touched — the profile's
-#                launch height is what buys that margin.
+# The 2.4.5 redesign lands the victim right at the ANSWER-DENIAL BOUNDARY: the
+# separation where, at the moment they could first swing back (their ping + the
+# turn they'd need), their reach-back is denied by a hair while YOU can still reach
+# them. It PUSHES OUT to that edge and only pulls IN if the natural knock would
+# eject them past your own reach — the opposite of the old "pull into the least
+# separation" servo, which dragged the victim into their own retaliation range.
+# Vertical is deliberately never touched — the profile's launch height buys the
+# vertical margin the geometry reads.
 #   gain         blends toward the full exact solve (1.0 = exact; lower softens).
 #   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
 #   max-factor   } stronger hold; past them the pocket is honestly lost and era
@@ -360,35 +360,53 @@ modules:
 #                vertical stamp's air-time, ping horizons and the ground tail into
 #                the window; this is the base cadence they shift from.
 #
-# ── Precision predictor (§3.2b): the solve now folds the victim's launch ground
-#    state (the mandatory grounded/air drag branch), measured mid-air steering,
-#    both parties' ping horizons and the ground tail into that same window — no
-#    knobs; every input degrades to a no-op when unavailable. The one knob pair:
-#   target-mode  anchor | dynamic. ANCHOR (default) always steers to `target`; the
-#                exposure-budget DYNAMIC target (facing- and ping-aware, relaxing
-#                between `target` and `hit-cap`) is COMPUTED and logged to the
-#                debug sink either way, so you can field-calibrate it before flipping
-#                the default. Leave it `anchor` until a lab round validates dynamic.
-#   hit-cap      the dynamic target's upper clamp — the practical hittable edge
-#                (2.95). Only consulted under `target-mode: dynamic`.
+# ── The boundary geometry (the target knobs) ───────────────────────────────
+#   target-mode  boundary | static. BOUNDARY (default) computes the geometric
+#                answer-denial target from the reach geometry below. STATIC pins the
+#                servo to a fixed `target` separation regardless of facing.
+#                (Migration: an old `anchor` reads as STATIC, an old `dynamic` reads
+#                as BOUNDARY, each with a loud reload notice.)
+#   target       the STATIC-mode / no-facing FALLBACK separation (2.85, the lab's
+#                held-separation equilibrium). Used whenever the geometry can't be
+#                measured (the victim's facing is unknown) or under target-mode:
+#                static. (This is the old `target` key, reused — a tuned value carries
+#                over.)
+#   victim-reach the victim's era answer reach in blocks (R_v, 3.0). The combo reach
+#                handicap, when live, SHORTENS this for the held combo — a shorter
+#                victim reach drops the deny boundary and OPENS the keepable pocket
+#                (this is why the reach nerf keeps a combo).
+#   attacker-reach   YOUR era reach (R_a, 3.0) — never handicapped.
+#   deny-margin  the hair past the victim's deny boundary the servo aims for, so
+#                jitter can't let them answer (0.02).
+#   jitter-margin    the slack below your reach the target keeps, so you reliably
+#                connect (0.15).
+#   target-floor the closest the servo will EVER pull the victim in (2.5).
+# (The pre-2.4.5 `hit-cap` knob is gone with the exposure-budget dynamic target; an
+# upgraded config that still sets it gets one reload notice, then it is ignored.)
 #
 # ── Reach handicap ─────────────────────────────────────────────────────────
 # The reach handicap moved to its OWN module in 2.4.4 — modules.combo-reach-handicap
-# above, tuned in the combo-reach-handicap section below. (It used to live here as a
-# nested combo-hold.reach-handicap block; an upgraded config with that old block still
-# works for one release — honoured with a loud reload notice — but move it.)
+# above, tuned in the combo-reach-handicap section below. Since 2.4.5 it drives combo
+# DETECTION itself, so it works STANDALONE (combo-hold off) AND composes with the
+# servo when both are on. (It used to live here as a nested combo-hold.reach-handicap
+# block; an upgraded config with that old block still works for one release — honoured
+# with a loud reload notice — but move it.)
 #combo-hold:
 #  min-hits: 2
 #  max-gap-ticks: 20
 #  grounded-run-ticks: 10
 #  blowout-blocks: 6.0
-#  target: 2.85
 #  gain: 1.0
 #  min-factor: 0.8
 #  max-factor: 1.2
 #  window-ticks: 10
-#  target-mode: anchor
-#  hit-cap: 2.95
+#  target-mode: boundary
+#  target: 2.85
+#  victim-reach: 3.0
+#  attacker-reach: 3.0
+#  deny-margin: 0.02
+#  jitter-margin: 0.15
+#  target-floor: 2.5
 
 # Combo reach handicap, active when modules.combo-reach-handicap is true.
 # While a victim is held in a combo, scale DOWN their entity-interaction-range
@@ -398,8 +416,8 @@ modules:
 # fully reversible, and swept clean on join / enable / disable so a crash never leaves
 # a shortened reach in a saved profile.
 #
-#   DEPENDS ON combo-hold. It only engages while a combo is held, so with combo-hold
-#   off it never applies (enabling it alone warns on reload).
+#   STANDALONE since 2.4.5. It drives combo detection itself, so it engages with
+#   combo-hold off (and composes with the servo when both are on).
 #
 #   1.20.5+ ONLY. The interaction-range attribute is client-synced from 1.20.5, so
 #   shortening it makes the client's OWN raycast shorten (no phantom misses). Below
