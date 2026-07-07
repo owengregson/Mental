@@ -348,9 +348,11 @@ modules:
 # Vertical is deliberately never touched — the profile's launch height buys the
 # vertical margin the geometry reads.
 #   gain         blends toward the full exact solve (1.0 = exact; lower softens).
-#   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
-#   max-factor   } stronger hold; past them the pocket is honestly lost and era
-#                  physics wins rather than the servo forcing a non-era knock.
+#   min-factor   } the honesty clamps on the knock multiplier. [0.93, 1.35] is the
+#   max-factor   } calibrated band (2.4.6 undershoot fix): the servo's chase floor
+#                  centres sigma near 1.0-1.1, so the floor rarely pulls below 0.93
+#                  and the ceiling admits the harder "apply more" closes; past them
+#                  the pocket is honestly lost and era physics wins over a non-era knock.
 #   window-ticks the cadence horizon (t*) the flight is projected over — the era
 #                full-hit cadence (10). The predictor already folds the shipped
 #                vertical stamp's air-time, ping horizons and the ground tail into
@@ -393,8 +395,8 @@ modules:
 #  grounded-run-ticks: 10
 #  blowout-blocks: 6.0
 #  gain: 1.0
-#  min-factor: 0.8
-#  max-factor: 1.2
+#  min-factor: 0.93
+#  max-factor: 1.35
 #  window-ticks: 10
 #  target-mode: boundary
 #  target: 2.85

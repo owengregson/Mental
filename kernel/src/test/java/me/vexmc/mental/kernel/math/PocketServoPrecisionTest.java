@@ -70,8 +70,11 @@ class PocketServoPrecisionTest {
                 Double.NaN, Double.NaN, 0,      // no facing → static target
                 Double.NaN, Double.NaN, Double.NaN, Double.NaN);
         PredictorInputs dynamic = base.withDynamicChase(0.28, 0, 0.5);
-        FlightPrediction dyn = PocketServo.predict(SERVO, dynamic, 2.6, 0.0, 0.4, 0.4, 0.28);
-        FlightPrediction flat = PocketServo.predict(SERVO, base, 2.6, 0.0, 0.4, 0.4, 0.28);
+        // attackerNormalizedSpeed 0.10 keeps the chase-alignment floor (0.196·10 =
+        // 1.964) below BOTH chases (dynamic 2.520, flat 2.800), so the floor stays off
+        // and the pin isolates the dynamic-vs-flat priority it is here to test.
+        FlightPrediction dyn = PocketServo.predict(SERVO, dynamic, 2.6, 0.0, 0.4, 0.4, 0.10);
+        FlightPrediction flat = PocketServo.predict(SERVO, base, 2.6, 0.0, 0.4, 0.4, 0.10);
         assertEquals(10, dyn.windowTicks(), "no ping shift ⇒ the config window");
         // The dynamic branch prices the ramp, not base's flat 0.28·10.
         assertEquals(2.6 - DynamicChase.projectTravel(0.28, 0, 0.5, 10), dyn.constant(), EPSILON);
@@ -260,13 +263,16 @@ class PocketServoPrecisionTest {
                 "repriced airTime is the ground-level fold (0.35716 → 10t), not the +0.30 launch's 11t");
         assertEquals(PocketServo.groundedLaunchDragSum(10, 0.6 * Q), s.dragSum(), EPSILON,
                 "the drag schedule takes the grounded launch branch: D_g(10) = 1 + 0.546·geo(9)");
-        // Hand pin, the lab's counterfactual: d0 2.55, R 0.02, F 0.325 (plain
-        // stance), measured chase 0.116 b/t, static target 2.85 (NaN facing), w' 10.
-        //   σ* = (2.85 − (2.55 − 1.16) − 4.470559213·0.02) / (0.325·4.470559213)
-        //      = 1.370588824 / 1.452931744 = 0.943326362 — interior, ≈ 1 (the σ=1
-        //        counterfactual the lab measured settling in the pocket).
-        assertEquals(0.943326362, s.sigmaStar(), 1.0e-9);
-        assertEquals(s.sigmaStar(), s.sigma(), EPSILON, "interior: the clamp does not bind");
+        // Hand pin WITH the 2.4.6 chase-alignment floor: the measured 0.116 b/t
+        // (1.16 blocks) is under the aligned-sprint floor (0.7·0.2806·1.0·10 =
+        // 1.9642), so the chase floors to 1.9642 — an active-combo attacker is assumed
+        // to close at 0.7× sprint, not the window-averaged 0.116 that under-reads the
+        // post-knock burst. d0 2.55, R 0.02, F 0.325 (plain stance), static target
+        // 2.85 (NaN facing), w' 10, grounded dragSum 4.470559213.
+        //   σ* = (2.85 − (2.55 − 1.9642) − 4.470559213·0.02) / (0.325·4.470559213)
+        //      = 2.174788816 / 1.452931744 = 1.496827931 → clamps to 1.2.
+        assertEquals(1.496827931, s.sigmaStar(), 1.0e-9);
+        assertEquals(1.2, s.sigma(), EPSILON, "the floored chase lifts σ* past the max clamp");
         // And the repriced σ* lands exactly on target through the independent fold.
         double landed = independentLanding(
                 touchdown(0.30, -0.35, 0.116).asGroundedLaunch(),
@@ -275,21 +281,24 @@ class PocketServoPrecisionTest {
     }
 
     @Test
-    void withoutTheRepriceTheAirborneModelManufacturesTheFalseLowMode() {
-        // The SAME hit priced with no boundary vy (the pre-round arity): the solve
-        // takes the airborne branch — D_a(10) = geo(10) = 6.784265354, a 52%
-        // overtravel per unit shipped speed — and σ* collapses into the lab's
-        // false-low min-clamp mode:
-        //   σ* = (2.85 − 1.39 − 6.784265354·0.02) / (0.325·6.784265354)
-        //      = 1.324314693 / 2.204886240 = 0.600627220 → pinned at 0.8.
+    void theChaseFloorPreventsTheAirborneFalseLowMode() {
+        // The SAME hit priced with no boundary vy (the airborne branch): D_a(10) =
+        // geo(10) = 6.784265354, a 52% overtravel per unit shipped speed. Pre-2.4.6
+        // this collapsed σ* into the lab's false-low min-clamp mode (σ* 0.60 → pinned
+        // 0.8 — the undershoot). The chase-alignment floor now lifts the under-read
+        // 0.116 b/t measured chase to 0.7·0.2806·1.0·10 = 1.9642, so σ* holds INTERIOR
+        // (≈ 1) instead of collapsing:
+        //   σ* = (2.85 − (2.55 − 1.9642) − 6.784265354·0.02) / (0.325·6.784265354)
+        //      = 2.128815307 / 2.204886240 = 0.965362591 — no false-low.
         PredictorInputs blind = new PredictorInputs(
                 false, 0.6, 0.6, 0.30, 0.0, 0.116, 0.10,
                 -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
         PocketServo.Solution s = PocketServo.solve(SHIPPED_ANCHOR, blind, 2.55, 0.02, 0.325, 0.35716, 0.10);
         assertFalse(s.launchRepriced(), "no boundary vy — the branch cannot fire (byte-identical pre-round)");
         assertEquals(PocketServo.airborneLaunchDragSum(10), s.dragSum(), EPSILON);
-        assertEquals(0.600627220, s.sigmaStar(), 1.0e-9);
-        assertEquals(0.8, s.sigma(), EPSILON, "the false-low mode pins the min clamp");
+        assertEquals(0.965362591, s.sigmaStar(), 1.0e-9);
+        assertEquals(s.sigmaStar(), s.sigma(), EPSILON,
+                "the chase floor holds σ* interior — the false-low min-clamp no longer binds");
         // The lab's own travel validation at the As plain-stance stamp |H| = 0.26:
         // grounded 0.26·D_g(10) = 1.1623 (measured 1.162 — exact); the airborne
         // mispricing models 0.26·D_a(10) = 1.7639 (the lab's 1.764 model row).
@@ -385,13 +394,14 @@ class PocketServoPrecisionTest {
         //                  → D(18) = 4.981141159
         //   drift  = −0.0196 · S2(min(18, 10)) = −0.0196 · 42.514650307 = −0.833287146
         //   tail   = −(0.98·0.13) · Σ_{k=1..8}(1 − 0.546^k)/0.454      = −1.910117693
-        //   chase  = 0.0972 · 18                                        = 1.7496
-        //   constant = 2.5 − 1.7496 − 0.833287146 − 1.910117693         = −1.993004839
-        //   σ* = (2.85 + 1.993004839 − 4.981141159·0.02) / (0.325·4.981141159)
-        //      = 4.743382016 / 1.618870877 = 2.930055809
+        //   chase  = floor 0.7·0.2806·1.0·18 = 3.53556  (the measured 0.0972·18 =
+        //            1.7496 is under the aligned-sprint floor at attr 0.10 → floored)
+        //   constant = 2.5 − 3.53556 − 0.833287146 − 1.910117693         = −3.778964839
+        //   σ* = (2.85 + 3.778964839 − 4.981141159·0.02) / (0.325·4.981141159)
+        //      = 6.529342016 / 1.618870877 = 4.033269182
         // → clamps to 1.2: a sprint-returning victim at 17–19t cadence is honestly
         // clamp-starved (the lab's σ-needed med 2.82 for that cell), and the servo
-        // holds the boundary instead of shipping the false-low 0.8.
+        // holds the boundary instead of shipping a false-low knock.
         PredictorInputs in = new PredictorInputs(
                 true, 0.6, 0.6, 0.0, -0.0196, 0.0972, 0.13,
                 -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0,
@@ -402,7 +412,7 @@ class PocketServoPrecisionTest {
         assertEquals(4.981141159, s.dragSum(), 1.0e-9, "Π folds the knock's own ground tail after tLand");
         assertEquals(-0.833287146 - 1.910117693, s.driftTravel(), 1.0e-9,
                 "air drift truncated at touchdown + the §5 attribute-rate ground return");
-        assertEquals(2.930055809, s.sigmaStar(), 1.0e-9);
+        assertEquals(4.033269182, s.sigmaStar(), 1.0e-9);
         assertEquals(1.2, s.sigma(), EPSILON, "clamp-starved — the honesty boundary holds");
         // The unclamped σ* still lands exactly on target through the independent fold
         // (the exact-inverse property survives the gap-aware window).
@@ -564,11 +574,16 @@ class PocketServoPrecisionTest {
         double tail = (g > 0 && in.driftAlongAxis() != 0.0)
                 ? Math.signum(in.driftAlongAxis()) * (0.98 * groundAttr) * bruteGroundSum(g, sqLand)
                 : 0.0;
-        // Chase.
+        // Chase — mirror the solve's measured/attribute rate AND the 2.4.6
+        // chase-alignment floor (the independent fold verifies the affine inversion,
+        // so it must model the same floored chase the solve prices).
         double chaseRate = !Double.isNaN(in.chaseAlongAxis())
                 ? in.chaseAlongAxis()
                 : 0.2806 * ((attrA > 0 ? attrA : 0.10) / 0.10);
-        return d0 + knockTravel + driftTravel + tail - chaseRate * wPrime;
+        double chaseTravel = Math.max(chaseRate * wPrime,
+                PocketServo.CHASE_ALIGNMENT * PocketServo.SPRINT_GROUND_SPEED
+                        * ((attrA > 0 ? attrA : 0.10) / 0.10) * wPrime);
+        return d0 + knockTravel + driftTravel + tail - chaseTravel;
     }
 
     private static int localAirTime(double vstamp, double launchHeight) {
