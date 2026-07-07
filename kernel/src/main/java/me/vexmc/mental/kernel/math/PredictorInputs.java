@@ -80,6 +80,16 @@ package me.vexmc.mental.kernel.math;
  *                                reprices the flight as a GROUNDED ground-level
  *                                launch. {@link Double#NaN} ⇒ no repricing (the
  *                                pre-2.4.5 behaviour, byte-identical).
+ * @param cadenceEmaTicks         the per-combo EMA of observed inter-hit gaps
+ *                                (servo-lab 2.4.5) — the gap-aware window: the
+ *                                solve's cadence horizon follows the attacker's
+ *                                MEASURED rhythm instead of the fixed config
+ *                                cadence, so a 12–19-tick attacker's settle is
+ *                                predicted over the window that actually elapses
+ *                                (fixed-10 pricing stopped seven-plus ticks short
+ *                                and hid the whole post-touchdown tail).
+ *                                {@link Double#NaN} or &lt; 1 ⇒ the config
+ *                                {@code windowTicks} (the era 10), byte-identical.
  */
 public record PredictorInputs(
         boolean launchGrounded,
@@ -98,13 +108,31 @@ public record PredictorInputs(
         int groundedTicks,
         double priorChaseEma,
         double priorDynamicTarget,
-        double launchVerticalVelocity) {
+        double launchVerticalVelocity,
+        double cadenceEmaTicks) {
 
     /**
-     * The pre-2.4.5 arity (the target-v2 round): no boundary-read vertical motion,
-     * so the touchdown-aware launch branch never fires ({@link Double#NaN} ⇒ the
-     * launch state is taken exactly as captured). Keeps every caller and pin that
-     * predates the servo-solve round compiling — and solving — unchanged.
+     * The touchdown-branch arity (servo-solve round, step two): the boundary-read
+     * vertical motion but no measured cadence — the window stays the config
+     * {@code windowTicks}.
+     */
+    public PredictorInputs(
+            boolean launchGrounded, double launchSlip, double landingSlip, double launchHeight,
+            double driftAlongAxis, double chaseAlongAxis, double victimNormalizedSpeed,
+            int attackerRttMillis, int victimRttMillis, double attackerHeadY, double victimEyeHeight,
+            double victimYawVsAxisDeg, double victimYawRateDegPerTick, int groundedTicks,
+            double priorChaseEma, double priorDynamicTarget, double launchVerticalVelocity) {
+        this(launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
+                victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
+                launchVerticalVelocity, Double.NaN);
+    }
+
+    /**
+     * The pre-2.4.5 arity (the target-v2 round): no boundary-read vertical motion
+     * and no measured cadence, so the touchdown-aware launch branch never fires and
+     * the window stays the config cadence. Keeps every caller and pin that predates
+     * the servo-solve round compiling — and solving — unchanged.
      */
     public PredictorInputs(
             boolean launchGrounded, double launchSlip, double landingSlip, double launchHeight,
@@ -115,7 +143,7 @@ public record PredictorInputs(
         this(launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
                 victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
                 victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
-                Double.NaN);
+                Double.NaN, Double.NaN);
     }
 
     /**
@@ -148,7 +176,7 @@ public record PredictorInputs(
                 driftAlongAxis, chaseAlongAxis, victimNormalizedSpeed,
                 attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
                 victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks,
-                priorChaseEma, priorDynamicTarget, Double.NaN);
+                priorChaseEma, priorDynamicTarget, Double.NaN, cadenceEmaTicks);
     }
 
     /**

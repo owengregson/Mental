@@ -217,11 +217,14 @@ public final class ComboSuite {
     /* ------------------------ scenario 3: a grounded run ends it ------------------- */
 
     /**
-     * The genuine touchdown end (combo-hold §3.1): after a real grounded run of
-     * {@code groundedRunTicks} the held combo releases and the next knock is
-     * era-plain again. This case exercises the REAL threshold (10, un-widened) —
-     * that is its whole point — which forces it to stage the victim's ground state
-     * physically rather than lean on a widened window.
+     * The genuine touchdown end (combo-hold §3.1): after a real grounded run the
+     * held combo releases and the next knock is era-plain again. This case
+     * exercises the REAL configured threshold (10, un-widened) — that is its whole
+     * point — which forces it to stage the victim's ground state physically rather
+     * than lean on a widened window. Since the servo-solve round the effective
+     * threshold rides the chain's OBSERVED cadence (configured floor + observed
+     * gap + 2 jitter ticks), so the touchdown idle below waits on the released
+     * view rather than a fixed tick count.
      *
      * <p><b>Why the physical staging.</b> A clientless fake never moves from a melee
      * knock (send-then-restore), so under the honest combat-ground feed a stationary
@@ -270,8 +273,25 @@ public final class ComboSuite {
                 victim.preTick(() -> victim.setMotion(0.0, 0.0, 0.0));
                 teleportOnOwningThread(mental, victim, groundLoc);
             });
-            // Idle well past grounded-run-ticks (10) so the touchdown end fires.
-            context.awaitTicks(20);
+            // Idle until the touchdown end fires. The threshold is no longer the
+            // flat configured 10: since the servo-solve round it scales with the
+            // chain's OBSERVED cadence (observed + 2 jitter ticks, capped by
+            // max-gap — here 400, so the cap never binds), and the build-up's real
+            // gaps carry scheduling overhead beyond CADENCE_TICKS. Waiting on the
+            // released view instead of a fixed tick count keeps the case honest
+            // for whatever cadence the run actually measured; the cap (60t) is
+            // comfortably past any build-up cadence this staging can produce.
+            context.awaitUntil(() -> {
+                try {
+                    return context.sync(() -> {
+                        CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                        PlayerView view = session == null ? null : session.view();
+                        return view != null && view.comboAttackerId() == null;
+                    });
+                } catch (Exception failure) {
+                    return false;
+                }
+            }, 60, "the grounded run to release the combo");
 
             // The grounded run must have RELEASED the combo before the measured hit —
             // the direct proof that the touchdown, not some other end, did the work.

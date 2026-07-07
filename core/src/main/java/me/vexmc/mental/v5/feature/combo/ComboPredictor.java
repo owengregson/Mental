@@ -81,15 +81,17 @@ public final class ComboPredictor {
      * One victim's cross-hit servo state. {@code anchorTick} is the tick of the
      * previous servo-solved hit and {@code anchorX/Z} the attacker's feet there —
      * the base of the next POST-hit chase window; {@link TickStamp#NO_TICK}'s
-     * value marks "no anchor yet" (a fresh combo).
+     * value marks "no anchor yet" (a fresh combo). {@code cadenceEmaTicks} is the
+     * same windows' inter-hit gap EMA — the solve's gap-aware cadence horizon
+     * (servo-lab 2.4.5), NaN until a first window is measured.
      */
     private record ServoMemory(
             double chaseEma, double dynamicTarget,
-            double windowChaseEma,
+            double windowChaseEma, double cadenceEmaTicks,
             double anchorX, double anchorZ, int anchorTick) {
 
         static final ServoMemory EMPTY = new ServoMemory(
-                Double.NaN, Double.NaN, Double.NaN, 0.0, 0.0, Integer.MIN_VALUE);
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0.0, 0.0, Integer.MIN_VALUE);
     }
 
     private ComboPredictor() {}
@@ -145,20 +147,22 @@ public final class ComboPredictor {
 
         double driftAxis = DRIFT_SHRINKAGE * estimateDrift(positions, victimId, victimView, ux, uz);
 
-        // The POST-hit chase window (servo-lab 2.4.5): advance the per-combo EMA
-        // with the attacker's measured displacement over the just-completed
+        // The POST-hit chase window (servo-lab 2.4.5): advance the per-combo EMAs
+        // — the measured chase AND the observed cadence — with the just-completed
         // inter-hit gap. Gaps outside [MIN, MAX] are artifacts (the dual-seam
-        // re-solve, or an idle stretch under a widened test config) — the EMA
-        // carries its prior unchanged, and a combo with no window yet rides NaN
-        // into the kernel's attribute-model fallback.
+        // re-solve, or an idle stretch under a widened test config) — the EMAs
+        // carry their priors unchanged, and a combo with no window yet rides NaN
+        // into the kernel's attribute-model / config-cadence fallbacks.
         ServoMemory memory = MEMORY.getOrDefault(victimId, ServoMemory.EMPTY);
         double chaseAxis = memory.windowChaseEma();
+        double cadenceAxis = memory.cadenceEmaTicks();
         if (memory.anchorTick() != Integer.MIN_VALUE && now != null && now.known()) {
             long gap = (long) now.value() - memory.anchorTick();
             if (gap >= MIN_WINDOW_GAP_TICKS && gap <= MAX_WINDOW_GAP_TICKS) {
                 double measured = PocketServo.windowChaseRate(
                         memory.anchorX(), memory.anchorZ(), attackerX, attackerZ, ux, uz, gap);
                 chaseAxis = PocketServo.chaseEma(chaseAxis, measured);
+                cadenceAxis = PocketServo.cadenceEma(cadenceAxis, gap);
             }
         }
 
@@ -183,7 +187,9 @@ public final class ComboPredictor {
                 // The boundary-read vertical motion — the touchdown-aware launch
                 // branch's trigger (servo-lab 2.4.5): a descending capture whose
                 // remaining height is under one fall tick reprices as grounded.
-                victimView.motion().vy());
+                victimView.motion().vy(),
+                // The observed inter-hit cadence — the gap-aware window horizon.
+                cadenceAxis);
     }
 
     /**
@@ -204,7 +210,7 @@ public final class ComboPredictor {
             ServoMemory base = prior != null ? prior : ServoMemory.EMPTY;
             return new ServoMemory(
                     base.chaseEma(), base.dynamicTarget(),
-                    inputs.chaseAlongAxis(),
+                    inputs.chaseAlongAxis(), inputs.cadenceEmaTicks(),
                     attackerX, attackerZ, now.value());
         });
     }
@@ -227,7 +233,7 @@ public final class ComboPredictor {
             ServoMemory base = prior != null ? prior : ServoMemory.EMPTY;
             return new ServoMemory(
                     solution.chaseEma(), solution.dynamicTarget(),
-                    base.windowChaseEma(),
+                    base.windowChaseEma(), base.cadenceEmaTicks(),
                     base.anchorX(), base.anchorZ(), base.anchorTick());
         });
     }
@@ -319,6 +325,7 @@ public final class ComboPredictor {
                 + " launchRepriced=" + s.launchRepriced() + " vyLaunch=" + fmt(inputs.launchVerticalVelocity())
                 + " slip=" + fmt(s.launchSlip()) + " launchHeight=" + fmt(inputs.launchHeight())
                 + " wPrime=" + s.windowTicks() + " tStar=" + s.horizonTicks()
+                + " cadenceEma=" + fmt(inputs.cadenceEmaTicks())
                 + " shiftV=" + s.shiftVictimTicks() + " airTime=" + s.airTicks()
                 + " aHat=" + fmt(inputs.driftAlongAxis())
                 + " chase=" + fmt(s.chaseRate()) + (s.chaseMeasured() ? "(measured)" : "(model)")

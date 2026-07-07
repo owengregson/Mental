@@ -207,6 +207,70 @@ class PocketServoPrecisionTest {
         assertEquals(s.target(), landed, EPSILON);
     }
 
+    /* ── the gap-aware window + ground return (servo-lab 2.4.5) ────────────── */
+
+    @Test
+    void gapAwareWindowFollowsTheMeasuredCadence() {
+        // The measured cadence EMA replaces the fixed config cadence as the horizon.
+        assertEquals(18, cadenced(18.0, -1).windowTicks(), "cadence 18 → an 18-tick window");
+        assertEquals(18, cadenced(18.0, -1).horizonTicks());
+        assertEquals(17, cadenced(18.0, 100).windowTicks(), "rttA 100 still shaves the horizon: 18 − 1");
+        assertEquals(15, cadenced(15.4, -1).windowTicks(), "round-to-nearest, the t* rounding rule");
+        // Unmeasured / degenerate cadences keep the config windowTicks — byte-identical.
+        assertEquals(10, cadenced(Double.NaN, -1).windowTicks(), "no cadence → the config 10");
+        assertEquals(10, cadenced(0.5, -1).windowTicks(), "sub-tick cadence is no cadence");
+        // The robustness ceiling (3× the default max-gap): a garbage EMA can never
+        // size a giant schedule.
+        assertEquals(60, cadenced(500.0, -1).windowTicks(), "cadence ceiling 60");
+    }
+
+    @Test
+    void gapWindowPricesTheGroundReturnTail() {
+        // The lab's slow-cadence returning-victim cell (the Cr shape), hand-derived
+        // end to end. Grounded signature launch V0 0.35716 (airTime 10, tLand 10),
+        // cadence 18 → w' 18 → G = 8 post-touchdown ticks inside the window; the
+        // victim holds toward the attacker (â = −0.0196) at sprint attribute 0.13;
+        // measured window chase 0.0972 b/t (the lab's 1.75 blocks / 18t); d0 2.5,
+        // R 0.02, F 0.325, anchor 2.85.
+        //   drag schedule: Π grounded launch, air 2..10, ground tail 11..18
+        //                  → D(18) = 4.981141159
+        //   drift  = −0.0196 · S2(min(18, 10)) = −0.0196 · 42.514650307 = −0.833287146
+        //   tail   = −(0.98·0.13) · Σ_{k=1..8}(1 − 0.546^k)/0.454      = −1.910117693
+        //   chase  = 0.0972 · 18                                        = 1.7496
+        //   constant = 2.5 − 1.7496 − 0.833287146 − 1.910117693         = −1.993004839
+        //   σ* = (2.85 + 1.993004839 − 4.981141159·0.02) / (0.325·4.981141159)
+        //      = 4.743382016 / 1.618870877 = 2.930055809
+        // → clamps to 1.2: a sprint-returning victim at 17–19t cadence is honestly
+        // clamp-starved (the lab's σ-needed med 2.82 for that cell), and the servo
+        // holds the boundary instead of shipping the false-low 0.8.
+        PredictorInputs in = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, -0.0196, 0.0972, 0.13,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0,
+                Double.NaN, Double.NaN, Double.NaN, 18.0);
+        PocketServo.Solution s = PocketServo.solve(SHIPPED_ANCHOR, in, 2.5, 0.02, 0.325, 0.35716, 0.10);
+        assertEquals(18, s.windowTicks());
+        assertEquals(10, s.landTick(), "touchdown inside the window — the tail is live");
+        assertEquals(4.981141159, s.dragSum(), 1.0e-9, "Π folds the knock's own ground tail after tLand");
+        assertEquals(-0.833287146 - 1.910117693, s.driftTravel(), 1.0e-9,
+                "air drift truncated at touchdown + the §5 attribute-rate ground return");
+        assertEquals(2.930055809, s.sigmaStar(), 1.0e-9);
+        assertEquals(1.2, s.sigma(), EPSILON, "clamp-starved — the honesty boundary holds");
+        // The unclamped σ* still lands exactly on target through the independent fold
+        // (the exact-inverse property survives the gap-aware window).
+        double landed = independentLanding(in, 2.5, 0.02, 0.325, s.sigmaStar(), 0.35716, 0.10, 18);
+        assertEquals(s.target(), landed, EPSILON);
+    }
+
+    /** A grounded-launch solve carrying a measured cadence EMA (and optionally attacker RTT). */
+    private static PocketServo.Solution cadenced(double cadenceEma, int rttA) {
+        PredictorInputs in = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
+                rttA, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0,
+                Double.NaN, Double.NaN, Double.NaN, cadenceEma);
+        // A tall stamp keeps every window here inside the flight (no tail term).
+        return PocketServo.solve(SHIPPED_ANCHOR, in, 2.35, 0.0, 0.4, 1.2, 0.10);
+    }
+
     /* ── ping horizons (§4) ────────────────────────────────────────────────── */
 
     @Test
@@ -516,8 +580,10 @@ class PocketServoPrecisionTest {
             double drag = grounded ? (k == 1 ? sqLaunch : sqLand) : Q;
             pi *= drag;
         }
-        // Air drift over the window (S2) + ground-tail locomotion over G ticks.
-        double driftTravel = in.driftAlongAxis() * bruteS2(wPrime);
+        // Air drift over the AIRBORNE ticks (S2 truncates at touchdown — grounded
+        // ticks use the ground constants INSTEAD, §2.5) + the ground-tail
+        // locomotion over the G grounded ticks.
+        double driftTravel = in.driftAlongAxis() * bruteS2(Math.min(wPrime, tLand));
         int g = Math.max(0, wPrime - shiftV - airTime);
         double groundAttr = in.victimNormalizedSpeed() > 0.0 ? in.victimNormalizedSpeed() : 0.10;
         double tail = (g > 0 && in.driftAlongAxis() != 0.0)

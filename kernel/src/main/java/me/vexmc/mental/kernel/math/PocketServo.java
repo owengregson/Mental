@@ -82,6 +82,26 @@ public final class PocketServo {
     /** A landing-segment slipperiness past this is ice-class — decline (§6 issue 6). */
     public static final double ICE_DECLINE_SLIP = 0.7;
 
+    /**
+     * The per-combo cadence EMA weight α (servo-lab 2.4.5, the gap-aware window).
+     * The lab's within-cell cadence jitter is ±2 ticks (gap histograms 12–16 and
+     * 17–19); an EMA reduces white-jitter variance by {@code α/(2−α)} ≈ 0.176, so
+     * the smoothed cadence carries ≈ 0.6 ticks of noise — the ROUNDED window is
+     * stable against jitter and moves only on a sustained rhythm change (≈ 3
+     * windows to converge, 0.7³ ≈ 0.34 residual). Shared by the tracker's
+     * grounded-run scaling and the predictor's window cadence — one rhythm model.
+     */
+    public static final double CADENCE_EMA_ALPHA = 0.3;
+
+    /**
+     * The hard ceiling on a measured cadence window (ticks): 3× the default
+     * max-gap that ends every default combo — purely a robustness/allocation bound
+     * on the fold (a garbage EMA can never size a giant schedule), NOT a knob. The
+     * gap sources are themselves structurally bounded (the tracker rejects gaps
+     * past {@code maxGapTicks}; the predictor memory rejects windows past 40t).
+     */
+    private static final double CADENCE_CEILING = 60.0;
+
     /** Vanilla player height (head-top above feet) — the attacker's answer geometry (§3.1). */
     public static final double PLAYER_HEIGHT = 1.8;
 
@@ -380,7 +400,19 @@ public final class PocketServo {
         }
 
         double anchor = config.target();
+        // The gap-aware window (servo-lab 2.4.5): the cadence horizon follows the
+        // attacker's MEASURED rhythm (the per-combo inter-hit gap EMA) instead of
+        // the fixed config cadence. The lab's 12–19-tick attackers were priced over
+        // a 10-tick window: the settle prediction stopped short of the swing that
+        // actually judges the pocket (gap drift up to −1.3 blocks at 17–19t), and
+        // the whole post-touchdown tail — the knock's ground drag AND the victim's
+        // attribute-rate ground return — sat outside the priced window. An
+        // unmeasured cadence (NaN / < 1) keeps the config windowTicks, so every
+        // pre-round caller and pin is byte-identical.
         int cadence = config.windowTicks();
+        if (!Double.isNaN(inputs.cadenceEmaTicks()) && inputs.cadenceEmaTicks() >= 1.0) {
+            cadence = (int) Math.round(Math.min(inputs.cadenceEmaTicks(), CADENCE_CEILING));
+        }
         // Ping horizons (§4): attacker half-RTT shaves t* (round-to-nearest); victim
         // half-RTT shifts the arc late (floor — conservative in the safety direction).
         int shiftA = inputs.attackerRttMillis() >= 0
@@ -421,9 +453,15 @@ public final class PocketServo {
         }
 
         // (2) Victim self-drift (§2.5/§8): the estimated held input, axis-projected,
-        // accumulated as the air double-sum S2 over the window (rebuilding from 0 —
-        // the stamp wiped the drift VELOCITY, not the held input).
-        double driftTravel = inputs.driftAlongAxis() * s2(wPrime);
+        // accumulated as the air double-sum S2 (rebuilding from 0 — the stamp wiped
+        // the drift VELOCITY, not the held input). Only over the AIRBORNE ticks:
+        // §2.5's own rule is that grounded ticks inside the window use the ground
+        // constants INSTEAD (the §5 D_ground tail below), so the air sum truncates
+        // at touchdown. Under the fixed 10-tick window this was moot (flights fill
+        // the window); the gap-aware window makes the split load-bearing — an
+        // 18-tick window over a 10-tick flight prices 8 ticks of 0.127-class
+        // ground return, not 8 more ticks of 0.02-class air steering.
+        double driftTravel = inputs.driftAlongAxis() * s2(Math.min(wPrime, tLand));
 
         // (3) Ground-tail locomotion (§5): the G grounded ticks inside the window let
         // the victim WALK — their OWN move-speed attribute (not the air 0.02 rate),
@@ -654,6 +692,18 @@ public final class PocketServo {
         return Double.isNaN(priorChaseEma)
                 ? chaseRate
                 : CHASE_EMA_ALPHA * chaseRate + (1.0 - CHASE_EMA_ALPHA) * priorChaseEma;
+    }
+
+    /**
+     * The per-combo cadence EMA advance (servo-lab 2.4.5): a NaN prior seeds to
+     * the first observed gap, then the {@link #CADENCE_EMA_ALPHA} blend. One
+     * rhythm model for both consumers — the solve's gap-aware window and the
+     * tracker's grounded-run scaling.
+     */
+    public static double cadenceEma(double prior, double gapTicks) {
+        return Double.isNaN(prior)
+                ? gapTicks
+                : CADENCE_EMA_ALPHA * gapTicks + (1.0 - CADENCE_EMA_ALPHA) * prior;
     }
 
     /**

@@ -174,19 +174,96 @@ class ComboTrackerTest {
     }
 
     @Test
-    void groundedRunEndsExactlyOnTheTenthGroundedTick() {
-        ComboTracker tracker = active(); // active, lastHit tick 20
-        // Nine grounded ticks (21..29, gaps 1..9 <= maxGap) do NOT end the combo.
-        for (int tick = 21; tick <= 29; tick++) {
+    void groundedRunAtEraCadenceEndsOnTheTwelfthGroundedTick() {
+        // The gap-aware grounded run (servo-lab 2.4.5): active() observed a 10-tick
+        // cadence (gaps 10, 10 → EMA 10), so the effective threshold is the observed
+        // cadence plus the ±2-tick jitter slack — max(10, min(20, 10 + 2)) = 12.
+        ComboTracker tracker = active(); // active, lastHit tick 20, cadence EMA 10
+        assertEquals(10.0, tracker.cadenceTicks(), 1.0e-9, "EMA of gaps 10, 10");
+        // Eleven grounded ticks (21..31) are rhythm-legitimate skims.
+        for (int tick = 21; tick <= 31; tick++) {
             assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind(),
                     "grounded tick " + tick + " is a survivable skim");
             assertTrue(tracker.active());
         }
-        // The tenth consecutive grounded tick (30, gap 10) ends it.
-        ComboTransition grounded = tracker.onTick(t(30), true, Double.NaN);
+        // The twelfth consecutive grounded tick (32, still inside the 20-tick gap
+        // window) ends it — a real settle, not a between-hits stretch.
+        ComboTransition grounded = tracker.onTick(t(32), true, Double.NaN);
         assertTrue(grounded.ended());
         assertEquals(ComboEndReason.GROUNDED, grounded.reason());
         assertFalse(tracker.active());
+    }
+
+    @Test
+    void groundedRunScalesWithASlowObservedCadence() {
+        // An 18-tick attacker (the lab's C cells): threshold = max(10, min(20, 18+2))
+        // = 20 — the legitimate ~8-tick between-hit ground time (18t gap − ~10t
+        // flight) can never end the combo mid-gap any more (the lab's 57% coverage
+        // was GROUNDED deaths mid-gap), while gap expiry still owns a rhythm break.
+        ComboTracker tracker = tracker();
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(18)); // second hit → active, cadence seeds at 18
+        tracker.onKnockShipped(A, t(36)); // EMA 0.3·18 + 0.7·18 = 18
+        assertEquals(18.0, tracker.cadenceTicks(), 1.0e-9);
+        // Nineteen grounded ticks (37..55) survive — the old fixed 10 died here.
+        for (int tick = 37; tick <= 55; tick++) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind(),
+                    "grounded tick " + tick + " is inside the observed rhythm");
+            assertTrue(tracker.active());
+        }
+        // The twentieth (56 — gap 20 == maxGap, not yet expired) ends it GROUNDED:
+        // the scaled threshold stays ordered under the gap clock.
+        ComboTransition grounded = tracker.onTick(t(56), true, Double.NaN);
+        assertTrue(grounded.ended());
+        assertEquals(ComboEndReason.GROUNDED, grounded.reason());
+    }
+
+    @Test
+    void groundedRunKeepsTheConfiguredFloorWhenCadenceIsUnknown() {
+        // minHits 1 activates on the FIRST hit — no gap observed yet, so the
+        // threshold is exactly the configured groundedRunTicks (the pre-round
+        // behaviour, byte-identical).
+        ComboTracker tracker = new ComboTracker(new ComboRules(1, 20, 10, 6.0));
+        tracker.onKnockShipped(A, t(0));
+        assertTrue(tracker.active());
+        assertTrue(Double.isNaN(tracker.cadenceTicks()), "one hit — no cadence");
+        for (int tick = 1; tick <= 9; tick++) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind());
+        }
+        ComboTransition grounded = tracker.onTick(t(10), true, Double.NaN);
+        assertTrue(grounded.ended());
+        assertEquals(ComboEndReason.GROUNDED, grounded.reason());
+    }
+
+    @Test
+    void wideConfiguredThresholdStaysTheFloorUnderAFastCadence() {
+        // The suite-staging shape (grounded-run 400 / max-gap 400, an 8-tick fake
+        // chain): the CONFIGURED threshold is the floor — max(400, min(400, 8+2)) =
+        // 400 — so a widened window is never narrowed by the observed cadence.
+        ComboTracker tracker = new ComboTracker(new ComboRules(2, 400, 400, 6.0));
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(8));
+        assertTrue(tracker.active());
+        assertEquals(8.0, tracker.cadenceTicks(), 1.0e-9);
+        for (int tick = 9; tick <= 108; tick += 11) {
+            assertEquals(ComboTransition.Kind.NONE, tracker.onTick(t(tick), true, Double.NaN).kind(),
+                    "a stationary victim under the widened window never grounds out");
+        }
+        assertTrue(tracker.active());
+    }
+
+    @Test
+    void cadenceEmaSeedsBlendsAndResetsWithTheChain() {
+        // Seed on the first gap, α = 0.3 blend on the next: 0.3·18 + 0.7·14 = 15.2.
+        ComboTracker tracker = tracker();
+        tracker.onKnockShipped(A, t(0));
+        tracker.onKnockShipped(A, t(14));
+        assertEquals(14.0, tracker.cadenceTicks(), 1.0e-9, "the first gap seeds the EMA");
+        tracker.onKnockShipped(A, t(32)); // gap 18
+        assertEquals(15.2, tracker.cadenceTicks(), 1.0e-9, "0.3·18 + 0.7·14 = 15.2");
+        // A chain reset (retaliation) forgets the rhythm with the chain.
+        tracker.onOwnHitLanded(t(33));
+        assertTrue(Double.isNaN(tracker.cadenceTicks()), "the cadence is per-chain state");
     }
 
     @Test
