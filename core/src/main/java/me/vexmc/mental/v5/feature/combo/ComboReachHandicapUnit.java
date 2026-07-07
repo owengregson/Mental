@@ -52,12 +52,23 @@ public final class ComboReachHandicapUnit implements FeatureUnit {
             // releases it. Leg 2: sweep online players of any stale handicap and report
             // the degrade line if enabled-but-unsupported. Leg 3: the closer restores
             // every online player inline (belt-and-suspenders to the per-combo
-            // DISABLED-end removal).
+            // DISABLED-end removal). The retain is paired with a release on EVERY exit
+            // path: a throwing enable() must not leak the detection ref-count (a leaked
+            // keeper would hold detection live forever, breaking zero-touch), and the
+            // closer always releases even if disable() throws.
             sessions.retainCombo();
-            reachHandicap.enable();
-            return () -> {
-                reachHandicap.disable();
+            try {
+                reachHandicap.enable();
+            } catch (RuntimeException | Error enableFailed) {
                 sessions.releaseCombo();
+                throw enableFailed;
+            }
+            return () -> {
+                try {
+                    reachHandicap.disable();
+                } finally {
+                    sessions.releaseCombo();
+                }
             };
         });
     }

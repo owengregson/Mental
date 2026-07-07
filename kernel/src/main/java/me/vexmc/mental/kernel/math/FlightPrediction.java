@@ -7,7 +7,7 @@ package me.vexmc.mental.kernel.math;
  * seam the precision round extends</b>: the v1 predictor ({@link
  * PocketServo#predict}) fills {@code constant = d0 − chase} and {@code slope =
  * dragSum}; the precision predictor folds victim self-drift, the launch-state drag
- * branch, ground-tail travel, ping horizons, and the exposure-budget dynamic
+ * branch, ground-tail travel, ping horizons, and the answer-denial boundary
  * target into those same numbers — the {@link PocketServo#sigma} inversion
  * consumes the affine form and never needs to know how it was built.
  *
@@ -24,9 +24,10 @@ package me.vexmc.mental.kernel.math;
  *                    launch-branch drag schedule Σ Π over the flight window).
  * @param windowTicks the flight window the prediction used (the ping-shifted
  *                    horizon), exposed for pins and the debug sink.
- * @param target      the separation the solve steers toward — the config anchor,
- *                    or the resolved exposure-budget dynamic target (§3.3). A
- *                    declined prediction ({@code slope == 0}) carries the anchor.
+ * @param target      the separation the solve steers toward — the answer-denial
+ *                    boundary target, or the STATIC fallback when the geometry is
+ *                    unmeasurable. A declined prediction ({@code slope == 0}) still
+ *                    carries it.
  */
 public record FlightPrediction(double constant, double slope, int windowTicks, double target) {
 

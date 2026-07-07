@@ -586,15 +586,15 @@ public final class HitRegistrationUnit implements FeatureUnit {
     /**
      * The active reach-handicap scale for a swing by the player whose frozen view
      * is {@code attackerView}, or null when the handicap does not shorten their
-     * reach: no combo held against them, COMBO_HOLD off, the sub-feature off, or
-     * the attribute lever absent (below 1.20.5, where vanilla's gate could not
+     * reach: no combo held against them, the sub-feature off, or the attribute lever
+     * absent (below 1.20.5, where vanilla's gate could not
      * enforce it either). Netty-safe: one frozen view read, one snapshot read,
      * and the class-load-constant lever probe.
      */
     @SuppressWarnings("unchecked")
     private Double comboReachHandicapScale(PlayerView attackerView) {
         if (attackerView.comboAttackerId() == null) {
-            return null; // no combo is held against this attacker (implies COMBO_HOLD on)
+            return null; // no combo is held against this attacker (detection runs under either keeper)
         }
         Snapshot current = snapshot.get();
         if (!current.enabled(Feature.COMBO_REACH_HANDICAP) || !ComboReachHandicap.leverSupported()) {
