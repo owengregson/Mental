@@ -134,6 +134,7 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
                 ConnectionDomains.Domain domain = domains.peek(id);
                 if (domain != null) {
                     domain.sprint().onBlockReleased();
+                    domain.resetModel().onBlockRelease();
                 }
             } catch (Throwable ignored) {
                 // An observation listener must never break the inbound pipeline.
@@ -313,7 +314,8 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
         if (!domains.has(id)) {
             return; // no live connection wire (a synthetic/packetless player)
         }
-        SprintWire wire = domains.domainFor(id).sprint();
+        ConnectionDomains.Domain domain = domains.domainFor(id);
+        SprintWire wire = domain.sprint();
         if (!wire.clientSprinting()) {
             // Gate on the RAW client sprint flag — the only signal that survives
             // Mental's own post-hit setSprinting(false)/onServerClear (F3, restoring
@@ -330,6 +332,7 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
         // the block button releases (the RELEASE_USE_ITEM listener below) or a
         // STOP_SPRINTING lowers the raw client flag.
         wire.onBlockSprintReset();
+        domain.resetModel().onBlockRaise(); // a blockhit re-engage — a dynamic-chase reset point (defers the chase to the measured-ring)
         if (!player.isSprinting()) {
             player.setSprinting(true);
         }

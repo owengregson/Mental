@@ -13,6 +13,7 @@ import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
@@ -161,7 +162,10 @@ public final class ComboSuite {
                         attacker.uuid(), victim.uuid(),
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
                         view, mental.sessions().viewOf(attacker.uuid()),
-                        mental.sessions().positions(), new LatencyModel(), mental.clock().current());
+                        mental.sessions().positions(), new LatencyModel(), mental.clock().current(),
+                        // Clientless attackers dispatch past the rim (no domain), so production
+                        // reads ResetModel.UNKNOWN and keeps the measured-ring chase — match it.
+                        ResetModel.UNKNOWN);
                 // D-8: the java.util.Random overload keeps a jvmdowngrader RandomGenerator
                 // stub type out of this cross-jar call's descriptor (a RandomGenerator descriptor
                 // resolves a mismatched per-plugin stub and NoSuchMethodErrors on the v52 tier).

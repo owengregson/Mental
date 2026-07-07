@@ -4,6 +4,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.GroundFsm;
+import me.vexmc.mental.kernel.wire.ResetModelWire;
 import me.vexmc.mental.kernel.wire.SprintWire;
 
 /**
@@ -37,6 +38,7 @@ public final class ConnectionDomains {
 
         private final SprintWire sprint;
         private final GroundFsm ground;
+        private final ResetModelWire resetModel;
         // Volatile: written by this connection's own netty thread (the rim yaw tap)
         // and read cross-thread — the attacker's netty thread at hit-plan time (the
         // hurt-yaw tilt) and, with the pocket-servo precision round, the dynamic
@@ -49,6 +51,7 @@ public final class ConnectionDomains {
         Domain(TickClock clock) {
             this.sprint = new SprintWire(clock);
             this.ground = new GroundFsm(clock);
+            this.resetModel = new ResetModelWire(clock);
         }
 
         public SprintWire sprint() {
@@ -57,6 +60,11 @@ public final class ConnectionDomains {
 
         public GroundFsm ground() {
             return ground;
+        }
+
+        /** The attacker's sprint-reset model — the dynamic-chase phase/technique signal (D1). */
+        public ResetModelWire resetModel() {
+            return resetModel;
         }
 
         /** The last rotation-bearing yaw, tracked for the sprint-jump facing push. */

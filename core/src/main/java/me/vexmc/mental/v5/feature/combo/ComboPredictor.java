@@ -9,6 +9,7 @@ import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.math.VerticalTrim;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
@@ -42,6 +43,15 @@ public final class ComboPredictor {
      * bound that worst case; the per-hit re-solve corrects the residual.
      */
     private static final double DRIFT_SHRINKAGE = 0.7;
+
+    /**
+     * The attacker's ground re-accel ramp factor for the dynamic chase (servo
+     * dynamic-chase spec; the stone ground drag {@code slip × 0.91 = 0.546} the
+     * movement integrator rebuilds sprint speed at — NMS calibration 2026-07-07,
+     * ~95% of sprint in 5 ticks). A flat constant: a chaser is on ground, and the
+     * rare ice edge falls to the measured-ring anyway.
+     */
+    private static final double CHASE_RAMP_FACTOR = 0.546;
 
     /** How many ring samples the drift estimator reads (≥ 3 deltas for the N=3 mean). */
     private static final int DRIFT_SAMPLES = 5;
@@ -128,7 +138,7 @@ public final class ComboPredictor {
             double attackerX, double attackerZ,
             double victimX, double victimZ,
             PlayerView victimView, PlayerView attackerView,
-            PositionRing positions, LatencyModel latency, TickStamp now) {
+            PositionRing positions, LatencyModel latency, TickStamp now, ResetModel attackerReset) {
 
         // The attacker→victim unit axis (pointing away from the attacker).
         double dx = victimX - attackerX;
@@ -174,7 +184,7 @@ public final class ComboPredictor {
 
         double yawVsAxis = yawVsAxisDeg(victimView.yaw(), ux, uz);
 
-        return new PredictorInputs(
+        PredictorInputs base = new PredictorInputs(
                 launchGrounded, slip, slip, launchHeight,
                 driftAxis, chaseAxis, victimView.moveSpeedAttr(),
                 attackerRtt, victimRtt,
@@ -192,6 +202,23 @@ public final class ComboPredictor {
                 victimView.motion().vy(),
                 // The observed inter-hit cadence — the gap-aware window horizon.
                 cadenceAxis);
+
+        // The input-driven dynamic chase (spec 2026-07-07): when the attacker's reset
+        // model is known and they are SPRINTING but NOT blocking, price the chase from
+        // their re-accel ramp over the real window. A blockhitter DEFERS to the
+        // measured-ring chase above — it captures a legacy client's crawl or a modern
+        // one's full sprint empirically, sidestepping the protocol ambiguity. Steady
+        // speed = their sprint ground speed (attribute-scaled); phase = ticks since
+        // their last (re-)engage; ramp = the stone ground drag. UNKNOWN / not-sprinting
+        // ⇒ base — the measured-ring / attribute fallback ladder is left in place.
+        if (attackerReset != null && attackerReset.known()
+                && attackerReset.sprinting() && !attackerReset.blocking()) {
+            double attackerAttr = attackerView != null
+                    ? attackerView.moveSpeedAttr() : PocketServo.WALK_BASELINE;
+            double steadySpeed = PocketServo.SPRINT_GROUND_SPEED * PocketServo.chaseFactor(attackerAttr);
+            return base.withDynamicChase(steadySpeed, attackerReset.phaseTicks(), CHASE_RAMP_FACTOR);
+        }
+        return base;
     }
 
     /**

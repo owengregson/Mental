@@ -25,6 +25,7 @@ import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.model.SprintVerdict;
 import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
@@ -140,6 +141,17 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
     @Override
     public Feature descriptor() {
         return Feature.KNOCKBACK;
+    }
+
+    /**
+     * The attacker's sprint-reset model for the input-driven dynamic chase, read
+     * through the NON-creating {@link ConnectionDomains#peek} (a packetless attacker
+     * has no domain, and {@code domainFor} would poison it) — {@link
+     * ResetModel#UNKNOWN} then, so the servo keeps its measured-ring fallback.
+     */
+    private ResetModel attackerResetModel(UUID attackerId, TickStamp now) {
+        ConnectionDomains.Domain domain = domains.peek(attackerId);
+        return domain != null ? domain.resetModel().modelAt(now) : ResetModel.UNKNOWN;
     }
 
     @Override
@@ -296,7 +308,8 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         PredictorInputs inputs = (servo.active() || verticalTrim.active()) && victimView != null
                 ? ComboPredictor.build(attacker.getUniqueId(), victim.getUniqueId(),
                         attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
-                        victimView, attackerView, sessions.positions(), latency, servoNow)
+                        victimView, attackerView, sessions.positions(), latency, servoNow,
+                        attackerResetModel(attacker.getUniqueId(), servoNow))
                 : PredictorInputs.degraded(victimState.grounded(),
                         victimView != null ? victimView.slipperiness() : Decay.DEFAULT_SLIPPERINESS,
                         victimState.moveSpeedAttr());

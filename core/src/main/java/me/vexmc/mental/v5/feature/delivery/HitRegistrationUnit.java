@@ -29,6 +29,7 @@ import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
+import me.vexmc.mental.kernel.model.ResetModel;
 import me.vexmc.mental.kernel.model.SprintVerdict;
 import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
@@ -133,6 +134,17 @@ public final class HitRegistrationUnit implements FeatureUnit {
     @Override
     public Feature descriptor() {
         return Feature.HIT_REGISTRATION;
+    }
+
+    /**
+     * The attacker's sprint-reset model for the input-driven dynamic chase, read
+     * through the NON-creating {@link ConnectionDomains#peek} (a packetless attacker
+     * has no domain, and {@code domainFor} would poison it) — {@link
+     * ResetModel#UNKNOWN} then, so the servo keeps its measured-ring fallback.
+     */
+    private ResetModel attackerResetModel(UUID attackerId, TickStamp now) {
+        ConnectionDomains.Domain domain = domains.peek(attackerId);
+        return domain != null ? domain.resetModel().modelAt(now) : ResetModel.UNKNOWN;
     }
 
     @Override
@@ -374,7 +386,8 @@ public final class HitRegistrationUnit implements FeatureUnit {
                         ? ComboPredictor.build(attackerId, victimId,
                                 servoAttackerX, servoAttackerZ,
                                 positionX(victimId), positionZ(victimId),
-                                victimView, attackerView, sessions.positions(), latency, servoNow)
+                                victimView, attackerView, sessions.positions(), latency, servoNow,
+                                attackerResetModel(attackerId, servoNow))
                         : PredictorInputs.degraded(
                                 victimView.grounded(), victimView.slipperiness(), victimView.moveSpeedAttr());
                 EntityState preAttacker = preAttackerState(attackerId, attackerView, verdict);
