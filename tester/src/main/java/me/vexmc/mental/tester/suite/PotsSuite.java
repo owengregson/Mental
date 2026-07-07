@@ -1,6 +1,8 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
+import java.util.UUID;
+import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.CommandMaps;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
@@ -75,6 +77,8 @@ public final class PotsSuite {
                         context -> economyPartialFill(mental, tester, context)),
                 new TestCase("fast-pots: a steep throw is redirected at the predicted feet",
                         context -> fastPotRedirected(mental, tester, context)),
+                new TestCase("fast-pots: the thrower velocity reads the position ring, not grounded getVelocity",
+                        context -> fastPotVelocityFromRing(mental, tester, context)),
                 new TestCase("fast-pots: a shallow throw and a lingering potion are untouched",
                         context -> fastPotUntouched(mental, tester, context)));
     }
@@ -281,7 +285,7 @@ public final class PotsSuite {
             // staging is therefore the tagged heal pot every player actually throws,
             // built through the production seam.
             ItemStack healPot = new HealPotItems().createSplashHealPotion();
-            Object[] tagged = throwSplashObserving(context, thrower, 50.0f,
+            Object[] tagged = throwSplashObserving(mental, context, thrower, 50.0f,
                     healPot != null ? healPot : plainPotion("SPLASH_POTION"), launch, settings);
             if (tagged == null) {
                 context.note("this version cannot stage a ThrownPotion launch — fast-pots logic unit-pinned");
@@ -293,7 +297,7 @@ public final class PotsSuite {
             // on the 1.16.x–1.20.4 band it reads back as AIR and exercises the
             // production empty-item fallback; honest tiers read SPLASH_POTION and
             // take the plain path, so the assertion is version-uniform.
-            Object[] tagless = throwSplashObserving(context, thrower, 50.0f,
+            Object[] tagless = throwSplashObserving(mental, context, thrower, 50.0f,
                     plainPotion("SPLASH_POTION"), launch, settings);
             if (tagless == null) {
                 context.note("tagless splash not stageable here — the AIR fallback is unit-pinned");
@@ -302,6 +306,50 @@ public final class PotsSuite {
             assertRedirected(context, tagless, vanillaSpeed, settings, "tagless splash, AIR read band");
         } finally {
             setModule(context, Feature.FAST_POTS, false);
+            context.syncRun(thrower::remove);
+        }
+    }
+
+    /* --------------- 6b. the velocity source (grounded-run behind bug) ---------- */
+
+    /**
+     * The root-cause pin for the "lands behind when running flat" bug: the aim must
+     * read the thrower's velocity from the {@link PositionRing} per-tick delta, NOT
+     * {@link org.bukkit.entity.Player#getVelocity()} — which is ~0 for a player
+     * moving on the GROUND (input-driven movement is client-authoritative; the
+     * server's velocity field is not populated from it), so a getVelocity-based aim
+     * never leads a flat-running thrower. We plant a sprint-speed ground delta in a
+     * ring (feet moving +0.28 b/t in x, y flat) while getVelocity stays ~0, and
+     * assert {@link FastPotsUnit#throwerVelocity} returns the RING delta.
+     */
+    private static void fastPotVelocityFromRing(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer thrower = new FakePlayer(tester, mental.scheduling());
+        try {
+            context.syncRun(() -> {
+                thrower.spawn(Arena.prepare(Bukkit.getWorlds().get(0)));
+                thrower.player().setVelocity(new Vector(0, 0, 0)); // getVelocity ~0, the buggy source
+            });
+            context.awaitTicks(2);
+
+            // A throwaway ring with a flat-ground sprint delta (+0.28 x, y unchanged):
+            // getVelocity cannot see this, the position delta can.
+            UUID id = context.sync(() -> thrower.player().getUniqueId());
+            PositionRing ring = new PositionRing();
+            ring.record(id, 10.0, 64.0, 10.0, 1_000L);
+            ring.record(id, 10.28, 64.0, 10.0, 51_000L);
+
+            Vector fromRing = context.sync(() -> FastPotsUnit.throwerVelocity(thrower.player(), ring));
+            context.expectNear(0.28, fromRing.getX(), 1.0e-9,
+                    "the aim velocity is the position-ring x-delta (flat ground run), not getVelocity");
+            context.expectNear(0.0, fromRing.getY(), 1.0e-9, "flat ground: no y motion");
+            context.expectNear(0.0, fromRing.getZ(), 1.0e-9, "no z motion planted");
+
+            // And the ground getVelocity really is ~0 — the reason the old aim landed behind.
+            Vector grounded = context.sync(() -> thrower.player().getVelocity());
+            context.expect(Math.abs(grounded.getX()) < 0.05,
+                    "grounded getVelocity x is ~0 (the bug's source), got " + grounded.getX());
+        } finally {
             context.syncRun(thrower::remove);
         }
     }
@@ -383,8 +431,8 @@ public final class PotsSuite {
      * {@code [expected, applied]}.
      */
     private static @Nullable Object[] throwSplashObserving(
-            TestContext context, FakePlayer thrower, float pitch, @Nullable ItemStack potionItem,
-            Vector launch, FastPotsSettings settings) throws Exception {
+            MentalPluginV5 mental, TestContext context, FakePlayer thrower, float pitch,
+            @Nullable ItemStack potionItem, Vector launch, FastPotsSettings settings) throws Exception {
         return context.sync(() -> {
             ThrownPotion potion = stagePotion(thrower, pitch, potionItem, launch);
             if (potion == null) {
@@ -393,8 +441,13 @@ public final class PotsSuite {
             try {
                 thrower.player().setVelocity(new Vector(0, 0, 0)); // deterministic predicted feet
                 double vanillaSpeed = potion.getVelocity().length();
+                // The redirect now reads the thrower's velocity from the position ring
+                // (getVelocity is ~0 for a grounded player), so the expected derivation
+                // passes the SAME ring the event handler uses — expected == applied by
+                // construction regardless of whether the fake thrower is ring-tracked.
                 Vector expected = FastPotsUnit.redirect(
-                        potion.getLocation(), thrower.player(), vanillaSpeed, settings);
+                        potion.getLocation(), thrower.player(), vanillaSpeed, settings,
+                        mental.sessions().positions());
                 Bukkit.getPluginManager().callEvent(new ProjectileLaunchEvent(potion));
                 Vector applied = potion.getVelocity().clone();
                 return new Object[] {expected, applied};

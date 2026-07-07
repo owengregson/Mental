@@ -93,6 +93,19 @@ With `d = 0.99`: `H(N) = 99·(1 − 0.99^N)`, `G(N) = 4.95·(N − H(N))`. Worke
 the lead). Constant-velocity extrapolation is the right model here — the thrower is
 actively inputting motion over a 1–3-tick flight, so friction-decay would mispredict.
 
+**`throwerVel` MUST come from the position ring, not `getVelocity()` (2.4.6 fix).**
+`Player.getVelocity()` reads ~0 for a player running on the GROUND — input-driven
+movement is client-authoritative and never lands in the server's velocity field —
+and carries horizontal momentum only mid-jump. A `getVelocity`-based aim therefore
+never leads a flat-running thrower: `feet + vel·(N+lead)` collapses to `feet`
+(0×lead = 0), so the burst plants at the current feet and the moving player has
+already left — it lands BEHIND, and no `lead-ticks` value can fix `0×lead`
+(playtest: still behind at `lead-ticks 5.0`, and correct only mid sprint-jump where
+`getVelocity` briefly carries momentum). `FastPotsUnit.throwerVelocity` reads the
+`PositionRing` per-tick position delta instead — the same client-authoritative
+source `SessionService.buildView`'s `measuredVx/Vz` uses — with a `getVelocity`
+fallback only for an untracked (out-of-combat) thrower.
+
 **Why the un-led aim landed "behind" (owner playtest).** The un-led target
 `feet + vel·N` places the burst at the tick-`N` feet, but the potion's ground burst
 is *not* an instantaneous tick-`N` event: its collision is a swept/AABB test that
@@ -145,11 +158,13 @@ for its `N` ticks and assert the burst lands on the *led* feet).
   (combat-adjacent gameplay math, not the frozen delivery core), exhaustively
   unit-pinnable. All three velocity components are solved independently; the spawn
   `L` is a pure input, never moved.
-- `FastPotsUnit.redirect(launch, thrower, vanillaSpeed, settings)` unchanged
-  signature, returns a `Vector` (drops `ticks`); `minSpeed = vanillaSpeed ×
-  minMultiplier`, `maxSpeed = vanillaSpeed × maxMultiplier`, `leadTicks` from
-  settings. Still reads `thrower.getVelocity()` (owning-thread, region-safe;
-  fresher published view not worth the coupling for a 1–3-tick aim aid).
+- `FastPotsUnit.redirect(launch, thrower, vanillaSpeed, settings, positions)`
+  returns a `Vector` (drops `ticks`); `minSpeed = vanillaSpeed × minMultiplier`,
+  `maxSpeed = vanillaSpeed × maxMultiplier`, `leadTicks` from settings. It reads the
+  thrower's velocity via `throwerVelocity(thrower, positions)` — the `PositionRing`
+  per-tick delta (client-authoritative, correct on the ground), NOT
+  `getVelocity()` — the 2.4.6 "lands behind on flat ground" fix. `FastPotsUnit`
+  holds the injected `PositionRing`; the integration suite pins the velocity source.
 
 ## Invariants
 

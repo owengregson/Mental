@@ -1,6 +1,8 @@
 package me.vexmc.mental.v5.feature.pots;
 
+import java.util.List;
 import java.util.function.Supplier;
+import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.feature.Feature;
@@ -42,9 +44,12 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p>Threading: {@link ProjectileLaunchEvent} fires on the owning region thread,
  * so the velocity write is inline and Folia-safe with no cross-region read. The
- * thrower's measured velocity is {@link Player#getVelocity()} — an owning-thread
- * read; the published session view would be marginally fresher but is not worth
- * the coupling for a short-flight aim aid (documented simplification).</p>
+ * thrower's velocity is the {@link PositionRing} per-tick position delta ({@link
+ * #throwerVelocity}), NOT {@link Player#getVelocity()} — the latter reads ~0 for a
+ * player running on the GROUND (input-driven movement is client-authoritative and
+ * not in the server's velocity field) and only carries momentum mid-jump, so a
+ * getVelocity-based aim never leads a flat-running thrower and the burst lands
+ * behind. The ring is the same client-authoritative source the combat view uses.</p>
  */
 public final class FastPotsUnit implements FeatureUnit, Listener {
 
@@ -56,8 +61,21 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
 
     private final Supplier<Snapshot> snapshot;
 
-    public FastPotsUnit(@NotNull Supplier<Snapshot> snapshot) {
+    /**
+     * The per-player position ring — the thrower's velocity source. {@link
+     * Player#getVelocity()} is ~0 for a player running on the GROUND (movement is
+     * client-authoritative; the server's velocity field is not populated from ground
+     * input), and only carries momentum mid-jump — so an un-led aim built from it
+     * never leads a flat-running thrower and the burst lands behind. The position
+     * ring is the client-authoritative per-tick position delta the whole combat stack
+     * already trusts ({@code SessionService.buildView}'s {@code measuredVx/Vz}); it
+     * reflects real ground movement.
+     */
+    private final PositionRing positions;
+
+    public FastPotsUnit(@NotNull Supplier<Snapshot> snapshot, @NotNull PositionRing positions) {
         this.snapshot = snapshot;
+        this.positions = positions;
     }
 
     @Override
@@ -93,7 +111,7 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
         if (vanillaSpeed < DEGENERATE_SPEED) {
             return; // no launch speed to scale
         }
-        potion.setVelocity(redirect(potion.getLocation(), thrower, vanillaSpeed, settings));
+        potion.setVelocity(redirect(potion.getLocation(), thrower, vanillaSpeed, settings, positions));
     }
 
     /**
@@ -128,9 +146,9 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
      */
     public static @NotNull Vector redirect(
             @NotNull Location launch, @NotNull Player thrower, double vanillaSpeed,
-            @NotNull FastPotsSettings settings) {
+            @NotNull FastPotsSettings settings, @NotNull PositionRing positions) {
         Location feet = thrower.getLocation();
-        Vector throwerVelocity = thrower.getVelocity();
+        Vector throwerVelocity = throwerVelocity(thrower, positions);
         double minSpeed = vanillaSpeed * settings.minSpeedMultiplier();
         double maxSpeed = vanillaSpeed * settings.maxSpeedMultiplier();
         PotsAim.Aim aim = PotsAim.aim(
@@ -139,6 +157,27 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
                 throwerVelocity.getX(), throwerVelocity.getY(), throwerVelocity.getZ(),
                 minSpeed, maxSpeed, settings.leadTicks());
         return new Vector(aim.x(), aim.y(), aim.z());
+    }
+
+    /**
+     * The thrower's real per-tick velocity for the aim — the position-ring delta
+     * between the two most recent samples (client-authoritative, so it reflects flat
+     * GROUND running, which {@link Player#getVelocity()} does not). Falls back to
+     * {@link Player#getVelocity()} only when the ring has fewer than two samples (an
+     * untracked, out-of-combat thrower) — imperfect there, but a self-heal pot is a
+     * combat action, so the thrower is normally tracked and the ring is populated.
+     * Public + static so the integration suite derives the expected redirect through
+     * exactly this seam, not a re-derivation.
+     */
+    public static @NotNull Vector throwerVelocity(@NotNull Player thrower, @NotNull PositionRing positions) {
+        List<PositionRing.Sample> recent = positions.recent(thrower.getUniqueId(), 2);
+        if (recent.size() >= 2) {
+            PositionRing.Sample previous = recent.get(0);
+            PositionRing.Sample latest = recent.get(1);
+            return new Vector(
+                    latest.x() - previous.x(), latest.y() - previous.y(), latest.z() - previous.z());
+        }
+        return thrower.getVelocity();
     }
 
     @SuppressWarnings("unchecked")

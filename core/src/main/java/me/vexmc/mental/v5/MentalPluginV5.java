@@ -710,7 +710,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // feet at a multiplied launch speed.
         reconciler.register(new PotFillUnit(this, this::snapshot, scheduling,
                 message -> getLogger().info(message)));
-        reconciler.register(new FastPotsUnit(this::snapshot));
+        reconciler.register(new FastPotsUnit(this::snapshot, positions));
     }
 
     private Snapshot parseSnapshot() {
