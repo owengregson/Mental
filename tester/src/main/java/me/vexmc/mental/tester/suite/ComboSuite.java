@@ -99,6 +99,8 @@ public final class ComboSuite {
         return List.of(
                 new TestCase("combo: a same-attacker chain scales the fresh knock from the active hit",
                         context -> runChainScenario(mental, tester, context)),
+                new TestCase("combo: a strafing (45°) attacker's servo hit prices the measured alignment",
+                        context -> runStrafeAlignmentScenario(mental, tester, context)),
                 new TestCase("combo: the victim retaliating flips the next knock back to 1.0",
                         context -> runRetaliationScenario(mental, tester, context)),
                 new TestCase("combo: a grounded run flips the next knock back to 1.0",
@@ -187,6 +189,94 @@ public final class ComboSuite {
                     "an active-combo hit must be servo-shaped, not 1.0 (got " + sigma + ")");
             context.expectNear(expected[0], sigma, SIGMA_EPSILON,
                     "the journaled σ must equal the production solve on the same inputs");
+        } finally {
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /* -------------------- scenario 1b: the strafing attacker -------------------- */
+
+    /**
+     * The 2.4.7 strafe fix, end to end: with the combo active, the attacker
+     * "strafes" — stepped diagonally (45° off the live attacker→victim axis,
+     * closing component positive) one small teleport per tick, so the position
+     * ring carries a genuine strafe heading — and the next servo hit must
+     * (a) build inputs whose measured alignment reads cos45-class, (b) journal a σ
+     * equal to the re-derived solve over those same inputs, and (c) stay inside
+     * the honesty clamps. The stationary chain scenario covers the NaN-alignment
+     * (byte-identical) side of the same seam.
+     */
+    private static void runStrafeAlignmentScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            setUp(mental, context, attacker, victim, true);
+            buildActiveCombo(mental, context, attacker, victim);
+
+            // Stage the strafe: five 0.20-block steps, one per tick, each at 45°
+            // off the CURRENT attacker→victim axis with a positive closing
+            // component — the ring's recent(5) then reads a heading whose axis dot
+            // is ≈ cos 45°. Steps ride the owning thread (Folia-safe teleports);
+            // total gap stays far under the combo's maxGapTicks, and the ~0.7
+            // blocks of diagonal close keeps the pair inside attack reach.
+            for (int step = 0; step < 5; step++) {
+                context.syncRun(() -> {
+                    Location a = attacker.player().getLocation();
+                    Location v = victim.player().getLocation();
+                    double dx = v.getX() - a.getX();
+                    double dz = v.getZ() - a.getZ();
+                    double len = Math.sqrt(dx * dx + dz * dz);
+                    double ux = dx / len;
+                    double uz = dz / len;
+                    // Rotate the closing axis +45°: (ux,uz) → ((ux−uz)/√2, (ux+uz)/√2).
+                    double hx = (ux - uz) * Math.sqrt(0.5);
+                    double hz = (ux + uz) * Math.sqrt(0.5);
+                    teleportOnOwningThread(mental, attacker,
+                            a.clone().add(hx * 0.20, 0.0, hz * 0.20));
+                });
+                context.awaitTicks(1);
+            }
+
+            // Re-derive the expected σ from the SAME build + solve in the SAME sync
+            // tick as the attack (the chain scenario's pattern) and capture the
+            // measured alignment the inputs carried.
+            double[] expected = new double[1];
+            double[] alignment = new double[1];
+            int shipsBefore = context.sync(() -> {
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                PlayerView view = session.view();
+                context.expect(view != null && attacker.uuid().equals(view.comboAttackerId()),
+                        "the combo must still be active after the strafe staging");
+                KnockbackProfile profile = KnockbackSuite.profileFor(mental, victim);
+                EntityState attackerState = EntityStates.capture(attacker.player());
+                EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
+                PocketServoConfig servo = comboSettings(mental).servo();
+                PredictorInputs inputs = ComboPredictor.build(
+                        attacker.uuid(), victim.uuid(),
+                        attackerState.x(), attackerState.z(), victimState.x(), victimState.z(),
+                        view, mental.sessions().viewOf(attacker.uuid()),
+                        mental.sessions().positions(), new LatencyModel(), mental.clock().current(),
+                        ResetModel.UNKNOWN);
+                alignment[0] = inputs.chaseAlignment();
+                expected[0] = KnockbackEngine.computePaced(
+                        attackerState, victimState, profile, null, new Random(0L), false, servo, inputs)
+                        .comboFactor();
+                victim.player().setNoDamageTicks(0);
+                int before = countShips(mental, victim);
+                attacker.attack(victim.player());
+                return before;
+            });
+            JournalEntry ship = awaitNewShip(context, mental, victim, shipsBefore);
+            context.expect(ship != null && ship.shipped() != null,
+                    "the strafing-combo hit journaled no SHIP");
+            context.expect(alignment[0] > 0.55 && alignment[0] < 0.85,
+                    "a 45° strafe heading must read a cos45-class alignment (got " + alignment[0] + ")");
+            double sigma = ship.comboFactor();
+            context.expect(sigma >= SERVO_MIN - 1e-9 && sigma <= SERVO_MAX + 1e-9,
+                    "the strafing servo factor must sit inside the [0.93, 1.35] clamps (got " + sigma + ")");
+            context.expectNear(expected[0], sigma, SIGMA_EPSILON,
+                    "the journaled σ must equal the production solve on the same strafe inputs");
         } finally {
             teardown(mental, context, attacker, victim);
         }
