@@ -577,6 +577,25 @@ class PocketServoPrecisionTest {
         assertTrue(Double.isNaN(PocketServo.headingAlignment(0.0, 0.0, 1.0, 0.0)));
     }
 
+    @Test
+    void chaseAlignmentDefaultsNaNAndSurvivesTheRebuildingWithers() {
+        // Every pre-round arity defaults the alignment to NaN — the aligned 1.0
+        // model, byte-identical (the era-exact no-op default of the round).
+        PredictorInputs legacy = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, Double.NaN, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
+        assertTrue(Double.isNaN(legacy.chaseAlignment()), "pre-round arity defaults NaN");
+        assertTrue(Double.isNaN(PredictorInputs.degraded(true, 0.6, 0.10).chaseAlignment()),
+                "the degraded factory defaults NaN");
+        PredictorInputs strafing = legacy.withChaseAlignment(0.71);
+        assertEquals(0.71, strafing.chaseAlignment(), 0.0);
+        // The two REBUILDING withers must CARRY the alignment: dropping it would
+        // silently re-price a strafing touchdown-repriced or dynamic-chase hit as
+        // fully aligned (the exact bug class this round fixes).
+        assertEquals(0.71, strafing.withDynamicChase(0.28, 0, 0.5).chaseAlignment(), 0.0);
+        assertEquals(0.71, strafing.asGroundedLaunch().chaseAlignment(), 0.0);
+    }
+
     /* ── independent fold + brute references (never the production sum code) ─── */
 
     private static double independentLanding(
