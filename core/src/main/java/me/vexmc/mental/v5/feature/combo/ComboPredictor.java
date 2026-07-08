@@ -56,6 +56,15 @@ public final class ComboPredictor {
     private static final int DRIFT_SAMPLES = 5;
 
     /**
+     * How many ring samples the attacker-heading alignment reads (2.4.7 strafe
+     * fix): 5 samples = up to 4 tick deltas — longer than the 3–4-tick w-tap dip
+     * recovery, so one wrong-phase instant cannot flip the DIRECTION read. Only
+     * the direction is consumed (the magnitude dips in a w-tap; the heading
+     * survives it), which is why this sidesteps the 2.4.5 pre-hit-trend lesson.
+     */
+    private static final int ALIGNMENT_SAMPLES = 5;
+
+    /**
      * The shortest inter-hit gap a POST-hit chase window may measure (servo-lab
      * 2.4.5). The era immunity floor keeps landed knocks ≥ ~10 ticks apart
      * (maxHurtResistantTime/2, boundary reads 9), so any shorter "window" is the
@@ -146,6 +155,16 @@ public final class ComboPredictor {
         double ux = len > 1.0e-9 ? dx / len : 0.0;
         double uz = len > 1.0e-9 ? dz / len : 0.0;
 
+        // The measured attacker-heading alignment (2.4.7 strafe fix): the
+        // attacker's net ring displacement over the last few ticks, normalized and
+        // dotted with the knock axis. A strafing (W+A / W+D) attacker reads
+        // ≈ cos 45°; the solve clamps the factor into [cos 45°, 1] and scales its
+        // MODEL chase channels (dynamic, attribute, floor) by it, while the
+        // measured window channel keeps its own axis projection. Too little
+        // movement — or a short ring — reads NaN ⇒ the aligned 1.0 models,
+        // byte-identical for a straight-line chase and for a stationary attacker.
+        double alignmentRaw = attackerHeadingAlignment(positions, attackerId, ux, uz);
+
         // The launch ground state and the grounded-tick tail (below) are BOTH the
         // combo/precision signal, so both read the session's grounded-tick counter —
         // the one honest source (fed by the packetless physical fallback). Deriving
@@ -210,6 +229,11 @@ public final class ComboPredictor {
         // speed = their sprint ground speed (attribute-scaled); phase = ticks since
         // their last (re-)engage; ramp = the stone ground drag. UNKNOWN / not-sprinting
         // ⇒ base — the measured-ring / attribute fallback ladder is left in place.
+        // The heading alignment rides EVERY return path (withDynamicChase carries
+        // it): the dynamic steadySpeed stays technique-resolved only — the kernel
+        // solve resolves the alignment itself from this input, honoring the
+        // DynamicChase caller contract in one place.
+        base = base.withChaseAlignment(alignmentRaw);
         if (attackerReset != null && attackerReset.known()
                 && attackerReset.sprinting() && !attackerReset.blocking()) {
             double attackerAttr = attackerView != null
@@ -276,6 +300,26 @@ public final class ComboPredictor {
         return DriftEstimator.estimate(measured, knock);
     }
 
+    /**
+     * The attacker's ring-heading alignment with the knock axis (2.4.7 strafe
+     * fix): the net displacement over the last {@link #ALIGNMENT_SAMPLES} ring
+     * samples (oldest→newest, the ring's own order), normalized and dotted with
+     * the axis by the kernel {@link PocketServo#headingAlignment}. NaN when the
+     * ring is short or the attacker has not measurably moved — the solve then
+     * prices the aligned 1.0 models, byte-identical.
+     */
+    private static double attackerHeadingAlignment(
+            PositionRing positions, UUID attackerId, double ux, double uz) {
+        List<PositionRing.Sample> ring = positions.recent(attackerId, ALIGNMENT_SAMPLES);
+        if (ring.size() < 2) {
+            return Double.NaN;
+        }
+        PositionRing.Sample first = ring.get(0);
+        PositionRing.Sample last = ring.get(ring.size() - 1);
+        return PocketServo.headingAlignment(
+                last.x() - first.x(), last.z() - first.z(), ux, uz);
+    }
+
     /** The full RTT (ms) from the latency model, or the view's Bukkit ping, or 0 (unavailable → no shift). */
     private static int rttMillis(LatencyModel latency, UUID id, PlayerView view) {
         Double probe = latency.forPlayer(id).pingMillis();
@@ -330,6 +374,7 @@ public final class ComboPredictor {
                 + " shiftV=" + s.shiftVictimTicks() + " airTime=" + s.airTicks()
                 + " aHat=" + fmt(inputs.driftAlongAxis())
                 + " chase=" + fmt(s.chaseRate()) + (s.chaseMeasured() ? "(measured)" : "(model)")
+                + " align=" + fmt(inputs.chaseAlignment())
                 + " yawVsAxis=" + fmt(inputs.victimYawVsAxisDeg())
                 + " yawRateHat=" + fmt(inputs.victimYawRateDegPerTick())
                 + " turn=" + fmt(s.turn()) + " tAllow=" + fmt(s.tAllow())
