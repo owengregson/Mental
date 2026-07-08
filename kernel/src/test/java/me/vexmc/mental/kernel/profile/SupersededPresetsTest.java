@@ -133,4 +133,47 @@ class SupersededPresetsTest {
                     "an owner-edited " + name + " must never be touched");
         }
     }
+
+    /**
+     * The 2.4.8 round extends the floor to the era presets and custom (owner
+     * directive — flat-ground downward knocks were reported on legacy too):
+     * each pre-floor revision (the values as shipped through 2.4.7, −3.9
+     * verticalMin) is verbatim-superseded, the current 0.0-floor bundle is the
+     * target (never re-flagged), and any owner edit is frozen.
+     */
+    @Test
+    void uneditedPreFloorLegacyAndCustomUpgradeButTheCurrentBundlesDoNot() {
+        for (String name : List.of("legacy-1.7", "legacy-1.8", "custom")) {
+            KnockbackProfile current = Presets.ALL.get(name);
+            assertEquals(0.0, current.limits().verticalMin(), 0.0,
+                    name + " must carry the 2.4.8 floor");
+
+            KnockbackProfile preFloor = new KnockbackProfile(
+                    current.name(), current.displayName(), current.description(),
+                    current.base(), current.verticalMode(), current.extra(), current.wtapExtra(),
+                    current.friction(),
+                    new KnockbackProfile.Limits(
+                            current.limits().vertical(), -3.9, current.limits().horizontal()),
+                    current.air(), current.add(), current.rangeReduction(), current.sprintFactor(),
+                    current.combos(), current.meleeDelivery(), current.projectileDelivery(),
+                    current.resistance(), current.shieldBlockingCancels());
+            assertTrue(SupersededPresets.isSupersededVerbatim(name, preFloor),
+                    "an unedited pre-floor " + name + " must upgrade to the 2.4.8 floor");
+            assertFalse(SupersededPresets.isSupersededVerbatim(name, current),
+                    "the current " + name + " bundle is the target, not a superseded revision");
+
+            // An owner edit (any tuned value) is frozen forever, old floor and all.
+            KnockbackProfile edited = new KnockbackProfile(
+                    preFloor.name(), preFloor.displayName(), preFloor.description(),
+                    new KnockbackProfile.Push(
+                            preFloor.base().horizontal() + 0.01, preFloor.base().vertical()),
+                    preFloor.verticalMode(), preFloor.extra(), preFloor.wtapExtra(),
+                    preFloor.friction(), preFloor.limits(), preFloor.air(), preFloor.add(),
+                    preFloor.rangeReduction(), preFloor.sprintFactor(), preFloor.combos(),
+                    preFloor.meleeDelivery(), preFloor.projectileDelivery(),
+                    preFloor.resistance(), preFloor.shieldBlockingCancels());
+            assertFalse(SupersededPresets.isSupersededVerbatim(name, edited),
+                    "an owner-edited " + name + " must never be touched");
+        }
+    }
 }

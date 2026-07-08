@@ -6,6 +6,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
@@ -79,11 +80,23 @@ public final class TestContext {
      */
     public void awaitUntil(@NotNull BooleanSupplier condition, int maxTicks, @NotNull String what)
             throws InterruptedException {
+        awaitUntil(condition, maxTicks, () -> what);
+    }
+
+    /**
+     * As {@link #awaitUntil(BooleanSupplier, int, String)}, but the description
+     * is built lazily AT TIMEOUT TIME — for waits whose failure message should
+     * report the last observed state (a timeout that says only "timed out"
+     * costs a full diagnostic round on a version-specific matrix entry).
+     */
+    public void awaitUntil(
+            @NotNull BooleanSupplier condition, int maxTicks, @NotNull Supplier<String> what)
+            throws InterruptedException {
         for (int tick = 0; tick < maxTicks && !condition.getAsBoolean(); tick++) {
             awaitTicks(1);
         }
         expect(condition.getAsBoolean(),
-                "timed out after " + maxTicks + " ticks waiting for " + what);
+                "timed out after " + maxTicks + " ticks waiting for " + what.get());
     }
 
     public void expect(boolean condition, @NotNull String message) {

@@ -134,7 +134,14 @@ public record KnockbackProfile(
             new Push(0.5, 0.1),
             new WtapExtra(false, 0.5, 0.1),
             new Friction(0.5, 0.5, 0.5),
-            new Limits(0.4, -3.9, -1.0),
+            // verticalMin 0.0 since 2.4.8 — the owner reported downward combo
+            // knocks on the legacy presets too (flat ground, where a faithful
+            // era server never produced one: the divergence is the ledger vy
+            // running past the real flight), so the 2.4.7 practice floor now
+            // covers the whole shipped bundle. This deliberately trades away
+            // the one era-authentic negative (a hit mid-long-fall, motY < −0.8,
+            // kept falling) — an owner directive; restore −3.9 to unfloor.
+            new Limits(0.4, 0.0, -1.0),
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),
             RangeReduction.DISABLED,

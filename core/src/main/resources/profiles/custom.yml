@@ -59,10 +59,11 @@ knockback:
     # Clamps the BASE vertical before bonus levels are added (vanilla
     # ordering: a sprint hit reaches 0.5). Values <= 0 disable.
     vertical: 0.4
-    # Floors the FINAL vertical after every addition. -3.9 (the packet
-    # encoding limit) is a no-op; raise it toward 0 to keep hard downward
-    # residuals from smashing victims into the ground.
-    vertical-min: -3.9
+    # Floors the FINAL vertical after every addition. 0.0 (the 2.4.8 bundle
+    # default, matching legacy-1.7) means a knock never points DOWN; lower it
+    # toward -3.9 (the packet encoding limit, a no-op) to allow hard downward
+    # residuals through.
+    vertical-min: 0.0
     # Caps the post-friction base horizontal magnitude. <= 0 disables.
     horizontal: -1
 

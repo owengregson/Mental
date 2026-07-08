@@ -504,10 +504,11 @@ class KnockbackEngineTest {
                 attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, -2.0, 0, 0), floored, null);
         assertEquals(-0.2, vector.y(), EPSILON);
 
-        // The default floor (−3.9) only restates the packet clamp.
+        // The bundle default floors at 0.0 since 2.4.8 (LEGACY_17 joined the
+        // owner floor): the same hard downward residual ships exactly 0.0.
         KnockbackVector legacy = computed(
                 attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, -2.0, 0, 0), DEFAULTS, null);
-        assertEquals(-0.6, legacy.y(), EPSILON);
+        assertEquals(0.0, legacy.y(), EPSILON);
     }
 
     @Test

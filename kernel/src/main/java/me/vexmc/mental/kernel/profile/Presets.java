@@ -35,7 +35,7 @@ public final class Presets {
             new Push(0.5, 0.1),
             new WtapExtra(false, 0.5, 0.1),
             new Friction(0.5, 0.5, 0.5),
-            new Limits(0.4, -3.9, -1.0),
+            new Limits(0.4, 0.0, -1.0), // verticalMin 0.0 — the 2.4.8 owner floor (see LEGACY_17)
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),
             RangeReduction.DISABLED,
@@ -69,8 +69,9 @@ public final class Presets {
             // real servers' true physics never reached in flat play (every
             // measured era hit-2 vertical is positive; compendium §1.4). velt
             // and signature stay unfloored (friction.y 0.1 puts the threshold
-            // past the −3.92 decay terminal); legacy-1.7/1.8 stay unfloored
-            // (the era law knocks a long-falling victim downward, byte-exact).
+            // past the −3.92 decay terminal); legacy-1.7/1.8 joined the floor
+            // in 2.4.8 (owner-reported flat-ground leaks there too — see
+            // KnockbackProfile.LEGACY_17).
             new Limits(0.4, 0.0, -1.0),
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),

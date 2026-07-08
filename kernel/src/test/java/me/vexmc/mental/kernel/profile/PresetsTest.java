@@ -147,8 +147,10 @@ class PresetsTest {
         // knob (−3.9 was Mental's schema filler), and with it a deep falling
         // ledger vy shipped a DOWNWARD combo knock. velt/signature keep −3.9
         // (friction.y 0.1 puts the leak past the decay terminal — their feel
-        // is pinned untouched), and the era presets keep −3.9 (era vanilla DID
-        // knock long-falling victims downward; legacy stays byte-exact).
+        // is pinned untouched). 2.4.8 extends the floor to the era presets
+        // (owner directive: flat-ground downward knocks were reported on
+        // legacy too — the era-authentic long-fall negative is deliberately
+        // traded away; see KnockbackProfile.LEGACY_17).
         assertEquals(0.0, kohi.limits().verticalMin());
         assertEquals(0.0, mmc.limits().verticalMin());
         assertEquals(0.0, lunar.limits().verticalMin());
@@ -156,8 +158,8 @@ class PresetsTest {
         assertEquals(0.0, badlion.limits().verticalMin());
         assertEquals(-3.9, velt.limits().verticalMin());
         assertEquals(-3.9, signature.limits().verticalMin());
-        assertEquals(-3.9, legacy17.limits().verticalMin());
-        assertEquals(-3.9, legacy18.limits().verticalMin());
+        assertEquals(0.0, legacy17.limits().verticalMin());
+        assertEquals(0.0, legacy18.limits().verticalMin());
 
         // Every OTHER preset stays OFF — archived-server presets are historical
         // records, and OFF is the era-exact no-op.

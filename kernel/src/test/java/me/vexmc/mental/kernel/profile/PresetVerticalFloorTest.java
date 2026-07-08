@@ -21,8 +21,10 @@ import org.junit.jupiter.api.Test;
  * the real servers' true physics never reached the thresholds in flat play —
  * every measured era hit-2 vertical is positive (combat compendium §1.4/§3) —
  * so the five practice presets now floor the final vertical at 0.0 while
- * legacy-1.7/1.8 keep the unfloored era law (era vanilla DID knock long-falling
- * victims downward) and velt/signature stay byte-identical.
+ * velt/signature stay byte-identical. 2.4.8 extended the floor to
+ * legacy-1.7/1.8 and custom (owner directive — flat-ground downward knocks
+ * were reported on legacy too, which a faithful era server never produced;
+ * the era-authentic long-fall negative is deliberately traded away).
  *
  * <p>The staged vy values are the airborne ledger free-fall
  * ({@code vy ← (vy − 0.08) × 0.98}) at the measured combo cadence: −0.78113
@@ -124,12 +126,22 @@ class PresetVerticalFloorTest {
     }
 
     @Test
-    void legacyPresetsKeepTheUnflooredEraLaw() {
-        // Era vanilla DID knock a long-falling victim downward (motY < −0.8):
-        // legacy-1.7 plain @ −2.0 ships 0.5 × −2.0 + 0.4 = −0.6, exactly the
-        // decompiled law — the era presets are deliberately NOT floored.
-        assertEquals(-0.6, shippedY(KnockbackProfile.LEGACY_17, false, airborneVictim(-2.0)), EPSILON);
-        assertEquals(-0.6, shippedY(Presets.LEGACY_18, false, airborneVictim(-2.0)), EPSILON);
+    void legacyPresetsJoinTheFloorInTwoFourEight() {
+        // 2.4.8, owner directive: flat-ground downward knocks were reported on
+        // the legacy presets too (their −0.8/−1.0 thresholds crossing on flat
+        // ground proves the ledger vy runs past the real flight), so the floor
+        // now covers the whole shipped bundle. The pre-floor law shipped
+        // 0.5 × −2.0 + 0.4 = −0.6 here; the floor lifts it to exactly 0.0 —
+        // the one era-authentic negative (a hit mid-long-fall kept falling)
+        // is deliberately traded away.
+        assertEquals(0.0, shippedY(KnockbackProfile.LEGACY_17, false, airborneVictim(-2.0)), EPSILON);
+        assertEquals(0.0, shippedY(Presets.LEGACY_18, false, airborneVictim(-2.0)), EPSILON);
+
+        // Every era-normal legacy hit is untouched by the floor: a faithful
+        // airborne combo hit (jump-curve vy −0.37390 at tick 10) ships
+        // 0.5 × −0.37390 + 0.4 = +0.21305 — positive, byte-identical.
+        assertEquals(0.21305, shippedY(KnockbackProfile.LEGACY_17, false, airborneVictim(-0.37390)), EPSILON);
+        assertEquals(0.21305, shippedY(Presets.LEGACY_18, false, airborneVictim(-0.37390)), EPSILON);
     }
 
     @Test
