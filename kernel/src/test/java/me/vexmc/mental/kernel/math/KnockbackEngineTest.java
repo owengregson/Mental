@@ -510,6 +510,44 @@ class KnockbackEngineTest {
         assertEquals(-0.6, legacy.y(), EPSILON);
     }
 
+    @Test
+    void verticalMinFloorAppliesAfterTheAirMultiplierAndNeverLiftsAPositive() {
+        // The ordering lock for the 2.4.7 practice-floor round: the floor runs
+        // AFTER the air multiplier (engine step 7), so a floored profile clamps
+        // the POST-air vertical. Airborne victim falling at −2.0:
+        //   base y = −2.0 × 0.5 + 0.4 = −0.6, air ×0.5 → −0.3, floor −0.2 → −0.2.
+        // Floor-before-air would yield −0.2 × 0.5 = −0.1 instead — this pin
+        // fails if the ordering ever moves.
+        KnockbackProfile flooredAired = new KnockbackProfile(
+                "floor-air", "Floor air", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
+                DEFAULTS.wtapExtra(), DEFAULTS.friction(),
+                new KnockbackProfile.Limits(0.4, -0.2, -1.0),
+                new KnockbackProfile.Push(1.0, 0.5), DEFAULTS.add(),
+                DEFAULTS.rangeReduction(), 1.0, true, KnockbackDelivery.TRACKER,
+                KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
+        KnockbackVector ordered = computed(
+                attacker(0, 0, 0.0f, false, 0), airborneVictim(0, 4, 0, -2.0, 0), flooredAired, null);
+        assertEquals(-0.2, ordered.y(), EPSILON);
+
+        // A zero floor guarantees a non-negative ship outright on the same input
+        // (−0.6 → air ×0.5 → −0.3 → floored 0.0) …
+        KnockbackProfile zeroFloor = new KnockbackProfile(
+                "floor-zero", "Floor zero", "", DEFAULTS.base(), VerticalMode.ADD, DEFAULTS.extra(),
+                DEFAULTS.wtapExtra(), DEFAULTS.friction(),
+                new KnockbackProfile.Limits(0.4, 0.0, -1.0),
+                new KnockbackProfile.Push(1.0, 0.5), DEFAULTS.add(),
+                DEFAULTS.rangeReduction(), 1.0, true, KnockbackDelivery.TRACKER,
+                KnockbackDelivery.TRACKER, ResistancePolicy.NONE, true);
+        KnockbackVector floored = computed(
+                attacker(0, 0, 0.0f, false, 0), airborneVictim(0, 4, 0, -2.0, 0), zeroFloor, null);
+        assertEquals(0.0, floored.y(), EPSILON);
+
+        // … and NEVER lifts a positive: the grounded opener (0.4) is untouched.
+        KnockbackVector opener = computed(
+                attacker(0, 0, 0.0f, false, 0), victim(0, 4, 0, 0, 0, 0), zeroFloor, null);
+        assertEquals(0.4, opener.y(), EPSILON);
+    }
+
     /* ----------------------- speed-conformal knockback (pace scaling) ----------------------- */
 
     private static final PaceScaling PACE_ATTACKER = new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0);
