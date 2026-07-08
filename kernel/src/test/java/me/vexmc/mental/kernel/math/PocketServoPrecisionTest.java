@@ -596,6 +596,141 @@ class PocketServoPrecisionTest {
         assertEquals(0.71, strafing.asGroundedLaunch().chaseAlignment(), 0.0);
     }
 
+    @Test
+    void alignedApproachIsBitIdenticalWithAndWithoutTheAlignmentInput() {
+        // THE BINDING CONSTRAINT of the strafe round: a straight-line approach —
+        // alignment measured at 1.0, or no signal at all (NaN) — must solve
+        // BIT-identically to the pre-round arity on every channel the alignment
+        // scales. IEEE gives this exactly (1.0 × x == x for every finite x), so the
+        // deltas here are 0.0, not epsilons. This pin FAILS if the alignment fold
+        // perturbs an aligned solve in any way.
+        PredictorInputs floored = touchdown(0.30, -0.35, 0.116);
+        PocketServo.Solution unaligned = PocketServo.solve(
+                SHIPPED_ANCHOR, floored, 2.55, 0.02, 0.325, 0.35716, 0.10);
+        PocketServo.Solution aligned = PocketServo.solve(
+                SHIPPED_ANCHOR, floored.withChaseAlignment(1.0), 2.55, 0.02, 0.325, 0.35716, 0.10);
+        assertEquals(unaligned.sigmaStar(), aligned.sigmaStar(), 0.0,
+                "floor channel: alignment 1.0 is bit-exact");
+        assertEquals(unaligned.sigma(), aligned.sigma(), 0.0);
+        assertEquals(unaligned.chaseTravel(), aligned.chaseTravel(), 0.0);
+        assertEquals(1.496827931, aligned.sigmaStar(), 1.0e-9,
+                "the 2.4.6 hand pin stands untouched under alignment 1.0");
+        // The dynamic channel: alignment 1.0 == the pre-round constant, bit-exact.
+        PredictorInputs dynamic = new PredictorInputs(
+                false, 0.6, 0.6, 0.2, 0.0, 0.28, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0,
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN).withDynamicChase(0.28, 0, 0.5);
+        FlightPrediction dynNaN = PocketServo.predict(SERVO, dynamic, 2.6, 0.0, 0.4, 0.4, 0.10);
+        FlightPrediction dynOne = PocketServo.predict(
+                SERVO, dynamic.withChaseAlignment(1.0), 2.6, 0.0, 0.4, 0.4, 0.10);
+        assertEquals(dynNaN.constant(), dynOne.constant(), 0.0,
+                "dynamic channel: alignment 1.0 is bit-exact");
+    }
+
+    @Test
+    void strafeAlignmentScalesTheChaseFloor() {
+        // The 2.4.7 strafe fix, floor channel: the SAME touchdown hit as the 2.4.6
+        // pin (d0 2.55, R 0.02, F 0.325, grounded reprice, D_g(10) = 4.470559213,
+        // measured chase 0.116 b/t) thrown by a measured forward-strafing attacker
+        // (alignment cos 45°). The floor scales by the stance geometry:
+        //   floor = 0.7071067811865476 · 0.70 · 0.2806 · 1.0 · 10 = 1.388899140
+        //   (measured 1.16 still below → floored)
+        //   σ* = (2.85 − (2.55 − 1.388899140) − 4.470559213·0.02) / (0.325·4.470559213)
+        //      = 1.599487955 / 1.452931744 = 1.100869302
+        // vs the aligned 1.496827931 — the strafe hit no longer rides the max clamp.
+        PocketServo.Solution s = PocketServo.solve(
+                SHIPPED_ANCHOR,
+                touchdown(0.30, -0.35, 0.116).withChaseAlignment(PocketServo.MIN_CHASE_ALIGNMENT),
+                2.55, 0.02, 0.325, 0.35716, 0.10);
+        assertTrue(s.launchRepriced(),
+                "the alignment survives asGroundedLaunch through the touchdown reprice");
+        assertEquals(1.100869302, s.sigmaStar(), 1.0e-9);
+        assertEquals(1.100869302, s.sigma(), 1.0e-9, "interior — off the 1.2 ceiling");
+        // The strafe σ* still lands exactly on target through the independent fold.
+        double landed = independentLanding(
+                touchdown(0.30, -0.35, 0.116)
+                        .withChaseAlignment(PocketServo.MIN_CHASE_ALIGNMENT).asGroundedLaunch(),
+                2.55, 0.02, 0.325, s.sigmaStar(), 0.35716, 0.10, 10);
+        assertEquals(s.target(), landed, EPSILON);
+    }
+
+    @Test
+    void strafeAlignmentHoldsTheAirborneChannelHonest() {
+        // The airborne shape of theChaseFloorPreventsTheAirborneFalseLowMode,
+        // strafing: the scaled floor prices the cos45 stance —
+        //   σ* = (2.85 − (2.55 − 1.388899140) − 6.784265354·0.02) / (0.325·6.784265354)
+        //      = 1.553213833 / 2.204886240 = 0.704441710
+        // The LOWER σ* is correct for a strafing attacker (they close ~29% slower;
+        // the victim needs less push to sit at the same pocket); the min clamp
+        // bounds the reduction — this is honest strafe pricing, not the 2.4.6
+        // false-low mispricing (which was a wrong drag schedule + a diluted
+        // measurement, both unchanged here).
+        PredictorInputs blind = new PredictorInputs(
+                false, 0.6, 0.6, 0.30, 0.0, 0.116, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0)
+                .withChaseAlignment(PocketServo.MIN_CHASE_ALIGNMENT);
+        PocketServo.Solution s = PocketServo.solve(SHIPPED_ANCHOR, blind, 2.55, 0.02, 0.325, 0.35716, 0.10);
+        assertEquals(0.704441710, s.sigmaStar(), 1.0e-9);
+        assertEquals(0.8, s.sigma(), EPSILON, "the min clamp bounds the honest strafe reduction");
+    }
+
+    @Test
+    void strafeAlignmentScalesTheDynamicChase() {
+        // The dynamic-priority shape with a measured strafe heading: projectTravel is
+        // linear in steadySpeed, so the priced travel scales by cos 45° —
+        //   travel   = 0.7071067811865476 · 2.5202734375 = 1.782102438
+        //   constant = 2.6 − 1.782102438 = 0.817897562
+        // The scaled floor (cos45 · 1.9642 = 1.388899140) stays below the scaled
+        // dynamic travel, so the dynamic channel still owns the price.
+        PredictorInputs dynamic = new PredictorInputs(
+                false, 0.6, 0.6, 0.2, 0.0, 0.28, 0.10,
+                -1, -1, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0,
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN)
+                .withDynamicChase(0.28, 0, 0.5)
+                .withChaseAlignment(PocketServo.MIN_CHASE_ALIGNMENT);
+        FlightPrediction dyn = PocketServo.predict(SERVO, dynamic, 2.6, 0.0, 0.4, 0.4, 0.10);
+        assertEquals(0.8178975619, dyn.constant(), 1.0e-9);
+    }
+
+    @Test
+    void strafeGridLandsExactlyOnTarget() {
+        // The exact-inverse property survives the alignment scaling: across launch
+        // branches × stamps × separations × alignments, σ* fed through the
+        // INDEPENDENT fold (which mirrors the alignment-scaled attribute/floor
+        // channels with its own arithmetic) lands on target within 1e-9. Measured
+        // chase NaN → the attribute channel × alignment, which always exceeds the
+        // floor × the SAME alignment (0.2806 > 0.7·0.2806), so the floor stays
+        // inert exactly as in the aligned grid — the ordering is alignment-invariant.
+        double[] alignments = {PocketServo.MIN_CHASE_ALIGNMENT, 0.85, 1.0};
+        double[] verticalStamps = {0.30, 0.35716, 0.40};
+        double[] separations = {2.00, 2.60};
+        int checked = 0;
+        for (boolean grounded : new boolean[] {true, false}) {
+            double launchHeight = grounded ? 0.0 : 0.2;
+            for (double stamp : verticalStamps) {
+                for (double d0 : separations) {
+                    for (double alignment : alignments) {
+                        PredictorInputs in = new PredictorInputs(
+                                grounded, 0.6, 0.6, launchHeight,
+                                0.0, Double.NaN, PocketServo.WALK_BASELINE,
+                                -1, -1, Double.NaN, Double.NaN, Double.NaN, 0.0, 0)
+                                .withChaseAlignment(alignment);
+                        PocketServo.Solution s = PocketServo.solve(
+                                SERVO, in, d0, 0.02, 0.4, stamp, 0.10);
+                        assertFalse(s.declined());
+                        double landed = independentLanding(
+                                in, d0, 0.02, 0.4, s.sigmaStar(), stamp, 0.10, 10);
+                        assertEquals(s.target(), landed, EPSILON,
+                                "σ* lands on target: grounded=" + grounded + " stamp=" + stamp
+                                        + " d0=" + d0 + " align=" + alignment);
+                        checked++;
+                    }
+                }
+            }
+        }
+        assertEquals(36, checked, "the 2×3×2×3 strafe cross exercised");
+    }
+
     /* ── independent fold + brute references (never the production sum code) ─── */
 
     private static double independentLanding(
@@ -630,14 +765,19 @@ class PocketServoPrecisionTest {
         double tail = (g > 0 && in.driftAlongAxis() != 0.0)
                 ? Math.signum(in.driftAlongAxis()) * (0.98 * groundAttr) * bruteGroundSum(g, sqLand)
                 : 0.0;
-        // Chase — mirror the solve's measured/attribute rate AND the 2.4.6
-        // chase-alignment floor (the independent fold verifies the affine inversion,
-        // so it must model the same floored chase the solve prices).
+        // Chase — mirror the solve's measured/attribute rate, the 2.4.6
+        // chase-alignment floor, AND the 2.4.7 strafe-alignment scaling of the
+        // MODEL channels (re-stated locally, deliberately NOT calling the
+        // production chaseAlignmentFactor — the fold stays independent). The
+        // measured channel is never alignment-scaled, matching the solve.
+        double align = Double.isNaN(in.chaseAlignment())
+                ? 1.0
+                : Math.max(Math.sqrt(0.5), Math.min(1.0, in.chaseAlignment()));
         double chaseRate = !Double.isNaN(in.chaseAlongAxis())
                 ? in.chaseAlongAxis()
-                : 0.2806 * ((attrA > 0 ? attrA : 0.10) / 0.10);
+                : align * 0.2806 * ((attrA > 0 ? attrA : 0.10) / 0.10);
         double chaseTravel = Math.max(chaseRate * wPrime,
-                PocketServo.CHASE_ALIGNMENT * PocketServo.SPRINT_GROUND_SPEED
+                align * PocketServo.CHASE_ALIGNMENT * PocketServo.SPRINT_GROUND_SPEED
                         * ((attrA > 0 ? attrA : 0.10) / 0.10) * wPrime);
         return d0 + knockTravel + driftTravel + tail - chaseTravel;
     }
