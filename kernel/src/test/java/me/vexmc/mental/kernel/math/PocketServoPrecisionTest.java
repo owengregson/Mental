@@ -540,6 +540,43 @@ class PocketServoPrecisionTest {
         assertEquals(0.36, blended, 1.0e-9);
     }
 
+    /* ── the strafe chase alignment (2.4.7) ────────────────────────────────── */
+
+    @Test
+    void chaseAlignmentFactorClampsTheStrafeBand() {
+        // NaN (no heading signal) → the aligned 1.0 — byte-identical to every
+        // pre-round solve. This is the era-exact no-op default of the round.
+        assertEquals(1.0, PocketServo.chaseAlignmentFactor(Double.NaN), 0.0);
+        // A measured dot inside the band passes through untouched.
+        assertEquals(0.9, PocketServo.chaseAlignmentFactor(0.9), EPSILON);
+        assertEquals(PocketServo.MIN_CHASE_ALIGNMENT,
+                PocketServo.chaseAlignmentFactor(PocketServo.MIN_CHASE_ALIGNMENT), 0.0);
+        // Above-aligned (numeric overshoot) clamps to 1.0; an orbit or backpedal
+        // clamps to cos 45° — the servo never prices a sub-strafe or negative
+        // chase off one noisy heading (the combo end rules own those stances).
+        assertEquals(1.0, PocketServo.chaseAlignmentFactor(1.2), 0.0);
+        assertEquals(PocketServo.MIN_CHASE_ALIGNMENT, PocketServo.chaseAlignmentFactor(0.3), 0.0);
+        assertEquals(PocketServo.MIN_CHASE_ALIGNMENT, PocketServo.chaseAlignmentFactor(-0.5), 0.0);
+        // The band floor is cos 45° exactly — the deepest crosshair-on-victim
+        // stance (moveFlying normalizes W+A to pure-W magnitude rotated 45°).
+        assertEquals(0.7071067811865476, PocketServo.MIN_CHASE_ALIGNMENT, 0.0);
+    }
+
+    @Test
+    void headingAlignmentIsTheNormalizedAxisDot() {
+        // A diagonal heading on a +x axis reads cos 45°: (1,1)/√2 · (1,0).
+        assertEquals(0.7071067811865476, PocketServo.headingAlignment(1.0, 1.0, 1.0, 0.0), EPSILON);
+        // Straight down the axis reads 1 — magnitude is irrelevant once measurable.
+        assertEquals(1.0, PocketServo.headingAlignment(0.6, 0.8, 0.6, 0.8), EPSILON);
+        // Backpedal reads the negative dot RAW — clamping is chaseAlignmentFactor's
+        // job, so a lab consumer can still see the true stance.
+        assertEquals(-1.0, PocketServo.headingAlignment(-0.5, 0.0, 1.0, 0.0), EPSILON);
+        // Standing jitter (|heading| < 0.05 blocks over the span) has no direction:
+        // NaN, never a division by the near-zero magnitude.
+        assertTrue(Double.isNaN(PocketServo.headingAlignment(0.03, 0.03, 1.0, 0.0)));
+        assertTrue(Double.isNaN(PocketServo.headingAlignment(0.0, 0.0, 1.0, 0.0)));
+    }
+
     /* ── independent fold + brute references (never the production sum code) ─── */
 
     private static double independentLanding(
