@@ -21,6 +21,12 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile.WtapExtra;
  * the real servers' archived configs and corrected kohi's era model
  * (1.7.10 lineage → ledger combos); the revisions below are what those
  * presets shipped between 1.3.0 and 1.7.0.</p>
+ *
+ * <p>The 2.4.7 downward-knock round floors the five practice presets'
+ * {@code limits.verticalMin} at {@code 0.0} (the archives carried no vertical
+ * floor knob — {@code −3.9} was Mental's schema filler, and it let a deep
+ * falling ledger vy ship a DOWNWARD combo knock); the {@code *_1_8} revisions
+ * below are those presets exactly as shipped 1.8.0 → 2.4.6.</p>
  */
 public final class SupersededPresets {
 
@@ -88,6 +94,115 @@ public final class SupersededPresets {
             KnockbackDelivery.TRACKER,
             KnockbackDelivery.TRACKER,
             ResistancePolicy.LEGACY,
+            true);
+
+    /** kohi as shipped 1.8.0 → 2.4.6: the archived values with the −3.9 verticalMin filler. */
+    private static final KnockbackProfile KOHI_1_8 = new KnockbackProfile(
+            "kohi",
+            "Kohi",
+            "The canonical Kohi/HCF values — lower base, smaller per-level bonus"
+                    + " (0.425/0.085), 1.7.10 ledger combos.",
+            new Push(0.35, 0.35),
+            VerticalMode.ADD,
+            new Push(0.425, 0.085),
+            new WtapExtra(false, 0.425, 0.085),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            true,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true);
+
+    /** mmc as shipped 1.8.0 → 2.4.6: the archived values with the −3.9 verticalMin filler. */
+    private static final KnockbackProfile MMC_1_8 = new KnockbackProfile(
+            "mmc",
+            "MMC",
+            "Minemen Club's archived dev123 (2017) values — soft base, full"
+                    + " vanilla sprint bonus, flat 1.8 delivery.",
+            new Push(0.32, 0.32),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5556, 0.5556, 0.5556),
+            new Limits(0.4, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.IMMEDIATE,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true);
+
+    /** lunar as shipped 1.8.0 → 2.4.6: the archived values with the −3.9 verticalMin filler. */
+    private static final KnockbackProfile LUNAR_1_8 = new KnockbackProfile(
+            "lunar",
+            "Lunar",
+            "Lunar Network's archived S5 values — heavy base, high residual"
+                    + " survival, weak sprint differential.",
+            new Push(0.54, 0.44),
+            VerticalMode.ADD,
+            new Push(0.38, 0.0),
+            new WtapExtra(false, 0.38, 0.0),
+            new Friction(0.6849, 0.7634, 0.6849),
+            new Limits(0.361735, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.IMMEDIATE,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true);
+
+    /** minehq as shipped 1.8.0 → 2.4.6: the archived values with the −3.9 verticalMin filler. */
+    private static final KnockbackProfile MINEHQ_1_8 = new KnockbackProfile(
+            "minehq",
+            "MineHQ",
+            "MineHQ's archived HCF values — between Kohi and vanilla, 1.7.10 ledger combos.",
+            new Push(0.36, 0.36),
+            VerticalMode.ADD,
+            new Push(0.45, 0.09),
+            new WtapExtra(false, 0.45, 0.09),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            true,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true);
+
+    /** badlion as shipped 1.8.0 → 2.4.6: the archived values with the −3.9 verticalMin filler. */
+    private static final KnockbackProfile BADLION_1_8 = new KnockbackProfile(
+            "badlion",
+            "Badlion",
+            "Badlion's archived NoDebuff values — soft base 0.34, strong sprint"
+                    + " differential, 1.7 ledger combos.",
+            new Push(0.34, 0.34),
+            VerticalMode.ADD,
+            new Push(0.48, 0.085),
+            new WtapExtra(false, 0.48, 0.085),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            true,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
             true);
 
     /**
@@ -183,9 +298,11 @@ public final class SupersededPresets {
             new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0));
 
     private static final Map<String, List<KnockbackProfile>> BY_PRESET = Map.of(
-            "kohi", List.of(KOHI_1_3),
-            "mmc", List.of(MMC_1_3),
-            "lunar", List.of(LUNAR_1_3),
+            "kohi", List.of(KOHI_1_3, KOHI_1_8),
+            "mmc", List.of(MMC_1_3, MMC_1_8),
+            "lunar", List.of(LUNAR_1_3, LUNAR_1_8),
+            "minehq", List.of(MINEHQ_1_8),
+            "badlion", List.of(BADLION_1_8),
             "signature", List.of(SIGNATURE_2_2_0, SIGNATURE_2_2_1, SIGNATURE_2_4_0));
 
     private SupersededPresets() {}

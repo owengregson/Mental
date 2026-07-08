@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -89,5 +90,47 @@ class SupersededPresetsTest {
                 new PaceScaling(PaceScaling.Mode.ATTACKER, 0.8, 0.5, 2.0));
         assertFalse(SupersededPresets.isSupersededVerbatim("signature", editedExponent),
                 "an owner-tuned exponent must never be touched");
+    }
+
+    /**
+     * The 2.4.7 practice-floor round: each practice preset's pre-floor revision
+     * (as shipped 1.8.0 → 2.4.6 — the current values with the −3.9 verticalMin
+     * filler) is verbatim-superseded, the current 0.0-floor bundle is the
+     * target (never re-flagged, no upgrade loop), and any owner edit is frozen.
+     */
+    @Test
+    void uneditedPreFloorPracticePresetsUpgradeButTheCurrentBundlesDoNot() {
+        for (String name : List.of("kohi", "mmc", "lunar", "minehq", "badlion")) {
+            KnockbackProfile current = Presets.ALL.get(name);
+            assertEquals(0.0, current.limits().verticalMin(), 0.0,
+                    name + " must carry the 2.4.7 practice floor");
+
+            KnockbackProfile preFloor = new KnockbackProfile(
+                    current.name(), current.displayName(), current.description(),
+                    current.base(), current.verticalMode(), current.extra(), current.wtapExtra(),
+                    current.friction(),
+                    new KnockbackProfile.Limits(
+                            current.limits().vertical(), -3.9, current.limits().horizontal()),
+                    current.air(), current.add(), current.rangeReduction(), current.sprintFactor(),
+                    current.combos(), current.meleeDelivery(), current.projectileDelivery(),
+                    current.resistance(), current.shieldBlockingCancels());
+            assertTrue(SupersededPresets.isSupersededVerbatim(name, preFloor),
+                    "an unedited pre-floor " + name + " must upgrade to the 2.4.7 floor");
+            assertFalse(SupersededPresets.isSupersededVerbatim(name, current),
+                    "the current " + name + " bundle is the target, not a superseded revision");
+
+            // An owner edit (any tuned value) is frozen forever, old floor and all.
+            KnockbackProfile edited = new KnockbackProfile(
+                    preFloor.name(), preFloor.displayName(), preFloor.description(),
+                    new KnockbackProfile.Push(
+                            preFloor.base().horizontal() + 0.01, preFloor.base().vertical()),
+                    preFloor.verticalMode(), preFloor.extra(), preFloor.wtapExtra(),
+                    preFloor.friction(), preFloor.limits(), preFloor.air(), preFloor.add(),
+                    preFloor.rangeReduction(), preFloor.sprintFactor(), preFloor.combos(),
+                    preFloor.meleeDelivery(), preFloor.projectileDelivery(),
+                    preFloor.resistance(), preFloor.shieldBlockingCancels());
+            assertFalse(SupersededPresets.isSupersededVerbatim(name, edited),
+                    "an owner-edited " + name + " must never be touched");
+        }
     }
 }
