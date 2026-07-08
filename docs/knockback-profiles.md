@@ -53,6 +53,19 @@ archaeology, flagged fakes — is in
 and the archive verification in
 [research/2026-06-12-archived-server-values.md](research/2026-06-12-archived-server-values.md).
 
+**The practice floor (2.4.7).** The five archived practice presets (`kohi`,
+`minehq`, `badlion`, `mmc`, `lunar`) ship `limits.vertical-min: 0.0`: a knock
+never points DOWN. The archives carried no vertical floor knob (`-3.9` was
+Mental's schema filler, a no-op), and the ADD vertical
+(`vy × friction.y + base.vertical`) goes negative once a falling victim's
+residual `vy` runs past `−(base + extra) / friction.y` — −0.58 … −0.90 on these
+presets, thresholds the archived servers' true physics never reached in flat
+play. `velt` and `signature` are untouched (`friction.y 0.1` puts their
+thresholds past the −3.92 decay terminal — the bug's own immunity pattern), and
+the era presets (`legacy-1.7`, `legacy-1.8`) deliberately keep the unfloored
+era law: real 1.7/1.8 DID knock a long-falling victim downward
+(`motY < −0.8`), and legacy stays byte-exact to it.
+
 ## The knob vocabulary
 
 Everything lives under `knockback:` in a profile file. Defaults (shown) are
@@ -76,7 +89,9 @@ knockback:
                             # victim's residual motion (see the hazard note)
   limits:
     vertical: 0.4           # clamps the BASE vertical, before bonuses
-    vertical-min: -3.9      # floors the FINAL vertical; -3.9 = off
+    vertical-min: -3.9      # floors the FINAL vertical (post-air-multiplier);
+                            # -3.9 = off. The five archived practice presets
+                            # ship 0.0 — a knock never points DOWN (2.4.7)
     horizontal: -1          # caps the post-friction base; <= 0 = off
   air: {horizontal: 1.0, vertical: 1.0}    # multipliers for airborne victims
   add: {horizontal: 0.0, vertical: 0.0}    # flat post-formula offsets,
