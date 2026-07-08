@@ -116,7 +116,37 @@ public record PredictorInputs(
         // measured-ring / attribute chase). Both NaN sentinels gate the dynamic branch off.
         double chaseSteadySpeed,
         int resetPhaseTicks,
-        double chaseRampFactor) {
+        double chaseRampFactor,
+        // The measured attacker-heading alignment (2.4.7 strafe fix): the RAW
+        // normalized dot of the attacker's recent movement heading with the knock
+        // axis (PocketServo.headingAlignment) — +1 straight chase, ≈ +0.7071 full
+        // forward-strafe, ≤ 0 orbit/backpedal. The solve clamps it into
+        // [cos 45°, 1] (PocketServo.chaseAlignmentFactor) and scales every MODEL
+        // chase channel (dynamic, attribute, floor) by it; the measured window
+        // channel is already axis-projected and is never scaled. NaN ⇒ the aligned
+        // 1.0 — byte-identical to every pre-round solve.
+        double chaseAlignment) {
+
+    /**
+     * The pre-strafe-alignment arity (2.4.7 strafe fix): every input through the
+     * input-driven dynamic chase, with NO measured attacker-heading alignment —
+     * {@code chaseAlignment} defaults to {@link Double#NaN}, so every model chase
+     * channel prices the aligned 1.0. Keeps every caller and pin that predates the
+     * strafe round compiling — and solving byte-identically.
+     */
+    public PredictorInputs(
+            boolean launchGrounded, double launchSlip, double landingSlip, double launchHeight,
+            double driftAlongAxis, double chaseAlongAxis, double victimNormalizedSpeed,
+            int attackerRttMillis, int victimRttMillis, double attackerHeadY, double victimEyeHeight,
+            double victimYawVsAxisDeg, double victimYawRateDegPerTick, int groundedTicks,
+            double priorChaseEma, double priorDynamicTarget, double launchVerticalVelocity,
+            double cadenceEmaTicks, double chaseSteadySpeed, int resetPhaseTicks, double chaseRampFactor) {
+        this(launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
+                victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
+                launchVerticalVelocity, cadenceEmaTicks, chaseSteadySpeed, resetPhaseTicks, chaseRampFactor,
+                Double.NaN);
+    }
 
     /**
      * The pre-dynamic-chase arity (2026-07-07 servo dynamic chase): every input through
@@ -204,7 +234,7 @@ public record PredictorInputs(
                 attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
                 victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks,
                 priorChaseEma, priorDynamicTarget, Double.NaN, cadenceEmaTicks,
-                chaseSteadySpeed, resetPhaseTicks, chaseRampFactor);
+                chaseSteadySpeed, resetPhaseTicks, chaseRampFactor, chaseAlignment);
     }
 
     /**
@@ -220,7 +250,24 @@ public record PredictorInputs(
                 launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
                 victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
                 victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
-                launchVerticalVelocity, cadenceEmaTicks, steadySpeed, phaseTicks, rampFactor);
+                launchVerticalVelocity, cadenceEmaTicks, steadySpeed, phaseTicks, rampFactor,
+                chaseAlignment);
+    }
+
+    /**
+     * This input set with the measured attacker-heading alignment attached (2.4.7
+     * strafe fix): the raw normalized dot of the attacker's recent ring heading
+     * with the knock axis ({@link PocketServo#headingAlignment}). The solve clamps
+     * it into {@code [cos 45°, 1]} and scales the MODEL chase channels by it; NaN
+     * leaves every channel at the aligned 1.0 — byte-identical.
+     */
+    public PredictorInputs withChaseAlignment(double alignment) {
+        return new PredictorInputs(
+                launchGrounded, launchSlip, landingSlip, launchHeight, driftAlongAxis, chaseAlongAxis,
+                victimNormalizedSpeed, attackerRttMillis, victimRttMillis, attackerHeadY, victimEyeHeight,
+                victimYawVsAxisDeg, victimYawRateDegPerTick, groundedTicks, priorChaseEma, priorDynamicTarget,
+                launchVerticalVelocity, cadenceEmaTicks, chaseSteadySpeed, resetPhaseTicks, chaseRampFactor,
+                alignment);
     }
 
     /**

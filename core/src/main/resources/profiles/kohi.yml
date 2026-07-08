@@ -45,7 +45,12 @@ knockback:
     z: 0.5
   limits:
     vertical: 0.4
-    vertical-min: -3.9
+    # 0.0 since 2.4.7: a knock never points DOWN. The archived config carried
+    # no vertical floor knob (-3.9 was Mental's schema filler); the ADD
+    # vertical (vy x friction.y + base.vertical) went negative once a falling
+    # victim's residual vy passed -0.87 (sprint) — a downward combo hit the
+    # real server's flat play never produced. Restore -3.9 to unfloor.
+    vertical-min: 0.0
     horizontal: -1
   air:
     horizontal: 1.0

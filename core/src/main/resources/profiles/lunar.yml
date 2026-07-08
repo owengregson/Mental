@@ -48,7 +48,9 @@ knockback:
   limits:
     # Below the 0.44 base on purpose: every grounded hit pins at the cap.
     vertical: 0.361735
-    vertical-min: -3.9
+    # 0.0 since 2.4.7: a knock never points DOWN (the archives carried no
+    # vertical floor knob; kohi.yml has the full story). Restore -3.9 to unfloor.
+    vertical-min: 0.0
     horizontal: -1
   air:
     horizontal: 1.0

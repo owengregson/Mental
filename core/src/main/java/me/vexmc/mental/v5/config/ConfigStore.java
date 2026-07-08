@@ -124,7 +124,7 @@ public final class ConfigStore {
             Files.writeString(file, current, StandardCharsets.UTF_8);
             log.accept("profiles/" + preset + ".yml carried a superseded bundled revision"
                     + " unedited — upgraded to the corrected values"
-                    + " (research 2026-06-12; delete the file to regenerate anytime)");
+                    + " (delete the file to regenerate anytime)");
         } catch (IOException failure) {
             log.accept("Could not upgrade profiles/" + preset + ".yml: " + failure);
         }

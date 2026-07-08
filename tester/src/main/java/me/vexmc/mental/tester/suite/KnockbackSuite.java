@@ -61,7 +61,9 @@ public final class KnockbackSuite {
                 new TestCase("knockback: a packetless attacker's sprint hit never poisons its ledger feed",
                         context -> runDomainPoisonScenario(mental, tester, context)),
                 new TestCase("knockback: a packetless victim's server-side melee always journals a SHIP",
-                        context -> runPacketlessMeleeJournalScenario(mental, tester, context)));
+                        context -> runPacketlessMeleeJournalScenario(mental, tester, context)),
+                new TestCase("knockback: an airborne leak-class hit on a practice preset never ships a downward knock",
+                        context -> runAirborneFloorScenario(mental, tester, context)));
     }
 
     /**
@@ -105,6 +107,121 @@ public final class KnockbackSuite {
                             + " no-velocity-event net regressed (F1)");
         } finally {
             context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+        }
+    }
+
+    /**
+     * The 2.4.7 downward-knock pin (the owner's "2nd airborne combo hit knocks
+     * DOWN" bug). The ADD vertical (vy × friction.y + base.vertical) goes
+     * negative once the victim's LEDGER vy falls past −(base + extra)/friction.y
+     * — kohi sprint: −0.87 — which a free-falling airborne ledger reaches
+     * ~15–20 ticks after an airborne hit. velt/signature were immune
+     * (friction.y 0.1); every practice preset leaked. The fix floors the five
+     * practice presets' final vertical at 0.0 (limits.vertical-min), and this
+     * stages exactly the leak class live and asserts the SHIP through the
+     * journal — the "what did we actually ship" seam: y ≥ 0, exactly the
+     * floored 0.0, and exactly the engine expectation (formula parity survives
+     * the floor; the floored value is also tick-slack-immune, since one more
+     * decay tick only deepens the pre-floor negative).
+     *
+     * <p>Staging: a clientless fake never moves from a knock and never lands its
+     * ledger through the rim, so the ledger is driven airborne PHYSICALLY — the
+     * per-tick upward motion (the ComboSuite float pattern) keeps the honest
+     * combat-ground feed reading airborne, hit 1 records its stamp on the
+     * airborne ledger branch, and the ledger then free-falls
+     * (vy ← (vy − 0.08) × 0.98) into the leak zone while the victim stays
+     * airborne. Latency compensation is disabled for the case so the region
+     * path carries no vy override and the in-suite engine expectation (null
+     * override) is exact.</p>
+     */
+    private static void runAirborneFloorScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            context.syncRun(() -> {
+                mental.overlaySet("modules.latency-compensation", false);
+                mental.reloadAll();
+                context.expect(mental.management().setGlobalProfile("kohi"), "kohi preset missing");
+            });
+            context.awaitTicks(3);
+            context.expect(context.sync(() ->
+                            profileFor(mental, victim).limits().verticalMin() == 0.0),
+                    "kohi must carry the 2.4.7 practice floor (vertical-min 0.0)");
+
+            // Float the victim so the honest feed reads airborne every tick and
+            // hit 1 records on the airborne ledger branch (the ComboSuite pattern).
+            context.syncRun(() -> victim.preTick(() -> victim.setMotion(0.0, 0.42, 0.0)));
+            context.awaitTicks(4);
+
+            // Hit 1: an airborne sprint hit — the ledger now carries the shipped
+            // stamp and free-falls tick by tick.
+            context.syncRun(() -> {
+                attacker.player().setSprinting(true);
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+            });
+
+            // Wait for the free-fall to cross the leak threshold with margin:
+            // kohi sprint ships negative below vy −0.87; −1.0 gives a pre-floor
+            // y of −1.0 × 0.5 + 0.35 + 0.085 = −0.065 — unambiguously leak-class.
+            CombatSession session = mental.sessions().sessionFor(victim.uuid());
+            context.expect(session != null, "no combat session for the victim");
+            context.awaitUntil(() -> {
+                try {
+                    return context.sync(() ->
+                            EntityStates.captureVictim(victim.player(), session.ledger()).vy() <= -1.0);
+                } catch (Exception failure) {
+                    return false;
+                }
+            }, 80, "the airborne ledger to free-fall into the leak zone (vy <= -1.0)");
+
+            // Hit 2 — the reported downward hit. Same-tick engine expectation
+            // (null override: latency compensation is off for this case).
+            KnockbackVector[] expected = new KnockbackVector[1];
+            double[] ledgerVy = new double[1];
+            int shipsBefore = context.sync(() -> {
+                EntityState attackerState = EntityStates.capture(attacker.player());
+                EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
+                ledgerVy[0] = victimState.vy();
+                KnockbackProfile profile = profileFor(mental, victim);
+                expected[0] = SuiteDelivery.melee(
+                        KnockbackEngine.compute(attackerState, victimState, profile, null),
+                        profile, victimState.grounded());
+                victim.player().setNoDamageTicks(0);
+                int before = countShips(mental, victim);
+                attacker.attack(victim.player());
+                return before;
+            });
+            context.expect(ledgerVy[0] <= -1.0,
+                    "staging failed — the ledger vy must be leak-class (got " + ledgerVy[0] + ")");
+
+            JournalEntry ship = awaitNewShip(context, mental, victim, shipsBefore);
+            context.expect(ship != null && ship.shipped() != null,
+                    "the airborne leak-class hit journaled no SHIP");
+            context.expect(ship.shipped().y() >= 0.0,
+                    "a practice-preset knock must NEVER point down (shipped y "
+                            + ship.shipped().y() + " off ledger vy " + ledgerVy[0] + ")");
+            context.expectNear(0.0, ship.shipped().y(), 1.0e-9,
+                    "the leak-class hit must ship exactly the floored 0.0 vertical");
+            context.expect(expected[0] != null, "engine returned no vector for the staged hit");
+            context.expectNear(expected[0].y(), ship.shipped().y(), 1.0e-9,
+                    "the journaled SHIP must equal the engine expectation (formula parity)");
+        } finally {
+            context.syncRun(() -> {
+                victim.preTick(null);
+                mental.overlaySet("modules.latency-compensation", true);
+                mental.reloadAll();
+                mental.management().setGlobalProfile("legacy-1.7");
                 attacker.remove();
                 victim.remove();
             });

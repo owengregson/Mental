@@ -92,6 +92,28 @@ public final class PocketServo {
      */
     public static final double CHASE_ALIGNMENT = 0.70;
 
+    /**
+     * The floor of the measured chase-alignment band (2.4.7 strafe fix): cos 45°.
+     * A combo attacker steers with the crosshair ON the victim, so the deepest
+     * sustained stance their velocity can hold off the knock axis is the full
+     * forward-strafe (W+A / W+D) — moveFlying normalizes the (0.98, 0.98) diagonal
+     * input to the pure-W impulse magnitude and rotates it 45° off facing
+     * (dynamic-chase-movement-constants §3a). Below this the attacker is not
+     * meaningfully chasing (an orbit or a backpedal) and the combo's own end rules
+     * are the honest authority, so a noisier / lower measured dot clamps here
+     * instead of over-shrinking the priced chase into a strafe-flavoured 2.4.6
+     * undershoot.
+     */
+    public static final double MIN_CHASE_ALIGNMENT = Math.sqrt(0.5);
+
+    /**
+     * The least attacker net displacement (blocks, over the sampled heading span)
+     * that counts as a measurable heading. Below it the direction is standing
+     * jitter, not movement — the alignment degrades to {@link Double#NaN} (⇒ the
+     * aligned 1.0 model, byte-identical to the pre-round solve).
+     */
+    public static final double MIN_HEADING_BLOCKS = 0.05;
+
     /** Below this the fresh knock or the flight window is effectively nil; the servo declines (σ = 1). */
     private static final double EPSILON = 1.0e-9;
 
@@ -454,6 +476,20 @@ public final class PocketServo {
                         * groundLocomotion(groundTicks, sqLand, INPUT_DAMPING * groundAttr)
                 : 0.0;
 
+        // (4a) The measured attacker-heading alignment (2.4.7 strafe fix). Every
+        // MODEL channel below prices the chase as if the attacker's velocity lay
+        // ON the knock axis — true for a straight-line (W) pursuit, but a strafing
+        // (W+A / W+D) attacker's velocity sits 45° off their crosshair (moveFlying
+        // normalizes the diagonal input to the pure-W magnitude, rotated 45° off
+        // facing), so their true axis-closing rate is cos 45° ≈ 0.7071 of their
+        // speed and the aligned models over-price the close by ~41% — σ*
+        // over-solves and the strafe combo overshoots the pocket by up to ~0.8
+        // blocks (the 2.4.7 strafe dossier). The MEASURED window channel is never
+        // scaled: axis projection is its definition, so it already embodies the
+        // strafe geometry. NaN (no heading signal) resolves to 1.0 —
+        // byte-identical for every straight-line and pre-round solve.
+        double alignment = chaseAlignmentFactor(inputs.chaseAlignment());
+
         // (4) Chase — the input-driven dynamic chase (ramp-aware, over the ACTUAL
         // window) when the reset model is present, else the measured attacker-velocity
         // trend, else the 0.2806×attr model (spec 2026-07-07; the fallback ladder).
@@ -462,9 +498,12 @@ public final class PocketServo {
         boolean chaseMeasured;
         if (!Double.isNaN(inputs.chaseRampFactor()) && !Double.isNaN(inputs.chaseSteadySpeed())) {
             // The attacker's ramped re-accel out of their sprint reset, projected over
-            // the flight window from the observed reset phase.
+            // the flight window from the observed reset phase. The alignment resolves
+            // HERE: DynamicChase's contract wants an already-alignment-resolved
+            // steadySpeed, and this solve is that caller.
             chaseTravel = DynamicChase.projectTravel(
-                    inputs.chaseSteadySpeed(), inputs.resetPhaseTicks(), inputs.chaseRampFactor(), wPrime);
+                    alignment * inputs.chaseSteadySpeed(), inputs.resetPhaseTicks(),
+                    inputs.chaseRampFactor(), wPrime);
             chaseRate = wPrime > 0 ? chaseTravel / wPrime : 0.0;
             chaseMeasured = true;
         } else if (!Double.isNaN(inputs.chaseAlongAxis())) {
@@ -472,7 +511,7 @@ public final class PocketServo {
             chaseTravel = chaseRate * wPrime;
             chaseMeasured = true;
         } else {
-            chaseRate = SPRINT_GROUND_SPEED * chaseFactor(attackerNormalizedSpeed);
+            chaseRate = alignment * SPRINT_GROUND_SPEED * chaseFactor(attackerNormalizedSpeed);
             chaseTravel = chaseRate * wPrime;
             chaseMeasured = false;
         }
@@ -487,8 +526,14 @@ public final class PocketServo {
         // aligned-sprint rate for an ACTIVE combo (the attacker is closing by
         // definition); a genuinely harder measured chase still exceeds the floor and
         // wins. This is the single lever that lands σ in the calibrated band.
-        double alignedFloorTravel =
-                CHASE_ALIGNMENT * SPRINT_GROUND_SPEED * chaseFactor(attackerNormalizedSpeed) * wPrime;
+        // Since 2.4.7 the floor itself scales by the measured heading alignment:
+        // CHASE_ALIGNMENT (0.70) is the STRAIGHT-line effectiveness fraction (w-tap
+        // dip + imperfect tracking, the 2.4.6 calibration), the alignment factor is
+        // the stance GEOMETRY — a forward-strafing attacker's floor is cos 45°
+        // lower, which is exactly the over-price that pushed strafe combos out of
+        // reach. At alignment 1.0 the product is bit-identical to the 2.4.6 floor.
+        double alignedFloorTravel = alignment
+                * CHASE_ALIGNMENT * SPRINT_GROUND_SPEED * chaseFactor(attackerNormalizedSpeed) * wPrime;
         if (chaseTravel < alignedFloorTravel) {
             chaseTravel = alignedFloorTravel;
             chaseRate = wPrime > 0 ? chaseTravel / wPrime : 0.0;
@@ -675,6 +720,43 @@ public final class PocketServo {
             return Double.NaN;
         }
         return ((x - anchorX) * ux + (z - anchorZ) * uz) / gapTicks;
+    }
+
+    /**
+     * The attacker's movement-heading alignment with the knock axis (2.4.7 strafe
+     * fix): the dot of the NORMALIZED horizontal heading {@code (headingX,
+     * headingZ)} — the attacker's net displacement over the last few ticks — with
+     * the attacker→victim unit axis {@code (ux, uz)}. +1 = chasing straight down
+     * the axis; ≈ +0.7071 = a full forward-strafe (W+A / W+D); ≤ 0 = orbiting or
+     * backpedaling. Returned RAW (unclamped) so consumers can observe the true
+     * stance; the solve clamps through {@link #chaseAlignmentFactor}. A heading
+     * shorter than {@link #MIN_HEADING_BLOCKS} is standing jitter — no measurable
+     * direction — and returns {@link Double#NaN} without dividing.
+     */
+    public static double headingAlignment(double headingX, double headingZ, double ux, double uz) {
+        double magnitude = Math.sqrt(headingX * headingX + headingZ * headingZ);
+        if (!(magnitude >= MIN_HEADING_BLOCKS)) {
+            return Double.NaN;
+        }
+        return (headingX * ux + headingZ * uz) / magnitude;
+    }
+
+    /**
+     * The chase-alignment factor the MODEL channels price (2.4.7 strafe fix):
+     * {@link Double#NaN} (no signal) resolves to the aligned 1.0 — byte-identical
+     * to every pre-round solve — and a measured dot clamps into
+     * {@code [MIN_CHASE_ALIGNMENT, 1.0]}. The low clamp is deliberate: below
+     * cos 45° the attacker is not in a crosshair-on-victim chase stance and the
+     * combo's own end rules (gap / blowout / retaliation) own the outcome — the
+     * servo must not price a near-zero or NEGATIVE chase off one noisy heading (a
+     * w-tap instant, or the attacker's own received knock), which would over-shrink
+     * σ and resurrect the 2.4.6 undershoot in strafe form.
+     */
+    public static double chaseAlignmentFactor(double alignment) {
+        if (Double.isNaN(alignment)) {
+            return 1.0;
+        }
+        return Math.max(MIN_CHASE_ALIGNMENT, Math.min(1.0, alignment));
     }
 
     /* ── shared flight helpers ────────────────────────────────────────────── */

@@ -142,6 +142,23 @@ class PresetsTest {
         // Speed-III feel tune.
         assertEquals(new PaceScaling(PaceScaling.Mode.ATTACKER, 0.95, 0.5, 2.0), signature.paceScaling());
 
+        // 2.4.7 — the practice floor: the five archived practice presets floor
+        // the FINAL vertical at 0.0. The archives carried no vertical floor
+        // knob (−3.9 was Mental's schema filler), and with it a deep falling
+        // ledger vy shipped a DOWNWARD combo knock. velt/signature keep −3.9
+        // (friction.y 0.1 puts the leak past the decay terminal — their feel
+        // is pinned untouched), and the era presets keep −3.9 (era vanilla DID
+        // knock long-falling victims downward; legacy stays byte-exact).
+        assertEquals(0.0, kohi.limits().verticalMin());
+        assertEquals(0.0, mmc.limits().verticalMin());
+        assertEquals(0.0, lunar.limits().verticalMin());
+        assertEquals(0.0, minehq.limits().verticalMin());
+        assertEquals(0.0, badlion.limits().verticalMin());
+        assertEquals(-3.9, velt.limits().verticalMin());
+        assertEquals(-3.9, signature.limits().verticalMin());
+        assertEquals(-3.9, legacy17.limits().verticalMin());
+        assertEquals(-3.9, legacy18.limits().verticalMin());
+
         // Every OTHER preset stays OFF — archived-server presets are historical
         // records, and OFF is the era-exact no-op.
         for (KnockbackProfile profile : profiles.values()) {

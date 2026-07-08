@@ -61,7 +61,17 @@ public final class Presets {
             new Push(0.425, 0.085),
             new WtapExtra(false, 0.425, 0.085),
             new Friction(0.5, 0.5, 0.5),
-            new Limits(0.4, -3.9, -1.0),
+            // verticalMin 0.0 — the 2.4.7 practice floor. The archived configs
+            // carried NO vertical floor knob (−3.9 was Mental's schema filler,
+            // a no-op), and the ADD vertical (vy × friction.y + base.vertical)
+            // ships DOWNWARD once a falling ledger vy passes
+            // −(base + extra) / friction.y (kohi sprint: −0.87) — a leak the
+            // real servers' true physics never reached in flat play (every
+            // measured era hit-2 vertical is positive; compendium §1.4). velt
+            // and signature stay unfloored (friction.y 0.1 puts the threshold
+            // past the −3.92 decay terminal); legacy-1.7/1.8 stay unfloored
+            // (the era law knocks a long-falling victim downward, byte-exact).
+            new Limits(0.4, 0.0, -1.0),
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),
             RangeReduction.DISABLED,
@@ -88,7 +98,7 @@ public final class Presets {
             new Push(0.5, 0.1),
             new WtapExtra(false, 0.5, 0.1),
             new Friction(0.5556, 0.5556, 0.5556),
-            new Limits(0.4, -3.9, -1.0),
+            new Limits(0.4, 0.0, -1.0), // verticalMin 0.0 — the 2.4.7 practice floor (see KOHI)
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),
             RangeReduction.DISABLED,
@@ -114,7 +124,7 @@ public final class Presets {
             new Push(0.38, 0.0),
             new WtapExtra(false, 0.38, 0.0),
             new Friction(0.6849, 0.7634, 0.6849),
-            new Limits(0.361735, -3.9, -1.0),
+            new Limits(0.361735, 0.0, -1.0), // verticalMin 0.0 — the 2.4.7 practice floor (see KOHI)
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),
             RangeReduction.DISABLED,
@@ -135,7 +145,7 @@ public final class Presets {
             new Push(0.45, 0.09),
             new WtapExtra(false, 0.45, 0.09),
             new Friction(0.5, 0.5, 0.5),
-            new Limits(0.4, -3.9, -1.0),
+            new Limits(0.4, 0.0, -1.0), // verticalMin 0.0 — the 2.4.7 practice floor (see KOHI)
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),
             RangeReduction.DISABLED,
@@ -161,7 +171,7 @@ public final class Presets {
             new Push(0.48, 0.085),
             new WtapExtra(false, 0.48, 0.085),
             new Friction(0.5, 0.5, 0.5),
-            new Limits(0.4, -3.9, -1.0),
+            new Limits(0.4, 0.0, -1.0), // verticalMin 0.0 — the 2.4.7 practice floor (see KOHI)
             new Push(1.0, 1.0),
             new Push(0.0, 0.0),
             RangeReduction.DISABLED,
