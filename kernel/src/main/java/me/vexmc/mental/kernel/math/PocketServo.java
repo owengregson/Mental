@@ -77,6 +77,21 @@ public final class PocketServo {
     /** The walk-stance movement-speed baseline (0.1 player base) — the chase-factor denominator. */
     public static final double WALK_BASELINE = 0.10;
 
+    /**
+     * The chase-alignment / effectiveness fraction (2.4.6 undershoot fix): the
+     * share of full straight-line sprint a real combo attacker's close actually
+     * realizes over the flight window — imperfect alignment to the axis plus the
+     * per-hit w-tap dip (a real reset dips to ≈0.55× sprint and recovers in 3–4
+     * ticks, dynamic-chase-movement-constants §3b). Used as the chase FLOOR for an
+     * active combo: the measured post-hit window averages the whole inter-hit gap
+     * and under-reads the post-knock chase burst, so without this floor σ* sinks
+     * into the false-low min-clamp (the measured undershoot). Calibrated so σ*
+     * centres near 1.0–1.1 at a typical mid-combo residual, landing inside the
+     * {@code [0.93, 1.35]} clamp band (owner playtest, 2026-07-07). A genuinely
+     * harder MEASURED chase still exceeds the floor and is used as-is.
+     */
+    public static final double CHASE_ALIGNMENT = 0.70;
+
     /** Below this the fresh knock or the flight window is effectively nil; the servo declines (σ = 1). */
     private static final double EPSILON = 1.0e-9;
 
@@ -459,6 +474,24 @@ public final class PocketServo {
         } else {
             chaseRate = SPRINT_GROUND_SPEED * chaseFactor(attackerNormalizedSpeed);
             chaseTravel = chaseRate * wPrime;
+            chaseMeasured = false;
+        }
+
+        // (4b) The chase-alignment floor (2.4.6 undershoot fix). A real combo
+        // attacker's straight-line effective close is a FRACTION of full sprint
+        // (imperfect alignment + the per-hit w-tap dip), but the MEASURED window
+        // averages the attacker's NET displacement over the whole inter-hit gap and
+        // under-reads the harder post-knock chase burst the solve actually prices —
+        // driving σ* into the false-low min-clamp (the measured 1.4-block window
+        // solves σ*≈0.36–0.86 where the victim needs ≈1.0). Floor the chase at the
+        // aligned-sprint rate for an ACTIVE combo (the attacker is closing by
+        // definition); a genuinely harder measured chase still exceeds the floor and
+        // wins. This is the single lever that lands σ in the calibrated band.
+        double alignedFloorTravel =
+                CHASE_ALIGNMENT * SPRINT_GROUND_SPEED * chaseFactor(attackerNormalizedSpeed) * wPrime;
+        if (chaseTravel < alignedFloorTravel) {
+            chaseTravel = alignedFloorTravel;
+            chaseRate = wPrime > 0 ? chaseTravel / wPrime : 0.0;
             chaseMeasured = false;
         }
 

@@ -58,7 +58,7 @@ public record ComboSettings(
     /** The design defaults (§3.1/§3.2/§3.2b). The MODULE toggle — not this record — is what makes it a no-op. */
     public static final ComboSettings DEFAULTS =
             new ComboSettings(2, 20, 10, 6.0,
-                    PocketServoConfig.DEFAULT_STATIC_TARGET, 1.0, 0.8, 1.2, 10,
+                    PocketServoConfig.DEFAULT_STATIC_TARGET, 1.0, 0.93, 1.35, 10,
                     TargetMode.BOUNDARY, PocketServoConfig.DEFAULT_REACH, PocketServoConfig.DEFAULT_REACH,
                     PocketServoConfig.DEFAULT_DENY_MARGIN, PocketServoConfig.DEFAULT_JITTER_MARGIN,
                     PocketServoConfig.DEFAULT_TARGET_FLOOR);

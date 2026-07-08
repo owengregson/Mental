@@ -239,6 +239,25 @@ public final class DeliveryDesk {
      * has no velocity event coming, so it is journaled immediately.
      */
     public void sweep(TickStamp now) {
+        sweep(now, false);
+    }
+
+    /**
+     * As {@link #sweep(TickStamp)}, but a CONNECTED victim's still-awaiting melee is
+     * NEVER time-dropped (2.4.6 vanilla-knockback leak fix). A connected victim's
+     * genuine {@code PlayerVelocityEvent} is the sole delivery authority for its
+     * melee and can land a tick or two late under Folia region/counter skew or a
+     * lagging main thread; dropping the pending early as {@code no-velocity-event}
+     * lets that late event {@code resolve} against nothing (or an F6-recorded
+     * terminal) and PASS_THROUGH vanilla's OWN velocity — which for an airborne
+     * combo hit is vanilla's KEPT falling-y, i.e. a DOWNWARD knock infiltrating (the
+     * preset-wide symptom). Holding it means the late event always finds the pending
+     * and ships Mental's era vector, overriding vanilla. A genuinely orphaned
+     * connected pending is superseded by the next hit ({@link #replacePending}); only
+     * a PACKETLESS victim — no velocity event ever coming — is dropped here, in step
+     * with the stranded-packetless net's own {@code domains.has} gate.
+     */
+    public void sweep(TickStamp now, boolean victimConnected) {
         drainWire();
         if (pending == null) {
             return;
@@ -248,12 +267,14 @@ public final class DeliveryDesk {
             return; // same tick (its velocity event may still come) or an unknown clock
         }
         if (LIVE.contains(pending.state())) {
-            if (now.value() - registeredAt.value() >= 2) {
+            // A connected victim's velocity event is authoritative and merely late —
+            // never time-drop it, or vanilla's velocity infiltrates on the late resolve.
+            if (!victimConnected && now.value() - registeredAt.value() >= 2) {
                 pending.dropped("no-velocity-event");
                 record(pending, null, false, "no-velocity-event");
                 clearDecision();
             }
-            return; // age 1: hold one more tick for the Folia skew window (F6)
+            return; // age 1, or connected: hold for the (authoritative) velocity event
         }
         // Already resolved but not recorded — no velocity event is coming, so
         // journal it now (tick-causal, never a valve).

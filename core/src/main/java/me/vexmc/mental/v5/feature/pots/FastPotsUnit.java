@@ -1,6 +1,8 @@
 package me.vexmc.mental.v5.feature.pots;
 
+import java.util.List;
 import java.util.function.Supplier;
+import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.feature.Feature;
@@ -26,12 +28,15 @@ import org.jetbrains.annotations.NotNull;
  * <p>When a {@link ThrownPotion} whose item is a splash potion is launched by a
  * player looking down more steeply than {@code angle-degrees} (Bukkit pitch >
  * threshold), the launch velocity is re-aimed by {@link PotsAim}, which solves the
- * exact discrete potion flight so the burst lands ON the thrower's predicted feet
- * — extrapolated over the short flight from the thrower's current per-tick velocity
- * — spending the least speed up to {@code speed-multiplier ×} the vanilla launch
- * speed (the multiplier is a ceiling, not a fixed speed). The potion's spawn is
- * never moved; only its velocity is solved. Shallower throws are left byte-for-byte
- * untouched (zero-touch outside the band),
+ * exact discrete potion flight so the burst lands just in front of the thrower's
+ * predicted feet — extrapolated over the short flight from the thrower's current
+ * per-tick velocity and led forward by {@code lead-ticks} so a running player moves
+ * INTO the cloud — spending the least speed <em>within</em> the {@code
+ * [min-speed-multiplier, max-speed-multiplier] × vanilla} band (default {@code
+ * [0.5, 1.5]×}). The band is the only lever on which impact tick is reachable; every
+ * velocity component stays free and the potion's spawn is never moved (velocity-only
+ * redirect). Shallower throws are left byte-for-byte untouched (zero-touch outside
+ * the band),
  * and LINGERING potions are excluded (their item is {@code LINGERING_POTION}, not
  * {@code SPLASH_POTION}) — this aids the instant splash self-heal, not the ground
  * cloud. What counts as a splash potion is {@link #splashItem(String)} — including
@@ -39,9 +44,12 @@ import org.jetbrains.annotations.NotNull;
  *
  * <p>Threading: {@link ProjectileLaunchEvent} fires on the owning region thread,
  * so the velocity write is inline and Folia-safe with no cross-region read. The
- * thrower's measured velocity is {@link Player#getVelocity()} — an owning-thread
- * read; the published session view would be marginally fresher but is not worth
- * the coupling for a short-flight aim aid (documented simplification).</p>
+ * thrower's velocity is the {@link PositionRing} per-tick position delta ({@link
+ * #throwerVelocity}), NOT {@link Player#getVelocity()} — the latter reads ~0 for a
+ * player running on the GROUND (input-driven movement is client-authoritative and
+ * not in the server's velocity field) and only carries momentum mid-jump, so a
+ * getVelocity-based aim never leads a flat-running thrower and the burst lands
+ * behind. The ring is the same client-authoritative source the combat view uses.</p>
  */
 public final class FastPotsUnit implements FeatureUnit, Listener {
 
@@ -53,8 +61,21 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
 
     private final Supplier<Snapshot> snapshot;
 
-    public FastPotsUnit(@NotNull Supplier<Snapshot> snapshot) {
+    /**
+     * The per-player position ring — the thrower's velocity source. {@link
+     * Player#getVelocity()} is ~0 for a player running on the GROUND (movement is
+     * client-authoritative; the server's velocity field is not populated from ground
+     * input), and only carries momentum mid-jump — so an un-led aim built from it
+     * never leads a flat-running thrower and the burst lands behind. The position
+     * ring is the client-authoritative per-tick position delta the whole combat stack
+     * already trusts ({@code SessionService.buildView}'s {@code measuredVx/Vz}); it
+     * reflects real ground movement.
+     */
+    private final PositionRing positions;
+
+    public FastPotsUnit(@NotNull Supplier<Snapshot> snapshot, @NotNull PositionRing positions) {
         this.snapshot = snapshot;
+        this.positions = positions;
     }
 
     @Override
@@ -90,7 +111,7 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
         if (vanillaSpeed < DEGENERATE_SPEED) {
             return; // no launch speed to scale
         }
-        potion.setVelocity(redirect(potion.getLocation(), thrower, vanillaSpeed, settings));
+        potion.setVelocity(redirect(potion.getLocation(), thrower, vanillaSpeed, settings, positions));
     }
 
     /**
@@ -116,23 +137,47 @@ public final class FastPotsUnit implements FeatureUnit, Listener {
     /**
      * The redirected launch velocity for a fast pot — public and production-derived
      * so the integration suite asserts against exactly this, not a re-derivation.
-     * {@link PotsAim} solves the exact discrete potion flight to land the burst ON
-     * the thrower's predicted feet, spending the least launch speed up to the cap
-     * {@code multiplier × vanillaSpeed} (the multiplier is a ceiling, not a fixed
-     * speed — the returned magnitude is {@code ≤} the cap).
+     * {@link PotsAim} solves the exact discrete potion flight to land the burst just
+     * in front of the thrower's predicted feet (led forward by {@code lead-ticks}),
+     * spending the least launch speed <em>within</em> the {@code [min, max] ×
+     * vanillaSpeed} band — so the returned magnitude is bounded into that band, never
+     * a fixed speed. The spawn ({@code launch}) is passed through untouched; only the
+     * velocity is solved.
      */
     public static @NotNull Vector redirect(
             @NotNull Location launch, @NotNull Player thrower, double vanillaSpeed,
-            @NotNull FastPotsSettings settings) {
+            @NotNull FastPotsSettings settings, @NotNull PositionRing positions) {
         Location feet = thrower.getLocation();
-        Vector throwerVelocity = thrower.getVelocity();
-        double speedCap = vanillaSpeed * settings.speedMultiplier();
+        Vector throwerVelocity = throwerVelocity(thrower, positions);
+        double minSpeed = vanillaSpeed * settings.minSpeedMultiplier();
+        double maxSpeed = vanillaSpeed * settings.maxSpeedMultiplier();
         PotsAim.Aim aim = PotsAim.aim(
                 launch.getX(), launch.getY(), launch.getZ(),
                 feet.getX(), feet.getY(), feet.getZ(),
                 throwerVelocity.getX(), throwerVelocity.getY(), throwerVelocity.getZ(),
-                speedCap);
+                minSpeed, maxSpeed, settings.leadTicks());
         return new Vector(aim.x(), aim.y(), aim.z());
+    }
+
+    /**
+     * The thrower's real per-tick velocity for the aim — the position-ring delta
+     * between the two most recent samples (client-authoritative, so it reflects flat
+     * GROUND running, which {@link Player#getVelocity()} does not). Falls back to
+     * {@link Player#getVelocity()} only when the ring has fewer than two samples (an
+     * untracked, out-of-combat thrower) — imperfect there, but a self-heal pot is a
+     * combat action, so the thrower is normally tracked and the ring is populated.
+     * Public + static so the integration suite derives the expected redirect through
+     * exactly this seam, not a re-derivation.
+     */
+    public static @NotNull Vector throwerVelocity(@NotNull Player thrower, @NotNull PositionRing positions) {
+        List<PositionRing.Sample> recent = positions.recent(thrower.getUniqueId(), 2);
+        if (recent.size() >= 2) {
+            PositionRing.Sample previous = recent.get(0);
+            PositionRing.Sample latest = recent.get(1);
+            return new Vector(
+                    latest.x() - previous.x(), latest.y() - previous.y(), latest.z() - previous.z());
+        }
+        return thrower.getVelocity();
     }
 
     @SuppressWarnings("unchecked")

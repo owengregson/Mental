@@ -86,8 +86,8 @@ public final class ComboSuite {
     private static final double SIGMA_EPSILON = 1.0e-6;
     /** Tolerance for a byte-identity vector compare (era stamps are exact; float slack only). */
     private static final double VECTOR_EPSILON = 1.0e-9;
-    private static final double SERVO_MIN = 0.8;
-    private static final double SERVO_MAX = 1.2;
+    private static final double SERVO_MIN = 0.93;
+    private static final double SERVO_MAX = 1.35;
     private static final String DEFAULT_PROFILE = "legacy-1.7";
     /** Ticks between chain hits — below the default grounded-run so a stationary fake never grounds out. */
     private static final int CADENCE_TICKS = 8;
@@ -182,7 +182,7 @@ public final class ComboSuite {
             context.expect(ship != null && ship.shipped() != null, "the active-combo hit journaled no SHIP");
             double sigma = ship.comboFactor();
             context.expect(sigma >= SERVO_MIN - 1e-9 && sigma <= SERVO_MAX + 1e-9,
-                    "the servo factor must sit inside the [0.8, 1.2] honesty clamps (got " + sigma + ")");
+                    "the servo factor must sit inside the [0.93, 1.35] honesty clamps (got " + sigma + ")");
             context.expect(Math.abs(sigma - 1.0) > 1e-6,
                     "an active-combo hit must be servo-shaped, not 1.0 (got " + sigma + ")");
             context.expectNear(expected[0], sigma, SIGMA_EPSILON,

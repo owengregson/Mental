@@ -298,11 +298,12 @@ modules:
   pot-fill: false
   # fast-pots: the classic "fast pot" self-heal, made reliable. When you throw a
   # splash potion while looking down more steeply than fast-pots.angle-degrees,
-  # Mental re-aims it at your own feet (predicting where they will be by the time
-  # it lands) and multiplies its speed, so the splash lands on you instantly.
-  # Throws shallower than the angle are left completely untouched, and LINGERING
-  # potions are never redirected (this aids the instant splash, not the cloud).
-  # Tuned in the fast-pots section below. Default OFF.
+  # Mental re-aims it just in front of your own feet (predicting where they will be
+  # by the time it lands, and leading slightly so you run INTO the cloud), within a
+  # bounded speed band, so the splash lands on you reliably. Throws shallower than
+  # the angle are left completely untouched, and LINGERING potions are never
+  # redirected (this aids the instant splash, not the cloud). Tuned in the fast-pots
+  # section below. Default OFF.
   fast-pots: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
@@ -348,9 +349,11 @@ modules:
 # Vertical is deliberately never touched — the profile's launch height buys the
 # vertical margin the geometry reads.
 #   gain         blends toward the full exact solve (1.0 = exact; lower softens).
-#   min-factor   } the honesty clamps on the knock multiplier. [0.8, 1.2] is the
-#   max-factor   } stronger hold; past them the pocket is honestly lost and era
-#                  physics wins rather than the servo forcing a non-era knock.
+#   min-factor   } the honesty clamps on the knock multiplier. [0.93, 1.35] is the
+#   max-factor   } calibrated band (2.4.6 undershoot fix): the servo's chase floor
+#                  centres sigma near 1.0-1.1, so the floor rarely pulls below 0.93
+#                  and the ceiling admits the harder "apply more" closes; past them
+#                  the pocket is honestly lost and era physics wins over a non-era knock.
 #   window-ticks the cadence horizon (t*) the flight is projected over — the era
 #                full-hit cadence (10). The predictor already folds the shipped
 #                vertical stamp's air-time, ping horizons and the ground tail into
@@ -393,8 +396,8 @@ modules:
 #  grounded-run-ticks: 10
 #  blowout-blocks: 6.0
 #  gain: 1.0
-#  min-factor: 0.8
-#  max-factor: 1.2
+#  min-factor: 0.93
+#  max-factor: 1.35
 #  window-ticks: 10
 #  target-mode: boundary
 #  target: 2.85
@@ -466,14 +469,14 @@ modules:
 #  cost-per-potion: 0.0
 
 # Fast pots, active when modules.fast-pots is true. Redirects a steeply-thrown
-# splash potion at your own feet at a multiplied speed.
+# splash potion just in front of your own feet within a bounded speed band.
 #
-# angle-degrees:    how far below the horizon your throw must aim before the
-#                   redirect kicks in, as a Bukkit pitch threshold (pitch is 0
-#                   at the horizon and +90 looking straight down). The redirect
-#                   fires when your pitch is GREATER than this value; shallower
-#                   throws are left completely untouched. Clamped to [0, 90].
-#                   Default 35.0.
+# angle-degrees:       how far below the horizon your throw must aim before the
+#                      redirect kicks in, as a Bukkit pitch threshold (pitch is 0
+#                      at the horizon and +90 looking straight down). The redirect
+#                      fires when your pitch is GREATER than this value; shallower
+#                      throws are left completely untouched. Clamped to [0, 90].
+#                      Default 35.0.
 #
 #                        horizon ── 0° ───────────────  (never redirected)
 #                                    \
@@ -485,13 +488,30 @@ modules:
 #                                          \ re-aimed at your feet
 #                        straight down ── 90°
 #
-# speed-multiplier: the factor applied to the potion's normal launch speed for
-#                   the redirected throw. Higher = the potion reaches your feet
-#                   sooner. Clamped to [1.0, 5.0] (never slower than vanilla,
-#                   capped so it cannot outrun its own splash). Default 3.0.
+# The redirect speed is bounded to a band around your potion's normal launch
+# speed. The solver spends the LEAST speed in the band that still lands the burst
+# exactly on your (led) feet; the band only limits which impact tick it can reach,
+# so beyond it the aim leans on the other free variables (direction, arc) rather
+# than throwing harder than the ceiling.
+#
+# min-speed-multiplier: the FLOOR, as a factor of the normal launch speed — the
+#                       redirect is never slower than this (a fast pot always has
+#                       punch). Clamped to [0.05, 1.0]. Default 0.5.
+# max-speed-multiplier: the CEILING, as a factor of the normal launch speed — the
+#                       redirect is never faster than this (so it cannot outrun its
+#                       own splash). Clamped to [1.0, 5.0]. Default 1.5.
+#
+# lead-ticks:          how far ahead of your predicted feet to aim, in ticks of
+#                      your own motion. The burst lands slightly IN FRONT of where
+#                      your feet will be when it hits, so while running you move
+#                      into the cloud (and it cancels the sub-tick lag that would
+#                      otherwise plant it behind you). 0 = aim exactly at the
+#                      predicted feet. Clamped to [0, 5]. Default 1.0.
 #fast-pots:
 #  angle-degrees: 35.0
-#  speed-multiplier: 3.0
+#  min-speed-multiplier: 0.5
+#  max-speed-multiplier: 1.5
+#  lead-ticks: 1.0
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

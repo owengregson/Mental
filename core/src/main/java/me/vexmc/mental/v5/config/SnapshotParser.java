@@ -336,8 +336,12 @@ public final class SnapshotParser {
         return new FastPotsSettings(
                 reader.numberClamped("angle-degrees", d.angleDegrees(),
                         FastPotsSettings.MIN_ANGLE, FastPotsSettings.MAX_ANGLE),
-                reader.numberClamped("speed-multiplier", d.speedMultiplier(),
-                        FastPotsSettings.MIN_MULTIPLIER, FastPotsSettings.MAX_MULTIPLIER));
+                reader.numberClamped("min-speed-multiplier", d.minSpeedMultiplier(),
+                        FastPotsSettings.MIN_MIN_MULTIPLIER, FastPotsSettings.MAX_MIN_MULTIPLIER),
+                reader.numberClamped("max-speed-multiplier", d.maxSpeedMultiplier(),
+                        FastPotsSettings.MIN_MAX_MULTIPLIER, FastPotsSettings.MAX_MAX_MULTIPLIER),
+                reader.numberClamped("lead-ticks", d.leadTicks(),
+                        FastPotsSettings.MIN_LEAD, FastPotsSettings.MAX_LEAD));
     }
 
     private static OffhandSettings parseOffhand(ConfigReader reader) {
