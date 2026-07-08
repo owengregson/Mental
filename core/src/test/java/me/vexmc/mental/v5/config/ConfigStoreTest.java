@@ -211,6 +211,80 @@ class ConfigStoreTest {
                 () -> "no upgrade may be reported for a tuned file, logged: " + logged);
     }
 
+    /**
+     * A kohi file exactly as 2.4.6 shipped it (vertical-min −3.9, every other
+     * value the current archive) — parses to the KOHI_1_8 superseded revision.
+     * Keys omitted here fall back to LEGACY_17 values, which for kohi equal the
+     * constant's (friction 0.5, air 1.0, sprint 1.0, combos true, tracker wire).
+     */
+    private static final String KOHI_2_4_6_BODY = """
+            display-name: Kohi
+            description: "The canonical Kohi/HCF values — lower base, smaller per-level bonus (0.425/0.085), 1.7.10 ledger combos."
+            knockback:
+              base:
+                horizontal: 0.35
+                vertical: 0.35
+              extra:
+                horizontal: 0.425
+                vertical: 0.085
+              wtap-extra:
+                enabled: false
+                horizontal: 0.425
+                vertical: 0.085
+              limits:
+                vertical: 0.4
+                vertical-min: -3.9
+                horizontal: -1
+              delivery:
+                melee: tracker
+                projectile: tracker
+              modifiers:
+                combos: true
+                armor-resistance: none
+            """;
+
+    @Test
+    void unTunedPreFloorKohiUpgradesToThePracticeFloor() throws Exception {
+        ConfigStore store = store();
+        Files.createDirectories(profile("kohi").getParent());
+        Files.writeString(profile("kohi"), KOHI_2_4_6_BODY, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration upgraded = YamlConfiguration.loadConfiguration(profile("kohi").toFile());
+        assertEquals(0.0, upgraded.getDouble("knockback.limits.vertical-min"),
+                "an unedited pre-floor kohi must gain the 2.4.7 practice floor");
+        assertEquals(0.35, upgraded.getDouble("knockback.base.horizontal"),
+                "the archived kohi values are untouched by the floor upgrade");
+        assertTrue(logged.stream().anyMatch(line ->
+                line.contains("kohi.yml") && line.contains("upgraded")),
+                () -> "expected an upgrade report, logged: " + logged);
+
+        // Idempotent: the upgraded file IS the current bundle — never re-flagged.
+        String afterFirst = Files.readString(profile("kohi"), StandardCharsets.UTF_8);
+        store.ensureDefaultFiles();
+        assertEquals(afterFirst, Files.readString(profile("kohi"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void tunedPreFloorKohiKeepsItsOldFloorForever() throws Exception {
+        ConfigStore store = store();
+        Files.createDirectories(profile("kohi").getParent());
+        String tuned = KOHI_2_4_6_BODY.replace("horizontal: 0.35", "horizontal: 0.37");
+        Files.writeString(profile("kohi"), tuned, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration kept = YamlConfiguration.loadConfiguration(profile("kohi").toFile());
+        assertEquals(0.37, kept.getDouble("knockback.base.horizontal"),
+                "owner-tuned values must survive every upgrade pass");
+        assertEquals(-3.9, kept.getDouble("knockback.limits.vertical-min"),
+                "a tuned file keeps its own floor — frozen forever");
+        assertFalse(logged.stream().anyMatch(line ->
+                line.contains("kohi.yml") && line.contains("upgraded")),
+                () -> "no upgrade may be reported for a tuned file, logged: " + logged);
+    }
+
     @Test
     void loadSourcesTreatsUnparseableFilesAsEmptyAndReportsThem() throws Exception {
         ConfigStore store = store();
