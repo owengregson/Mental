@@ -63,7 +63,9 @@ public final class KnockbackSuite {
                 new TestCase("knockback: a packetless victim's server-side melee always journals a SHIP",
                         context -> runPacketlessMeleeJournalScenario(mental, tester, context)),
                 new TestCase("knockback: an airborne leak-class hit on a practice preset never ships a downward knock",
-                        context -> runAirborneFloorScenario(mental, tester, context)));
+                        context -> runAirborneFloorScenario(mental, tester, context, "kohi")),
+                new TestCase("knockback: an airborne leak-class hit on a legacy preset never ships a downward knock",
+                        context -> runAirborneFloorScenario(mental, tester, context, "legacy-1.8")));
     }
 
     /**
@@ -138,7 +140,8 @@ public final class KnockbackSuite {
      * override) is exact.</p>
      */
     private static void runAirborneFloorScenario(
-            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context, String preset)
+            throws Exception {
         FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
         FakePlayer victim = new FakePlayer(tester, mental.scheduling());
         try {
@@ -151,12 +154,12 @@ public final class KnockbackSuite {
             context.syncRun(() -> {
                 mental.overlaySet("modules.latency-compensation", false);
                 mental.reloadAll();
-                context.expect(mental.management().setGlobalProfile("kohi"), "kohi preset missing");
+                context.expect(mental.management().setGlobalProfile(preset), preset + " preset missing");
             });
             context.awaitTicks(3);
             context.expect(context.sync(() ->
                             profileFor(mental, victim).limits().verticalMin() == 0.0),
-                    "kohi must carry the 2.4.7 practice floor (vertical-min 0.0)");
+                    preset + " must carry the vertical floor (vertical-min 0.0)");
 
             // Float the victim so the honest feed reads airborne every tick and
             // hit 1 records on the airborne ledger branch (the ComboSuite pattern).
@@ -172,8 +175,11 @@ public final class KnockbackSuite {
             });
 
             // Wait for the free-fall to cross the leak threshold with margin:
-            // kohi sprint ships negative below vy −0.87; −1.0 gives a pre-floor
-            // y of −1.0 × 0.5 + 0.35 + 0.085 = −0.065 — unambiguously leak-class.
+            // kohi sprint ships negative below vy −0.87 (−1.0 gives a pre-floor
+            // y of −1.0 × 0.5 + 0.35 + 0.085 = −0.065 — unambiguously
+            // leak-class); legacy-1.8 sprint sits exactly at its −1.0 threshold
+            // and every further decay tick goes negative — either way the SHIP
+            // must be the floored 0.0 (2.4.8 extended the floor to legacy).
             CombatSession session = mental.sessions().sessionFor(victim.uuid());
             context.expect(session != null, "no combat session for the victim");
             context.awaitUntil(() -> {

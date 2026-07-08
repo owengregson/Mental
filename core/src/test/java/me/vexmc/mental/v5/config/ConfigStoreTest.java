@@ -88,6 +88,11 @@ class ConfigStoreTest {
                 z: 0.5248
               limits:
                 vertical: 4.0
+                # Explicit like the real v1.3.0 bundle (git-verified): since the
+                # 2.4.8 owner floor moved the LEGACY_17 parse fallback to 0.0,
+                # relying on the fallback here would no longer parse to the
+                # MMC_1_3 revision's -3.9.
+                vertical-min: -3.9
               range-reduction:
                 enabled: true
               modifiers:
@@ -282,6 +287,66 @@ class ConfigStoreTest {
                 "a tuned file keeps its own floor — frozen forever");
         assertFalse(logged.stream().anyMatch(line ->
                 line.contains("kohi.yml") && line.contains("upgraded")),
+                () -> "no upgrade may be reported for a tuned file, logged: " + logged);
+    }
+
+    /**
+     * A legacy-1.7 file exactly as 2.4.7 shipped it (vertical-min −3.9, every
+     * other value the era default). Keys omitted here fall back to LEGACY_17
+     * values, which for legacy-1.7 equal the constant's by definition — only
+     * the pre-floor vertical-min differs from the current bundle.
+     */
+    private static final String LEGACY17_2_4_7_BODY = """
+            display-name: Legacy 1.7
+            description: "The 1.7.10 combat model: vanilla-era values with ledger combos."
+            knockback:
+              limits:
+                vertical: 0.4
+                vertical-min: -3.9
+                horizontal: -1
+            """;
+
+    @Test
+    void unTunedPreFloorLegacyUpgradesToTheOwnerFloor() throws Exception {
+        ConfigStore store = store();
+        Files.createDirectories(profile("legacy-1.7").getParent());
+        Files.writeString(profile("legacy-1.7"), LEGACY17_2_4_7_BODY, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration upgraded =
+                YamlConfiguration.loadConfiguration(profile("legacy-1.7").toFile());
+        assertEquals(0.0, upgraded.getDouble("knockback.limits.vertical-min"),
+                "an unedited pre-floor legacy-1.7 must gain the 2.4.8 owner floor");
+        assertEquals(0.4, upgraded.getDouble("knockback.base.horizontal"),
+                "the era values are untouched by the floor upgrade");
+        assertTrue(logged.stream().anyMatch(line ->
+                line.contains("legacy-1.7.yml") && line.contains("upgraded")),
+                () -> "expected an upgrade report, logged: " + logged);
+
+        // Idempotent: the upgraded file IS the current bundle — never re-flagged.
+        String afterFirst = Files.readString(profile("legacy-1.7"), StandardCharsets.UTF_8);
+        store.ensureDefaultFiles();
+        assertEquals(afterFirst, Files.readString(profile("legacy-1.7"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void tunedPreFloorLegacyKeepsItsOldFloorForever() throws Exception {
+        ConfigStore store = store();
+        Files.createDirectories(profile("legacy-1.7").getParent());
+        String tuned = LEGACY17_2_4_7_BODY.replace("vertical: 0.4", "vertical: 0.45");
+        Files.writeString(profile("legacy-1.7"), tuned, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        YamlConfiguration kept =
+                YamlConfiguration.loadConfiguration(profile("legacy-1.7").toFile());
+        assertEquals(0.45, kept.getDouble("knockback.limits.vertical"),
+                "owner-tuned values must survive every upgrade pass");
+        assertEquals(-3.9, kept.getDouble("knockback.limits.vertical-min"),
+                "a tuned file keeps its own floor — frozen forever");
+        assertFalse(logged.stream().anyMatch(line ->
+                line.contains("legacy-1.7.yml") && line.contains("upgraded")),
                 () -> "no upgrade may be reported for a tuned file, logged: " + logged);
     }
 

@@ -27,6 +27,12 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile.WtapExtra;
  * floor knob — {@code −3.9} was Mental's schema filler, and it let a deep
  * falling ledger vy ship a DOWNWARD combo knock); the {@code *_1_8} revisions
  * below are those presets exactly as shipped 1.8.0 → 2.4.6.</p>
+ *
+ * <p>The 2.4.8 round extends the floor to legacy-1.7, legacy-1.8 and custom
+ * (the owner reported flat-ground downward knocks on the legacy presets too —
+ * an owner directive that deliberately trades away the era-authentic
+ * long-fall negative); the {@code *_2_4_7} revisions below are those presets
+ * exactly as shipped through 2.4.7 (unchanged since they first bundled).</p>
  */
 public final class SupersededPresets {
 
@@ -297,13 +303,90 @@ public final class SupersededPresets {
             true,
             new PaceScaling(PaceScaling.Mode.ATTACKER, 1.0, 0.5, 2.0));
 
+    /**
+     * legacy-1.7 as shipped through 2.4.7: the era values with the unfloored
+     * −3.9 verticalMin filler. 2.4.8 floors the final vertical at 0.0 (owner
+     * directive — flat-ground downward knocks were reported on legacy too),
+     * so an unedited file upgrades in place; an older or owner-tuned file
+     * simply never matches and stays frozen.
+     */
+    private static final KnockbackProfile LEGACY17_2_4_7 = new KnockbackProfile(
+            "legacy-1.7",
+            "Legacy 1.7",
+            "The 1.7.10 combat model: vanilla-era values with ledger combos.",
+            new Push(0.4, 0.4),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            true,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true);
+
+    /** legacy-1.8 as shipped through 2.4.7 — the unfloored twin of {@link #LEGACY17_2_4_7}. */
+    private static final KnockbackProfile LEGACY18_2_4_7 = new KnockbackProfile(
+            "legacy-1.8",
+            "Legacy 1.8",
+            "The 1.8.9 combat model: identical math, flat send-then-revert delivery.",
+            new Push(0.4, 0.4),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.IMMEDIATE,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.LEGACY,
+            true);
+
+    /**
+     * custom as shipped through 2.4.7 — legacy-1.7 values verbatim under the
+     * custom identity ("ships as legacy-1.7 values"), so an unedited
+     * custom.yml follows the 2.4.8 floor exactly like its template; the
+     * moment the owner tunes anything it is theirs forever.
+     */
+    private static final KnockbackProfile CUSTOM_2_4_7 = new KnockbackProfile(
+            "custom",
+            "Custom",
+            "Your own knockback tuning — edit profiles/custom.yml.",
+            new Push(0.4, 0.4),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            true,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true);
+
     private static final Map<String, List<KnockbackProfile>> BY_PRESET = Map.of(
             "kohi", List.of(KOHI_1_3, KOHI_1_8),
             "mmc", List.of(MMC_1_3, MMC_1_8),
             "lunar", List.of(LUNAR_1_3, LUNAR_1_8),
             "minehq", List.of(MINEHQ_1_8),
             "badlion", List.of(BADLION_1_8),
-            "signature", List.of(SIGNATURE_2_2_0, SIGNATURE_2_2_1, SIGNATURE_2_4_0));
+            "signature", List.of(SIGNATURE_2_2_0, SIGNATURE_2_2_1, SIGNATURE_2_4_0),
+            "legacy-1.7", List.of(LEGACY17_2_4_7),
+            "legacy-1.8", List.of(LEGACY18_2_4_7),
+            "custom", List.of(CUSTOM_2_4_7));
 
     private SupersededPresets() {}
 
