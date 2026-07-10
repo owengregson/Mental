@@ -288,3 +288,54 @@ handler reads only the mark map and the wrapper (never live entities).
    resolver floor set where PE's sound mappings actually carry it.
 4. The victim's self-derived vanilla hurt sound remains under custom sounds
    (two-audience model) — accepted, documented.
+
+---
+
+## Addendum (2026-07-10, owner mid-round): Combat Effects category, low-HP extras, death-effects
+
+Three additions, same round:
+
+**1. The family is "Combat Effects".** `Family.FEEDBACK` keeps its enum name
+(already merged) but its display metadata becomes
+`"Combat Effects"` / blurb covering all three modules. Feature display names:
+"Hit Effects" (`hit-feedback`), "Damage Indicators" (`damage-indicators`),
+"Death Effects" (`death-effects`). The family's GUI menu is automatic
+(registry-derived), satisfying "has its own menu category".
+
+**2. Low-health extra sounds (`hit-feedback`).** When the victim's health
+AFTER the hit falls below `low-health-threshold-hearts` (default 4.0 hearts)
+AND the hit does not kill, an optional EXTRA sound list plays on top of the
+normal set, same audience. Signature preset extra:
+`entity.glow_squid.hurt` volume 0.9 pitch 1.2 (glow squid floors at 1.17 —
+era fallback `entity.squid.hurt`, universal). Vanilla preset extra: empty.
+Custom: a `low-health-sounds:` list + threshold key. **Killing-hit rule:** on
+the hit that kills, the NORMAL hit sounds/particles still play, the low-HP
+extra is suppressed (death-effects owns the death moment).
+
+**3. `death-effects` module** (third Feature in the family, default OFF).
+Fires once per player death — `PlayerDeathEvent` at MONITOR (any cause; the
+"was hit to cause death" case is covered because hit-feedback already played
+its normal sounds on that killing EDBEE). Presets:
+
+- **vanilla** (parse default): NOTHING — enabled-but-vanilla is a strict
+  no-op (zero-touch is the module toggle; the preset is data).
+- **signature**: (a) cosmetic lightning at the death location — a
+  client-side packet LIGHTNING_BOLT entity sent to nearby viewers (never a
+  real entity: no fire, no damage, no block/drop interaction by
+  construction; destroyed after ~20 ticks belt-and-braces since clients
+  self-expire the bolt render); the vanilla thunder sound is NOT sent;
+  (b) sound `entity.glow_squid.death` volume 1.0 pitch 0.95 (fallback below
+  1.17: `entity.squid.death`); (c) a firework-blast burst at the death
+  location in white/yellow/gold (&f/&e/&6 → 0xFFFFFF/0xFFFF55/0xFFAA00):
+  colored DUST particles in a fireworks-spark-shaped burst plus a few
+  uncolored `firework` sparks for the blast read — the vanilla firework
+  particle is not colorable, so the mix approximates it honestly (config
+  comment says so); below 1.13 dust color degrades → sparks only.
+- **custom**: `lightning: true|false`, `sounds:` list, `particles:` list
+  (same spec shapes as hit-feedback; `DeathEffectsSettings` reuses
+  `HitFeedbackSettings.SoundSpec`/`ParticleSpec`).
+
+Audience for death effects: every player within range of the death location
+(the victim is dead/respawning — no exclusion needed). Decisions are traced
+in `FeedbackTrace` (module `"death-effects"`, decision `EMITTED`/`NO_VIEWERS`)
+so the suite can assert them clientless.
