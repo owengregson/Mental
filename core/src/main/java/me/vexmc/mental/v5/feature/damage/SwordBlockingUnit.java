@@ -19,6 +19,7 @@ import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.platform.SwordBlockAdapter;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import org.bukkit.entity.Player;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -31,6 +32,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -62,7 +64,11 @@ import org.jetbrains.annotations.NotNull;
  * crosses the wire. {@link #resetSprintForBlock} re-arms the wire freshness on
  * the right-click, gated on the RAW client sprint flag (the {@link SprintWire}'s
  * view — never the server flag), so a stationary defensive block gains no phantom
- * bonus, and never touching sprint particles (client-authoritative).</p>
+ * bonus, and never touching sprint particles (client-authoritative). The
+ * triggering right-click is the born-cancelled {@code RIGHT_CLICK_AIR} interact
+ * (the listener is {@code ignoreCancelled=false}, self-filtering on
+ * {@code useItemInHand() != DENY}) or the victim-aimed
+ * {@link PlayerInteractEntityEvent} — either reaches the re-arm.</p>
  */
 public final class SwordBlockingUnit implements FeatureUnit, Listener {
 
@@ -146,22 +152,61 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     /*  Trigger                                                            */
     /* ------------------------------------------------------------------ */
 
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
     public void onInteract(@NotNull PlayerInteractEvent event) {
-        Action action = event.getAction();
-        if (action != Action.RIGHT_CLICK_AIR && action != Action.RIGHT_CLICK_BLOCK) {
+        if (!engagesBlock(event.getAction(), event.getHand(), event.useItemInHand())) {
             return;
         }
-        if (event.getHand() != EquipmentSlot.HAND) {
-            return; // dedupe the per-hand double-fire: act only on the main-hand fire
+        beginBlock(event.getPlayer());
+    }
+
+    /**
+     * A victim-aimed right-click fires {@link PlayerInteractEntityEvent}, NOT
+     * {@link PlayerInteractEvent} — so without this handler the blockhit re-arm never
+     * fired while the crosshair sat on the target (real combat's norm). Same guards
+     * as the interact fire: the main-hand event only (the off-hand is a separate
+     * fire), a sword in hand, and the feature gate (this listener is registered only
+     * while SWORD_BLOCKING is enabled).
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInteractEntity(@NotNull PlayerInteractEntityEvent event) {
+        if (!engagesBlockEntity(event.getHand())) {
+            return;
         }
-        Player player = event.getPlayer();
+        beginBlock(event.getPlayer());
+    }
+
+    /** The shared sword-in-hand gate + sprint re-arm/decoration engage for both interact fires. */
+    private void beginBlock(@NotNull Player player) {
         ItemStack mainHand = player.getInventory().getItemInMainHand();
         if (!SwordBlockAdapter.isSword(mainHand.getType())) {
             return;
         }
         resetSprintForBlock(player);
         decoration.begin(player);
+    }
+
+    /**
+     * Whether a {@link PlayerInteractEvent} should engage a sword block. A RIGHT_CLICK
+     * air/block on the MAIN hand (dedupe the per-hand double-fire) that the item-use
+     * result did not veto. The listener is {@code ignoreCancelled=false} on purpose: a
+     * bare-hand/air right-click is BORN cancelled on Paper with
+     * {@code useItemInHand=ALLOW}, so the old {@code ignoreCancelled=true} silently
+     * dropped EVERY air right-click and the blockhit re-arm never fired (the second
+     * half of the modern-client sprint latch — the SWORD_BLOCKING re-arm was the only
+     * reconstruction path and it could not reach a born-cancelled event). Filtering on
+     * {@code useItemInHand() != DENY} reaches the born-cancelled air click while still
+     * yielding to a protection plugin's explicit item-use DENY.
+     */
+    static boolean engagesBlock(Action action, EquipmentSlot hand, Event.Result useItemInHand) {
+        return (action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK)
+                && hand == EquipmentSlot.HAND
+                && useItemInHand != Event.Result.DENY;
+    }
+
+    /** The main-hand dedupe for the entity-interact fire (the off-hand event is a separate fire). */
+    static boolean engagesBlockEntity(EquipmentSlot hand) {
+        return hand == EquipmentSlot.HAND;
     }
 
     /* ------------------------------------------------------------------ */
@@ -311,11 +356,11 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
 
     /**
      * Re-arms the sprint knockback bonus a 1.7/1.8 sword block earned, gated on the
-     * RAW client sprint flag (the wire's view — the only signal that survives
-     * Mental's post-hit {@code setSprinting(false)}); a packetless player has no
-     * wire, so the reset never fires for it. Re-syncs the server flag so the
-     * snapshot read sees it when {@code wtap-registration} is off; touches no
-     * sprint particles (client-authoritative).
+     * RAW client sprint flag (the wire's view — the only signal that survives the
+     * wire's own post-hit clear); a packetless player has no wire, so the reset never
+     * fires for it. Re-syncs the server flag so the snapshot read sees it when
+     * {@code wtap-registration} is off; touches no sprint particles
+     * (client-authoritative).
      */
     private void resetSprintForBlock(@NotNull Player player) {
         UUID id = player.getUniqueId();
@@ -325,11 +370,11 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
         ConnectionDomains.Domain domain = domains.domainFor(id);
         SprintWire wire = domain.sprint();
         if (!wire.clientSprinting()) {
-            // Gate on the RAW client sprint flag — the only signal that survives
-            // Mental's own post-hit setSprinting(false)/onServerClear (F3, restoring
-            // the documented pre-v5 contract). verdictAt().sprinting() is the very
-            // flag those clears drop, so a real sprinter mid-combo would read false
-            // and lose the block-hit re-arm; a defensive block still earns no bonus.
+            // Gate on the RAW client sprint flag — the only signal that survives the
+            // wire's own post-hit clear (onServerClear, restoring the documented pre-v5
+            // contract). verdictAt().sprinting() is the very flag that clear drops, so a
+            // real sprinter mid-combo would read false and lose the block-hit re-arm; a
+            // defensive block still earns no bonus.
             return;
         }
         // Re-arm freshness AND raise the sticky held-block reset (the owner's

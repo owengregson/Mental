@@ -424,4 +424,114 @@ class SprintWireTest {
         SprintVerdict verdict = wire.verdictAt(new TickStamp(10));
         assertFalse(verdict.sprinting(), "the adopted server flag stands; the stale clear no-ops against it");
     }
+
+    /* ── the post-clear re-arm (modern-client sprint latch fix) ──────────── */
+
+    @Test
+    void aSameTickReconcileDoesNotReArmTheGapHolds() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                    // clientSprinting up, sprinting+armed
+        wire.onServerClear(new TickStamp(5));    // the post-hit clear: clearedAt = 5
+        // A movement reconcile the SAME tick as the clear: the era one-tick re-engage
+        // gap has not elapsed, so the bonus stays dropped (bonus → gap → re-arm).
+        wire.reconcile(true, new TickStamp(5), 3);
+
+        SprintVerdict sameTick = wire.verdictAt(new TickStamp(5));
+        assertFalse(sameTick.sprinting(), "no re-arm the same tick as the clear — the era gap holds");
+        assertEquals(Boolean.FALSE, sameTick.fresh());
+    }
+
+    @Test
+    void aReconcileAfterTheClearReArmsWhenTheClientNeverUnSprinted() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                    // clientSprinting up, sprinting+armed
+        wire.onServerClear(new TickStamp(5));    // the post-hit clear: sprinting/armed drop
+        long seqAfterClear = wire.verdictAt(new TickStamp(5)).wireSeq();
+        assertFalse(wire.verdictAt(new TickStamp(5)).sprinting());
+
+        // A movement reconcile ≥1 tick after the clear with the RAW client flag still
+        // up (no STOP followed the hit): the modern client never expressed un-sprint,
+        // so re-engage the bonus at the era one-tick re-engage cadence.
+        wire.reconcile(true, new TickStamp(6), 3);
+        SprintVerdict reArmed = wire.verdictAt(new TickStamp(6));
+        assertTrue(reArmed.sprinting(), "re-armed at the era one-tick re-engage cadence");
+        assertEquals(Boolean.FALSE, reArmed.fresh(),
+                "armed is untouched — freshness still comes only from a real START");
+        assertEquals(seqAfterClear + 1, reArmed.wireSeq(), "the re-arm is a wire write — the seq bumps");
+    }
+
+    @Test
+    void aClientStopAfterTheClearBlocksTheReArmThenAStartReArmsFreshness() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();
+        wire.onServerClear(new TickStamp(5));    // clearedAt = 5, clientSprinting still up
+
+        // The client DID express un-sprint (a w-tap's release, or a genuine stop): the
+        // STOP lowers the raw client flag AND resets clearedAt, forbidding the re-arm.
+        clock.tick = 6;
+        wire.onSprintStop();
+        assertFalse(wire.clientSprinting());
+        wire.reconcile(true, new TickStamp(6), 3);
+        assertFalse(wire.verdictAt(new TickStamp(6)).sprinting(),
+                "a client STOP after the hit forbids the auto re-arm — the w-tap contract is preserved");
+
+        // The re-engage START (the actual w-tap) re-arms freshness the ordinary way.
+        clock.tick = 7;
+        wire.onSprintStart();
+        SprintVerdict reArmed = wire.verdictAt(new TickStamp(7));
+        assertTrue(reArmed.sprinting());
+        assertEquals(Boolean.TRUE, reArmed.fresh(), "freshness is armed by the real START, w-tap intact");
+    }
+
+    @Test
+    void aReconcileNeverReArmsWithoutAPriorClear() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        // The published-view / packetless-fallback shape: the server flag disagrees but
+        // NO post-hit clear ever opened a re-arm window (clearedAt absent). Only a hit's
+        // clear opens it, so reconcile behaves byte-identically to before — a seed, then
+        // an adopt strictly after the quiet window, never a synthesized re-arm.
+        wire.reconcile(true, new TickStamp(5), 3);            // unseen ⇒ seed to sprinting, NOT fresh
+        SprintVerdict seeded = wire.verdictAt(new TickStamp(5));
+        assertTrue(seeded.sprinting());
+        assertEquals(Boolean.FALSE, seeded.fresh(), "a seed is not fresh — no re-engage happened");
+
+        wire.onSprintStop();                                  // wire says not-sprinting at tick 5
+        wire.reconcile(true, new TickStamp(7), 3);            // age 2 < 3 ⇒ hold (no clearedAt to re-arm from)
+        assertFalse(wire.verdictAt(new TickStamp(7)).sprinting(),
+                "no clearedAt window ⇒ the fresh wire STOP is not overwritten inside the quiet window");
+    }
+
+    @Test
+    void aServerAdoptAfterAReArmClosesTheWindowSoNoOscillation() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();
+        wire.onServerClear(new TickStamp(5));                 // clearedAt = 5
+        wire.reconcile(true, new TickStamp(6), 3);            // re-arm: sprinting again
+        assertTrue(wire.verdictAt(new TickStamp(6)).sprinting());
+
+        // A genuine server-side un-sprint (an external setSprinting(false)/hunger drop)
+        // that persists: after the quiet window the wire adopts the server's false flag
+        // AND resets clearedAt, so the next reconcile does NOT re-arm over it — a
+        // genuine un-sprint is never overridden (no post-hit re-arm oscillation).
+        wire.reconcile(false, new TickStamp(9), 3);           // disagree + age 3 ⇒ adopt false, clearedAt reset
+        assertFalse(wire.verdictAt(new TickStamp(9)).sprinting());
+        wire.reconcile(false, new TickStamp(10), 3);          // window closed ⇒ no re-arm
+        assertFalse(wire.verdictAt(new TickStamp(10)).sprinting(),
+                "the adopted server un-sprint stands — the re-arm window closed on adopt");
+    }
 }
