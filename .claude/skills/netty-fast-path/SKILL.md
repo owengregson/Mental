@@ -227,11 +227,33 @@ Cancelling ATTACK means `Player.attack` never runs — anything era-relevant
 it did server-side must be re-implemented or it silently vanishes:
 
 - **Sprint-flag clear**: vanilla ends every sprint-bonus hit with
-  `setSprinting(false)` (the server half of w-tap). The **delivery desk**
-  (was `KnockbackModule`) clears it after each accepted sprint-bonus melee hit
-  (a post-hit obligation in the one velocity-event apply) — without it, no-w-tap
-  seconds keep the sprint extra forever (measured: no-w-tap and w-tap doubles
-  both flew 10.09 blocks; real 1.8.9 separates them 7.2 vs 11.4).
+  `setSprinting(false)` (the server half of w-tap). Mental does **NOT**
+  reconstruct that server-flag write (removed 2026-07-10, the modern-client
+  sprint latch fix). On 1.21.2+ a server-side `setSprinting(false)` is ECHOED
+  to the attacker's OWN client (`sendDirtyEntityData →
+  sendToTrackingPlayersAndSelf`, javap-verified 26.1.2): the client adopts it,
+  drops its local sprint, and confirms with one STOP_SPRINTING — and no START
+  ever returns (item-use block-hitting blocks a fresh sprint start; 1.21.2+
+  sends START only on a rising edge), so the raw `clientSprinting` latches
+  false and every later melee verdict reads plain — a one-way latch (measured:
+  ~900 consecutive owner hits all `sprint=f`). Real vanilla never produced that
+  side effect at spam cadence: its clear sits behind the ≥90%-charge gate,
+  where the client simultaneously predicts the same clear and re-engages, so
+  the echo is always redundant. **The new contract is the WIRE cadence.** The
+  hit clears only the wire sprint (`SprintWire.onServerClear`, spending the
+  freshness the hit used), and the `SprintWire`'s post-clear re-arm re-engages
+  the bonus one tick later (`reconcile`, the era one-tick re-engage) when the
+  raw `clientSprinting` flag survived — i.e. no STOP followed the hit, so the
+  client's held sprint intent persisted. A client that DID predict the attack
+  un-sprint (legacy via Via, a CADENCE-spoofed modern client, a slow
+  full-charge clicker) sends STOP → `clientSprinting` false → NO auto re-arm →
+  a real START (the w-tap) is still required, freshness armed as ever (the
+  client-side technique contract is preserved exactly where a client expresses
+  it). The re-arm window is opened by `clearedAt` on `onServerClear` and reset
+  by any client START/STOP or a reconcile adopt, so a genuine un-sprint is
+  never overridden. Without ANY clear, no-w-tap seconds keep the sprint extra
+  forever — the wire clear is what spends it (measured: no-w-tap and w-tap
+  doubles both flew 10.09 blocks; real 1.8.9 separates them 7.2 vs 11.4).
 - **Attack-time sprint truth**: a faithful client sends STOP_SPRINTING in
   the same flush as its attack; vanilla read the flag INSIDE
   `Player.attack`, ahead of that packet, while the owning-thread damage
@@ -247,11 +269,15 @@ it did server-side must be re-implemented or it silently vanishes:
   (was `SprintTracker.peekWire`): the attacker's entity-action packets replayed
   at arrival (fed by the parse rim into `GroundFsm`, was `GroundPacketTap`,
   same-thread program order with their ATTACK), freshness armed on START
-  arrival, vanilla's in-attack clear mirrored beside the desk's post-hit clear
-  (was `clearWireSprint`), and an owning-thread per-tick session reconcile (was
+  arrival, vanilla's in-attack clear mirrored onto the wire (`onServerClear`,
+  was `clearWireSprint`), and an owning-thread per-tick session reconcile (was
   `reconcileWire`) that seeds and re-adopts server-granted `setSprinting` after
   ≥3 ticks of wire silence (TickStamp compare — replaced the old 150 ms
-  constant). A null wire view (feature off, synthetic players) = published-view
+  constant), AND (2026-07-10) re-arms the bonus one tick after a post-hit clear
+  when the raw client flag survived — the deferred server-flag
+  `setSprinting(false)` that used to run beside the wire clear is GONE (its
+  modern-client echo latched sprint off), so this wire cadence IS the whole
+  contract. A null wire view (feature off, synthetic players) = published-view
   fallback, byte-identical to pre-1.7.0. Bukkit toggle events must NEVER write
   the wire view — they fire at packet application, so a boundary-applied STOP
   would overwrite a newer wire START (in D1 they don't exist at all).
