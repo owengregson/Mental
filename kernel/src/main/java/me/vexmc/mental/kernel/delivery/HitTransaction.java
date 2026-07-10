@@ -2,6 +2,7 @@ package me.vexmc.mental.kernel.delivery;
 
 import java.util.EnumSet;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitGeometry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 
 /**
@@ -93,6 +94,24 @@ public final class HitTransaction {
     public void comboFactor(double factor) {
         this.comboFactor = factor;
     }
+
+    /*
+     * The F9 journal-attribution stamps: the pre-send disposition, the base()
+     * geometry actually consumed, and the effective victim profile. Written by the
+     * compute/registration site (netty plan() or the region EDBEE), copied into the
+     * journal entry's capture by the desk — the same one-writer hand-off pattern as
+     * paceFactor/comboFactor. Null until a compute stamped them.
+     */
+    private String presend;          // pre-send disposition (F9 namespace), null = region path
+    private HitGeometry geometry;    // the base() geometry actually consumed, null until a compute stamped it
+    private String profileName;      // the effective victim profile at compute time, null until stamped
+
+    public String presend() { return presend; }
+    public void presend(String disposition) { this.presend = disposition; }
+    public HitGeometry geometry() { return geometry; }
+    public void geometry(HitGeometry geometry) { this.geometry = geometry; }
+    public String profileName() { return profileName; }
+    public void profileName(String name) { this.profileName = name; }
 
     public State state() {
         return state;

@@ -19,6 +19,7 @@ import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitGeometry;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
@@ -308,6 +309,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
+        // The exact base() geometry + effective profile this hit consumed (F9). A
+        // region-path Vanilla(ENTITY_ATTACK) hit gets these too; its presend stays null
+        // (the formatter prints "none"). The PRE_SENT/PINNED adopt branch returns before
+        // this — its stamps were written at plan(), where the adopted vector was computed.
+        tx.profileName(profile.name());
+        tx.geometry(new HitGeometry(attackerState.x(), attackerState.z(), attackerState.yaw(),
+                victimState.x(), victimState.z()));
         // Commit the post-hit chase window on EVERY active servo hit (servo-lab
         // 2.4.5): this hit's attacker position/tick anchors the next window's
         // measurement, and the EMA the inputs carried is persisted. Load-bearing —
@@ -536,6 +544,11 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // carries the ORIGINAL sprint verdict — the journal context stays honest.
         HitTransaction fresh = mint(source, attackerId, victimId, original.context().sprint(),
                 paceFactor, comboFactor, original.context().attackerYaw());
+        // Carry the original's F9 stamps like the factor carry above — the redelivery
+        // journals the same geometry/profile/pre-send disposition the original computed.
+        fresh.presend(original.presend());
+        fresh.geometry(original.geometry());
+        fresh.profileName(original.profileName());
         // Withdraw + JOURNAL the original (a PRE_SENT/PINNED submitFromWire) so the
         // tick sweep cannot record it as a false "no-velocity-event"; a REGISTERED
         // region-path original was never on the desk, so this is a no-op there.

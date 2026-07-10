@@ -24,6 +24,7 @@ import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitGeometry;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
@@ -331,15 +332,28 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     verdict, victimHasWire, compensationY, clock.current(), registrationYaw(attackerId));
             HitTransaction tx = new HitTransaction(context);
 
-            // The pre-send only exists for player victims with published views.
-            if (playerVictim == null || victimId == null || attackerView == null || victimView == null
-                    || !settings.preSendFeedback() || victimView.damageImmune()) {
+            // The pre-send only exists for player victims with published views —
+            // each absence stamps its own F9 pre-send disposition before returning.
+            if (playerVictim == null || victimId == null || attackerView == null || victimView == null) {
+                tx.presend("no-view");
                 return tx;
             }
+            if (!settings.preSendFeedback()) {
+                tx.presend("off");
+                return tx;
+            }
+            if (victimView.damageImmune()) {
+                tx.presend("suppressed:frozen-immune");
+                return tx;
+            }
+            tx.profileName(victimView.profile().name());
 
             KnockbackProfile profile = victimView.profile();
             KnockbackVector vector = null;
             String suppressed = suppressorFor(profile, victimView);
+            if (suppressed != null) {
+                tx.presend("suppressed:" + suppressed); // suppressed:anticheat / suppressed:resistance-roll
+            }
             if (suppressed == null) {
                 // The pocket servo (combo-hold §3.2): active only when THIS attacker
                 // holds the victim's active combo (read from the victim's frozen view
@@ -363,6 +377,9 @@ public final class HitRegistrationUnit implements FeatureUnit {
                                 victimView.grounded(), victimView.slipperiness(), victimView.moveSpeedAttr());
                 EntityState preAttacker = preAttackerState(attackerId, attackerView, verdict);
                 EntityState preVictim = preVictimState(victimId, victimView);
+                // The exact base() geometry this hit consumed (F9 journal attribution).
+                tx.geometry(new HitGeometry(preAttacker.x(), preAttacker.z(), preAttacker.yaw(),
+                        preVictim.x(), preVictim.z()));
                 boolean freshSprint = verdict.fresh() != null && verdict.fresh() && verdict.sprinting();
                 KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                         preAttacker, preVictim, profile, compensationY, ThreadLocalRandom.current(),
@@ -401,6 +418,14 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     : Math.max(0, victimView.maxNoDamageTicks() / 2 - 1) * 50L;
             boolean velocityShips = admitVelocityPreSend(
                     feedbackGate, victimId, victimHasWire, vector != null, now, minInterval);
+            // The F9 pre-send disposition: wire/pinned when the velocity ships, paced-out
+            // when an eligible velocity lost this window. commitPreSendState overwrites this
+            // with "unsendable-downgrade" if the wire then refuses the burst (F2).
+            if (velocityShips) {
+                tx.presend(victimHasWire ? "wire" : "pinned");
+            } else if (vector != null) {
+                tx.presend("paced-out");
+            }
 
             KnockbackVector shipped = velocityShips ? vector : null; // TRACKER (full stamp); TRACKER_DECAYED handled by the desk record
 
@@ -566,6 +591,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             tx.preSent(shipped);
         } else if (victimHasWire) {
             tx.pinnedWireFailed(shipped);
+            tx.presend("unsendable-downgrade"); // the wire refused the burst — journal it (F9 namespace)
         } else {
             tx.pinned(shipped);
         }

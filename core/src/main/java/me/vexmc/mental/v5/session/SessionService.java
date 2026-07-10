@@ -14,6 +14,7 @@ import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.Directive;
+import me.vexmc.mental.kernel.delivery.JournalObserver;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
 import me.vexmc.mental.kernel.model.HitContext;
@@ -85,6 +86,7 @@ public final class SessionService implements Listener, SessionAccess {
     private final PositionRing positions;
     private final ConnectionDomains domains;
     private final ComboEvents comboEvents;
+    private final JournalObserver journalObserver;
 
     private final ConcurrentHashMap<UUID, CombatSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Integer> entityIdByPlayer = new ConcurrentHashMap<>();
@@ -120,7 +122,8 @@ public final class SessionService implements Listener, SessionAccess {
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
             VelocityValve valve, Supplier<Snapshot> snapshot,
-            PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents) {
+            PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents,
+            JournalObserver journalObserver) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
@@ -129,6 +132,7 @@ public final class SessionService implements Listener, SessionAccess {
         this.positions = positions;
         this.domains = domains;
         this.comboEvents = comboEvents;
+        this.journalObserver = journalObserver;
     }
 
     /** The per-player position ring the fast path rewinds through (reach) and reads latest (pre-send). */
@@ -254,7 +258,7 @@ public final class SessionService implements Listener, SessionAccess {
         UUID id = player.getUniqueId();
         int entityId = player.getEntityId();
         double gravity = Attributes.valueOr(player, Attributes.gravity(), Decay.DEFAULT_GRAVITY);
-        CombatSession session = new CombatSession(gravity, entityId, clock, JOURNAL_CAPACITY);
+        CombatSession session = new CombatSession(gravity, entityId, clock, JOURNAL_CAPACITY, journalObserver);
         sessions.put(id, session);
         entityIdByPlayer.put(id, entityId);
         playerIdByEntityId.put(entityId, id);

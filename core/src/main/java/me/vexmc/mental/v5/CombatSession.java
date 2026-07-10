@@ -8,6 +8,7 @@ import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
+import me.vexmc.mental.kernel.delivery.JournalObserver;
 import me.vexmc.mental.kernel.ledger.MotionLedger;
 import me.vexmc.mental.kernel.model.LedgerEvent;
 import me.vexmc.mental.kernel.model.PlayerView;
@@ -84,9 +85,15 @@ public final class CombatSession {
     private int yawDeltaCount;
     private int yawDeltaNext;
 
+    /** The pre-F9 arity: no journal observer (delegates to {@link JournalObserver#NONE}). Tests construct it. */
     public CombatSession(double gravity, int entityId, TickClock clock, int journalCapacity) {
+        this(gravity, entityId, clock, journalCapacity, JournalObserver.NONE);
+    }
+
+    public CombatSession(double gravity, int entityId, TickClock clock, int journalCapacity,
+                         JournalObserver journalObserver) {
         this.ledger = new MotionLedger(gravity);
-        this.desk = new DeliveryDesk(entityId, clock, journalCapacity);
+        this.desk = new DeliveryDesk(entityId, clock, journalCapacity, journalObserver);
     }
 
     public MotionLedger ledger() {

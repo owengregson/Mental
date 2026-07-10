@@ -544,6 +544,9 @@ debug:
   categories:
     hitreg: false
     knockback: false
+    # Per-hit delivery journal lines: verdict, pre-send disposition, resolve
+    # outcome, shipped h/v, engine geometry, profile — one greppable line per hit.
+    journal: false
     compensation: false
     fishing: false
     projectile: false

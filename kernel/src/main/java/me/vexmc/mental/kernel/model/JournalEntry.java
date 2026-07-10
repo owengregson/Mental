@@ -30,7 +30,44 @@ package me.vexmc.mental.kernel.model;
  */
 public record JournalEntry(HitId id, HitSource source, KnockbackVector shipped,
                            boolean wireCarried, String suppressReason, TickStamp at,
-                           double paceFactor, double comboFactor) {
+                           double paceFactor, double comboFactor, Capture capture) {
+
+    /**
+     * The F9 per-hit delivery capture — the investigation's discriminating
+     * measurement as a permanent journal field. Null on entries built through a
+     * pre-F9 arity (additive growth) and on sources that never stamp (projectiles).
+     *
+     * <p>{@code presend} and {@code resolution} are open STRING namespaces (the
+     * {@link #suppressReason} precedent), so parallel lanes extend them with new
+     * values, never a type change: F2 adds its pre-send outcome pins (e.g.
+     * "unsendable-downgrade"); F4 adds its supersede-passthrough resolutions.</p>
+     *
+     * <p>presend values (stamped at registration): "wire", "pinned", "paced-out",
+     * "suppressed:anticheat", "suppressed:resistance-roll",
+     * "suppressed:frozen-immune", "no-view", "off"; null = the region path (no
+     * fast-path pre-send existed — the formatter prints "none").</p>
+     *
+     * <p>resolution values (chosen by the desk branch that journaled):
+     * "ship-valve", "ship-corrected", "ship-pinned", "ship-formula", "ensured",
+     * "cancel", "superseded", "drop", "sweep", "late-resolve".</p>
+     *
+     * <p>{@code sprintFresh} is {@link Boolean} (Java 8 — D-8 safe), nullable =
+     * "no wire view existed", mirroring {@code SprintVerdict.fresh()}.</p>
+     */
+    public record Capture(boolean sprinting, Boolean sprintFresh, String presend,
+                          String resolution, HitGeometry geometry, String profile) {
+    }
+
+    /**
+     * Additive growth (F9): the pre-F9 canonical arity defaults {@link #capture}
+     * to {@code null}, so every construction that predates the delivery capture
+     * builds unchanged.
+     */
+    public JournalEntry(HitId id, HitSource source, KnockbackVector shipped,
+                        boolean wireCarried, String suppressReason, TickStamp at,
+                        double paceFactor, double comboFactor) {
+        this(id, source, shipped, wireCarried, suppressReason, at, paceFactor, comboFactor, null);
+    }
 
     /**
      * Additive growth (combo-hold): the 2.4.1 arity defaults {@link #comboFactor}
