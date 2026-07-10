@@ -14,6 +14,7 @@ import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.Directive;
+import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.delivery.JournalObserver;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
@@ -410,7 +411,11 @@ public final class SessionService implements Listener, SessionAccess {
      * mid-invulnerability) was submitted UNARMED so it is excluded: vanilla knocks
      * nothing there and the era stays silent), and only once it is as old as the
      * sweep's own drop threshold. A hit that resolved in time left nothing pending,
-     * so nothing fires.</p>
+     * so nothing fires. One more corroboration guards the ship itself — an UNBLOCKED
+     * difference hit reaches here ARMED (its frozen immune read looked accepting), so
+     * {@link #ensureOrWithhold} reads the victim's live {@code noDamageTicks} at
+     * ensure time and ships only a full vanilla accept; a mid-invuln difference hit is
+     * withheld and journaled (S3).</p>
      */
     private void ensureStrandedPacketlessMelee(Player player, CombatSession session, TickStamp now) {
         if (domains.has(player.getUniqueId())) {
@@ -436,11 +441,47 @@ public final class SessionService implements Listener, SessionAccess {
             // no flinch); leave it for the sweep to drop.
             return;
         }
-        Directive directive = desk.ensure(pending.id());
-        KnockbackVector shipped = directive.ship();
+        // Corroborate era-silence with the victim's LIVE invulnerability counter at
+        // ensure time (S3) before shipping — an UNBLOCKED difference hit reaches this
+        // net armed (its frozen immune read looked accepting), so the awaiting gate
+        // alone is not enough. Only a full vanilla accept ships.
+        KnockbackVector shipped = ensureOrWithhold(
+                desk, pending, player.getNoDamageTicks(), player.getMaximumNoDamageTicks());
         if (shipped != null) {
             player.setVelocity(Vectors.toBukkit(shipped));
         }
+    }
+
+    /**
+     * The era-silence gate over an already-qualified stranded packetless pending
+     * (packetless victim, region-melee, ≥2 ticks old, awaiting delivery). Split out
+     * of {@link #ensureStrandedPacketlessMelee} so the {@code noDamageTicks}
+     * corroboration is unit-pinned without a live server.
+     *
+     * <p>A full vanilla accept reset the victim's {@code noDamageTicks} to max at the
+     * hit tick, so at this +2-tick net it reads ≈ {@code max−2}; a mid-invulnerability
+     * DIFFERENCE hit (a stronger hit landing while still invulnerable) left the OLD
+     * countdown untouched — no reset, no knockback, no flinch (the era-silent
+     * difference branch) — so it reads well below that ({@code < max−3}). Only the
+     * full-accept case ships (returns the era vector to {@code setVelocity}); the
+     * difference case is WITHHELD — journaled as a drop with reason
+     * {@code era-silent-difference} (never silently vanished; the reconstructed
+     * transaction from the live pending context keeps the drop correlatable —
+     * attacker/victim/source/sprint) and removed from the desk so neither this ensure
+     * nor the tick sweep ships it. Withholding it kills the manufactured
+     * velocity-event loop ({@code ensure → hurtMarked → next armed pending ships}) at
+     * its head — the ~2-tick re-knock a packetless victim (bot/harness) took in the
+     * owner's capture and that poisoned feel tests.</p>
+     */
+    static KnockbackVector ensureOrWithhold(
+            DeliveryDesk desk, HitContext pending, int noDamageTicks, int maxNoDamageTicks) {
+        if (noDamageTicks < maxNoDamageTicks - 3) {
+            desk.journalDrop(new HitTransaction(pending), "era-silent-difference");
+            desk.withdraw(pending.id());
+            return null;
+        }
+        Directive directive = desk.ensure(pending.id());
+        return directive.ship();
     }
 
     /** A region-path vanilla melee ({@code ENTITY_ATTACK}) or an adopted fast-path melee. */
