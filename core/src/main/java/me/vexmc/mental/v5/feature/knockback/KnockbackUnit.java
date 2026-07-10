@@ -37,6 +37,7 @@ import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.delivery.HitIds;
@@ -391,9 +392,16 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (view == null) {
             return null;
         }
-        Double ping = latency.forPlayer(victim.getUniqueId()).pingMillis();
+        CompensationSettings settings = compensationSettings();
+        Double ping = latency.forPlayer(victim.getUniqueId()).filteredPingMillis(settings.spikeThresholdMillis());
         int rtt = ping == null ? 0 : (int) Math.round(ping);
-        return CompensationQuery.verticalFor(view, rtt, view.motion().vy());
+        return CompensationQuery.verticalFor(view, rtt, view.motion().vy(), settings.offGroundSync());
+    }
+
+    @SuppressWarnings("unchecked")
+    private CompensationSettings compensationSettings() {
+        return snapshot.get().settings(
+                (SettingsKey<CompensationSettings>) Feature.LATENCY_COMPENSATION.settingsKey());
     }
 
     /**

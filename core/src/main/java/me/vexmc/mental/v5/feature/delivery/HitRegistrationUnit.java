@@ -42,6 +42,7 @@ import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -558,12 +559,21 @@ public final class HitRegistrationUnit implements FeatureUnit {
     }
 
     private Double compensationFor(UUID victimId, PlayerView victimView) {
-        if (victimId == null || victimView == null || !snapshot.get().enabled(Feature.LATENCY_COMPENSATION)) {
+        if (victimId == null || victimView == null
+                || !snapshot.get().enabled(Feature.LATENCY_COMPENSATION)) {
             return null;
         }
-        Double ping = latency.forPlayer(victimId).pingMillis();
+        CompensationSettings settings = compensationSettings();
+        Double ping = latency.forPlayer(victimId).filteredPingMillis(settings.spikeThresholdMillis());
         int rtt = ping == null ? 0 : (int) Math.round(ping);
-        return CompensationQuery.verticalFor(victimView, rtt, victimView.motion().vy());
+        return CompensationQuery.verticalFor(
+                victimView, rtt, victimView.motion().vy(), settings.offGroundSync());
+    }
+
+    @SuppressWarnings("unchecked")
+    private CompensationSettings compensationSettings() {
+        return snapshot.get().settings(
+                (SettingsKey<CompensationSettings>) Feature.LATENCY_COMPENSATION.settingsKey());
     }
 
     /** The velocity-pre-send suppressor reason, or null when the pre-send is eligible. */
