@@ -96,6 +96,24 @@ class PacketTapStateTest {
         assertFalse(event.isCancelled(), "pre-Play traffic must never be cancelled");
     }
 
+    /**
+     * The PLAYER_INPUT sprint-key feed (FIX 3): a PLAY-state PLAYER_INPUT is routed to
+     * the new corroborator branch (never the movement branch — its buffer is unreadable
+     * here, so a mis-route to {@code onMovement} would throw before NO_SESSIONS), and
+     * the defensive wrapper parse is swallowed so the observation tap never breaks the
+     * inbound pipeline. Pins that {@code PacketType.Play.Client.PLAYER_INPUT} resolves
+     * in the shaded PacketEvents and is handled zero-touch; the {@code onKeyIntent}
+     * state semantics are pinned by {@code SprintWireTest}.
+     */
+    @org.junit.jupiter.api.Test
+    void playerInputInPlayStateIsHandledAndNeverBreaksThePipeline() {
+        PacketTap tap = new PacketTap(new ConnectionDomains(CLOCK), NO_SESSIONS, CLOCK);
+        PacketReceiveEvent event = receiveEvent(ConnectionState.PLAY, PacketType.Play.Client.PLAYER_INPUT);
+
+        assertDoesNotThrow(() -> tap.onPacketReceive(event));
+        assertFalse(event.isCancelled(), "an observation tap never cancels PLAYER_INPUT");
+    }
+
     private static PacketReceiveEvent receiveEvent(ConnectionState state, PacketTypeCommon type) {
         User user = new User(null, state, ClientVersion.UNKNOWN,
                 new UserProfile(UUID.randomUUID(), "joining"));

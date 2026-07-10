@@ -244,12 +244,21 @@ it did server-side must be re-implemented or it silently vanishes:
   freshness the hit used), and the `SprintWire`'s post-clear re-arm re-engages
   the bonus one tick later (`reconcile`, the era one-tick re-engage) when the
   raw `clientSprinting` flag survived — i.e. no STOP followed the hit, so the
-  client's held sprint intent persisted. A client that DID predict the attack
-  un-sprint (legacy via Via, a CADENCE-spoofed modern client, a slow
-  full-charge clicker) sends STOP → `clientSprinting` false → NO auto re-arm →
-  a real START (the w-tap) is still required, freshness armed as ever (the
-  client-side technique contract is preserved exactly where a client expresses
-  it). The re-arm window is opened by `clearedAt` on `onServerClear` and reset
+  client's held sprint intent persisted. A STOP crosses the wire ONLY when the
+  client's same-tick re-arm is blocked — item-use / block-holding foremost, food
+  ≤6, or lost forward impulse — or for a double-tap-W sprinter (no rising edge
+  until a full re-gesture): those send STOP → `clientSprinting` false → NO auto
+  re-arm → a real START (the w-tap) is still required, freshness armed as ever. A
+  sprint-KEY-HOLDER's full-charge un-sprint prediction is wire-INVISIBLE: the
+  re-arm fires in the SAME tick's `aiStep` (the level-triggered hold path, which
+  runs BEFORE the per-tick diff sender `sendIsSprintingIfNeeded`), so no STOP
+  crosses and the held sprinter keeps the bonus — the client-side technique
+  contract is preserved exactly where a client expresses it (empirical 1.21.11
+  extraction, `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`).
+  PLAYER_INPUT on 1.21.2+ DOES carry a sprint bit (0x40, raw `keySprint.isDown()`
+  intent — false for double-tap sprinters, true for stationary ctrl-holders; the
+  server ignores it) — a future re-arm corroborator, never a verdict source. The
+  re-arm window is opened by `clearedAt` on `onServerClear` and reset
   by any client START/STOP or a reconcile adopt, so a genuine un-sprint is
   never overridden. Without ANY clear, no-w-tap seconds keep the sprint extra
   forever — the wire clear is what spends it (measured: no-w-tap and w-tap

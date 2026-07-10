@@ -534,4 +534,191 @@ class SprintWireTest {
         assertFalse(wire.verdictAt(new TickStamp(10)).sprinting(),
                 "the adopted server un-sprint stands — the re-arm window closed on adopt");
     }
+
+    /* ── the seed raises clientSprinting (mid-sprint plugin load/reload) ───── */
+
+    @Test
+    void seedFromASprintingServerFlagRaisesClientSprintingAndKeepsTheBonusAcrossAHit() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        // A plugin load/reload mid-play creates the wire for a player who is ALREADY
+        // sprinting. The first movement reconcile seeds the unseen wire from the live
+        // server flag, which — its own pre-wire START having set it through vanilla's
+        // handler — IS the client's last transmitted sprint state.
+        wire.reconcile(true, new TickStamp(0), 3); // unseen ⇒ seed
+        SprintVerdict seeded = wire.verdictAt(new TickStamp(0));
+        assertTrue(seeded.sprinting(), "seeded sprinting from the live server flag");
+        assertEquals(Boolean.FALSE, seeded.fresh(), "a seed is not fresh — no re-engage happened");
+        assertTrue(wire.clientSprinting(),
+                "the seed adopts the server flag as the client's last transmitted sprint state");
+
+        // A bonus hit clears the wire (the seq-guarded clear; no later wire write).
+        clock.tick = 1;
+        wire.onServerClear(seeded.wireSeq()); // seq not advanced ⇒ clears sprinting/armed, clearedAt = 1
+        assertFalse(wire.verdictAt(new TickStamp(1)).sprinting(), "the hit cleared the wire view");
+
+        // The +1-tick movement reconcile with the raw client flag surviving the seed:
+        // the mid-sprint-reload player keeps the bonus. WITHOUT the seed fix the seed
+        // carried the INITIAL false clientSprinting, so this re-arm would refuse.
+        wire.reconcile(true, new TickStamp(2), 3);
+        assertTrue(wire.verdictAt(new TickStamp(2)).sprinting(),
+                "the seed's raised clientSprinting lets the post-clear re-arm re-engage the bonus");
+    }
+
+    @Test
+    void seedFromANonSprintingServerFlagLeavesClientSprintingLowAndDoesNotReArm() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        // The reloaded player was walking: a non-sprinting seed leaves the raw flag down.
+        wire.reconcile(false, new TickStamp(0), 3); // unseen ⇒ seed to not-sprinting
+        SprintVerdict seeded = wire.verdictAt(new TickStamp(0));
+        assertFalse(seeded.sprinting());
+        assertFalse(wire.clientSprinting(), "a non-sprinting seed leaves clientSprinting false");
+
+        // No clear window and no client sprint intent ⇒ later reconciles never synthesize
+        // a bonus. Byte-identical to the pre-fix behaviour.
+        wire.reconcile(false, new TickStamp(2), 3);
+        assertFalse(wire.verdictAt(new TickStamp(2)).sprinting(),
+                "no re-arm without a surviving client sprint intent");
+    }
+
+    @Test
+    void theAdoptBranchNeverTouchesClientSprinting() {
+        Clock clock = new Clock();
+        clock.tick = 4;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart(); // seen=true, clientSprinting up, sprinting+armed, lastWrite = 4
+        assertTrue(wire.clientSprinting(), "a START raises the raw client flag");
+
+        // A persistent server un-sprint is ADOPTED into the wire's sprinting flag after
+        // the quiet window — but the raw client flag is packet-only, so the adopt (unlike
+        // the seed) must never write it. This is the existing packet-only invariant.
+        wire.reconcile(false, new TickStamp(8), 3); // disagree + age 4 ≥ 3 ⇒ adopt sprinting=false
+        assertFalse(wire.verdictAt(new TickStamp(8)).sprinting(), "the adopt took the server un-sprint");
+        assertTrue(wire.clientSprinting(), "the ADOPT branch never touches the raw client flag");
+    }
+
+    /* ── the PLAYER_INPUT sprint-key corroborator (SWORD_BLOCKING block-hit gates) ─ */
+
+    @Test
+    void unknownKeyIntentLeavesBothBlockhitGatesByteIdentical() {
+        Clock clock = new Clock();
+        clock.tick = 4;
+        SprintWire wire = new SprintWire(clock);
+
+        // No onKeyIntent is ever called — keyIntent stays UNKNOWN (null), the value for
+        // every pre-1.21.2 / Via / packetless client. Both gates must collapse to the
+        // raw-flag test exactly.
+        wire.onSprintStart(); // clientSprinting = true
+        assertTrue(wire.blockReArmEligible(),
+                "UNKNOWN keyIntent + clientSprinting=true ⇒ eligible, as the raw-flag gate always was");
+
+        wire.onBlockSprintReset();
+        wire.onServerClear(new TickStamp(4)); // clears sprinting/armed; blockReset + clientSprinting survive
+        assertTrue(wire.verdictAt(new TickStamp(4)).sprinting(),
+                "held-block override rides clientSprinting exactly as before with UNKNOWN keyIntent");
+
+        // Drop the raw client flag: with no keyIntent to widen them, both gates refuse.
+        clock.tick = 5;
+        wire.onSprintStop(); // clientSprinting = false; keyIntent still UNKNOWN; blockReset survives
+        assertFalse(wire.blockReArmEligible(),
+                "UNKNOWN keyIntent + clientSprinting=false ⇒ refused (byte-identical to the raw-flag gate)");
+        assertFalse(wire.verdictAt(new TickStamp(6)).sprinting(),
+                "the block override ends with the raw flag when keyIntent is UNKNOWN");
+    }
+
+    @Test
+    void aGenuineStopWithARecentlySprintingHeldKeyKeepsBothBlockhitGates() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();   // lastSprintingAt = 0, clientSprinting = true
+        wire.onKeyIntent(true); // the raw sprint KEY is held (a ctrl/toggle holder)
+
+        // A full-charge / spoofed hit lands while item-use blocked the same-tick re-arm:
+        // the ONE case a genuine STOP crosses for a key-holder — the raw client flag falls.
+        clock.tick = 5;
+        wire.onSprintStop();
+        assertFalse(wire.clientSprinting(), "the blocked-tick STOP lowered the raw client flag");
+
+        // Gate 1 (blockReArmEligible): 5 ticks since last sprint, key still held ⇒ re-arm fires.
+        assertTrue(wire.blockReArmEligible(),
+                "held sprint key + recent sprint carries the era block-hitter past the blocked STOP");
+
+        // The re-arm engages the sticky block reset; a later blocked STOP lowers the raw
+        // flag again while the block is STILL held.
+        wire.onBlockSprintReset(); // clientSprinting back up, blockReset sticky, lastSprintingAt = 5
+        clock.tick = 6;
+        wire.onSprintStop();
+        assertFalse(wire.clientSprinting());
+
+        // Gate 2 (verdictAt blockReset override): blockReset && !clientSprinting, rescued by
+        // the recent held sprint key.
+        SprintVerdict v = wire.verdictAt(new TickStamp(7));
+        assertTrue(v.sprinting(),
+                "the held-block override survives the STOP via the recent sprint-key corroborator");
+        assertEquals(Boolean.TRUE, v.fresh());
+    }
+
+    @Test
+    void aHeldKeyThatHasNotSprintedInOverASecondIsRefusedByBothGates() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        // A stationary defensive ctrl-holder: the sprint KEY is held, but the last time
+        // the wire was actually sprinting is now stale (> 20 ticks).
+        wire.onSprintStart();      // lastSprintingAt = 0
+        wire.onBlockSprintReset(); // blockReset sticky; lastSprintingAt still 0 (same tick)
+        wire.onKeyIntent(true);
+        wire.onSprintStop();       // raw client flag down; lastSprintingAt stays 0; blockReset survives
+
+        clock.tick = 25; // 25 ticks since the last sprint > ERA_BLOCKHIT_RECENCY_TICKS (20)
+        assertFalse(wire.blockReArmEligible(),
+                "25 ticks since last sprint ⇒ the stationary defensive ctrl-holder earns no re-arm");
+        assertFalse(wire.verdictAt(new TickStamp(25)).sprinting(),
+                "and the verdict override is refused past the recency window — no phantom bonus");
+    }
+
+    @Test
+    void keyIntentFalseNeverVetoesAClientSprintingPath() {
+        Clock clock = new Clock();
+        clock.tick = 3;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();    // clientSprinting = true (a double-tap-W sprinter IS sprinting)
+        wire.onKeyIntent(false); // ...but the raw sprint KEY reads false (double-tap holds no key)
+        assertTrue(wire.blockReArmEligible(),
+                "clientSprinting=true passes regardless of a FALSE key intent — double-tap sprinters unaffected");
+
+        wire.onBlockSprintReset();
+        wire.onServerClear(new TickStamp(3)); // clears sprinting/armed; blockReset + clientSprinting survive
+        SprintVerdict v = wire.verdictAt(new TickStamp(3));
+        assertTrue(v.sprinting(), "the block override still rides clientSprinting; a FALSE key intent never vetoes it");
+        assertEquals(Boolean.TRUE, v.fresh());
+    }
+
+    @Test
+    void onKeyIntentBumpsSeqSoADeferredClearCannotRetroEatIt() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                               // seq 1, sprinting + armed
+        SprintVerdict peek = wire.verdictAt(new TickStamp(5));
+        assertEquals(1L, peek.wireSeq());
+        wire.onKeyIntent(true);                             // seq 2 — an arrival-order wire write
+        clock.tick = 7;
+        wire.onServerClear(peek.wireSeq());                 // 2 > 1 ⇒ no-op (a later write arrived)
+        SprintVerdict after = wire.verdictAt(new TickStamp(7));
+        assertTrue(after.sprinting(), "the later key-intent write protects sprint from the deferred clear");
+        assertEquals(Boolean.TRUE, after.fresh());
+        assertEquals(2L, after.wireSeq(), "onKeyIntent bumped the arrival sequence");
+    }
 }
