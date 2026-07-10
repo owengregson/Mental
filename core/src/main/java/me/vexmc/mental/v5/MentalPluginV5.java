@@ -67,6 +67,7 @@ import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.feedback.DeathEffectsUnit;
 import me.vexmc.mental.v5.feature.feedback.FeedbackTrace;
 import me.vexmc.mental.v5.feature.feedback.HitFeedbackUnit;
 import me.vexmc.mental.v5.feature.combo.ComboEvents;
@@ -678,7 +679,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The feedback family (4C). Hit-feedback assembles the era-correct hit
         // sound/particle emitter plus the mark-correlated hurt-sound suppressor,
         // sharing the one boot FeedbackTrace decision ring the tester asserts against.
+        // Death-effects strikes cosmetic packet lightning + sound + burst at
+        // PlayerDeathEvent; its scope-owned destroy-task registry needs scheduling.
         reconciler.register(new HitFeedbackUnit(environment, clock, feedbackTrace, getLogger()));
+        reconciler.register(new DeathEffectsUnit(environment, scheduling, feedbackTrace, getLogger()));
 
         // The sustain family (4C). Golden apples + potion durations compute era
         // values from the kernel and apply them at the confirmed terminal event

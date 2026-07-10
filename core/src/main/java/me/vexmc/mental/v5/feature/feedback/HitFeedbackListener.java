@@ -7,14 +7,10 @@ import com.github.retrooper.packetevents.protocol.particle.data.ParticleBlockSta
 import com.github.retrooper.packetevents.protocol.particle.type.ParticleType;
 import com.github.retrooper.packetevents.protocol.particle.type.ParticleTypes;
 import com.github.retrooper.packetevents.protocol.player.User;
-import com.github.retrooper.packetevents.protocol.sound.Sound;
 import com.github.retrooper.packetevents.protocol.sound.SoundCategory;
-import com.github.retrooper.packetevents.protocol.sound.Sounds;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.util.Vector3d;
-import com.github.retrooper.packetevents.util.Vector3f;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerParticle;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSoundEffect;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,10 +20,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Logger;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
-import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.Mode;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.ParticleSpec;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.Preset;
-import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.SoundSpec;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -83,9 +77,9 @@ public final class HitFeedbackListener implements Listener {
     private final double lowHealthCeiling; // post-hit health (in half-hearts) below which the extra layer fires
     private final double audienceRadius;
 
-    private final List<ResolvedSound> normalSounds;
-    private final List<ResolvedSound> lowHealthSounds;
-    private final List<ResolvedParticle> particles;
+    private final List<FeedbackEmit.ResolvedSound> normalSounds;
+    private final List<FeedbackEmit.ResolvedSound> lowHealthSounds;
+    private final List<FeedbackEmit.ResolvedParticle> particles;
 
     private final String soundSummary;
     private final String lowHealthSummary;
@@ -100,13 +94,14 @@ public final class HitFeedbackListener implements Listener {
         this.playerManager = PacketEvents.getAPI().getPlayerManager();
         this.vanillaPreset = settings.preset() == Preset.VANILLA;
         this.lowHealthCeiling = settings.lowHealthThresholdHearts() * 2.0;
-        this.normalSounds = resolveSounds(settings.sounds(), table, "hit", logger);
-        this.lowHealthSounds = resolveSounds(settings.lowHealthSounds(), table, "low-health", logger);
+        this.normalSounds = FeedbackEmit.resolveSounds(settings.sounds(), table, "hit-feedback", "hit", logger);
+        this.lowHealthSounds =
+                FeedbackEmit.resolveSounds(settings.lowHealthSounds(), table, "hit-feedback", "low-health", logger);
         this.particles = resolveParticles(settings.particles(), modernBlockData, logger);
         this.audienceRadius = 16.0 * Math.max(1.0, maxVolume(this.normalSounds));
-        this.soundSummary = summariseSounds(this.normalSounds);
-        this.lowHealthSummary = summariseSounds(this.lowHealthSounds);
-        this.particleSummary = summariseParticles(this.particles);
+        this.soundSummary = FeedbackEmit.summariseSounds(this.normalSounds);
+        this.lowHealthSummary = FeedbackEmit.summariseSounds(this.lowHealthSounds);
+        this.particleSummary = FeedbackEmit.summariseParticles(this.particles);
     }
 
     /**
@@ -196,7 +191,7 @@ public final class HitFeedbackListener implements Listener {
             soundPackets.addAll(soundPacketsFor(lowHealthSounds, soundPosition));
         }
         Vector3d chest = new Vector3d(loc.getX(), loc.getY() + CHEST_OFFSET, loc.getZ());
-        List<PacketWrapper<?>> particlePackets = particlePacketsFor(chest);
+        List<PacketWrapper<?>> particlePackets = FeedbackEmit.particlePackets(particles, chest);
 
         try {
             for (Player viewer : nearby) {
@@ -219,9 +214,9 @@ public final class HitFeedbackListener implements Listener {
         }
     }
 
-    private List<PacketWrapper<?>> soundPacketsFor(List<ResolvedSound> sounds, Vector3d position) {
+    private List<PacketWrapper<?>> soundPacketsFor(List<FeedbackEmit.ResolvedSound> sounds, Vector3d position) {
         List<PacketWrapper<?>> packets = new ArrayList<>(sounds.size());
-        for (ResolvedSound sound : sounds) {
+        for (FeedbackEmit.ResolvedSound sound : sounds) {
             float pitch = vanillaPreset ? vanillaJitter() : sound.pitch();
             packets.add(new WrapperPlayServerSoundEffect(
                     sound.sound(), SoundCategory.PLAYER, position, sound.volume(), pitch));
@@ -229,34 +224,9 @@ public final class HitFeedbackListener implements Listener {
         return packets;
     }
 
-    private List<PacketWrapper<?>> particlePacketsFor(Vector3d chest) {
-        List<PacketWrapper<?>> packets = new ArrayList<>(particles.size());
-        for (ResolvedParticle particle : particles) {
-            int count = randomCount(particle.countMin(), particle.countMax());
-            Vector3f offset;
-            float speed;
-            if (particle.mode() == Mode.EMANATE) {
-                offset = new Vector3f(0.0f, 0.0f, 0.0f); // burst outward from the point
-                speed = particle.speed();
-            } else {
-                offset = new Vector3f( // SPREAD: the offset field is vanilla's per-axis Gaussian sigma
-                        (float) particle.spreadX(), (float) particle.spreadY(), (float) particle.spreadZ());
-                speed = 0.0f;
-            }
-            packets.add(new WrapperPlayServerParticle(particle.particle(), false, chest, offset, speed, count));
-        }
-        return packets;
-    }
-
     private static float vanillaJitter() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         return 1.0f + (random.nextFloat() - random.nextFloat()) * VANILLA_JITTER;
-    }
-
-    private static int randomCount(int min, int max) {
-        int low = Math.max(0, min);
-        int high = Math.max(low, max);
-        return low == high ? low : ThreadLocalRandom.current().nextInt(low, high + 1);
     }
 
     private String detail(String decision, boolean lowHealth) {
@@ -271,28 +241,9 @@ public final class HitFeedbackListener implements Listener {
     // Assemble-time resolution (once; never on the hot path).
     // ------------------------------------------------------------------------
 
-    private static List<ResolvedSound> resolveSounds(
-            List<SoundSpec> specs, FeedbackSoundTable table, String kind, Logger logger) {
-        List<ResolvedSound> resolved = new ArrayList<>(specs.size());
-        for (SoundSpec spec : specs) {
-            String name = table.resolve(spec.sound());
-            if (name.isEmpty()) {
-                logger.info("hit-feedback: " + kind + " sound '" + spec.sound()
-                        + "' has no era-correct id on this server — skipped");
-                continue;
-            }
-            if (!name.equals(FeedbackSoundTable.normalize(spec.sound()))) {
-                logger.info("hit-feedback: " + kind + " sound '" + spec.sound()
-                        + "' resolves to '" + name + "' on this server");
-            }
-            resolved.add(new ResolvedSound(Sounds.getByNameOrCreate(name), spec.volume(), spec.pitch(), name));
-        }
-        return resolved;
-    }
-
-    private static List<ResolvedParticle> resolveParticles(
+    private static List<FeedbackEmit.ResolvedParticle> resolveParticles(
             List<ParticleSpec> specs, boolean modernBlockData, Logger logger) {
-        List<ResolvedParticle> resolved = new ArrayList<>(specs.size());
+        List<FeedbackEmit.ResolvedParticle> resolved = new ArrayList<>(specs.size());
         for (ParticleSpec spec : specs) {
             resolved.add(buildParticle(spec, modernBlockData, logger));
         }
@@ -300,7 +251,7 @@ public final class HitFeedbackListener implements Listener {
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static ResolvedParticle buildParticle(ParticleSpec spec, boolean modernBlockData, Logger logger) {
+    private static FeedbackEmit.ResolvedParticle buildParticle(ParticleSpec spec, boolean modernBlockData, Logger logger) {
         String name = spec.particle() == null ? "" : spec.particle().trim().toLowerCase(Locale.ROOT);
         String label = name;
         if ("block".equals(name) && spec.block() != null && !spec.block().isBlank()) {
@@ -309,7 +260,7 @@ public final class HitFeedbackListener implements Listener {
                 try {
                     WrappedBlockState state = WrappedBlockState.getByString(spec.block());
                     if (state != null) {
-                        return new ResolvedParticle(
+                        return new FeedbackEmit.ResolvedParticle(
                                 new Particle<>(ParticleTypes.BLOCK, new ParticleBlockStateData(state)), spec, label);
                     }
                 } catch (Throwable inconvertible) {
@@ -318,62 +269,25 @@ public final class HitFeedbackListener implements Listener {
             }
             logger.info("hit-feedback: block particle '" + spec.block()
                     + "' is not resolvable on this server — using crit");
-            return new ResolvedParticle(new Particle<>(ParticleTypes.CRIT), spec, "crit");
+            return new FeedbackEmit.ResolvedParticle(new Particle<>(ParticleTypes.CRIT), spec, "crit");
         }
         try {
             ParticleType<?> type = ParticleTypes.getByName(name);
             if (type != null) {
-                return new ResolvedParticle(new Particle(type), spec, label);
+                return new FeedbackEmit.ResolvedParticle(new Particle(type), spec, label);
             }
         } catch (Throwable unresolved) {
             // Fall through to the crit degrade below.
         }
         logger.info("hit-feedback: particle '" + spec.particle() + "' is not resolvable on this server — using crit");
-        return new ResolvedParticle(new Particle<>(ParticleTypes.CRIT), spec, "crit");
+        return new FeedbackEmit.ResolvedParticle(new Particle<>(ParticleTypes.CRIT), spec, "crit");
     }
 
-    private static double maxVolume(List<ResolvedSound> sounds) {
+    private static double maxVolume(List<FeedbackEmit.ResolvedSound> sounds) {
         double max = 1.0;
-        for (ResolvedSound sound : sounds) {
+        for (FeedbackEmit.ResolvedSound sound : sounds) {
             max = Math.max(max, sound.volume());
         }
         return max;
-    }
-
-    private static String summariseSounds(List<ResolvedSound> sounds) {
-        StringBuilder builder = new StringBuilder();
-        for (ResolvedSound sound : sounds) {
-            if (builder.length() > 0) {
-                builder.append(',');
-            }
-            builder.append(sound.name());
-        }
-        return builder.toString();
-    }
-
-    private static String summariseParticles(List<ResolvedParticle> particles) {
-        StringBuilder builder = new StringBuilder();
-        for (ResolvedParticle particle : particles) {
-            if (builder.length() > 0) {
-                builder.append(',');
-            }
-            builder.append(particle.label()).append('×')
-                    .append(particle.countMin()).append('-').append(particle.countMax());
-        }
-        return builder.toString();
-    }
-
-    /** A sound resolved to a PacketEvents {@link Sound} plus its emit volume/pitch and final name. */
-    private record ResolvedSound(Sound sound, float volume, float pitch, String name) {}
-
-    /** A particle resolved to a PacketEvents {@link Particle} plus its burst geometry. */
-    private record ResolvedParticle(
-            Particle<?> particle, int countMin, int countMax, Mode mode, float speed,
-            double spreadX, double spreadY, double spreadZ, String label) {
-
-        ResolvedParticle(Particle<?> particle, ParticleSpec spec, String label) {
-            this(particle, spec.countMin(), spec.countMax(), spec.mode(), spec.speed(),
-                    spec.spreadX(), spec.spreadY(), spec.spreadZ(), label);
-        }
     }
 }
