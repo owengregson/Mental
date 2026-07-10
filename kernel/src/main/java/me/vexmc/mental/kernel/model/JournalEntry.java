@@ -8,7 +8,10 @@ package me.vexmc.mental.kernel.model;
  * @param shipped        the final delivered vector, or null for a cancelled/suppressed hit.
  * @param wireCarried    true when the wire carried it and a valve was armed;
  *                       false for a correction, a pinned ship, or a suppression.
- * @param suppressReason the reason a hit was suppressed/dropped, or null.
+ * @param suppressReason the reason a hit was suppressed/dropped, or null. A SHIPPED
+ *                       pinned entry may carry the {@code wire-failed} note — the
+ *                       pre-send burst the wire refused; the knock still shipped once
+ *                       via the velocity event.
  * @param paceFactor     the speed-conformal pace factor actually applied to the
  *                       fresh horizontal knock (D-6). {@code 1.0} whenever pace is
  *                       off, the hit was suppressed before compute, or the hit is a

@@ -402,16 +402,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             boolean velocityShips = admitVelocityPreSend(
                     feedbackGate, victimId, victimHasWire, vector != null, now, minInterval);
 
-            KnockbackVector shipped = null;
-            if (velocityShips) {
-                shipped = vector; // TRACKER (full stamp); TRACKER_DECAYED handled by the desk record
-                tx.planned();
-                if (victimHasWire) {
-                    tx.preSent(shipped);
-                } else {
-                    tx.pinned(shipped);
-                }
-            }
+            KnockbackVector shipped = velocityShips ? vector : null; // TRACKER (full stamp); TRACKER_DECAYED handled by the desk record
 
             float hurtYaw = HurtYaw.hurtYaw(
                     attackerView == null ? 0 : positionX(attackerId),
@@ -424,10 +415,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
             // nothing. An eligible velocity paced out this window skips the wire
             // (the authoritative pass delivers it), preserving the pacing.
             boolean shipBurst = victimHasWire && (vector == null || velocityShips);
+            // The burst ships FIRST and the transaction state commits off its
+            // Outcome — BurstSender's contract: an UNSENDABLE burst (user-null
+            // race, mid-ship throw) must be PINNED, never accounted
+            // wire-delivered. Committing PRE_SENT ahead of the ship let a failed
+            // burst arm the valve, which then ate the authoritative
+            // ENTITY_VELOCITY — the victim's only copy (F2).
+            BurstSender.Outcome outcome = null;
             if (shipBurst) {
-                senders.ship(PacketEvents.getAPI().getPlayerManager().getUser(playerVictim),
+                outcome = senders.ship(PacketEvents.getAPI().getPlayerManager().getUser(playerVictim),
                         victimView.entityId(), shipped, hurtYaw, settings.bundleFeedback());
             }
+            commitPreSendState(tx, shipped, velocityShips, victimHasWire, outcome);
             if (tx.state() == HitTransaction.State.PRE_SENT || tx.state() == HitTransaction.State.PINNED) {
                 sessions.sessionFor(victimId).desk().submitFromWire(tx);
             }
@@ -542,6 +541,34 @@ public final class HitRegistrationUnit implements FeatureUnit {
         return new EntityState(x, y, z, lastYaw,
                 0, 0, 0, view.grounded(), verdict.sprinting(),
                 view.kbEnchantLevel(), view.knockbackResistance(), view.moveSpeedAttr());
+    }
+
+    /**
+     * Commits the transaction state for a planned velocity pre-send off the
+     * burst's actual ship {@link BurstSender.Outcome}. Only a DELIVERED burst may
+     * account wire-carried (PRE_SENT — the valve will consume the tracker
+     * duplicate); anything else on a wired victim is the wire-failed pin — the
+     * era-moment vector ships once via the genuine velocity event and no valve
+     * arms (a phantom PRE_SENT would let the valve eat the victim's only copy).
+     * A connectionless victim pins plain (the pre-existing B4 path). A no-velocity
+     * plan (hurt-only burst) commits nothing — the hit stays REGISTERED for the
+     * authoritative recompute. Pure over the transaction so the contract is
+     * unit-pinned at this seam.
+     */
+    static void commitPreSendState(
+            HitTransaction tx, KnockbackVector shipped, boolean velocityShips,
+            boolean victimHasWire, BurstSender.Outcome outcome) {
+        if (!velocityShips) {
+            return;
+        }
+        tx.planned();
+        if (victimHasWire && outcome == BurstSender.Outcome.DELIVERED) {
+            tx.preSent(shipped);
+        } else if (victimHasWire) {
+            tx.pinnedWireFailed(shipped);
+        } else {
+            tx.pinned(shipped);
+        }
     }
 
     private SprintVerdict sprintVerdict(UUID attackerId) {

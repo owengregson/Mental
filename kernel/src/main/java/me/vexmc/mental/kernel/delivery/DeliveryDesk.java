@@ -214,10 +214,12 @@ public final class DeliveryDesk {
                 directive = new Directive(Directive.Action.SHIP, modified, null);
             }
         } else if (tx.state() == State.PINNED) {
-            // 5. Pinned: ship normally, never a valve (B4).
+            // 5. Pinned: ship normally, never a valve (B4). A wire-failed
+            //    downgrade (BurstSender UNSENDABLE) carries its note into the
+            //    journal so a refused burst is visible in one read.
             KnockbackVector carried = tx.carried();
             tx.adopted();
-            record(tx, carried, false, null);
+            record(tx, carried, false, tx.deliveryNote());
             directive = new Directive(Directive.Action.SHIP, carried, null);
         } else if (LIVE.contains(tx.state())) {
             // A live REGISTERED/PLANNED decision (vanilla path): ship the formula,

@@ -13,8 +13,9 @@ import me.vexmc.mental.kernel.model.KnockbackVector;
  *
  * <pre>
  *   REGISTERED → PLANNED → PRE_SENT            (the wire carried the burst)
- *                        → PINNED              (value pinned; ships once via the
- *                                               velocity event, never a valve — B4)
+ *                        → PINNED              (value pinned — connectionless victim
+ *                                               OR wire-failed burst; ships once via
+ *                                               the velocity event, never a valve — B4)
  *             → { ADOPTED | SUPPRESSED | RETRACTED | DROPPED | ENSURED }   (resolved)
  *             → RECORDED                        (terminal; journal entry written)
  * </pre>
@@ -38,11 +39,15 @@ public final class HitTransaction {
     private static final EnumSet<State> LIVE =
             EnumSet.of(State.REGISTERED, State.PLANNED, State.PRE_SENT, State.PINNED);
 
+    /** The journal note for a burst the wire refused (BurstSender UNSENDABLE) — the pin downgrade. */
+    public static final String WIRE_FAILED = "wire-failed";
+
     private final HitContext context;
     private State state = State.REGISTERED;
     private KnockbackVector carried;
     private boolean wireCarried;
     private String suppressReason;
+    private String deliveryNote;
     private double paceFactor = 1.0;
     private double comboFactor = 1.0;
 
@@ -127,6 +132,24 @@ public final class HitTransaction {
         transition(EnumSet.of(State.PLANNED), State.PINNED);
         this.carried = eraVector;
         this.wireCarried = false;
+    }
+
+    /**
+     * The wire refused this hit's burst (a user-null race or a mid-ship throw —
+     * BurstSender returned UNSENDABLE having written nothing): pin the era-moment
+     * vector so it ships once via the genuine velocity event and no valve ever
+     * arms to eat the victim's only authoritative ENTITY_VELOCITY. The note is
+     * journaled by the desk on the pinned ship, so a wire failure is visible in
+     * one journal read instead of masquerading as a healthy wire-carried SHIP.
+     */
+    public void pinnedWireFailed(KnockbackVector eraVector) {
+        pinned(eraVector);
+        this.deliveryNote = WIRE_FAILED;
+    }
+
+    /** The delivery note the desk journals on a pinned ship ({@link #WIRE_FAILED}), or null. */
+    public String deliveryNote() {
+        return deliveryNote;
     }
 
     public void adopted() {

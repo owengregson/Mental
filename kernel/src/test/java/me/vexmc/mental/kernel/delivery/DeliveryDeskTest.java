@@ -170,6 +170,32 @@ class DeliveryDeskTest {
         JournalEntry entry = desk.journal().get(0);
         assertEquals(VECTOR, entry.shipped());
         assertTrue(!entry.wireCarried(), "PINNED is never wire-carried");
+        assertNull(entry.suppressReason(), "an ordinary pin journals no note");
+    }
+
+    /* ── 5b. wire-failed pin (F2) = ship, never a valve, journals the downgrade ─ */
+
+    @Test
+    void wireFailedPinnedResolvesAsShipWithoutValveAndJournalsTheDowngrade() {
+        DeliveryDesk desk = desk();
+        HitTransaction tx = new HitTransaction(ctx(1, new HitSource.Melee(), 0));
+        tx.planned();
+        tx.pinnedWireFailed(VECTOR);
+        desk.submitFromWire(tx); // the real netty entry
+        desk.awaitVelocityEvent(tx);
+
+        Directive directive = desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+        assertEquals(Action.SHIP, directive.action());
+        assertNull(directive.arm(),
+                "a wire-failed pin never arms a valve — the authoritative ENTITY_VELOCITY is the victim's only copy");
+        assertEquals(VECTOR, directive.ship());
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(1, journal.size());
+        assertEquals(VECTOR, journal.get(0).shipped());
+        assertTrue(!journal.get(0).wireCarried());
+        assertEquals("wire-failed", journal.get(0).suppressReason());
+        assertEquals(HitTransaction.State.RECORDED, tx.state());
     }
 
     /* ── 6. last-submitter-wins ────────────────────────────────────────── */
