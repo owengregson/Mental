@@ -355,11 +355,14 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     /* ------------------------------------------------------------------ */
 
     /**
-     * Re-arms the sprint knockback bonus a 1.7/1.8 sword block earned, gated on the
-     * RAW client sprint flag (the wire's view — the only signal that survives the
-     * wire's own post-hit clear); a packetless player has no wire, so the reset never
-     * fires for it. Re-syncs the server flag so the snapshot read sees it when
-     * {@code wtap-registration} is off; touches no sprint particles
+     * Re-arms the sprint knockback bonus a 1.7/1.8 sword block earned, gated on
+     * {@link SprintWire#blockReArmEligible()} — the RAW client sprint flag (the only
+     * signal that survives the wire's own post-hit clear), OR, for a 1.21.2+ client
+     * whose genuine blocked-tick STOP lowered that flag, the held PLAYER_INPUT sprint
+     * KEY with a recent sprint (the corroborator; a stationary defensive ctrl-holder
+     * is excluded by the recency window). A packetless player has no wire, so the
+     * reset never fires for it. Re-syncs the server flag so the snapshot read sees it
+     * when {@code wtap-registration} is off; touches no sprint particles
      * (client-authoritative).
      */
     private void resetSprintForBlock(@NotNull Player player) {
@@ -369,12 +372,14 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
         }
         ConnectionDomains.Domain domain = domains.domainFor(id);
         SprintWire wire = domain.sprint();
-        if (!wire.clientSprinting()) {
-            // Gate on the RAW client sprint flag — the only signal that survives the
-            // wire's own post-hit clear (onServerClear, restoring the documented pre-v5
-            // contract). verdictAt().sprinting() is the very flag that clear drops, so a
-            // real sprinter mid-combo would read false and lose the block-hit re-arm; a
-            // defensive block still earns no bonus.
+        if (!wire.blockReArmEligible()) {
+            // Gate on the RAW client sprint flag, widened by the SWORD_BLOCKING-scoped
+            // keyIntent corroborator (blockReArmEligible). The raw flag is the only
+            // signal that survives the wire's own post-hit clear (onServerClear); a real
+            // sprinter mid-combo whose flag that clear drops still keeps re-arming, and a
+            // 1.21.2+ block-hitter whose full-charge/blocked hit crossed a genuine STOP
+            // keeps it via the held sprint KEY + recent-sprint window. A stationary
+            // defensive block earns no bonus (UNKNOWN keyIntent or a stale sprint).
             return;
         }
         // Re-arm freshness AND raise the sticky held-block reset (the owner's

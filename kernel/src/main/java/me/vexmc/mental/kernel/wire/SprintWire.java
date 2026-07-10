@@ -87,19 +87,42 @@ public final class SprintWire {
      * adopt so a genuine un-sprint is never re-armed over); {@code seen} gates
      * reconcile seeding; {@code lastWrite} is the reconcile quiet clock; {@code seq}
      * counts WIRE WRITES in arrival order — client START/STOP, the block-hit re-arm,
-     * the post-clear re-arm, and a reconcile seed/adopt each bump it, so it IS this
-     * wire's era queue program order. {@link #onBlockReleased} and
+     * the post-clear re-arm, a reconcile seed/adopt, and a PLAYER_INPUT key-intent
+     * write ({@link #onKeyIntent}) each bump it, so it IS this wire's era queue
+     * program order. {@link #onBlockReleased} and
      * {@link #onServerClear} do NOT bump: a release only drops the sticky
      * {@code blockReset} (deliberately not a sprint write, matching its
      * {@code lastWrite} exemption), and the clear is the CONSUMER of the ordering,
-     * never a producer.
+     * never a producer. {@code keyIntent} is the raw PLAYER_INPUT sprint KEY
+     * intent (1.21.2+, the 0x40 flag; {@code null} = UNKNOWN, the INITIAL value and
+     * the value for every client that never sends it), written ONLY by
+     * {@link #onKeyIntent} (it bumps {@code seq} — an arrival-order wire write — but
+     * NOT {@code lastWrite}, since a key-state change is not a sprint-truth write);
+     * clears and reconciles never touch it. {@code lastSprintingAt} is the tick the
+     * wire was LAST left sprinting (any transition to {@code sprinting==true}
+     * refreshes it); together with {@code keyIntent} it is the corroborator the two
+     * SWORD_BLOCKING block-hit gates read, and nothing else.
      */
     private record State(boolean seen, boolean sprinting, boolean armed,
                          boolean clientSprinting, boolean blockReset, TickStamp clearedAt,
-                         TickStamp lastWrite, long seq) {}
+                         TickStamp lastWrite, long seq, Boolean keyIntent,
+                         TickStamp lastSprintingAt) {}
+
+    /**
+     * The recency window for the PLAYER_INPUT sprint-key corroborator: a held
+     * sprint KEY ({@code keyIntent} TRUE) only widens a block-hit gate when the wire
+     * recorded sprinting within this many ticks. 20 ticks ≈ 1s — long enough to
+     * carry an era block-hitter through the one blocked-tick STOP a key-holder ever
+     * crosses and its subsequent re-arm cycles, short enough to exclude a stationary
+     * defensive ctrl-holder (no sprint in the last second ⇒ defending, not
+     * block-hitting mid-combo — the phantom-bonus guard). A 1-second "still in the
+     * fight" heuristic, not era-tuned wire timing.
+     */
+    public static final int ERA_BLOCKHIT_RECENCY_TICKS = 20;
 
     private static final State INITIAL =
-            new State(false, false, false, false, false, TickStamp.NO_TICK, TickStamp.NO_TICK, 0L);
+            new State(false, false, false, false, false, TickStamp.NO_TICK, TickStamp.NO_TICK, 0L,
+                    null, TickStamp.NO_TICK);
 
     private final TickClock clock;
     private final AtomicReference<State> state = new AtomicReference<>(INITIAL);
@@ -115,7 +138,8 @@ public final class SprintWire {
      */
     public void onSprintStart() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, true, true, true, s.blockReset(), TickStamp.NO_TICK, now, s.seq() + 1));
+        state.updateAndGet(s -> new State(true, true, true, true, s.blockReset(), TickStamp.NO_TICK, now, s.seq() + 1,
+                s.keyIntent(), now)); // sprinting=true ⇒ lastSprintingAt = now
     }
 
     /**
@@ -125,7 +149,34 @@ public final class SprintWire {
      */
     public void onSprintStop() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, false, s.armed(), false, s.blockReset(), TickStamp.NO_TICK, now, s.seq() + 1));
+        state.updateAndGet(s -> new State(true, false, s.armed(), false, s.blockReset(), TickStamp.NO_TICK, now, s.seq() + 1,
+                s.keyIntent(), s.lastSprintingAt())); // sprinting=false ⇒ lastSprintingAt carries
+    }
+
+    /**
+     * Records the client's raw SPRINT KEY intent from a PLAYER_INPUT packet (1.21.2+,
+     * the 0x40 flag = {@code keySprint.isDown()}): TRUE for a ctrl/toggle holder even
+     * while standing or item-use-blocked, FALSE for a double-tap-W sprinter even while
+     * sprinting. It is NEVER a verdict source — {@link #verdictAt} still derives
+     * {@code sprinting} only from the wire — only a recency corroborator for the two
+     * SWORD_BLOCKING block-hit gates ({@link #blockReArmEligible} and the
+     * {@code verdictAt} blockReset override); its ABSENCE (INITIAL {@code null}
+     * keyIntent — every pre-1.21.2 / Via / packetless client) leaves both gates
+     * byte-identical to before, so defaults stay zero-touch.
+     *
+     * <p>An arrival-order WIRE WRITE: it bumps {@code seq} so a deferred same-tick
+     * {@link #onServerClear(long)} cannot retro-eat a later intent write (the F1
+     * arrival-order rule the seq guard exists for). It deliberately does NOT refresh
+     * {@code lastWrite}: that field is the reconcile quiet clock for SPRINT adoption,
+     * and a key-state change is not a sprint-truth write — refreshing it would
+     * spuriously delay the server-flag adoption. Everything else — {@code sprinting},
+     * {@code armed}, the raw client flag, {@code blockReset}, {@code clearedAt} and
+     * {@code lastSprintingAt} — carries unchanged. Called on the connection's netty
+     * thread; the CAS keeps it atomic against the cross-thread readers.</p>
+     */
+    public void onKeyIntent(boolean intent) {
+        state.updateAndGet(s -> new State(s.seen(), s.sprinting(), s.armed(), s.clientSprinting(),
+                s.blockReset(), s.clearedAt(), s.lastWrite(), s.seq() + 1, intent, s.lastSprintingAt()));
     }
 
     /**
@@ -157,7 +208,7 @@ public final class SprintWire {
             // so the freshness this hit spent must NOT drop while the block is held.
             // clearedAt = now opens the post-clear re-arm window (reconcile re-engages
             // ≥1 tick later while the raw client flag survives).
-            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now, now, s.seq());
+            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now, now, s.seq(), s.keyIntent(), s.lastSprintingAt());
         });
     }
 
@@ -181,7 +232,7 @@ public final class SprintWire {
             if (s.seq() > asOfSeq) {
                 return s; // a wire write arrived after the verdict peek — never retro-clear it
             }
-            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now, now, s.seq());
+            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now, now, s.seq(), s.keyIntent(), s.lastSprintingAt());
         });
     }
 
@@ -197,7 +248,7 @@ public final class SprintWire {
     @Deprecated
     public void onServerClear() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, false, false, s.clientSprinting(), s.blockReset(), now, now, s.seq()));
+        state.updateAndGet(s -> new State(true, false, false, s.clientSprinting(), s.blockReset(), now, now, s.seq(), s.keyIntent(), s.lastSprintingAt()));
     }
 
     /**
@@ -216,7 +267,8 @@ public final class SprintWire {
      */
     public void onBlockSprintReset() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, true, true, true, true, TickStamp.NO_TICK, now, s.seq() + 1));
+        state.updateAndGet(s -> new State(true, true, true, true, true, TickStamp.NO_TICK, now, s.seq() + 1,
+                s.keyIntent(), now)); // block re-arm leaves sprinting=true ⇒ lastSprintingAt = now
     }
 
     /**
@@ -232,7 +284,7 @@ public final class SprintWire {
     public void onBlockReleased() {
         state.updateAndGet(s -> s.blockReset()
                 ? new State(s.seen(), s.sprinting(), s.armed(), s.clientSprinting(), false,
-                        s.clearedAt(), s.lastWrite(), s.seq())
+                        s.clearedAt(), s.lastWrite(), s.seq(), s.keyIntent(), s.lastSprintingAt())
                 : s);
     }
 
@@ -278,7 +330,7 @@ public final class SprintWire {
                 // so re-engage the bonus the wire's own clear dropped — the era wire
                 // cadence the removed setSprinting(false) echo used to fake by proxy.
                 return new State(s.seen(), true, s.armed(), s.clientSprinting(), s.blockReset(),
-                        s.clearedAt(), now, s.seq() + 1);
+                        s.clearedAt(), now, s.seq() + 1, s.keyIntent(), now); // re-engaged ⇒ lastSprintingAt = now
             }
             if (!s.seen()) {
                 // Seed clientSprinting = serverSprinting: the server flag at seed time IS
@@ -292,12 +344,14 @@ public final class SprintWire {
                 // plain knockback despite genuinely sprinting. The ADOPT branch below stays
                 // clientSprinting-blind: it must never overwrite live client-action state.
                 return new State(true, serverSprinting, false, serverSprinting, s.blockReset(),
-                        s.clearedAt(), now, s.seq() + 1);
+                        s.clearedAt(), now, s.seq() + 1, s.keyIntent(),
+                        serverSprinting ? now : s.lastSprintingAt()); // seed to sprinting ⇒ refresh lastSprintingAt
             }
             if (s.sprinting() != serverSprinting && s.lastWrite().known() && now.known()
                     && now.value() - s.lastWrite().value() >= quietTicks) {
                 return new State(true, serverSprinting, s.armed(), s.clientSprinting(), s.blockReset(),
-                        TickStamp.NO_TICK, now, s.seq() + 1);
+                        TickStamp.NO_TICK, now, s.seq() + 1, s.keyIntent(),
+                        serverSprinting ? now : s.lastSprintingAt()); // adopt-true ⇒ refresh lastSprintingAt
             }
             return s;
         });
@@ -314,13 +368,53 @@ public final class SprintWire {
      * and so ends the override (the attacker is no longer moving); the block
      * release drops {@code blockReset} itself. Otherwise the verdict is the plain
      * arrival-order wire view, byte-identical to before.</p>
+     *
+     * <p>The block override also survives the SWORD_BLOCKING-scoped
+     * {@code keyIntent} corroborator: a held sprint KEY that sprinted within
+     * {@link #ERA_BLOCKHIT_RECENCY_TICKS} keeps the override alive when a genuine
+     * blocked-tick STOP has lowered the raw client flag (see
+     * {@link #recentlySprintedWithKeyHeld}). UNKNOWN keyIntent collapses this back to
+     * the raw-flag test exactly, so a client that never sends PLAYER_INPUT is
+     * unaffected.</p>
      */
     public SprintVerdict verdictAt(TickStamp now) {
         State s = state.get();
-        boolean blockHeldReset = s.blockReset() && s.clientSprinting();
+        boolean blockHeldReset = s.blockReset()
+                && (s.clientSprinting() || recentlySprintedWithKeyHeld(s, now));
         boolean sprinting = blockHeldReset || s.sprinting();
         boolean fresh = blockHeldReset || s.armed();
         return new SprintVerdict(sprinting, fresh, now, s.seq());
+    }
+
+    /**
+     * Whether a 1.7/1.8 sword-block engagement may (re-)arm the sprint bonus NOW —
+     * the SWORD_BLOCKING block-hit gate {@code SwordBlockingUnit.resetSprintForBlock}
+     * consults this instead of the raw {@link #clientSprinting} flag alone. Passes
+     * when the raw client flag is up (the ORIGINAL gate, unchanged), OR when the
+     * PLAYER_INPUT sprint KEY is held ({@code keyIntent} TRUE) and the wire sprinted
+     * within {@link #ERA_BLOCKHIT_RECENCY_TICKS}: the one case a genuine STOP crosses
+     * for a key-holder — a full-charge / spoofed hit landing while item-use blocked
+     * the same-tick re-arm — where the era block-hitter must keep re-arming through
+     * block cycles. A stationary defensive ctrl-holder is excluded by the recency
+     * window (no sprint in the last second). UNKNOWN keyIntent ({@code null}, the
+     * default for pre-1.21.2 / Via / packetless clients) collapses this to the
+     * raw-flag gate exactly, so defaults stay zero-touch.
+     */
+    public boolean blockReArmEligible() {
+        State s = state.get();
+        return s.clientSprinting() || recentlySprintedWithKeyHeld(s, clock.current());
+    }
+
+    /**
+     * The PLAYER_INPUT sprint-key recency corroborator: the sprint KEY is held
+     * ({@code keyIntent} TRUE, never {@code null}/UNKNOWN and never FALSE) AND the
+     * wire was last left sprinting no more than {@link #ERA_BLOCKHIT_RECENCY_TICKS}
+     * ago. Widens the two SWORD_BLOCKING block-hit gates only; nothing else reads it.
+     */
+    private static boolean recentlySprintedWithKeyHeld(State s, TickStamp now) {
+        return s.keyIntent() == Boolean.TRUE
+                && s.lastSprintingAt().known() && now.known()
+                && now.value() - s.lastSprintingAt().value() <= ERA_BLOCKHIT_RECENCY_TICKS;
     }
 
     /**

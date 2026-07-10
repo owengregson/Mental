@@ -8,6 +8,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon;
 import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientEntityAction;
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerFlying;
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput;
 import java.util.UUID;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.model.LedgerEvent;
@@ -61,6 +62,8 @@ public final class PacketTap extends PacketListenerAbstract {
                 onMovement(event);
             } else if (type == PacketType.Play.Client.ENTITY_ACTION) {
                 onEntityAction(event);
+            } else if (type == PacketType.Play.Client.PLAYER_INPUT) {
+                onPlayerInput(event);
             }
         } catch (Throwable ignored) {
             // An observation tap must never break the inbound pipeline.
@@ -107,6 +110,26 @@ public final class PacketTap extends PacketListenerAbstract {
             domain.sprint().onSprintStop();
             domain.resetModel().onSprintStop();
         }
+    }
+
+    /**
+     * The PLAYER_INPUT sprint-KEY feed (1.21.2+ only). PacketEvents dispatches this
+     * packet type only for protocol clients that carry the input-flags byte; a
+     * pre-1.21.2 / legacy-via-Via client sends STEER_VEHICLE (a different
+     * {@link PacketTypeCommon} that never matches the by-REFERENCE check above), so it
+     * simply feeds nothing and the wire's {@code keyIntent} stays UNKNOWN. The wrapper
+     * decodes the 0x40 flag into {@code isSprint()} = the raw {@code keySprint.isDown()}
+     * intent (true for a stationary ctrl-holder, false for a double-tap-W sprinter);
+     * the wire never treats it as a verdict source, only a block-hit corroborator. Any
+     * wrapper/parse failure is swallowed by {@link #onPacketReceive} — feed nothing.
+     */
+    private void onPlayerInput(PacketReceiveEvent event) {
+        UUID id = userId(event);
+        if (id == null) {
+            return;
+        }
+        WrapperPlayClientPlayerInput packet = new WrapperPlayClientPlayerInput(event);
+        domains.domainFor(id).sprint().onKeyIntent(packet.isSprint());
     }
 
     private static GroundFsm.ViewSlice viewSlice(PlayerView view, Domain domain) {

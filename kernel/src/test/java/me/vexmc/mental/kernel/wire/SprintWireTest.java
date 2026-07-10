@@ -602,4 +602,123 @@ class SprintWireTest {
         assertFalse(wire.verdictAt(new TickStamp(8)).sprinting(), "the adopt took the server un-sprint");
         assertTrue(wire.clientSprinting(), "the ADOPT branch never touches the raw client flag");
     }
+
+    /* ── the PLAYER_INPUT sprint-key corroborator (SWORD_BLOCKING block-hit gates) ─ */
+
+    @Test
+    void unknownKeyIntentLeavesBothBlockhitGatesByteIdentical() {
+        Clock clock = new Clock();
+        clock.tick = 4;
+        SprintWire wire = new SprintWire(clock);
+
+        // No onKeyIntent is ever called — keyIntent stays UNKNOWN (null), the value for
+        // every pre-1.21.2 / Via / packetless client. Both gates must collapse to the
+        // raw-flag test exactly.
+        wire.onSprintStart(); // clientSprinting = true
+        assertTrue(wire.blockReArmEligible(),
+                "UNKNOWN keyIntent + clientSprinting=true ⇒ eligible, as the raw-flag gate always was");
+
+        wire.onBlockSprintReset();
+        wire.onServerClear(new TickStamp(4)); // clears sprinting/armed; blockReset + clientSprinting survive
+        assertTrue(wire.verdictAt(new TickStamp(4)).sprinting(),
+                "held-block override rides clientSprinting exactly as before with UNKNOWN keyIntent");
+
+        // Drop the raw client flag: with no keyIntent to widen them, both gates refuse.
+        clock.tick = 5;
+        wire.onSprintStop(); // clientSprinting = false; keyIntent still UNKNOWN; blockReset survives
+        assertFalse(wire.blockReArmEligible(),
+                "UNKNOWN keyIntent + clientSprinting=false ⇒ refused (byte-identical to the raw-flag gate)");
+        assertFalse(wire.verdictAt(new TickStamp(6)).sprinting(),
+                "the block override ends with the raw flag when keyIntent is UNKNOWN");
+    }
+
+    @Test
+    void aGenuineStopWithARecentlySprintingHeldKeyKeepsBothBlockhitGates() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();   // lastSprintingAt = 0, clientSprinting = true
+        wire.onKeyIntent(true); // the raw sprint KEY is held (a ctrl/toggle holder)
+
+        // A full-charge / spoofed hit lands while item-use blocked the same-tick re-arm:
+        // the ONE case a genuine STOP crosses for a key-holder — the raw client flag falls.
+        clock.tick = 5;
+        wire.onSprintStop();
+        assertFalse(wire.clientSprinting(), "the blocked-tick STOP lowered the raw client flag");
+
+        // Gate 1 (blockReArmEligible): 5 ticks since last sprint, key still held ⇒ re-arm fires.
+        assertTrue(wire.blockReArmEligible(),
+                "held sprint key + recent sprint carries the era block-hitter past the blocked STOP");
+
+        // The re-arm engages the sticky block reset; a later blocked STOP lowers the raw
+        // flag again while the block is STILL held.
+        wire.onBlockSprintReset(); // clientSprinting back up, blockReset sticky, lastSprintingAt = 5
+        clock.tick = 6;
+        wire.onSprintStop();
+        assertFalse(wire.clientSprinting());
+
+        // Gate 2 (verdictAt blockReset override): blockReset && !clientSprinting, rescued by
+        // the recent held sprint key.
+        SprintVerdict v = wire.verdictAt(new TickStamp(7));
+        assertTrue(v.sprinting(),
+                "the held-block override survives the STOP via the recent sprint-key corroborator");
+        assertEquals(Boolean.TRUE, v.fresh());
+    }
+
+    @Test
+    void aHeldKeyThatHasNotSprintedInOverASecondIsRefusedByBothGates() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        // A stationary defensive ctrl-holder: the sprint KEY is held, but the last time
+        // the wire was actually sprinting is now stale (> 20 ticks).
+        wire.onSprintStart();      // lastSprintingAt = 0
+        wire.onBlockSprintReset(); // blockReset sticky; lastSprintingAt still 0 (same tick)
+        wire.onKeyIntent(true);
+        wire.onSprintStop();       // raw client flag down; lastSprintingAt stays 0; blockReset survives
+
+        clock.tick = 25; // 25 ticks since the last sprint > ERA_BLOCKHIT_RECENCY_TICKS (20)
+        assertFalse(wire.blockReArmEligible(),
+                "25 ticks since last sprint ⇒ the stationary defensive ctrl-holder earns no re-arm");
+        assertFalse(wire.verdictAt(new TickStamp(25)).sprinting(),
+                "and the verdict override is refused past the recency window — no phantom bonus");
+    }
+
+    @Test
+    void keyIntentFalseNeverVetoesAClientSprintingPath() {
+        Clock clock = new Clock();
+        clock.tick = 3;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();    // clientSprinting = true (a double-tap-W sprinter IS sprinting)
+        wire.onKeyIntent(false); // ...but the raw sprint KEY reads false (double-tap holds no key)
+        assertTrue(wire.blockReArmEligible(),
+                "clientSprinting=true passes regardless of a FALSE key intent — double-tap sprinters unaffected");
+
+        wire.onBlockSprintReset();
+        wire.onServerClear(new TickStamp(3)); // clears sprinting/armed; blockReset + clientSprinting survive
+        SprintVerdict v = wire.verdictAt(new TickStamp(3));
+        assertTrue(v.sprinting(), "the block override still rides clientSprinting; a FALSE key intent never vetoes it");
+        assertEquals(Boolean.TRUE, v.fresh());
+    }
+
+    @Test
+    void onKeyIntentBumpsSeqSoADeferredClearCannotRetroEatIt() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                               // seq 1, sprinting + armed
+        SprintVerdict peek = wire.verdictAt(new TickStamp(5));
+        assertEquals(1L, peek.wireSeq());
+        wire.onKeyIntent(true);                             // seq 2 — an arrival-order wire write
+        clock.tick = 7;
+        wire.onServerClear(peek.wireSeq());                 // 2 > 1 ⇒ no-op (a later write arrived)
+        SprintVerdict after = wire.verdictAt(new TickStamp(7));
+        assertTrue(after.sprinting(), "the later key-intent write protects sprint from the deferred clear");
+        assertEquals(Boolean.TRUE, after.fresh());
+        assertEquals(2L, after.wireSeq(), "onKeyIntent bumped the arrival sequence");
+    }
 }
