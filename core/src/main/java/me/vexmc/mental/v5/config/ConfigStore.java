@@ -114,7 +114,15 @@ public final class ConfigStore {
         }
         for (String preset : BUNDLED_PROFILES) {
             String folder = bundledFolder(preset);
-            Path file = profilesDir.resolve(folder).resolve(preset + ".yml");
+            // Prefer a pre-folder FLAT file if one is already present: an install that
+            // predates the formula folders keeps its (possibly edited) flat file in
+            // place — patched and upgraded there — so extraction never creates a
+            // second copy under the folder (a duplicate stem). Fresh installs land
+            // in the formula-category folder.
+            Path flat = profilesDir.resolve(preset + ".yml");
+            Path file = Files.isRegularFile(flat)
+                    ? flat
+                    : profilesDir.resolve(folder).resolve(preset + ".yml");
             extractIfMissing(PROFILES_DIR + "/" + folder + "/" + preset + ".yml", file);
             ensureDeliverySection(preset, file);
             upgradeSupersededPreset(preset, file);

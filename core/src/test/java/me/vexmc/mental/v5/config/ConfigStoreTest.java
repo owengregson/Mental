@@ -102,6 +102,24 @@ class ConfigStoreTest {
     }
 
     @Test
+    void aPreFolderFlatFileIsKeptInPlaceNotDuplicatedIntoTheFolder() throws Exception {
+        ConfigStore store = store();
+        // An install that predates the formula folders: an unedited pre-floor kohi
+        // sits FLAT at profiles/kohi.yml, not under profiles/legacy/.
+        Path flat = dataFolder.resolve(ConfigStore.PROFILES_DIR).resolve("kohi.yml");
+        Files.createDirectories(flat.getParent());
+        Files.writeString(flat, archived("kohi@1.8.0.yml"), StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        // Upgraded in place at the flat path — never duplicated into the folder.
+        assertEquals(currentBundle("kohi"), Files.readString(flat, StandardCharsets.UTF_8),
+                "a flat pre-folder kohi must upgrade in place");
+        assertFalse(Files.exists(profile("kohi")),
+                "extraction must not create a foldered duplicate when a flat file already exists");
+    }
+
+    @Test
     void unTunedSupersededPresetIsUpgradedInPlace() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("kohi").getParent());
