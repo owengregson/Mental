@@ -89,6 +89,14 @@ public final class SessionService implements Listener, SessionAccess {
     private final ComboEvents comboEvents;
     private final JournalObserver journalObserver;
 
+    /**
+     * The per-tick step armor (2.5.2; 2026-07-10-downward-kb-and-stacking-diagnoses.md
+     * report 2): each throw-capable step of {@link #tick} runs through this so a
+     * recurring throw in one can never starve {@code tickStep}'s ledger decay / view
+     * publish — a frozen decay is the monotone stacking ramp. Loud, rate-limited.
+     */
+    private final StepIsolator steps;
+
     private final ConcurrentHashMap<UUID, CombatSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Integer> entityIdByPlayer = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, UUID> playerIdByEntityId = new ConcurrentHashMap<>();
@@ -124,7 +132,7 @@ public final class SessionService implements Listener, SessionAccess {
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
             VelocityValve valve, Supplier<Snapshot> snapshot,
             PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents,
-            JournalObserver journalObserver) {
+            JournalObserver journalObserver, java.util.logging.Logger logger) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
@@ -134,6 +142,7 @@ public final class SessionService implements Listener, SessionAccess {
         this.domains = domains;
         this.comboEvents = comboEvents;
         this.journalObserver = journalObserver;
+        this.steps = new StepIsolator(logger);
     }
 
     /** The per-player position ring the fast path rewinds through (reach) and reads latest (pre-send). */
@@ -346,39 +355,57 @@ public final class SessionService implements Listener, SessionAccess {
         if (session == null) {
             return;
         }
-        sampleGround(player, session);
+        UUID id = player.getUniqueId();
+        // Every throw-capable step runs through the isolator (2.5.2 tick armor;
+        // 2026-07-10-downward-kb-and-stacking-diagnoses.md report 2): a recurring
+        // throw in ANY one step must NEVER prevent tickStep's ledger decay and the
+        // view publish from running, because a starved decay freezes the residual —
+        // and a residual that never decays is exactly the monotone stacking ramp of
+        // the close-range spam blast. Each failure is loud but rate-limited (B10).
+        steps.run(id, "sampleGround", () -> sampleGround(player, session));
         // The combat grounded truth for this tick, resolved ONCE (D2 one-source
         // doctrine) and shared by the combo detector's grounded-run end and the
         // view's grounded-tick counter — a packetless player's flag lies airborne
         // on the 1.9/1.10 NMS, so both must read the physical fallback, not the raw
-        // isOnGround() they used to read independently.
-        boolean combatGrounded = combatGrounded(player);
+        // isOnGround() they used to read independently. Fallback false on throw
+        // (degrade to the air branch) so the tick still reaches tickStep.
+        boolean combatGrounded = steps.call(id, "combatGrounded", () -> combatGrounded(player), false);
         // Drive the combo detector BEFORE building the view, so the view publishes
         // this tick's combo state (and its time-driven ends have already fired).
-        driveCombo(player, session, combatGrounded);
-        PlayerView view = buildView(player, session, combatGrounded);
-        // Deliver a PACKETLESS victim's region-path melee knock that no velocity
-        // event resolved before the desk's sweep would drop it (below, in tickStep).
-        // Run with the SAME `now` the sweep uses, immediately ahead of it, so a hit
-        // that DID resolve in time is already gone (zero-touch) and only a genuinely
-        // stranded one is ensured.
-        ensureStrandedPacketlessMelee(player, session, view.at());
-        // A CONNECTED victim (a real client with a netty connection domain) has an
-        // authoritative PlayerVelocityEvent that may be region-late; the sweep must
-        // NOT time-drop its still-awaiting melee, or vanilla's own (airborne =
-        // downward) velocity infiltrates on the late resolve — the exact inverse of
-        // the packetless-net gate above (2.4.6 vanilla-knockback leak fix).
-        session.tickStep(view, domains.has(player.getUniqueId()));
-        // Age-aware: a task-phase blocked-knock arm made THIS tick must survive to its
-        // end-of-tick tracker dup; only an arm >=2 ticks old (provably past any legal
-        // dup, the desk-sweep margin) is dropped. Same `now` the sweep/net use.
-        valve.clearStale(player.getUniqueId(), view.at());
+        steps.run(id, "driveCombo", () -> driveCombo(player, session, combatGrounded));
+        PlayerView view = steps.call(id, "buildView", () -> buildView(player, session, combatGrounded), null);
+        if (view != null) {
+            // Deliver a PACKETLESS victim's region-path melee knock that no velocity
+            // event resolved before the desk's sweep would drop it (below, in tickStep).
+            // Run with the SAME `now` the sweep uses, immediately ahead of it, so a hit
+            // that DID resolve in time is already gone (zero-touch) and only a genuinely
+            // stranded one is ensured.
+            steps.run(id, "ensureStrandedMelee",
+                    () -> ensureStrandedPacketlessMelee(player, session, view.at()));
+            // A CONNECTED victim (a real client with a netty connection domain) has an
+            // authoritative PlayerVelocityEvent that may be region-late; the sweep must
+            // NOT time-drop its still-awaiting melee, or vanilla's own (airborne =
+            // downward) velocity infiltrates on the late resolve — the exact inverse of
+            // the packetless-net gate above (2.4.6 vanilla-knockback leak fix). This is
+            // the step the whole armor exists to guarantee runs.
+            steps.run(id, "tickStep", () -> session.tickStep(view, domains.has(id)));
+            // Age-aware: a task-phase blocked-knock arm made THIS tick must survive to its
+            // end-of-tick tracker dup; only an arm >=2 ticks old (provably past any legal
+            // dup, the desk-sweep margin) is dropped. Same `now` the sweep/net use.
+            steps.run(id, "clearStaleValve", () -> valve.clearStale(id, view.at()));
+        } else {
+            // The view build itself threw: there is no fresh view to publish this tick,
+            // but ledger decay must NOT freeze (the stacking ramp). Decay directly at
+            // the current tick; the stale published view keeps its own freshness gate.
+            steps.run(id, "decayFallback", () -> session.decayOnly(clock.current()));
+        }
         // One owning-thread position sample per tick — the fast path's reach
         // rewind source and its off-region-safe pre-send position source (the
         // netty thread reads frozen samples, never the live entity).
-        Location location = player.getLocation();
-        positions.record(player.getUniqueId(),
-                location.getX(), location.getY(), location.getZ(), System.nanoTime());
+        steps.run(id, "recordPosition", () -> {
+            Location location = player.getLocation();
+            positions.record(id, location.getX(), location.getY(), location.getZ(), System.nanoTime());
+        });
     }
 
     /**
@@ -591,6 +618,14 @@ public final class SessionService implements Listener, SessionAccess {
         PositionRing.Sample previous = positions.latest(id);
         double measuredVx = previous == null ? 0.0 : location.getX() - previous.x();
         double measuredVz = previous == null ? 0.0 : location.getZ() - previous.z();
+        // The victim's measured per-tick vertical velocity — the same ring-Δy
+        // machinery as measuredVx/Vz, but Y, carried so the two knockback capture
+        // seams (EntityStates.captureVictim, HitRegistrationUnit.preVictimState) can
+        // bound the ledger residual's runaway free-fall by the real hover (the
+        // measured-reality clamp; the 2.5.2 downward-hit-2 fix). NaN before the first
+        // sample — the "no fresh measurement" sentinel the clamp reads as a strict
+        // no-op, so a packetless first tick and every existing suite stay byte-identical.
+        double measuredVy = previous == null ? Double.NaN : location.getY() - previous.y();
         // The grounded-tick run is a combo/precision signal, so it advances on the
         // combat grounded truth (the packetless physical fallback) — NOT the raw
         // client flag above, which stays the delivery/era air-multiplier baseline.
@@ -610,7 +645,7 @@ public final class SessionService implements Listener, SessionAccess {
                 knockbackResistance, profile, Pings.of(player), kinematics,
                 moveSpeedAttr, session.comboAttackerId(),
                 measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks,
-                yawRate, kbEnchantLevel);
+                yawRate, kbEnchantLevel, measuredVy);
     }
 
     /**

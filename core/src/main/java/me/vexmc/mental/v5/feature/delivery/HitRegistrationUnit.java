@@ -19,6 +19,7 @@ import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.HurtYaw;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.math.MeasuredReality;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
@@ -487,8 +488,15 @@ public final class HitRegistrationUnit implements FeatureUnit {
             double x = sample != null ? sample.x() : 0;
             double y = sample != null ? sample.y() : 0;
             double z = sample != null ? sample.z() : 0;
+            // The measured-reality clamp on the vertical residual — the pre-send twin
+            // of EntityStates.captureVictim, reading the SAME clamp off the SAME frozen
+            // view so the pre-sent knock and the region recompute agree (the ledger's
+            // runaway free-fall past the victim's real hover is a model bug, not era
+            // truth; 2026-07-10-downward-kb-and-stacking-diagnoses.md report 1). NaN
+            // measured (packetless first tick) ⇒ strict no-op. Horizontal untouched.
+            double vy = MeasuredReality.clampVy(view.motion().vy(), view.measuredVy());
             return new EntityState(x, y, z, 0,
-                    view.motion().vx(), view.motion().vy(), view.motion().vz(),
+                    view.motion().vx(), vy, view.motion().vz(),
                     view.grounded(), false, 0, view.knockbackResistance());
         }
 

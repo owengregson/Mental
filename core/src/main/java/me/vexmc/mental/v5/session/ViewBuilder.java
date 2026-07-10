@@ -118,4 +118,33 @@ public final class ViewBuilder {
                 measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick,
                 kbEnchantLevel);
     }
+
+    /**
+     * The measured-vy overload (2.5.2 downward-hit-2 fix) — carries the victim's
+     * measured per-tick vertical velocity (the position-ring Δy, frozen at the SAME
+     * publish as the ledger residual and the measuredVx/Vz drift signal) so the two
+     * capture seams can bound the ledger's runaway free-fall by the real hover
+     * (measured-reality clamp; 2026-07-10-downward-kb-and-stacking-diagnoses.md). The
+     * pre-fix overload defaults it to {@link Double#NaN} — the strict-no-op sentinel,
+     * so a view built without it leaves the clamp inert.
+     */
+    public PlayerView build(
+            UUID id, int entityId,
+            Decay.Motion motion, boolean grounded, double slipperiness,
+            double gravity, double jumpImpulse, int jumpBoostAmplifier,
+            boolean sprinting, boolean creative, boolean pvpAllowed,
+            int noDamageTicks, int maxNoDamageTicks,
+            double knockbackResistance,
+            KnockbackProfile profile, int pingMillis,
+            KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId,
+            double measuredVx, double measuredVz, float yaw, double eyeHeight, int groundedTicks,
+            double yawRateDegPerTick, int kbEnchantLevel, double measuredVy) {
+        return new PlayerView(
+                id, entityId, clock.current(), motion, grounded, slipperiness,
+                gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
+                noDamageTicks, maxNoDamageTicks, knockbackResistance,
+                profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
+                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick,
+                kbEnchantLevel, measuredVy);
+    }
 }

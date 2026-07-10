@@ -290,7 +290,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         JournalCapture journalCapture = new JournalCapture(debug.scoped(DebugCategory.JOURNAL), this::snapshot);
         this.sessions = new SessionService(
                 scheduling, clock, viewBuilder, valve, this::snapshot, positions, domains,
-                comboEvents, journalCapture);
+                comboEvents, journalCapture, getLogger());
         sessions.start(this);
 
         // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —

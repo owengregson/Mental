@@ -2,6 +2,7 @@ package me.vexmc.mental.v5;
 
 import me.vexmc.mental.kernel.ledger.MotionLedger;
 import me.vexmc.mental.kernel.math.Decay;
+import me.vexmc.mental.kernel.math.MeasuredReality;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Enchantments;
@@ -64,13 +65,33 @@ public final class EntityStates {
     }
 
     /**
+     * Captures a knockback victim with no measured-vy override — the packetless /
+     * suite path. Delegates with {@link Double#NaN}, so the measured-reality clamp
+     * is a strict no-op and this stays byte-identical to the pre-fix capture (every
+     * existing suite calls this arity; its staged ledger free-fall is untouched).
+     */
+    public static EntityState captureVictim(LivingEntity victim, MotionLedger ledger) {
+        return captureVictim(victim, ledger, Double.NaN);
+    }
+
+    /**
      * Captures a knockback victim. A player's motion is the {@link MotionLedger}
      * residual (owning-thread read of the single-writer ledger); grounded is the
      * live client-reported flag (the air-multiplier branch). Mobs fall back to a
      * live capture.
+     *
+     * <p>The vertical residual is bounded below by {@code measuredVy} (the victim's
+     * published per-tick position Δy) via {@link MeasuredReality#clampVy}: the ledger
+     * models the era server's motY field, but its runaway free-fall past the real
+     * hover is a MODEL bug that ships downward hit-2 knocks on juggled victims (the
+     * ledger-vy divergence; 2026-07-10-downward-kb-and-stacking-diagnoses.md report 1,
+     * root cause in 2026-07-07-ledger-vy-divergence.md). This must stay bit-identical
+     * to its pre-send twin ({@code HitRegistrationUnit.preVictimState}), which reads
+     * the same clamp off the same view. {@link Double#NaN} ⇒ no fresh measurement ⇒
+     * the residual passes through unchanged. Horizontal residual is never touched.</p>
      */
     @SuppressWarnings("deprecation") // Entity#isOnGround: the client-reported value drives the residual decay
-    public static EntityState captureVictim(LivingEntity victim, MotionLedger ledger) {
+    public static EntityState captureVictim(LivingEntity victim, MotionLedger ledger, double measuredVy) {
         if (!(victim instanceof Player player)) {
             return capture(victim);
         }
@@ -79,7 +100,7 @@ public final class EntityStates {
         Location location = player.getLocation();
         return new EntityState(
                 location.getX(), location.getY(), location.getZ(), location.getYaw(),
-                motion.vx(), motion.vy(), motion.vz(),
+                motion.vx(), MeasuredReality.clampVy(motion.vy(), measuredVy), motion.vz(),
                 grounded, player.isSprinting(),
                 heldKnockbackLevel(player), clampedResistance(player));
     }

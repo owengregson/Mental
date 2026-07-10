@@ -273,7 +273,14 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         }
 
         Double compensationY = compensationFor(source, tx, session, victim);
-        EntityState victimState = EntityStates.captureVictim(victim, session.ledger());
+        // The measured-reality clamp on the victim's vertical residual (2.5.2
+        // downward-hit-2 fix): read the measured per-tick Δy off the victim's own
+        // published view — the SAME frozen truth the netty pre-send's preVictimState
+        // reads — so the region recompute and any pre-send agree on the clamped
+        // vertical. Null view (pre-first-tick) ⇒ NaN ⇒ the clamp is a strict no-op.
+        PlayerView clampView = session.view();
+        double victimMeasuredVy = clampView == null ? Double.NaN : clampView.measuredVy();
+        EntityState victimState = EntityStates.captureVictim(victim, session.ledger(), victimMeasuredVy);
         // The era-moment yaw: the extras are directed along the attacker's facing,
         // which vanilla read synchronously inside attack() at click-flush. A
         // fast-path REGISTERED hit recomputes here 1–2 ticks later, so the live
