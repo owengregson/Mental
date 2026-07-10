@@ -1022,8 +1022,14 @@ public final class HitFeedbackListener implements Listener {
         // 4. per particle spec: WrapperPlayServerParticle at chest (feet+1.2),
         //    count ThreadLocalRandom.nextInt(min, max+1); EMANATE = offset 0 +
         //    speed; SPREAD = offset σ + speed 0; audience INCLUDING victim
-        // 5. trace.record(...) with decision "EMITTED" and a detail string
-        //    naming the resolved sounds + counts (or "NO_VIEWERS")
+        // 4b. LOW-HEALTH EXTRA (settings fields from Task 11): when
+        //    victim.getHealth() - finalDamage is > 0 AND below
+        //    lowHealthThresholdHearts * 2, ALSO play the preset's low-health
+        //    extra sound list (same audience as the normal sounds). A killing
+        //    hit (health - finalDamage <= 0) plays the NORMAL set but NEVER
+        //    the extra — death-effects owns the death moment.
+        // 5. trace.record(...) with decision "EMITTED"/"EMITTED+LOW_HP" and a
+        //    detail string naming the resolved sounds + counts (or "NO_VIEWERS")
     }
 }
 ```
@@ -1285,3 +1291,221 @@ land on this branch) — one sequential run gates the release, per matrix-gate.
 - Spec coverage: presets ✓ (Task 2 constants + Task 3 parse + Task 5 resolve), suppression scope ✓ (Task 5 marks), audience ✓ (Task 5), indicator placement/physics/despawn/timeout ✓ (Tasks 1, 7), crit/threshold ✓ (Task 7), {HEALTH} hearts ✓ (Task 7 IndicatorText), trace/testability ✓ (Tasks 4, 9), zero-touch ✓ (default OFF + Task 9 case 1), GUI ✓ (automatic; preset-picker deliberately deferred — spec stretch scope).
 - Known judgment calls an implementer must NOT "fix": suppression is mark-scoped (never unconditional); the victim keeps its self-derived vanilla sound (documented, not a bug); fake-attacker indicators are UNSENDABLE by design; kernel `fx` package stays JDK-only.
 - Places where the plan defers to the repo on purpose (read, then match): `Scheduling`'s exact repeat method + handle type; `SnapshotTest`'s helper names; the PE sound wrapper's position accessor + fixed-point scaling; the stand-flags band table verification against PE mappings; `TickStamp` construction in core tests.
+
+---
+
+## Addendum (2026-07-10b, owner mid-round): Tasks 11–14
+
+Execution order across the whole plan is now: 4 → 11 → 5 → 6 → 12 → 13 → 7 →
+8 → 9 → 10. The spec addendum (same date, in the spec file) governs.
+
+### Task 11: Low-health extra sound layer (settings + parse)
+
+**Files:**
+- Modify: `core/src/main/java/me/vexmc/mental/v5/config/settings/HitFeedbackSettings.java`
+- Modify: `core/src/main/java/me/vexmc/mental/v5/config/SnapshotParser.java`
+- Modify: `core/src/main/resources/config.yml`
+- Modify: `core/src/test/java/me/vexmc/mental/v5/config/SnapshotTest.java`
+
+**Interfaces:**
+- Produces on `HitFeedbackSettings`: two NEW record components appended
+  after `customParticles`: `List<SoundSpec> customLowHealthSounds`,
+  `double lowHealthThresholdHearts`; constant
+  `SIGNATURE_LOW_HEALTH_SOUNDS = List.of(new SoundSpec("entity.glow_squid.hurt", 0.9f, 1.2f))`;
+  accessor `List<SoundSpec> lowHealthSounds()` dispatching
+  VANILLA → `List.of()`, SIGNATURE → `SIGNATURE_LOW_HEALTH_SOUNDS`,
+  CUSTOM → `customLowHealthSounds`; `DEFAULTS` becomes
+  `(VANILLA, List.of(), List.of(), List.of(), 4.0)`.
+
+- [ ] Update every existing construction of `HitFeedbackSettings` (Task 3's
+  parser + tests) for the new arity. Parser: reuse the Task 3 sound-list
+  helper for key `low-health-sounds`;
+  `numberClamped("low-health-threshold-hearts", 4.0, 0.0, 100.0)`.
+- [ ] config.yml `hit-feedback:` section gains (with comments: HEARTS unit;
+  post-hit health; suppressed on the killing hit; signature's glow-squid
+  layer falls back to `entity.squid.hurt` below 1.17):
+
+```yaml
+  low-health-threshold-hearts: 4.0
+  low-health-sounds:
+    - sound: entity.glow_squid.hurt
+      volume: 0.9
+      pitch: 1.2
+```
+
+- [ ] SnapshotTest: extend the DEFAULTS assertion (still `== DEFAULTS` on
+  empty parse); extend the custom round-trip test with a low-health list +
+  threshold read; a preset test pinning
+  `SIGNATURE.lowHealthSounds() == SIGNATURE_LOW_HEALTH_SOUNDS`.
+- [ ] `./gradlew :core:test -q` green; commit
+  `feat(config): low-health extra sound layer for hit-feedback`.
+
+### Task 12: `death-effects` descriptor + settings + parse + family rename
+
+**Files:**
+- Modify: `core/src/main/java/me/vexmc/mental/v5/feature/Family.java` —
+  FEEDBACK display metadata becomes
+  `FEEDBACK("Combat Effects", "NOTE_BLOCK", "Hit sounds and particles, pop-off damage indicators, and death effects.")`.
+- Modify: `core/src/main/java/me/vexmc/mental/v5/feature/Feature.java` —
+  HIT_FEEDBACK displayName becomes `"Hit Effects"` (yamlKey UNCHANGED);
+  add third constant after DAMAGE_INDICATORS:
+
+```java
+    DEATH_EFFECTS("death-effects", Family.FEEDBACK, "Death Effects",
+            "A cosmetic strike on player death — lightning, sound, and a burst.",
+            "FIREWORK_ROCKET", false,
+            new Facets(
+                    Facets.none("cosmetic only, no gameplay state"),
+                    Facets.handled(),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("death-effects", DeathEffectsSettings.class)),
+```
+
+- Create: `core/src/main/java/me/vexmc/mental/v5/config/settings/DeathEffectsSettings.java`:
+
+```java
+package me.vexmc.mental.v5.config.settings;
+
+import java.util.List;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.ParticleSpec;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.SoundSpec;
+
+/**
+ * The {@code death-effects} module's tunables: what plays at the moment a
+ * player dies (any cause — PlayerDeathEvent). The VANILLA preset is a strict
+ * nothing (enabled-but-vanilla is a no-op; the toggle owns zero-touch);
+ * SIGNATURE is the owner's tune — a cosmetic packet lightning bolt (never a
+ * real entity: no fire, no damage, no block interaction by construction),
+ * the glow-squid death sound, and a white/yellow/gold firework-style burst.
+ */
+public record DeathEffectsSettings(
+        Preset preset,
+        boolean customLightning,
+        List<SoundSpec> customSounds,
+        List<ParticleSpec> customParticles) {
+
+    public enum Preset { VANILLA, SIGNATURE, CUSTOM }
+
+    public static final List<SoundSpec> SIGNATURE_SOUNDS =
+            List.of(new SoundSpec("entity.glow_squid.death", 1.0f, 0.95f));
+
+    /**
+     * The signature burst: colored dust in &f/&e/&6 (white 0xFFFFFF, yellow
+     * 0xFFFF55, gold 0xFFAA00) shaped like a firework blast, plus uncolored
+     * firework sparks — vanilla's firework particle is not colorable, so the
+     * mix approximates the ask honestly. Encoded as three dust specs (the
+     * runtime maps spec.block "dust:RRGGBB" to ParticleDustData) + one spark.
+     */
+    public static final List<ParticleSpec> SIGNATURE_PARTICLES = List.of(
+            new ParticleSpec("dust", "ffffff", 8, 12, HitFeedbackSettings.Mode.SPREAD, 0.0f, 0.5, 0.5, 0.5),
+            new ParticleSpec("dust", "ffff55", 8, 12, HitFeedbackSettings.Mode.SPREAD, 0.0f, 0.5, 0.5, 0.5),
+            new ParticleSpec("dust", "ffaa00", 8, 12, HitFeedbackSettings.Mode.SPREAD, 0.0f, 0.5, 0.5, 0.5),
+            new ParticleSpec("firework", "", 10, 14, HitFeedbackSettings.Mode.EMANATE, 0.12f, 0, 0, 0));
+
+    public static final DeathEffectsSettings DEFAULTS =
+            new DeathEffectsSettings(Preset.VANILLA, false, List.of(), List.of());
+
+    public boolean lightning() {
+        return switch (preset) {
+            case VANILLA -> false;
+            case SIGNATURE -> true;
+            case CUSTOM -> customLightning;
+        };
+    }
+
+    public List<SoundSpec> sounds() {
+        return switch (preset) {
+            case VANILLA -> List.of();
+            case SIGNATURE -> SIGNATURE_SOUNDS;
+            case CUSTOM -> customSounds;
+        };
+    }
+
+    public List<ParticleSpec> particles() {
+        return switch (preset) {
+            case VANILLA -> List.of();
+            case SIGNATURE -> SIGNATURE_PARTICLES;
+            case CUSTOM -> customParticles;
+        };
+    }
+}
+```
+
+  NOTE the `dust` ParticleSpec reuses the `block` field as a hex color — the
+  runtime (Task 13) interprets `particle == "dust"` that way. Comment this in
+  the record and in config.yml.
+
+- Modify: `SnapshotParser` — `case DEATH_EFFECTS -> parseDeathEffects(reader(main, "death-effects", "config.yml", issues));`
+  parser reads `oneOf("preset", VANILLA, Preset.class)`,
+  `flag("lightning", false)`, and reuses the Task 3 sound/particle list
+  helpers for `sounds:` / `particles:`.
+- Modify: `core/src/main/resources/config.yml` — `modules.death-effects: false`
+  + a commented `death-effects:` section (preset semantics; the lightning is
+  cosmetic-only; glow-squid sounds fall back to squid below 1.17; the burst
+  is a dust approximation of a colorable firework blast).
+- Modify: `FeatureRegistryTest.OPERATOR_CONTRACT_KEYS` — add `"death-effects"`.
+- Modify: `SnapshotTest` — DEFAULTS assertion + a custom round-trip test +
+  a signature preset-dispatch test.
+- [ ] `./gradlew :core:test -q` green; commit
+  `feat: death-effects descriptor + settings + Combat Effects family display`.
+
+### Task 13: `death-effects` runtime + registration
+
+**Files:**
+- Create: `core/src/main/java/me/vexmc/mental/v5/feature/feedback/DeathEffectsListener.java`
+- Create: `core/src/main/java/me/vexmc/mental/v5/feature/feedback/DeathEffectsUnit.java`
+- Modify: `core/src/main/java/me/vexmc/mental/v5/MentalPluginV5.java` (register)
+- Test: `core/src/test/java/me/vexmc/mental/v5/feature/feedback/DeathEffectsPacketsTest.java` (stub-PE encode pin for the lightning spawn + dust color mapping)
+
+**Contract:**
+- `PlayerDeathEvent` at MONITOR (`ignoreCancelled` is irrelevant — the event
+  is not cancellable on the floor API; do not set it). Victim =
+  `event.getEntity()`; location frozen immediately.
+- Audience: `Bukkit.getOnlinePlayers()`, same world, within 48 blocks of the
+  death location (lightning render distance posture), no exclusions.
+- Lightning (when `settings.lightning()`): ONE packet entity per audience
+  member — `WrapperPlayServerSpawnEntity` with `EntityTypes.LIGHTNING_BOLT`
+  at the death location (on 1.19+; below 1.19 the dedicated legacy
+  spawn-global-entity path — check PE 2.13.0 for
+  `WrapperPlayServerSpawnWeatherEntity` or the LIGHTNING_BOLT route on
+  legacy protocols and javap it; if pre-1.19 proves unreliable, gate
+  lightning to 1.19+ with one boot line — the sound+burst still fire).
+  Entity id from `SpigotReflectionUtil.generateEntityId()`;
+  `WrapperPlayServerDestroyEntities` for it after 20 ticks via
+  `Scheduling.runGlobal`-style delayed task registered through the unit
+  (belt-and-braces; clients self-expire the bolt render). NO thunder sound
+  is sent — the sound list owns audio.
+- Sounds: same emit path as hit-feedback (resolve via `FeedbackSoundTable`
+  — add `entity.glow_squid.death` → fallback `entity.squid.death` (<1.17)
+  and `entity.glow_squid.hurt` → `entity.squid.hurt` to its FLOORS map in
+  this task if Task 5 didn't already), positional at the death location.
+- Particles: same emit path as hit-feedback, at the death location +1.0y;
+  `particle == "dust"` maps `block` field hex → `ParticleDustData(1.0f, r, g, b)`;
+  below 1.13 dust degrades to `firework` sparks (one boot line).
+- Trace: `trace.record(new Entry("death-effects", killerUuidOrNull, victim.getUniqueId(), "EMITTED"|"NO_VIEWERS", detail))`.
+- Zero per-player state → no forget hook needed; the delayed destroy tasks
+  must be scope-owned (a `scope.task` registry like the indicator drivers,
+  closed on disable).
+- Unit test: stub-PE encode pin — lightning spawn wrapper carries
+  LIGHTNING_BOLT + the location; dust mapping "ffaa00" → (1.0, 0.667, 0.0)
+  RGB floats (or PE's 0–255 ints — match `ParticleDustData`'s javap'd shape).
+- [ ] `./gradlew :core:test -q` green; commit
+  `feat: death-effects runtime — cosmetic lightning, sounds, burst`.
+
+### Task 14: FeedbackSuite death-effects cases (amends Task 9)
+
+Add to `FeedbackSuite` (Task 9 implements the file; if Task 9 already ran,
+extend it here):
+- `death-effects zero-touch: disabled writes no trace on a real death` —
+  kill a fake (e.g. `victim.setHealth(0.0)` via `context.sync`), assert no
+  `death-effects` trace entries.
+- `death-effects signature records EMITTED on death` — enable via the
+  management seam, set preset signature via the overlay
+  (`management` write or config overlay key `death-effects.preset`), kill a
+  fake pair victim via a real melee kill (lower victim health first so one
+  hit kills), assert: exactly one `death-effects` entry, AND the
+  `hit-feedback` entry for the killing hit does NOT carry the low-HP layer
+  (decision == "EMITTED", not "EMITTED+LOW_HP") while hit-feedback is also
+  enabled — this pins the killing-hit interaction rule live.
+- disable both in `finally`; hit still lands afterward.
