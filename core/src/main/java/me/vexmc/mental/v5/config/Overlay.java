@@ -43,25 +43,31 @@ public final class Overlay {
      * path segment. The roots are the caller's parsed copies of the human files;
      * the files on disk are never touched.
      */
-    public void apply(
-            Configuration main,
-            Configuration knockback,
-            Configuration hitReg,
-            Configuration latency) {
+    public void apply(ConfigStore.Sources sources) {
         for (Map.Entry<String, Object> entry : overrides.entrySet()) {
-            route(entry.getKey(), main, knockback, hitReg, latency).set(entry.getKey(), entry.getValue());
+            route(entry.getKey(), sources).set(entry.getKey(), entry.getValue());
         }
     }
 
-    private static Configuration route(
-            String key, Configuration main, Configuration knockback,
-            Configuration hitReg, Configuration latency) {
+    private static Configuration route(String key, ConfigStore.Sources sources) {
         String section = key.indexOf('.') >= 0 ? key.substring(0, key.indexOf('.')) : key;
         return switch (section) {
-            case "knockback", "fishing-knockback", "projectile-knockback" -> knockback;
-            case "hit-registration" -> hitReg;
-            case "latency-compensation" -> latency;
-            default -> main; // modules, anticheat, debug, compatibility, disable-*
+            case "knockback", "fishing-knockback", "projectile-knockback" -> sources.knockback();
+            case "hit-registration" -> sources.hitReg();
+            case "latency-compensation" -> sources.latency();
+            // The 2.5.2 per-concern splits: an override on a moved section rides
+            // the split root, so it wins over the split FILE exactly as it wins
+            // over config.yml (effective = overlay ?? file ?? default). On an
+            // install still reading the old location, the override materialises
+            // the split section and the parser names the shadowed config.yml
+            // section loudly — precedence shifts are never silent.
+            case "combo-hold", "combo-reach-handicap" -> sources.combo();
+            case "pot-fill", "fast-pots" -> sources.pots();
+            case "disable-offhand", "disable-crafting" -> sources.loadout();
+            case "hit-feedback" -> sources.hitFeedback();
+            case "damage-indicators" -> sources.damageIndicators();
+            case "death-effects" -> sources.deathEffects();
+            default -> sources.main(); // modules, anticheat, metrics, debug
         };
     }
 

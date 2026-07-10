@@ -2,11 +2,14 @@ package me.vexmc.mental.v5.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
@@ -43,10 +46,41 @@ class SnapshotTest {
         return configuration;
     }
 
+    /** A full source set from file-name → YAML text; absent files parse empty. */
+    private static ConfigStore.Sources sources(Map<String, String> files) throws Exception {
+        return new ConfigStore.Sources(
+                yaml(files.getOrDefault(ConfigStore.MAIN_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.KNOCKBACK_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.HIT_REG_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.LATENCY_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.COMBO_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.POTS_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.LOADOUT_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.HIT_FEEDBACK_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.DAMAGE_INDICATORS_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.DEATH_EFFECTS_FILE, "")),
+                Map.of());
+    }
+
+    private static SnapshotParser.Result parseFiles(Map<String, String> files) throws Exception {
+        return SnapshotParser.parse(sources(files));
+    }
+
     private static SnapshotParser.Result parse(
             String main, String knockback, String hitReg, String compensation) throws Exception {
-        return SnapshotParser.parse(
-                yaml(main), yaml(knockback), yaml(hitReg), yaml(compensation), Map.of());
+        return parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, main,
+                ConfigStore.KNOCKBACK_FILE, knockback,
+                ConfigStore.HIT_REG_FILE, hitReg,
+                ConfigStore.LATENCY_FILE, compensation));
+    }
+
+    /** A real bundled resource, exactly as the plugin jar serves it. */
+    private static String bundled(String name) throws Exception {
+        try (var stream = SnapshotTest.class.getClassLoader().getResourceAsStream(name)) {
+            assertNotNull(stream, () -> "missing bundled resource: " + name);
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -169,14 +203,18 @@ class SnapshotTest {
     @Test
     void comboReachHandicapEnablesFromItsOwnModuleAndReadsTheTopLevelScale() throws Exception {
         // The 2.4.4 promotion: the reach handicap is its own module with a flat
-        // top-level scale (the enable dissolved into the module toggle).
-        SnapshotParser.Result result = parse("""
-                modules:
-                  combo-hold: true
-                  combo-reach-handicap: true
-                combo-reach-handicap:
-                  reach-scale: 0.7
-                """, "", "", "");
+        // top-level scale (the enable dissolved into the module toggle). Since
+        // 2.5.2 the scale block lives in combo.yml; the toggle stays in config.yml.
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, """
+                        modules:
+                          combo-hold: true
+                          combo-reach-handicap: true
+                        """,
+                ConfigStore.COMBO_FILE, """
+                        combo-reach-handicap:
+                          reach-scale: 0.7
+                        """));
 
         Snapshot snapshot = result.snapshot();
         assertTrue(snapshot.enabled(Feature.COMBO_REACH_HANDICAP), "the module toggle flips it on");
@@ -196,13 +234,16 @@ class SnapshotTest {
     @Test
     void comboReachScaleOutOfRangeWarnsOnceAndFallsBack() throws Exception {
         // 1.4 would INFLATE reach — a handicap never does; it warns and the default 0.87 stands.
-        SnapshotParser.Result result = parse("""
-                modules:
-                  combo-hold: true
-                  combo-reach-handicap: true
-                combo-reach-handicap:
-                  reach-scale: 1.4
-                """, "", "", "");
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, """
+                        modules:
+                          combo-hold: true
+                          combo-reach-handicap: true
+                        """,
+                ConfigStore.COMBO_FILE, """
+                        combo-reach-handicap:
+                          reach-scale: 1.4
+                        """));
 
         Snapshot snapshot = result.snapshot();
         ReachHandicapSettings handicap = settings(snapshot, Feature.COMBO_REACH_HANDICAP);
@@ -216,17 +257,22 @@ class SnapshotTest {
 
     @Test
     void legacyNestedReachHandicapMigratesLoudlyToTheModule() throws Exception {
-        // In-place upgrade from 2.4.3-beta: the old nested combo-hold.reach-handicap
-        // block with NO new module key. The parser honours it (enabled) and carries its
-        // tuned scale, and warns once naming BOTH keys — never silently ignored.
-        SnapshotParser.Result result = parse("""
-                modules:
-                  combo-hold: true
-                combo-hold:
-                  reach-handicap:
-                    enabled: true
-                    reach-scale: 0.7
-                """, "", "", "");
+        // In-place upgrade from 2.4.3-beta whose combo-hold block moved wholesale into
+        // combo.yml: the old nested combo-hold.reach-handicap block with NO new module
+        // key. The parser honours it (enabled) and carries its tuned scale, and warns
+        // once naming BOTH keys — never silently ignored. (The straight-2.4.3 shape,
+        // still in config.yml, is pinned separately by the moved-section tests.)
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, """
+                        modules:
+                          combo-hold: true
+                        """,
+                ConfigStore.COMBO_FILE, """
+                        combo-hold:
+                          reach-handicap:
+                            enabled: true
+                            reach-scale: 0.7
+                        """));
 
         Snapshot snapshot = result.snapshot();
         assertTrue(snapshot.enabled(Feature.COMBO_REACH_HANDICAP),
@@ -243,14 +289,17 @@ class SnapshotTest {
     void anExplicitReachHandicapModuleKeyWinsOverTheLegacyNestedEnable() throws Exception {
         // Once the operator has set the new module key, the legacy nested enable is
         // ignored (no migration, no warn) — the module key is the single source.
-        SnapshotParser.Result result = parse("""
-                modules:
-                  combo-hold: true
-                  combo-reach-handicap: false
-                combo-hold:
-                  reach-handicap:
-                    enabled: true
-                """, "", "", "");
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, """
+                        modules:
+                          combo-hold: true
+                          combo-reach-handicap: false
+                        """,
+                ConfigStore.COMBO_FILE, """
+                        combo-hold:
+                          reach-handicap:
+                            enabled: true
+                        """));
 
         Snapshot snapshot = result.snapshot();
         assertFalse(snapshot.enabled(Feature.COMBO_REACH_HANDICAP),
@@ -279,11 +328,12 @@ class SnapshotTest {
         // A transposed pair (min > max) would pin sigma to min-factor on every combo
         // hit through the clamp's Math.max(min, ...) — a constant amplifier. The parser
         // must warn and fall BOTH back to the defaults, not accept it silently.
-        SnapshotParser.Result result = parse("""
-                combo-hold:
-                  min-factor: 1.2
-                  max-factor: 0.8
-                """, "", "", "");
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.COMBO_FILE, """
+                        combo-hold:
+                          min-factor: 1.2
+                          max-factor: 0.8
+                        """));
 
         ComboSettings combo = settings(result.snapshot(), Feature.COMBO_HOLD);
         assertEquals(ComboSettings.DEFAULTS.minFactor(), combo.minFactor(), "min-factor fell back");
@@ -295,16 +345,17 @@ class SnapshotTest {
 
     @Test
     void potsSettingsReadFromTheConfig() throws Exception {
-        SnapshotParser.Result result = parse("""
-                pot-fill:
-                  permission: "server.vip.pots"
-                  cost-per-potion: 5.0
-                fast-pots:
-                  angle-degrees: 50.0
-                  min-speed-multiplier: 0.4
-                  max-speed-multiplier: 2.5
-                  lead-ticks: 2.0
-                """, "", "", "");
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.POTS_FILE, """
+                        pot-fill:
+                          permission: "server.vip.pots"
+                          cost-per-potion: 5.0
+                        fast-pots:
+                          angle-degrees: 50.0
+                          min-speed-multiplier: 0.4
+                          max-speed-multiplier: 2.5
+                          lead-ticks: 2.0
+                        """));
         assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
 
         PotFillSettings potFill = settings(result.snapshot(), Feature.POT_FILL);
@@ -322,13 +373,14 @@ class SnapshotTest {
     void fastPotsKnobsAreParseClampedToTheirBounds() throws Exception {
         // Angle above 90, ceiling above 5, floor above 1 and lead above 5 each clamp
         // to the nearest bound, one warn apiece.
-        SnapshotParser.Result high = parse("""
-                fast-pots:
-                  angle-degrees: 120.0
-                  min-speed-multiplier: 3.0
-                  max-speed-multiplier: 9.0
-                  lead-ticks: 12.0
-                """, "", "", "");
+        SnapshotParser.Result high = parseFiles(Map.of(
+                ConfigStore.POTS_FILE, """
+                        fast-pots:
+                          angle-degrees: 120.0
+                          min-speed-multiplier: 3.0
+                          max-speed-multiplier: 9.0
+                          lead-ticks: 12.0
+                        """));
         FastPotsSettings clampedHigh = settings(high.snapshot(), Feature.FAST_POTS);
         assertEquals(FastPotsSettings.MAX_ANGLE, clampedHigh.angleDegrees());
         assertEquals(FastPotsSettings.MAX_MIN_MULTIPLIER, clampedHigh.minSpeedMultiplier());
@@ -338,12 +390,13 @@ class SnapshotTest {
 
         // A ceiling below 1.0, a floor below its positive minimum and a negative lead
         // clamp up to their floors.
-        SnapshotParser.Result low = parse("""
-                fast-pots:
-                  min-speed-multiplier: 0.001
-                  max-speed-multiplier: 0.2
-                  lead-ticks: -3.0
-                """, "", "", "");
+        SnapshotParser.Result low = parseFiles(Map.of(
+                ConfigStore.POTS_FILE, """
+                        fast-pots:
+                          min-speed-multiplier: 0.001
+                          max-speed-multiplier: 0.2
+                          lead-ticks: -3.0
+                        """));
         FastPotsSettings clampedLow = settings(low.snapshot(), Feature.FAST_POTS);
         assertEquals(FastPotsSettings.MIN_MIN_MULTIPLIER, clampedLow.minSpeedMultiplier());
         assertEquals(FastPotsSettings.MIN_MAX_MULTIPLIER, clampedLow.maxSpeedMultiplier());
@@ -355,28 +408,29 @@ class SnapshotTest {
     void hitFeedbackCustomListsReadFromTheConfig() throws Exception {
         // preset: custom reads the sounds:/particles: lists — the config's first
         // list-of-records shape, each entry re-wrapped into its own reader.
-        Snapshot snapshot = parse("""
-                hit-feedback:
-                  preset: custom
-                  sounds:
-                    - sound: entity.player.hurt
-                      volume: 0.9
-                      pitch: 1.2
-                    - sound: block.anvil.land
-                      volume: 0.5
-                      pitch: 0.6
-                  particles:
-                    - particle: crit
-                      count-min: 3
-                      count-max: 5
-                      mode: spread
-                      spread: {x: 0.2, y: 0.3, z: 0.2}
-                  low-health-threshold-hearts: 5.0
-                  low-health-sounds:
-                    - sound: entity.glow_squid.hurt
-                      volume: 0.9
-                      pitch: 1.2
-                """, "", "", "").snapshot();
+        Snapshot snapshot = parseFiles(Map.of(
+                ConfigStore.HIT_FEEDBACK_FILE, """
+                        hit-feedback:
+                          preset: custom
+                          sounds:
+                            - sound: entity.player.hurt
+                              volume: 0.9
+                              pitch: 1.2
+                            - sound: block.anvil.land
+                              volume: 0.5
+                              pitch: 0.6
+                          particles:
+                            - particle: crit
+                              count-min: 3
+                              count-max: 5
+                              mode: spread
+                              spread: {x: 0.2, y: 0.3, z: 0.2}
+                          low-health-threshold-hearts: 5.0
+                          low-health-sounds:
+                            - sound: entity.glow_squid.hurt
+                              volume: 0.9
+                              pitch: 1.2
+                        """)).snapshot();
         HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
         assertEquals(HitFeedbackSettings.Preset.CUSTOM, s.preset());
         assertEquals(2, s.sounds().size());
@@ -397,10 +451,11 @@ class SnapshotTest {
     @Test
     void hitFeedbackPresetsResolveTheirInCodeLists() throws Exception {
         // A non-custom preset ignores the lists and resolves the in-code constants.
-        Snapshot snapshot = parse("""
-                hit-feedback:
-                  preset: signature
-                """, "", "", "").snapshot();
+        Snapshot snapshot = parseFiles(Map.of(
+                ConfigStore.HIT_FEEDBACK_FILE, """
+                        hit-feedback:
+                          preset: signature
+                        """)).snapshot();
         HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
         assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, s.sounds());
         assertEquals(HitFeedbackSettings.SIGNATURE_PARTICLES, s.particles());
@@ -412,14 +467,15 @@ class SnapshotTest {
     void hitFeedbackKnobsAreParseClampedToTheirBounds() throws Exception {
         // A volume above the ceiling and a pitch below the floor each clamp to the
         // nearest bound (per-entry numberClamped, one warn apiece).
-        Snapshot snapshot = parse("""
-                hit-feedback:
-                  preset: custom
-                  sounds:
-                    - sound: entity.player.hurt
-                      volume: 99
-                      pitch: 0.01
-                """, "", "", "").snapshot();
+        Snapshot snapshot = parseFiles(Map.of(
+                ConfigStore.HIT_FEEDBACK_FILE, """
+                        hit-feedback:
+                          preset: custom
+                          sounds:
+                            - sound: entity.player.hurt
+                              volume: 99
+                              pitch: 0.01
+                        """)).snapshot();
         HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
         assertEquals(HitFeedbackSettings.MAX_VOLUME, s.sounds().get(0).volume(), 1e-6);
         assertEquals(HitFeedbackSettings.MIN_PITCH, s.sounds().get(0).pitch(), 1e-6);
@@ -429,13 +485,14 @@ class SnapshotTest {
     void damageIndicatorKnobsReadAndClamp() throws Exception {
         // lifetime-ticks above MAX_LIFETIME clamps down; the in-range knobs read
         // verbatim, an absent crit-text keeps its default.
-        Snapshot snapshot = parse("""
-                damage-indicators:
-                  lifetime-ticks: 500
-                  ring-radius: 0.8
-                  text: "&e{HEALTH}"
-                  crit-threshold-hearts: 3.5
-                """, "", "", "").snapshot();
+        Snapshot snapshot = parseFiles(Map.of(
+                ConfigStore.DAMAGE_INDICATORS_FILE, """
+                        damage-indicators:
+                          lifetime-ticks: 500
+                          ring-radius: 0.8
+                          text: "&e{HEALTH}"
+                          crit-threshold-hearts: 3.5
+                        """)).snapshot();
         DamageIndicatorsSettings s = settings(snapshot, Feature.DAMAGE_INDICATORS);
         assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, s.lifetimeTicks());
         assertEquals(0.8, s.ringRadius(), 1e-9);
@@ -448,10 +505,11 @@ class SnapshotTest {
     void damageIndicatorLifetimeClampsHighWithAWarning() throws Exception {
         // intClamped is the integer twin of numberClamped: a high value is pulled to
         // MAX_LIFETIME with exactly one warn (intAtLeast would have silently kept it).
-        SnapshotParser.Result result = parse("""
-                damage-indicators:
-                  lifetime-ticks: 500
-                """, "", "", "");
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.DAMAGE_INDICATORS_FILE, """
+                        damage-indicators:
+                          lifetime-ticks: 500
+                        """));
         DamageIndicatorsSettings s = settings(result.snapshot(), Feature.DAMAGE_INDICATORS);
         assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, s.lifetimeTicks());
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
@@ -464,22 +522,23 @@ class SnapshotTest {
         // lists — the same list-of-records shape hit-feedback introduced. A
         // dust particle carries its RRGGBB hex color in the block field (the
         // runtime maps particle "dust" that way; there is no block state).
-        Snapshot snapshot = parse("""
-                death-effects:
-                  preset: custom
-                  lightning: true
-                  sounds:
-                    - sound: entity.lightning_bolt.thunder
-                      volume: 0.8
-                      pitch: 1.4
-                  particles:
-                    - particle: dust
-                      block: ff00aa
-                      count-min: 4
-                      count-max: 6
-                      mode: spread
-                      spread: {x: 0.4, y: 0.5, z: 0.4}
-                """, "", "", "").snapshot();
+        Snapshot snapshot = parseFiles(Map.of(
+                ConfigStore.DEATH_EFFECTS_FILE, """
+                        death-effects:
+                          preset: custom
+                          lightning: true
+                          sounds:
+                            - sound: entity.lightning_bolt.thunder
+                              volume: 0.8
+                              pitch: 1.4
+                          particles:
+                            - particle: dust
+                              block: ff00aa
+                              count-min: 4
+                              count-max: 6
+                              mode: spread
+                              spread: {x: 0.4, y: 0.5, z: 0.4}
+                        """)).snapshot();
         DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
         assertEquals(DeathEffectsSettings.Preset.CUSTOM, s.preset());
         assertTrue(s.lightning(), "custom preset honours the lightning flag");
@@ -500,11 +559,12 @@ class SnapshotTest {
         // A named preset resolves the in-code constants and ignores the custom
         // knobs entirely — signature strikes its cosmetic lightning even with
         // the custom flag written false alongside it.
-        Snapshot snapshot = parse("""
-                death-effects:
-                  preset: signature
-                  lightning: false
-                """, "", "", "").snapshot();
+        Snapshot snapshot = parseFiles(Map.of(
+                ConfigStore.DEATH_EFFECTS_FILE, """
+                        death-effects:
+                          preset: signature
+                          lightning: false
+                        """)).snapshot();
         DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
         assertTrue(s.lightning(), "signature strikes lightning regardless of the custom flag");
         assertEquals(DeathEffectsSettings.SIGNATURE_SOUNDS, s.sounds());
@@ -586,8 +646,170 @@ class SnapshotTest {
         // Mutating the source after parse cannot change the snapshot.
         YamlConfiguration main = yaml("modules:\n  knockback: true\n");
         Configuration knockback = yaml("");
-        Snapshot snapshot = SnapshotParser.parse(main, knockback, yaml(""), yaml(""), Map.of()).snapshot();
+        Snapshot snapshot = SnapshotParser.parse(
+                ConfigStore.Sources.of(main, knockback, yaml(""), yaml(""), Map.of())).snapshot();
         main.set("modules.knockback", false);
         assertTrue(snapshot.enabled(Feature.KNOCKBACK), "snapshot captured the value at parse time");
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  The 2.5.2 per-concern split — routing, parity, and back-compat     */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void bundledSplitFilesParseCleanAndKeepEveryEffectiveDefault() throws Exception {
+        // The fresh-install pin: every 2.5.2 split file, exactly as the jar ships
+        // it, parses with ZERO issues, and the EFFECTIVE settings are the same
+        // era-exact no-ops parse(empty) yields. (The effects templates carry live
+        // editable lists, so record equality is asserted on the effective
+        // per-preset views, not the raw custom lists.)
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.COMBO_FILE, bundled(ConfigStore.COMBO_FILE),
+                ConfigStore.POTS_FILE, bundled(ConfigStore.POTS_FILE),
+                ConfigStore.LOADOUT_FILE, bundled(ConfigStore.LOADOUT_FILE),
+                ConfigStore.HIT_FEEDBACK_FILE, bundled(ConfigStore.HIT_FEEDBACK_FILE),
+                ConfigStore.DAMAGE_INDICATORS_FILE, bundled(ConfigStore.DAMAGE_INDICATORS_FILE),
+                ConfigStore.DEATH_EFFECTS_FILE, bundled(ConfigStore.DEATH_EFFECTS_FILE)));
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+        Snapshot snapshot = result.snapshot();
+
+        // The commented templates parse to their exact DEFAULTS records.
+        assertEquals(ComboSettings.DEFAULTS, settings(snapshot, Feature.COMBO_HOLD));
+        assertEquals(ReachHandicapSettings.DEFAULTS, settings(snapshot, Feature.COMBO_REACH_HANDICAP));
+        assertEquals(PotFillSettings.DEFAULTS, settings(snapshot, Feature.POT_FILL));
+        assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
+        assertEquals(OffhandSettings.DEFAULTS, settings(snapshot, Feature.OFFHAND));
+        assertEquals(CraftingSettings.DEFAULTS, settings(snapshot, Feature.CRAFTING));
+        assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
+
+        // The effects templates: the preset picks the same effective sets the
+        // parse-empty defaults resolve.
+        HitFeedbackSettings feedback = settings(snapshot, Feature.HIT_FEEDBACK);
+        HitFeedbackSettings feedbackDefaults = HitFeedbackSettings.DEFAULTS;
+        assertEquals(feedbackDefaults.preset(), feedback.preset());
+        assertEquals(feedbackDefaults.sounds(), feedback.sounds());
+        assertEquals(feedbackDefaults.particles(), feedback.particles());
+        assertEquals(feedbackDefaults.lowHealthSounds(), feedback.lowHealthSounds());
+        assertEquals(feedbackDefaults.lowHealthThresholdHearts(), feedback.lowHealthThresholdHearts());
+        DeathEffectsSettings death = settings(snapshot, Feature.DEATH_EFFECTS);
+        DeathEffectsSettings deathDefaults = DeathEffectsSettings.DEFAULTS;
+        assertEquals(deathDefaults.preset(), death.preset());
+        assertEquals(deathDefaults.lightning(), death.lightning());
+        assertEquals(deathDefaults.sounds(), death.sounds());
+        assertEquals(deathDefaults.particles(), death.particles());
+    }
+
+    @Test
+    void eachBundledSplitFileParsesToTheSameSettingsFromTheOldConfigYmlLocation() throws Exception {
+        // The parity pin: a split file's content IS the old config.yml section
+        // shape (the move changed only the routing), so the SAME bundled text
+        // loaded as config.yml must parse every moved feature to the SAME
+        // settings — plus the loud moved-section notice per honoured section.
+        for (String file : ConfigStore.SPLIT_FILE_SECTIONS.keySet()) {
+            String body = bundled(file);
+            SnapshotParser.Result fromSplit = parseFiles(Map.of(file, body));
+            SnapshotParser.Result fromMain = parseFiles(Map.of(ConfigStore.MAIN_FILE, body));
+            for (Feature feature : List.of(Feature.COMBO_HOLD, Feature.COMBO_REACH_HANDICAP,
+                    Feature.POT_FILL, Feature.FAST_POTS, Feature.OFFHAND, Feature.CRAFTING,
+                    Feature.HIT_FEEDBACK, Feature.DAMAGE_INDICATORS, Feature.DEATH_EFFECTS)) {
+                assertEquals((Object) settings(fromSplit.snapshot(), feature),
+                        settings(fromMain.snapshot(), feature),
+                        () -> file + " parity for " + feature);
+            }
+            assertTrue(fromSplit.issues().isEmpty(),
+                    () -> file + " issues: " + fromSplit.issues());
+            // One moved-section line per LIVE section the old location carries
+            // (the combo/pots/loadout bundles are commented templates → none).
+            long liveSections = ConfigStore.SPLIT_FILE_SECTIONS.get(file).stream()
+                    .filter(section -> {
+                        try {
+                            return yaml(body).getConfigurationSection(section) != null;
+                        } catch (Exception impossible) {
+                            throw new IllegalStateException(impossible);
+                        }
+                    })
+                    .count();
+            assertEquals(liveSections, fromMain.issues().size(),
+                    () -> file + " old-location issues: " + fromMain.issues());
+            for (String issue : fromMain.issues()) {
+                assertTrue(issue.contains("moved to " + file), () -> issue);
+            }
+        }
+    }
+
+    @Test
+    void aTunedOldLocationSectionIsHonouredWithOneLoudLine() throws Exception {
+        // Back-compat: an upgraded install whose config.yml still carries a tuned
+        // moved section keeps its behavior — the values apply verbatim and exactly
+        // one issue line names the section, both files, and the way out.
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, """
+                        hit-feedback:
+                          preset: signature
+                          low-health-threshold-hearts: 6.0
+                        """));
+        HitFeedbackSettings feedback = settings(result.snapshot(), Feature.HIT_FEEDBACK);
+        assertEquals(HitFeedbackSettings.Preset.SIGNATURE, feedback.preset(),
+                "the old-location tune applies verbatim");
+        assertEquals(6.0, feedback.lowHealthThresholdHearts(), 0.0);
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("hit-feedback"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("moved to " + ConfigStore.HIT_FEEDBACK_FILE),
+                () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("honoured"), () -> result.issues().get(0));
+    }
+
+    @Test
+    void aTunedOldLocationComboSectionKeepsItsNestedLegacyMigrationToo() throws Exception {
+        // The straight 2.4.3 → 2.5.2 upgrade: combo-hold still in config.yml WITH
+        // the pre-2.4.4 nested reach-handicap block. Both migrations stack — the
+        // section is honoured from the old location (one moved line) AND the nested
+        // enable still promotes the module (one promotion line), carrying the scale.
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, """
+                        modules:
+                          combo-hold: true
+                        combo-hold:
+                          gain: 0.9
+                          reach-handicap:
+                            enabled: true
+                            reach-scale: 0.7
+                        """));
+        Snapshot snapshot = result.snapshot();
+        ComboSettings combo = settings(snapshot, Feature.COMBO_HOLD);
+        assertEquals(0.9, combo.gain(), 0.0, "the old-location combo tune applies verbatim");
+        assertTrue(snapshot.enabled(Feature.COMBO_REACH_HANDICAP),
+                "the nested legacy enable still promotes the module");
+        ReachHandicapSettings handicap = settings(snapshot, Feature.COMBO_REACH_HANDICAP);
+        assertEquals(0.7, handicap.scale(), "the nested legacy scale still carries");
+        assertEquals(2, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().stream().anyMatch(issue ->
+                        issue.contains("moved to " + ConfigStore.COMBO_FILE)),
+                () -> "expected the moved-section line: " + result.issues());
+        assertTrue(result.issues().stream().anyMatch(issue ->
+                        issue.contains("combo-hold.reach-handicap.enabled")),
+                () -> "expected the 2.4.4 promotion line: " + result.issues());
+    }
+
+    @Test
+    void whenBothLocationsCarryASectionTheSplitFileWinsLoudly() throws Exception {
+        // The shadow case: the split file exists AND config.yml still carries the
+        // section. The split file wins (it is the documented home) and the shadowed
+        // config.yml section is named loudly — never dropped in silence.
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.MAIN_FILE, """
+                        damage-indicators:
+                          ring-radius: 1.0
+                        """,
+                ConfigStore.DAMAGE_INDICATORS_FILE, """
+                        damage-indicators:
+                          ring-radius: 0.8
+                        """));
+        DamageIndicatorsSettings indicators = settings(result.snapshot(), Feature.DAMAGE_INDICATORS);
+        assertEquals(0.8, indicators.ringRadius(), 1e-9, "the split file wins");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("ignored"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains(ConfigStore.DAMAGE_INDICATORS_FILE),
+                () -> result.issues().get(0));
     }
 }

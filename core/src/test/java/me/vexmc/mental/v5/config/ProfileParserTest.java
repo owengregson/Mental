@@ -157,7 +157,7 @@ class ProfileParserTest {
             knockback.loadFromString(knockbackYaml);
         }
         YamlConfiguration empty = new YamlConfiguration();
-        return SnapshotParser.parse(empty, knockback, empty, empty, profiles).snapshot();
+        return SnapshotParser.parse(ConfigStore.Sources.of(empty, knockback, empty, empty, profiles)).snapshot();
     }
 
     private static Map<String, Configuration> profileSources(String... names) throws Exception {
@@ -188,7 +188,8 @@ class ProfileParserTest {
         YamlConfiguration knockback = new YamlConfiguration();
         knockback.loadFromString("knockback:\n  profile: minemen-exact\n");
         YamlConfiguration empty = new YamlConfiguration();
-        SnapshotParser.Result result = SnapshotParser.parse(empty, knockback, empty, empty, Map.of());
+        SnapshotParser.Result result = SnapshotParser.parse(
+                ConfigStore.Sources.of(empty, knockback, empty, empty, Map.of()));
 
         assertEquals("legacy-1.7", result.snapshot().profileFor("world").name());
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
@@ -207,7 +208,7 @@ class ProfileParserTest {
                 """);
         YamlConfiguration empty = new YamlConfiguration();
         SnapshotParser.Result result = SnapshotParser.parse(
-                empty, knockback, empty, empty, profileSources("arena"));
+                ConfigStore.Sources.of(empty, knockback, empty, empty, profileSources("arena")));
         Snapshot snapshot = result.snapshot();
 
         assertNotNull(snapshot);

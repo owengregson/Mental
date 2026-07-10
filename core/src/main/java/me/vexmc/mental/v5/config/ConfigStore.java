@@ -18,6 +18,7 @@ import me.vexmc.mental.kernel.profile.Presets;
 import me.vexmc.mental.kernel.profile.SupersededPresets;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.MemoryConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 /**
@@ -41,9 +42,33 @@ public final class ConfigStore {
     public static final String KNOCKBACK_FILE = "knockback.yml";
     public static final String HIT_REG_FILE = "hit-registration.yml";
     public static final String LATENCY_FILE = "latency-compensation.yml";
+    public static final String COMBO_FILE = "combo.yml";
+    public static final String POTS_FILE = "pots.yml";
+    public static final String LOADOUT_FILE = "loadout.yml";
+    public static final String EFFECTS_DIR = "effects";
+    public static final String HIT_FEEDBACK_FILE = EFFECTS_DIR + "/hit-feedback.yml";
+    public static final String DAMAGE_INDICATORS_FILE = EFFECTS_DIR + "/damage-indicators.yml";
+    public static final String DEATH_EFFECTS_FILE = EFFECTS_DIR + "/death-effects.yml";
     public static final String PROFILES_DIR = "profiles";
     public static final String STATE_DIR = "state";
     public static final String OVERRIDES_FILE = "overrides.yml";
+
+    /**
+     * The 2.5.2 per-concern splits: each file's top-level sections used to live
+     * in config.yml. The map drives BOTH halves of the move's back-compat
+     * contract — {@link #ensureDefaultFiles} suppresses a split file's
+     * extraction while config.yml still carries one of its sections (a pristine
+     * bundle must never shadow a tuned old-location section), and
+     * {@code SnapshotParser} honours the old location with one loud line per
+     * parse. Insertion order is the extraction order.
+     */
+    public static final Map<String, List<String>> SPLIT_FILE_SECTIONS = Map.of(
+            COMBO_FILE, List.of("combo-hold", "combo-reach-handicap"),
+            POTS_FILE, List.of("pot-fill", "fast-pots"),
+            LOADOUT_FILE, List.of("disable-offhand", "disable-crafting"),
+            HIT_FEEDBACK_FILE, List.of("hit-feedback"),
+            DAMAGE_INDICATORS_FILE, List.of("damage-indicators"),
+            DEATH_EFFECTS_FILE, List.of("death-effects"));
 
     /** The formula-category folder for a legacy-formula profile. */
     public static final String LEGACY_FOLDER = "legacy";
@@ -80,7 +105,31 @@ public final class ConfigStore {
             Configuration knockback,
             Configuration hitReg,
             Configuration latency,
-            Map<String, Configuration> profiles) {}
+            Configuration combo,
+            Configuration pots,
+            Configuration loadout,
+            Configuration hitFeedback,
+            Configuration damageIndicators,
+            Configuration deathEffects,
+            Map<String, Configuration> profiles) {
+
+        /**
+         * The pre-2.5.2 four-root shape with every split file empty — the parser
+         * then resolves each split section to its config.yml fallback (or the
+         * defaults). Test seam; production always loads the full set.
+         */
+        public static Sources of(
+                Configuration main,
+                Configuration knockback,
+                Configuration hitReg,
+                Configuration latency,
+                Map<String, Configuration> profiles) {
+            return new Sources(main, knockback, hitReg, latency,
+                    new MemoryConfiguration(), new MemoryConfiguration(), new MemoryConfiguration(),
+                    new MemoryConfiguration(), new MemoryConfiguration(), new MemoryConfiguration(),
+                    profiles);
+        }
+    }
 
     private final Path dataDir;
     private final Function<String, InputStream> resources;
@@ -108,6 +157,21 @@ public final class ConfigStore {
         extractIfMissing(KNOCKBACK_FILE, dataDir.resolve(KNOCKBACK_FILE));
         extractIfMissing(HIT_REG_FILE, dataDir.resolve(HIT_REG_FILE));
         extractIfMissing(LATENCY_FILE, dataDir.resolve(LATENCY_FILE));
+        // The 2.5.2 per-concern splits extract like everything else — only when
+        // missing — with ONE guard: while config.yml still carries a section
+        // that moved into the file, extraction is suppressed so a pristine
+        // bundle can never shadow the owner's tuned old-location section. The
+        // suppression itself is silent; the parser's per-reload issue line is
+        // THE loud notice (mandate B10: loud, once — not twice). Deleting the
+        // section from config.yml lets the bundle extract on the next boot.
+        Configuration mainOnDisk = loadYaml(dataDir.resolve(MAIN_FILE), MAIN_FILE);
+        for (Map.Entry<String, List<String>> split : SPLIT_FILE_SECTIONS.entrySet()) {
+            boolean legacyLocationInUse = split.getValue().stream()
+                    .anyMatch(section -> mainOnDisk.getConfigurationSection(section) != null);
+            if (!legacyLocationInUse) {
+                extractIfMissing(split.getKey(), dataDir.resolve(split.getKey()));
+            }
+        }
         Path profilesDir = dataDir.resolve(PROFILES_DIR);
         if (!Files.isDirectory(profilesDir) && !mkdirs(profilesDir)) {
             log.accept("Could not create " + profilesDir + " — profiles unavailable");
@@ -252,6 +316,12 @@ public final class ConfigStore {
                 loadYaml(dataDir.resolve(KNOCKBACK_FILE), KNOCKBACK_FILE),
                 loadYaml(dataDir.resolve(HIT_REG_FILE), HIT_REG_FILE),
                 loadYaml(dataDir.resolve(LATENCY_FILE), LATENCY_FILE),
+                loadYaml(dataDir.resolve(COMBO_FILE), COMBO_FILE),
+                loadYaml(dataDir.resolve(POTS_FILE), POTS_FILE),
+                loadYaml(dataDir.resolve(LOADOUT_FILE), LOADOUT_FILE),
+                loadYaml(dataDir.resolve(HIT_FEEDBACK_FILE), HIT_FEEDBACK_FILE),
+                loadYaml(dataDir.resolve(DAMAGE_INDICATORS_FILE), DAMAGE_INDICATORS_FILE),
+                loadYaml(dataDir.resolve(DEATH_EFFECTS_FILE), DEATH_EFFECTS_FILE),
                 profiles);
     }
 

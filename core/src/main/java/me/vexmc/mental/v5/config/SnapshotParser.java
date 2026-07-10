@@ -32,13 +32,21 @@ import org.bukkit.configuration.MemoryConfiguration;
 
 /**
  * Parses the post-overlay YAML (config.yml + knockback.yml + hit-registration.yml
- * + latency-compensation.yml + profiles/*.yml) into one immutable {@link Snapshot},
- * with the warn-and-fallback issue list. This is the retired
- * {@code MentalConfig.reload} re-expressed over the descriptor registry: every
- * module toggle keys off {@link Feature#yamlKey()}, every settings record keys
- * off {@link Feature#settingsKey()}, and {@code parse(empty) == full defaults}.
+ * + latency-compensation.yml + combo.yml + pots.yml + loadout.yml + effects/*.yml
+ * + profiles/*.yml) into one immutable {@link Snapshot}, with the
+ * warn-and-fallback issue list. This is the retired {@code MentalConfig.reload}
+ * re-expressed over the descriptor registry: every module toggle keys off
+ * {@link Feature#yamlKey()}, every settings record keys off
+ * {@link Feature#settingsKey()}, and {@code parse(empty) == full defaults}.
  * The per-record parse logic is ported field-for-field from the retired
  * {@code config.*Settings} records (whose parse methods it absorbs).
+ *
+ * <p>The per-module settings sections that lived in config.yml before 2.5.2
+ * (the {@link ConfigStore#SPLIT_FILE_SECTIONS} map) resolve through
+ * {@link #movedSection}: the split file's section wins when present; an
+ * old-location config.yml section is honoured verbatim with one loud issue
+ * line per parse (the 2.4.4 reach-handicap promotion contract) — never a
+ * silent drop.</p>
  */
 public final class SnapshotParser {
 
@@ -47,23 +55,48 @@ public final class SnapshotParser {
 
     private SnapshotParser() {}
 
-    public static Result parse(
-            Configuration main,
-            Configuration knockback,
-            Configuration hitReg,
-            Configuration compensation,
-            Map<String, Configuration> profiles) {
+    /**
+     * The nine per-module sections that moved out of config.yml in 2.5.2, each
+     * resolved exactly once per parse (so the moved-section notice is emitted
+     * once, however many parsers consult the reader).
+     */
+    private record MovedSections(
+            ConfigReader comboHold,
+            ConfigReader reachHandicap,
+            ConfigReader potFill,
+            ConfigReader fastPots,
+            ConfigReader offhand,
+            ConfigReader crafting,
+            ConfigReader hitFeedback,
+            ConfigReader damageIndicators,
+            ConfigReader deathEffects) {}
 
+    public static Result parse(ConfigStore.Sources sources) {
+        Configuration main = sources.main();
+        Configuration knockback = sources.knockback();
         ConfigIssues issues = new ConfigIssues();
         ConfigReader modules = new ConfigReader(
                 main.getConfigurationSection("modules"), "config.yml: modules", issues);
+
+        MovedSections moved = new MovedSections(
+                movedSection(sources.combo(), ConfigStore.COMBO_FILE, main, "combo-hold", issues),
+                movedSection(sources.combo(), ConfigStore.COMBO_FILE, main, "combo-reach-handicap", issues),
+                movedSection(sources.pots(), ConfigStore.POTS_FILE, main, "pot-fill", issues),
+                movedSection(sources.pots(), ConfigStore.POTS_FILE, main, "fast-pots", issues),
+                movedSection(sources.loadout(), ConfigStore.LOADOUT_FILE, main, "disable-offhand", issues),
+                movedSection(sources.loadout(), ConfigStore.LOADOUT_FILE, main, "disable-crafting", issues),
+                movedSection(sources.hitFeedback(), ConfigStore.HIT_FEEDBACK_FILE, main, "hit-feedback", issues),
+                movedSection(sources.damageIndicators(), ConfigStore.DAMAGE_INDICATORS_FILE, main,
+                        "damage-indicators", issues),
+                movedSection(sources.deathEffects(), ConfigStore.DEATH_EFFECTS_FILE, main,
+                        "death-effects", issues));
 
         // The combo reach handicap was promoted to its own module in 2.4.4; its
         // enablement carries a loud legacy-key migration, so it is resolved once here
         // and the loop below reuses it (COMBO_HOLD likewise, to avoid a double read).
         boolean comboHoldOn =
                 modules.flag(Feature.COMBO_HOLD.yamlKey(), Feature.COMBO_HOLD.defaultEnabled());
-        boolean reachHandicapOn = resolveReachHandicapEnabled(modules, main, issues);
+        boolean reachHandicapOn = resolveReachHandicapEnabled(modules, moved.comboHold(), issues);
 
         Snapshot.Builder builder = new Snapshot.Builder();
         for (Feature feature : Feature.values()) {
@@ -78,8 +111,7 @@ public final class SnapshotParser {
                 on = modules.flag(feature.yamlKey(), feature.defaultEnabled());
             }
             builder.enable(feature, on);
-            builder.put(feature.settingsKey(),
-                    settingsFor(feature, main, knockback, hitReg, compensation, issues));
+            builder.put(feature.settingsKey(), settingsFor(feature, sources, moved, issues));
         }
         // The reach handicap no longer depends on combo-hold: since the 2.4.5
         // detection/servo split it drives combo DETECTION itself (either keeper does),
@@ -87,7 +119,7 @@ public final class SnapshotParser {
         // dependency warning is emitted; the two combo modules toggle independently.
 
         builder.profiles(ProfileParser.parseSection(
-                reader(knockback, "knockback", "knockback.yml", issues), profiles, issues));
+                reader(knockback, "knockback", "knockback.yml", issues), sources.profiles(), issues));
         builder.anticheat(parseAnticheat(reader(main, "anticheat", "config.yml", issues)));
         builder.debug(parseDebug(reader(main, "debug", "config.yml", issues)));
         // bStats metrics toggle (spec §13). Parse-with-default: an absent
@@ -98,36 +130,61 @@ public final class SnapshotParser {
         return new Result(builder.build(), issues.all());
     }
 
+    /**
+     * Resolves one section that moved out of config.yml in 2.5.2 into its
+     * per-concern split file. The split file's section wins when present; an
+     * old-location config.yml section is HONOURED verbatim with one loud issue
+     * line per parse (the 2.4.4 reach-handicap promotion contract — an in-place
+     * upgrade keeps working and is told exactly what to move); when both carry
+     * the section the split file wins and the shadowed config.yml section is
+     * named loudly, never dropped in silence (mandate B10).
+     */
+    private static ConfigReader movedSection(
+            Configuration splitRoot, String splitFile, Configuration main,
+            String section, ConfigIssues issues) {
+        boolean inSplit = splitRoot.getConfigurationSection(section) != null;
+        boolean inMain = main.getConfigurationSection(section) != null;
+        if (inMain && inSplit) {
+            issues.add("config.yml: the " + section + " section moved to " + splitFile
+                    + " in 2.5.2 and BOTH carry it — " + splitFile + " wins and the config.yml"
+                    + " section is ignored; delete it from config.yml");
+        } else if (inMain) {
+            issues.add("config.yml: the " + section + " section moved to " + splitFile
+                    + " in 2.5.2 — the config.yml section is honoured for now; move it: delete"
+                    + " it from config.yml and the bundled " + splitFile + " (with the full"
+                    + " documentation) is extracted on the next boot, ready to carry your values");
+            return new ConfigReader(main.getConfigurationSection(section),
+                    "config.yml: " + section, issues);
+        }
+        return new ConfigReader(splitRoot.getConfigurationSection(section),
+                splitFile + ": " + section, issues);
+    }
+
     private static Object settingsFor(
             Feature feature,
-            Configuration main,
-            Configuration knockback,
-            Configuration hitReg,
-            Configuration compensation,
+            ConfigStore.Sources sources,
+            MovedSections moved,
             ConfigIssues issues) {
         return switch (feature) {
             case HIT_REGISTRATION ->
-                    parseHitReg(reader(hitReg, "hit-registration", "hit-registration.yml", issues));
+                    parseHitReg(reader(sources.hitReg(), "hit-registration", "hit-registration.yml", issues));
             case LATENCY_COMPENSATION ->
-                    parseCompensation(reader(compensation, "latency-compensation",
+                    parseCompensation(reader(sources.latency(), "latency-compensation",
                             "latency-compensation.yml", issues));
             case FISHING_KNOCKBACK ->
-                    parseFishing(reader(knockback, "fishing-knockback", "knockback.yml", issues));
+                    parseFishing(reader(sources.knockback(), "fishing-knockback", "knockback.yml", issues));
             case PROJECTILE_KNOCKBACK ->
-                    parseProjectile(reader(knockback, "projectile-knockback", "knockback.yml", issues));
-            case CRAFTING -> parseCrafting(reader(main, "disable-crafting", "config.yml", issues));
-            case OFFHAND -> parseOffhand(reader(main, "disable-offhand", "config.yml", issues));
-            case COMBO_HOLD -> parseCombo(reader(main, "combo-hold", "config.yml", issues));
+                    parseProjectile(reader(sources.knockback(), "projectile-knockback", "knockback.yml", issues));
+            case CRAFTING -> parseCrafting(moved.crafting());
+            case OFFHAND -> parseOffhand(moved.offhand());
+            case COMBO_HOLD -> parseCombo(moved.comboHold());
             case COMBO_REACH_HANDICAP -> parseReachHandicap(
-                    reader(main, "combo-reach-handicap", "config.yml", issues),
-                    reader(main, "combo-hold", "config.yml", issues).sub("reach-handicap"));
-            case POT_FILL -> parsePotFill(reader(main, "pot-fill", "config.yml", issues));
-            case FAST_POTS -> parseFastPots(reader(main, "fast-pots", "config.yml", issues));
-            case HIT_FEEDBACK -> parseHitFeedback(reader(main, "hit-feedback", "config.yml", issues));
-            case DAMAGE_INDICATORS ->
-                    parseDamageIndicators(reader(main, "damage-indicators", "config.yml", issues));
-            case DEATH_EFFECTS ->
-                    parseDeathEffects(reader(main, "death-effects", "config.yml", issues));
+                    moved.reachHandicap(), moved.comboHold().sub("reach-handicap"));
+            case POT_FILL -> parsePotFill(moved.potFill());
+            case FAST_POTS -> parseFastPots(moved.fastPots());
+            case HIT_FEEDBACK -> parseHitFeedback(moved.hitFeedback());
+            case DAMAGE_INDICATORS -> parseDamageIndicators(moved.damageIndicators());
+            case DEATH_EFFECTS -> parseDeathEffects(moved.deathEffects());
             default -> NoSettings.DEFAULTS;
         };
     }
@@ -316,23 +373,27 @@ public final class SnapshotParser {
      * on, honouring the 2.4.3-beta legacy shape. When the new module key is unset but
      * the old nested {@code combo-hold.reach-handicap.enabled} reads true, the module
      * is treated as enabled and a loud migration line is emitted naming both keys —
-     * never silently ignored. An explicit new module key always wins.
+     * never silently ignored. An explicit new module key always wins. The nested
+     * legacy block rides the RESOLVED combo-hold section (a 2.4.3 config carries it
+     * in config.yml — the moved-section fallback — while a block moved wholesale
+     * into combo.yml still resolves there), so a straight 2.4.3 → 2.5.2 upgrade
+     * keeps its tuned nested scale.
      */
     private static boolean resolveReachHandicapEnabled(
-            ConfigReader modules, Configuration main, ConfigIssues issues) {
+            ConfigReader modules, ConfigReader comboHold, ConfigIssues issues) {
         boolean moduleKeySet = modules.section() != null
                 && modules.section().isSet(Feature.COMBO_REACH_HANDICAP.yamlKey());
         if (moduleKeySet) {
             return modules.flag(Feature.COMBO_REACH_HANDICAP.yamlKey(),
                     Feature.COMBO_REACH_HANDICAP.defaultEnabled());
         }
-        ConfigReader legacy = reader(main, "combo-hold", "config.yml", issues).sub("reach-handicap");
+        ConfigReader legacy = comboHold.sub("reach-handicap");
         if (legacy.flag("enabled", false)) {
             issues.add("config.yml: the reach handicap moved to its own module in 2.4.4 — "
                     + "modules.combo-reach-handicap is unset, but the legacy "
                     + "combo-hold.reach-handicap.enabled reads true, so it is honoured (enabled) for "
                     + "this release. Set modules.combo-reach-handicap: true and move reach-scale to a "
-                    + "top-level combo-reach-handicap block; the nested block is deprecated.");
+                    + "top-level combo-reach-handicap block in combo.yml; the nested block is deprecated.");
             return true;
         }
         return false;

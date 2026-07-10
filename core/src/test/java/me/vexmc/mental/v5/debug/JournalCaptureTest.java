@@ -14,6 +14,7 @@ import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.SprintVerdict;
 import me.vexmc.mental.kernel.model.TickStamp;
+import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -112,7 +113,8 @@ class JournalCaptureTest {
     @Test
     void familiesOfListsTheEnabledFeaturesAndSkipsTheDisabled() {
         YamlConfiguration empty = new YamlConfiguration();
-        Snapshot snapshot = SnapshotParser.parse(empty, empty, empty, empty, Map.of()).snapshot();
+        Snapshot snapshot = SnapshotParser.parse(
+                ConfigStore.Sources.of(empty, empty, empty, empty, Map.of())).snapshot();
         String families = JournalCapture.familiesOf(snapshot);
         assertTrue(families.contains("KNOCKBACK"), "a default-ON engine feature is listed");
         assertTrue(families.contains("HIT_REGISTRATION"), "a default-ON delivery feature is listed");

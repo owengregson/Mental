@@ -746,9 +746,8 @@ public final class MentalPluginV5 extends JavaPlugin {
 
     private Snapshot parseSnapshot() {
         ConfigStore.Sources sources = configStore.loadSources();
-        overlay.apply(sources.main(), sources.knockback(), sources.hitReg(), sources.latency());
-        SnapshotParser.Result result = SnapshotParser.parse(
-                sources.main(), sources.knockback(), sources.hitReg(), sources.latency(), sources.profiles());
+        overlay.apply(sources);
+        SnapshotParser.Result result = SnapshotParser.parse(sources);
         List<String> issues = new ArrayList<>(result.issues());
         // Reconcile the raw configured probe strategy to the effective wire transport for
         // THIS server version — the parser is deliberately version-blind, so the mapping

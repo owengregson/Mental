@@ -7,6 +7,13 @@
 #                             rod, fishing and projectile mechanics
 #    hit-registration.yml     the async hit pipeline and its fast path
 #    latency-compensation.yml ping-aware knockback correction
+#    combo.yml                the Combo Solver family — the combo-hold
+#                             servo and the combo reach handicap
+#    pots.yml                 the POTS family — /potfill and fast pots
+#    loadout.yml              off-hand and crafting restrictions
+#    effects/                 one file per Combat Effects module —
+#                             hit-feedback, damage-indicators and
+#                             death-effects
 #    profiles/                one file per knockback profile; presets are
 #                             regenerated when missing, edits are yours
 #
@@ -69,15 +76,14 @@ modules:
   # the output would be a blocked material. SHIELD is the default blocked item —
   # complements disable-offhand, since the shield can only enter the off-hand
   # slot via the crafting table output on modern Paper. Configure the blocked
-  # list in the disable-crafting section below. Default OFF (era-exact no-op).
+  # list in loadout.yml. Default OFF (era-exact no-op).
   disable-crafting: false
   # Blocks players from placing or using items in the off-hand slot (slot 40).
   # The off-hand was added in 1.9; on a 1.7/1.8 era server the slot does not
   # exist. When enabled, all paths through which an item can enter the off-hand
   # are intercepted: the F-key swap, inventory clicks, number-key hotbar swaps,
   # drags, and the strip-on-join/world-change fallback. Configure which items
-  # are affected in the disable-offhand section below. Default OFF (era-exact
-  # no-op when disabled).
+  # are affected in loadout.yml. Default OFF (era-exact no-op when disabled).
   disable-offhand: false
   # Restores 1.8.9 golden apple and enchanted golden apple potion effects, and
   # re-registers the notch-apple (enchanted golden apple) crafting recipe that
@@ -265,7 +271,7 @@ modules:
   # bounded by honest clamps — past them the pocket is lost and era physics wins.
   # It never touches the vertical, the victim's own residual motion, reach, or
   # hit-delay, and it does nothing to any pair not in an active combo. Works under
-  # whichever knockback profile is active. Tune it in the combo-hold section below.
+  # whichever knockback profile is active. Tune it in combo.yml.
   #
   # This is Mental's own novel mechanic (no community precedent), so it is strictly
   # server-opt-in: it defaults OFF and no bundled config pre-enables it. Field-judge
@@ -278,7 +284,7 @@ modules:
   # a shorter victim reach opens the servo's keepable pocket). 1.20.5+ ONLY (the
   # attribute is client-synced there). For the SERVER-SIDE enforcement leg against
   # attribute-blind clients you must ALSO enable hit-registration.reach-validation.
-  # Tuned in the combo-reach-handicap section below. Default OFF (era-exact no-op).
+  # Tuned in combo.yml. Default OFF (era-exact no-op).
   #
   # (Moved in 2.4.4: this was the nested combo-hold.reach-handicap.enabled sub-knob.
   # An upgraded config with the old nested key still works for one release — it is
@@ -286,15 +292,14 @@ modules:
   combo-reach-handicap: false
   # POTS family — two independent splash-potion utilities. These are PvP-server
   # conveniences, not a 1.7/1.8 restoration; both default OFF and touch nothing
-  # while disabled.
+  # while disabled. Both are tuned in pots.yml.
   #
   # pot-fill: registers the /potfill command (aliases /pots, /pf) — fills every
   # empty slot of your main inventory (the 36 main + hotbar slots; armour and
   # off-hand are never touched) with a glowing splash Instant Health II potion.
   # The command is registered on enable and REMOVED on disable, so a disabled
   # module leaves no command or tab-completion behind. Permission and an optional
-  # per-potion economy cost are configured in the pot-fill section below.
-  # Default OFF.
+  # per-potion economy cost are configured in pots.yml. Default OFF.
   pot-fill: false
   # fast-pots: the classic "fast pot" self-heal, made reliable. When you throw a
   # splash potion while looking down more steeply than fast-pots.angle-degrees,
@@ -302,404 +307,27 @@ modules:
   # by the time it lands, and leading slightly so you run INTO the cloud), within a
   # bounded speed band, so the splash lands on you reliably. Throws shallower than
   # the angle are left completely untouched, and LINGERING potions are never
-  # redirected (this aids the instant splash, not the cloud). Tuned in the fast-pots
-  # section below. Default OFF.
+  # redirected (this aids the instant splash, not the cloud). Tuned in pots.yml.
+  # Default OFF.
   fast-pots: false
   # FEEDBACK family — the Combat Effects modules, cosmetic presentation only.
   # All three default OFF (zero-touch: a disabled module changes nothing the
-  # game does or shows).
+  # game does or shows). Each is tuned in its own file under effects/.
   #
   # hit-feedback: replaces the vanilla melee hurt-sound broadcast with your own
   # configured sounds and pops particles at the victim's chest. Its scope matches
   # vanilla exactly — every nearby player EXCEPT the victim, who keeps their own
-  # client-derived hurt sound. Tuned in the hit-feedback section below. Default OFF.
+  # client-derived hurt sound. Tuned in effects/hit-feedback.yml. Default OFF.
   hit-feedback: false
   # damage-indicators: pops a floating damage number off the victim, on the
-  # ATTACKER's screen only (a client-only packet armour stand). Tuned in the
-  # damage-indicators section below. Default OFF.
+  # ATTACKER's screen only (a client-only packet armour stand). Tuned in
+  # effects/damage-indicators.yml. Default OFF.
   damage-indicators: false
   # death-effects: a cosmetic strike the moment a player dies, from ANY cause
   # (PlayerDeathEvent) — optional packet-rendered lightning, sounds, and a
-  # particle burst at the death spot. Tuned in the death-effects section below.
+  # particle burst at the death spot. Tuned in effects/death-effects.yml.
   # Default OFF.
   death-effects: false
-
-# Off-hand slot filter, active when modules.disable-offhand is true.
-#
-# whitelist: true  → only materials listed in 'items' are permitted in the
-#                    off-hand; anything else is blocked.  An empty list blocks
-#                    ALL items (the maximally restrictive era default).
-# whitelist: false → materials listed in 'items' are blocked; everything else
-#                    is allowed.  An empty list allows everything.
-#
-# Any material name recognised by Bukkit's Material.matchMaterial() is valid.
-# Unknown names warn on reload and are skipped — the rest of the list applies.
-#
-# denied-message: the message shown when an action is denied ('' to suppress).
-#   '&' colour codes are translated.
-#disable-offhand:
-#  whitelist: true
-#  items: []
-#  denied-message: "&cOff-hand is disabled"
-
-# Combo-hold servo, active when modules.combo-hold is true. All knobs shown at
-# their defaults; the block is optional (an absent section uses these values).
-#
-# ── Detector: when is a combo "active"? ────────────────────────────────────
-#   min-hits            hits from ONE attacker before the servo engages (the
-#                       first develops the chain; the second confirms intent and
-#                       engages the servo — two hits, no retaliation = in combo).
-#   max-gap-ticks       an inter-hit gap longer than this ends the chain — era
-#                       sweet-spot cadence is ~10-12 ticks, so 20 is generous.
-#   grounded-run-ticks  consecutive grounded ticks that end the combo: brief
-#                       ground-skims survive, a real touchdown (10) ends it.
-#   blowout-blocks      separation past this ends the combo (the pocket is gone).
-# A false positive mid-scrap is harmless: it costs only one clamped knock nudge,
-# so these thresholds err toward NOT detecting a combo.
-#
-# ── Servo: where does the victim land? ─────────────────────────────────────
-# The 2.4.5 redesign lands the victim right at the ANSWER-DENIAL BOUNDARY: the
-# separation where, at the moment they could first swing back (their ping + the
-# turn they'd need), their reach-back is denied by a hair while YOU can still reach
-# them. It PUSHES OUT to that edge and only pulls IN if the natural knock would
-# eject them past your own reach — the opposite of the old "pull into the least
-# separation" servo, which dragged the victim into their own retaliation range.
-# Vertical is deliberately never touched — the profile's launch height buys the
-# vertical margin the geometry reads.
-#   gain         blends toward the full exact solve (1.0 = exact; lower softens).
-#   min-factor   } the honesty clamps on the knock multiplier. [0.93, 1.35] is the
-#   max-factor   } calibrated band (2.4.6 undershoot fix): the servo's chase floor
-#                  centres sigma near 1.0-1.1, so the floor rarely pulls below 0.93
-#                  and the ceiling admits the harder "apply more" closes; past them
-#                  the pocket is honestly lost and era physics wins over a non-era knock.
-#                  When the solve lands so far below min-factor that even the clamped
-#                  shave cannot approach the pocket (sigma* < 2*min-factor - 1 — every
-#                  sprint-fresh chase hit does), the servo declines the shave entirely
-#                  and ships the FULL era knock instead of a pointless min-factor shave.
-#   window-ticks the cadence horizon (t*) the flight is projected over — the era
-#                full-hit cadence (10). The predictor already folds the shipped
-#                vertical stamp's air-time, ping horizons and the ground tail into
-#                the window; this is the base cadence they shift from.
-#
-# ── The boundary geometry (the target knobs) ───────────────────────────────
-#   target-mode  boundary | static. BOUNDARY (default) computes the geometric
-#                answer-denial target from the reach geometry below. STATIC pins the
-#                servo to a fixed `target` separation regardless of facing.
-#                (Migration: an old `anchor` reads as STATIC, an old `dynamic` reads
-#                as BOUNDARY, each with a loud reload notice.)
-#   target       the STATIC-mode / no-facing FALLBACK separation (2.85, the lab's
-#                held-separation equilibrium). Used whenever the geometry can't be
-#                measured (the victim's facing is unknown) or under target-mode:
-#                static. (This is the old `target` key, reused — a tuned value carries
-#                over.)
-#   victim-reach the victim's era answer reach in blocks (R_v, 3.0). The combo reach
-#                handicap, when live, SHORTENS this for the held combo — a shorter
-#                victim reach drops the deny boundary and OPENS the keepable pocket
-#                (this is why the reach nerf keeps a combo).
-#   attacker-reach   YOUR era reach (R_a, 3.0) — never handicapped.
-#   deny-margin  the hair past the victim's deny boundary the servo aims for, so
-#                jitter can't let them answer (0.02).
-#   jitter-margin    the slack below your reach the target keeps, so you reliably
-#                connect (0.15).
-#   target-floor the closest the servo will EVER pull the victim in (2.5).
-# (The pre-2.4.5 `hit-cap` knob is gone with the exposure-budget dynamic target; an
-# upgraded config that still sets it gets one reload notice, then it is ignored.)
-#
-# ── Reach handicap ─────────────────────────────────────────────────────────
-# The reach handicap moved to its OWN module in 2.4.4 — modules.combo-reach-handicap
-# above, tuned in the combo-reach-handicap section below. Since 2.4.5 it drives combo
-# DETECTION itself, so it works STANDALONE (combo-hold off) AND composes with the
-# servo when both are on. (It used to live here as a nested combo-hold.reach-handicap
-# block; an upgraded config with that old block still works for one release — honoured
-# with a loud reload notice — but move it.)
-#combo-hold:
-#  min-hits: 2
-#  max-gap-ticks: 20
-#  grounded-run-ticks: 10
-#  blowout-blocks: 6.0
-#  gain: 1.0
-#  min-factor: 0.93
-#  max-factor: 1.35
-#  window-ticks: 10
-#  target-mode: boundary
-#  target: 2.85
-#  victim-reach: 3.0
-#  attacker-reach: 3.0
-#  deny-margin: 0.02
-#  jitter-margin: 0.15
-#  target-floor: 2.5
-
-# Combo reach handicap, active when modules.combo-reach-handicap is true.
-# While a victim is held in a combo, scale DOWN their entity-interaction-range
-# attribute so their own client raycast shortens and they cannot answer. This is a
-# SECONDARY lever: the combo-hold servo steers SPACING, this tightens RETALIATION.
-# Applied the moment a combo goes active, removed the moment it ends by ANY reason —
-# fully reversible, and swept clean on join / enable / disable so a crash never leaves
-# a shortened reach in a saved profile.
-#
-#   STANDALONE since 2.4.5. It drives combo detection itself, so it engages with
-#   combo-hold off (and composes with the servo when both are on).
-#
-#   1.20.5+ ONLY. The interaction-range attribute is client-synced from 1.20.5, so
-#   shortening it makes the client's OWN raycast shorten (no phantom misses). Below
-#   1.20.5 the attribute does not exist and this module is a documented no-op (one
-#   loud line is logged if you enable it there). NOTE: ViaVersion legacy clients ignore
-#   the synced attribute even on a 1.20.5+ server — the server cannot shorten their
-#   reach; there is no server-side fix for those clients.
-#
-#   SERVER-SIDE enforcement (against attribute-blind clients that ignore the synced
-#   value) rides the reach validator's backstop — it requires
-#   hit-registration.reach-validation.enabled: true. With reach-validation off, the
-#   handicap is purely the client-synced attribute shrink (honest clients only).
-#
-#   reach-scale  the multiplier on the era 3.0 reach, in [0.5, 1.0]. 0.87 → 2.61
-#                blocks; an out-of-range value warns on reload and 0.87 stands. It
-#                only ever SHORTENS reach (a handicap never inflates it). (The 2.4.5
-#                retune lifted the floor from 0.8/2.4 — that bottom end was too severe.)
-#combo-reach-handicap:
-#  reach-scale: 0.87
-
-# Items that become uncraftable when modules.disable-crafting is true.
-# Any material name recognised by Bukkit's Material.matchMaterial() is valid.
-# Unknown names are skipped with a config warning. SHIELD is the canonical
-# default — it is the only 1.9 item a 1.7/1.8 server needs to block from the
-# crafting table; remove it or add others to taste. Unrecognised names warn on
-# reload and are skipped — the rest of the list still applies.
-#disable-crafting:
-#  items: [SHIELD]
-
-# The /potfill command, active when modules.pot-fill is true. Fills every empty
-# main-inventory slot with a glowing splash Instant Health II potion.
-#
-# permission:      the permission node a player must hold to run /potfill. Leave
-#                  it as the default op-gated node, or point it at a rank node
-#                  (e.g. "server.kit.pots") to grant it to a group. A player
-#                  without it is refused with a message; the default is
-#                  "mental.pots.fill".
-# cost-per-potion: the price charged PER potion filled, through Vault (a soft,
-#                  optional dependency — Mental never hard-depends on it).
-#                    0    → free; no economy plugin is needed at all (the
-#                           default).
-#                    > 0  → each filled potion costs this much. The fill is a
-#                           PARTIAL fill capped at what you can afford, and you
-#                           are charged for exactly what was filled. With a cost
-#                           set but no Vault economy installed, the command
-#                           refuses honestly (it never fills for free) and one
-#                           line is logged at enable.
-#pot-fill:
-#  permission: "mental.pots.fill"
-#  cost-per-potion: 0.0
-
-# Fast pots, active when modules.fast-pots is true. Redirects a steeply-thrown
-# splash potion just in front of your own feet within a bounded speed band.
-#
-# angle-degrees:       how far below the horizon your throw must aim before the
-#                      redirect kicks in, as a Bukkit pitch threshold (pitch is 0
-#                      at the horizon and +90 looking straight down). The redirect
-#                      fires when your pitch is GREATER than this value; shallower
-#                      throws are left completely untouched. Clamped to [0, 90].
-#                      Default 35.0.
-#
-#                        horizon ── 0° ───────────────  (never redirected)
-#                                    \
-#                                     \   throws in this
-#                                      \  band are left alone
-#                          angle ──── 35° ─ ─ ─ ─ ─ ─ ─  ← threshold
-#                                        \
-#                                         \ steeper throws are
-#                                          \ re-aimed at your feet
-#                        straight down ── 90°
-#
-# The redirect speed is bounded to a band around your potion's normal launch
-# speed. The solver spends the LEAST speed in the band that still lands the burst
-# exactly on your (led) feet; the band only limits which impact tick it can reach,
-# so beyond it the aim leans on the other free variables (direction, arc) rather
-# than throwing harder than the ceiling.
-#
-# min-speed-multiplier: the FLOOR, as a factor of the normal launch speed — the
-#                       redirect is never slower than this (a fast pot always has
-#                       punch). Clamped to [0.05, 1.0]. Default 0.5.
-# max-speed-multiplier: the CEILING, as a factor of the normal launch speed — the
-#                       redirect is never faster than this (so it cannot outrun its
-#                       own splash). Clamped to [1.0, 5.0]. Default 1.5.
-#
-# lead-ticks:          how far ahead of your predicted feet to aim, in ticks of
-#                      your own motion. The burst lands slightly IN FRONT of where
-#                      your feet will be when it hits, so while running you move
-#                      into the cloud (and it cancels the sub-tick lag that would
-#                      otherwise plant it behind you). 0 = aim exactly at the
-#                      predicted feet. Clamped to [0, 5]. Default 1.0.
-#fast-pots:
-#  angle-degrees: 35.0
-#  min-speed-multiplier: 0.5
-#  max-speed-multiplier: 1.5
-#  lead-ticks: 1.0
-
-# Hit sounds & particles, active when modules.hit-feedback is true. Replaces the
-# vanilla melee hurt-sound broadcast with your own layered sounds and pops
-# particle bursts at the victim's mid-chest.
-#
-# Scope matches vanilla EXACTLY: the sounds and particles reach every nearby
-# player EXCEPT the victim. The victim's own client derives its hurt sound from
-# the damage event and keeps doing so — that is server-unreachable without
-# breaking the victim's own flinch, so it is deliberately left alone.
-#
-# preset: vanilla   → audibly vanilla — the era hurt sound at the era pitch (the
-#                     default; no particles).
-# preset: signature → Mental's own layered tune: a lodestone-break + generic-hurt
-#                     + breeze-deflect chord over a redstone-block burst. A sound
-#                     that does not exist on an older server resolves to an
-#                     era-appropriate fallback, printed once in the boot report.
-# preset: custom    → reads the sounds:/particles: lists below verbatim.
-#
-# The lists are consulted ONLY under preset: custom; they are shown here at the
-# vanilla values as an editable template. Per list entry:
-#   sound     a resource location ("entity.player.hurt") or Bukkit-style name.
-#             A blank/missing name skips that entry with one reload warning.
-#   volume    loudness, clamped to [0.0, 4.0].
-#   pitch     playback pitch, clamped to [0.5, 2.0].
-#   particle  a PacketEvents particle-type name. 'block' takes a block: state.
-#   block     the block-state name for block particles (ignored otherwise).
-#   count-min } the burst count is picked in [count-min, count-max]; both are
-#   count-max } clamped to [0, 64] and count-max is never below count-min.
-#   mode      emanate → burst outward from the chest at 'speed';
-#             spread  → scatter 'count' particles with per-axis Gaussian spread.
-#   speed     the emanate outward speed (ignored by spread), clamped to [0, 2].
-#   spread    per-axis Gaussian sigma for spread mode (x/y/z), each in [0, 4].
-#
-# Low-health extra layer: an OPTIONAL sound played ON TOP of the sounds above when
-# the victim's health AFTER this hit drops below low-health-threshold-hearts (in
-# HEARTS; 2 health = 1 heart). It is SUPPRESSED on the killing hit — a hit that
-# leaves the victim at zero health plays only the normal sounds, never the layer.
-# Under preset: vanilla the layer is never added; under preset: signature it is a
-# glow-squid hurt chirp, which falls back to entity.squid.hurt below 1.17 (no glow
-# squid existed) — printed once in the boot report. Under preset: custom the
-# low-health-sounds list below is used verbatim (empty = no extra layer); its
-# entries take the same sound/volume/pitch fields as the sounds list.
-#   low-health-threshold-hearts  the post-hit HEARTS ceiling below which the layer
-#                                fires. Clamped to [0, 100]. Default 4.0.
-hit-feedback:
-  preset: vanilla
-  sounds:
-    - sound: entity.player.hurt
-      volume: 1.0
-      pitch: 1.0
-  particles:
-    - particle: block
-      block: redstone_block
-      count-min: 6
-      count-max: 8
-      mode: emanate
-      speed: 0.15
-      spread: {x: 0.2, y: 0.3, z: 0.2}
-  low-health-threshold-hearts: 4.0
-  low-health-sounds:
-    - sound: entity.glow_squid.hurt
-      volume: 0.9
-      pitch: 1.2
-
-# Damage indicators, active when modules.damage-indicators is true. Pops a
-# floating damage number off the victim, drawn ONLY on the attacker's screen (a
-# client-only packet armour stand — no real entity exists and no bystander sees
-# it). It spawns on a front-half ring around the victim's chest and falls under a
-# light ballistic model, despawning the instant it reaches its spawn ground plane
-# or at lifetime-ticks, whichever comes first.
-#
-# text / crit-text: the label templates. {HEALTH} is the final damage in HEARTS
-#                   (2 damage = 1 heart; one decimal, a trailing .0 stripped).
-#                   '&' colour codes are translated. The crit variant is used when
-#                   the hit was an era-crit posture OR the damage is at or above
-#                   crit-threshold-hearts (also in HEARTS).
-#
-# The ballistic knobs (all optional; the defaults are the shipped feel):
-#   lifetime-ticks   hard despawn age in ticks. Clamped to [1, 200]. Default 40.
-#   ring-radius      how far off the chest, in blocks, the number spawns on the
-#                    front-half ring. Clamped to [0, 4]. Default 0.6.
-#   height-jitter    random vertical spawn offset, in blocks, so stacked hits do
-#                    not overlap. Clamped to [0, 2]. Default 0.3.
-#   launch-vertical  initial upward speed, blocks/tick. Clamped to [0, 2]. 0.25.
-#   launch-outward   initial outward (away-from-victim) speed, blocks/tick.
-#                    Clamped to [0, 2]. Default 0.06.
-#   gravity          downward pull each tick, blocks/tick². Clamped to [0, 0.5].
-#                    Default 0.05.
-#   drag             per-tick velocity retention (1.0 = frictionless). Clamped to
-#                    [0.5, 1.0]. Default 0.98.
-damage-indicators:
-  lifetime-ticks: 40
-  ring-radius: 0.6
-  height-jitter: 0.3
-  launch-vertical: 0.25
-  launch-outward: 0.06
-  gravity: 0.05
-  drag: 0.98
-  text: "&f-{HEALTH} &c❤&r"
-  crit-text: "&c&l** -{HEALTH} ❤ **"
-  crit-threshold-hearts: 5.0
-
-# Death effects, active when modules.death-effects is true. A cosmetic strike
-# the moment a player dies, from ANY cause (PlayerDeathEvent) — lightning, a
-# sound, and a particle burst at the death spot.
-#
-# The lightning is a PACKET RENDER only, never a real entity: the bolt and its
-# flash are drawn client-side, so by construction there is no fire, no damage,
-# and no block interaction — nothing about the world changes.
-#
-# preset: vanilla   → a strict nothing (the default). Even with the module
-#                     enabled this preset changes nothing — the toggle owns
-#                     zero-touch, the preset owns the tune.
-# preset: signature → Mental's own tune: the cosmetic lightning bolt, the
-#                     glow-squid death call (falls back to entity.squid.death
-#                     below 1.17, where no glow squid existed — printed once in
-#                     the boot report), and a white/yellow/gold burst. Vanilla's
-#                     firework particle is not colorable, so the burst is an
-#                     honest approximation: colored dust shaped like a firework
-#                     blast, plus uncolored firework sparks on top.
-# preset: custom    → reads the lightning flag and the sounds:/particles:
-#                     lists below verbatim.
-#
-# The knobs below are consulted ONLY under preset: custom; they are shown here
-# at the signature values as an editable template. The list entries take the
-# same fields as hit-feedback's lists (sound/volume/pitch; particle/block/
-# count-min/count-max/mode/speed/spread), with ONE twist:
-#   particle: dust  is the colorable burst particle — its RRGGBB hex color
-#                   rides the block field (block: ffaa00 = gold dust). For
-#                   every other particle, block keeps its usual meaning (the
-#                   block-state name for block-crack particles).
-death-effects:
-  preset: vanilla
-  lightning: false
-  sounds:
-    - sound: entity.glow_squid.death
-      volume: 1.0
-      pitch: 0.95
-  particles:
-    - particle: dust
-      block: ffffff
-      count-min: 8
-      count-max: 12
-      mode: spread
-      speed: 0.0
-      spread: {x: 0.5, y: 0.5, z: 0.5}
-    - particle: dust
-      block: ffff55
-      count-min: 8
-      count-max: 12
-      mode: spread
-      speed: 0.0
-      spread: {x: 0.5, y: 0.5, z: 0.5}
-    - particle: dust
-      block: ffaa00
-      count-min: 8
-      count-max: 12
-      mode: spread
-      speed: 0.0
-      spread: {x: 0.5, y: 0.5, z: 0.5}
-    - particle: firework
-      count-min: 10
-      count-max: 14
-      mode: emanate
-      speed: 0.12
-      spread: {x: 0, y: 0, z: 0}
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky
