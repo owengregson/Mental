@@ -29,6 +29,7 @@ import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.CompensationQuery;
 import me.vexmc.mental.kernel.wire.LatencyModel;
+import me.vexmc.mental.kernel.wire.SprintWire;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
@@ -263,7 +264,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             }
             // Adopt the pre-delivered vector — the era stamped once.
             desk.awaitVelocityEvent(tx);
-            applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
+            applyAttackerObligations(attacker, sprinting, tx.context().sprint());
             return;
         }
 
@@ -341,7 +342,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             // so only the (never-firing) velocity-event arm changes.
             desk.awaitVelocityEvent(tx);
         }
-        applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
+        applyAttackerObligations(attacker, sprinting, tx.context().sprint());
     }
 
     /** A protection plugin cancelling the melee hit withdraws the queued knock. */
@@ -393,15 +394,22 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * sprint clear, and {@code setSprinting(false)} (a no-op when vanilla's own
      * attack already cleared it on the server-side melee path).
      *
-     * <p>Both clears are guarded by the hit's verdict stamp ({@code asOf}). Vanilla
-     * cleared sprint synchronously inside {@code attack}, so it could never eat a
-     * re-engage that arrived afterwards; Mental's clears run 1–2 ticks late at the
-     * deferred EDBEE, so a w-tap START in that window must survive. The wire clear
-     * no-ops under a newer wire write ({@link SprintWire#onServerClear(TickStamp)}),
-     * and the deferred {@code setSprinting(false)} is skipped when the wire has
-     * re-armed to sprinting by execution time (F2).</p>
+     * <p>Both clears are guarded by the hit's {@code verdict}. A wire-peeked verdict
+     * carries the wire's arrival sequence at peek time ({@link SprintVerdict#wireSeq}),
+     * so the clear is ordered by ARRIVAL, not by tick granularity: vanilla cleared
+     * sprint synchronously inside {@code attack}, so it could never eat a re-engage
+     * that arrived afterwards; Mental's clears run 1–2 ticks late at the deferred
+     * EDBEE, so a w-tap START that landed in the SAME tick as (and after) the ATTACK
+     * must survive — the 2.4.x same-tick retro-clear defect a tick stamp could not
+     * separate. The wire clear no-ops under a wire write with a larger seq
+     * ({@link SprintWire#onServerClear(long)}), and the deferred
+     * {@code setSprinting(false)} is skipped when the wire has re-armed past this
+     * hit's peek seq by execution time (F1). A verdict with no wire provenance
+     * ({@link SprintVerdict#fromWire} false) falls back to the tick-stamp guard
+     * ({@link SprintWire#onServerClear(TickStamp)}) and the plain live-wire read,
+     * byte-identical to 2.4.1.</p>
      */
-    private void applyAttackerObligations(LivingEntity attacker, boolean sprinting, TickStamp asOf) {
+    private void applyAttackerObligations(LivingEntity attacker, boolean sprinting, SprintVerdict verdict) {
         if (!(attacker instanceof Player player)) {
             return;
         }
@@ -430,18 +438,26 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // its ledger to a zero vertical (the 2.4.4 domain-poisoning bug; the
         // SwordBlockingUnit:259 non-creating idiom is the precedent).
         if (domains.has(attackerId)) {
-            domains.domainFor(attackerId).sprint().onServerClear(asOf);
+            SprintWire wire = domains.domainFor(attackerId).sprint();
+            if (verdict.fromWire()) {
+                wire.onServerClear(verdict.wireSeq());
+            } else {
+                // No wire provenance (wtap-registration off / view-fallback verdict):
+                // the stamp guard is the best available ordering, byte-identical to 2.4.1.
+                wire.onServerClear(verdict.at());
+            }
         }
         if (player.isSprinting()) {
             scheduling.runOn(player, () -> {
-                // At execution time (the attacker's own thread), skip the clear when
-                // the wire re-armed to sprinting after the hit — a re-engage newer
-                // than asOf that vanilla's synchronous clear would never have eaten.
-                // With no wire (a packetless attacker) there is nothing to consult,
-                // so mirror vanilla's unconditional clear directly.
-                if (domains.has(attackerId)
-                        && domains.domainFor(attackerId).sprint().verdictAt(clock.current()).sprinting()) {
-                    return;
+                // Skip the server-flag clear only for a re-engage NEWER than this hit's
+                // verdict peek (arrival order) — vanilla's synchronous clear could never
+                // eat it. With no wire provenance, keep the plain live-wire read (2.4.1).
+                if (domains.has(attackerId)) {
+                    SprintVerdict live = domains.domainFor(attackerId).sprint().verdictAt(clock.current());
+                    if (live.sprinting()
+                            && (!verdict.fromWire() || live.wireSeq() > verdict.wireSeq())) {
+                        return;
+                    }
                 }
                 player.setSprinting(false);
             }, () -> {});
@@ -492,7 +508,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             CombatSession session, Player victim, LivingEntity attacker, HitSource source,
             HitTransaction original, KnockbackVector era, boolean wirePreSent, boolean sprinting,
             double paceFactor, double comboFactor) {
-        applyAttackerObligations(attacker, sprinting, original.context().sprint().at());
+        applyAttackerObligations(attacker, sprinting, original.context().sprint());
         if (era == null) {
             return; // nothing carried/computed — leave vanilla's (absent) knock
         }
