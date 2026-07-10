@@ -83,8 +83,7 @@ class MigrationsTest {
 
         // End to end: the migrated tree parses into the tuned profile.
         ConfigStore.Sources sources = new ConfigStore(dataFolder, resources, message -> {}).loadSources();
-        SnapshotParser.Result parsed = SnapshotParser.parse(sources.main(), sources.knockback(),
-                sources.hitReg(), sources.latency(), sources.profiles());
+        SnapshotParser.Result parsed = SnapshotParser.parse(sources);
         assertFalse(parsed.snapshot().enabled(
                 me.vexmc.mental.v5.feature.Feature.LATENCY_COMPENSATION));
         assertEquals("custom", parsed.snapshot().profileFor("world").name());

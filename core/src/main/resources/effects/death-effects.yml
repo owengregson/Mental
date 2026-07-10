@@ -1,0 +1,76 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — death effects (Combat Effects)
+#
+#  Settings only: the on/off switch lives in config.yml under modules:
+#  (modules.death-effects — default OFF; a disabled module changes nothing
+#  the game does or shows). This file is yours to edit — it is extracted
+#  once and never overwritten; deleting it regenerates the pristine bundle.
+# ──────────────────────────────────────────────────────────────────────────
+
+# A cosmetic strike the moment a player dies, from ANY cause
+# (PlayerDeathEvent) — lightning, a sound, and a particle burst at the death
+# spot.
+#
+# The lightning is a PACKET RENDER only, never a real entity: the bolt and its
+# flash are drawn client-side, so by construction there is no fire, no damage,
+# and no block interaction — nothing about the world changes.
+#
+# ── The preset chooses the whole tune ──────────────────────────────────────
+# preset: vanilla   → a strict nothing (the default). Even with the module
+#                     enabled this preset changes nothing — the toggle owns
+#                     zero-touch, the preset owns the tune.
+# preset: signature → Mental's own tune: the cosmetic lightning bolt, the
+#                     glow-squid death call (falls back to entity.squid.death
+#                     below 1.17, where no glow squid existed — printed once in
+#                     the boot report), and a white/yellow/gold burst. Vanilla's
+#                     firework particle is not colorable, so the burst is an
+#                     honest approximation: colored dust shaped like a firework
+#                     blast, plus uncolored firework sparks on top.
+# preset: custom    → reads the lightning flag and the sounds:/particles:
+#                     lists below verbatim.
+#
+# The knobs below are consulted ONLY under preset: custom; they are shown here
+# at the signature values as an editable template (so switching to custom
+# starts from the signature tune, not from silence). The list entries take the
+# same fields as hit-feedback's lists (sound/volume/pitch; particle/block/
+# count-min/count-max/mode/speed/spread — the full field reference is in
+# effects/hit-feedback.yml), with ONE twist:
+#   particle: dust  is the colorable burst particle — its RRGGBB hex color
+#                   rides the block field (block: ffaa00 = gold dust). For
+#                   every other particle, block keeps its usual meaning (the
+#                   block-state name for block-crack particles).
+death-effects:
+  preset: vanilla
+  lightning: false
+  sounds:
+    - sound: entity.glow_squid.death
+      volume: 1.0
+      pitch: 0.95
+  particles:
+    - particle: dust
+      block: ffffff
+      count-min: 8
+      count-max: 12
+      mode: spread
+      speed: 0.0
+      spread: {x: 0.5, y: 0.5, z: 0.5}
+    - particle: dust
+      block: ffff55
+      count-min: 8
+      count-max: 12
+      mode: spread
+      speed: 0.0
+      spread: {x: 0.5, y: 0.5, z: 0.5}
+    - particle: dust
+      block: ffaa00
+      count-min: 8
+      count-max: 12
+      mode: spread
+      speed: 0.0
+      spread: {x: 0.5, y: 0.5, z: 0.5}
+    - particle: firework
+      count-min: 10
+      count-max: 14
+      mode: emanate
+      speed: 0.12
+      spread: {x: 0, y: 0, z: 0}

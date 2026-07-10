@@ -39,10 +39,8 @@ class OverlayTest {
         overlay.set("knockback.profile", "kohi");
 
         ConfigStore.Sources sources = store.loadSources();
-        overlay.apply(sources.main(), sources.knockback(), sources.hitReg(), sources.latency());
-        SnapshotParser.Result result = SnapshotParser.parse(
-                sources.main(), sources.knockback(), sources.hitReg(), sources.latency(),
-                sources.profiles());
+        overlay.apply(sources);
+        SnapshotParser.Result result = SnapshotParser.parse(sources);
         Snapshot snapshot = result.snapshot();
 
         // The snapshot reflects BOTH overrides.
@@ -57,6 +55,28 @@ class OverlayTest {
 
         // The overlay persisted its own file.
         assertTrue(Files.isRegularFile(store.overridesFile()), "overlay file must be written");
+    }
+
+    @Test
+    void overlayKeysOnMovedSectionsRouteToTheSplitRoots() throws Exception {
+        // The 2.5.2 split: an override whose first path segment is a moved section
+        // must land on the split root the parser actually reads, so
+        // effective = overlay ?? file ?? default keeps holding for those keys.
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+        Overlay overlay = new Overlay(store.overridesFile());
+        overlay.set("hit-feedback.preset", "signature");
+        overlay.set("combo-hold.gain", 0.5);
+
+        ConfigStore.Sources sources = store.loadSources();
+        overlay.apply(sources);
+
+        assertEquals("signature", sources.hitFeedback().getString("hit-feedback.preset"),
+                "the hit-feedback override rides the effects/hit-feedback.yml root");
+        assertEquals(0.5, sources.combo().getDouble("combo-hold.gain"),
+                "the combo-hold override rides the combo.yml root");
+        SnapshotParser.Result result = SnapshotParser.parse(sources);
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
     }
 
     @Test

@@ -36,11 +36,17 @@ description: Use when changing the knockback engine, profile schema, presets, or
   change, and the public `Mental.setKnockbackProfile(String)` shares that same
   write-back path. The netty pre-send reads the profile FROZEN into the victim's
   per-tick `PlayerView`, so prediction and truth share one profile.
-- Config is split by concern: config.yml (module switches + policy),
-  knockback.yml (selection + rod/fishing/projectile), hit-registration.yml,
-  latency-compensation.yml, profiles/. v1 single-file configs migrate
-  automatically (backup `config-v1-backup.yml`; tuned knockback becomes
-  profiles/custom.yml, selected).
+- Config is split by concern: config.yml (module switches + cross-cutting
+  policy ONLY since 2.5.2), knockback.yml (selection + rod/fishing/projectile),
+  hit-registration.yml, latency-compensation.yml, combo.yml (servo + reach
+  handicap), pots.yml, loadout.yml, effects/ (one file per Combat Effects
+  module), profiles/. The 2.5.2 splits ride the extracted-only-when-missing
+  contract with a guard: a split file never extracts while config.yml still
+  carries its old-location section (the parser honours the old location with
+  one loud line per reload — SPLIT_FILE_SECTIONS in ConfigStore drives both
+  halves). v1 single-file configs migrate automatically (backup
+  `config-v1-backup.yml`; tuned knockback becomes profiles/custom.yml,
+  selected).
 
 ## Engine order of operations (KnockbackEngine)
 

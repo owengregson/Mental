@@ -1,0 +1,85 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — the POTS family (/potfill + fast pots)
+#
+#  Settings only: the on/off switches live in config.yml under modules:
+#  (modules.pot-fill and modules.fast-pots — both default OFF). These are
+#  PvP-server conveniences, not a 1.7/1.8 restoration; disabled they touch
+#  nothing. Each block below is optional and shown at its defaults — an
+#  absent block means exactly these values, so uncomment only what you
+#  change. Deleting this file regenerates the pristine bundle.
+# ──────────────────────────────────────────────────────────────────────────
+
+# The /potfill command, active when modules.pot-fill is true (config.yml).
+# Fills every empty main-inventory slot (the 36 main + hotbar slots; armour and
+# off-hand are never touched) with a glowing splash Instant Health II potion.
+# The command (aliases /pots, /pf) is registered on enable and REMOVED on
+# disable, so a disabled module leaves no command or tab-completion behind.
+#
+# permission:      the permission node a player must hold to run /potfill. Leave
+#                  it as the default op-gated node, or point it at a rank node
+#                  (e.g. "server.kit.pots") to grant it to a group. A player
+#                  without it is refused with a message; the default is
+#                  "mental.pots.fill".
+# cost-per-potion: the price charged PER potion filled, through Vault (a soft,
+#                  optional dependency — Mental never hard-depends on it).
+#                    0    → free; no economy plugin is needed at all (the
+#                           default).
+#                    > 0  → each filled potion costs this much. The fill is a
+#                           PARTIAL fill capped at what you can afford, and you
+#                           are charged for exactly what was filled. With a cost
+#                           set but no Vault economy installed, the command
+#                           refuses honestly (it never fills for free) and one
+#                           line is logged at enable.
+#pot-fill:
+#  permission: "mental.pots.fill"
+#  cost-per-potion: 0.0
+
+# Fast pots, active when modules.fast-pots is true (config.yml). Redirects a
+# steeply-thrown splash potion just in front of your own feet within a bounded
+# speed band — the classic "fast pot" self-heal, made reliable. Mental re-aims
+# the potion at where your feet WILL be by the time it lands (leading slightly
+# so you run INTO the cloud). Throws shallower than the angle are left
+# completely untouched, and LINGERING potions are never redirected (this aids
+# the instant splash, not the cloud).
+#
+# angle-degrees:       how far below the horizon your throw must aim before the
+#                      redirect kicks in, as a Bukkit pitch threshold (pitch is 0
+#                      at the horizon and +90 looking straight down). The redirect
+#                      fires when your pitch is GREATER than this value; shallower
+#                      throws are left completely untouched. Clamped to [0, 90].
+#                      Default 35.0.
+#
+#                        horizon ── 0° ───────────────  (never redirected)
+#                                    \
+#                                     \   throws in this
+#                                      \  band are left alone
+#                          angle ──── 35° ─ ─ ─ ─ ─ ─ ─  ← threshold
+#                                        \
+#                                         \ steeper throws are
+#                                          \ re-aimed at your feet
+#                        straight down ── 90°
+#
+# The redirect speed is bounded to a band around your potion's normal launch
+# speed. The solver spends the LEAST speed in the band that still lands the burst
+# exactly on your (led) feet; the band only limits which impact tick it can reach,
+# so beyond it the aim leans on the other free variables (direction, arc) rather
+# than throwing harder than the ceiling.
+#
+# min-speed-multiplier: the FLOOR, as a factor of the normal launch speed — the
+#                       redirect is never slower than this (a fast pot always has
+#                       punch). Clamped to [0.05, 1.0]. Default 0.5.
+# max-speed-multiplier: the CEILING, as a factor of the normal launch speed — the
+#                       redirect is never faster than this (so it cannot outrun its
+#                       own splash). Clamped to [1.0, 5.0]. Default 1.5.
+#
+# lead-ticks:          how far ahead of your predicted feet to aim, in ticks of
+#                      your own motion. The burst lands slightly IN FRONT of where
+#                      your feet will be when it hits, so while running you move
+#                      into the cloud (and it cancels the sub-tick lag that would
+#                      otherwise plant it behind you). 0 = aim exactly at the
+#                      predicted feet. Clamped to [0, 5]. Default 1.0.
+#fast-pots:
+#  angle-degrees: 35.0
+#  min-speed-multiplier: 0.5
+#  max-speed-multiplier: 1.5
+#  lead-ticks: 1.0
