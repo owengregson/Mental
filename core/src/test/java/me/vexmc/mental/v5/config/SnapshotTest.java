@@ -82,6 +82,10 @@ class SnapshotTest {
         assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
         // The FEEDBACK family: both cosmetic records default to their era-exact no-op.
         assertEquals(HitFeedbackSettings.DEFAULTS, settings(snapshot, Feature.HIT_FEEDBACK));
+        // The low-health extra layer defaults to no layer / a 4-heart post-hit ceiling.
+        HitFeedbackSettings feedback = settings(snapshot, Feature.HIT_FEEDBACK);
+        assertTrue(feedback.lowHealthSounds().isEmpty(), "no low-health layer by default (VANILLA)");
+        assertEquals(4.0, feedback.lowHealthThresholdHearts(), 0.0, "default low-health threshold is 4 hearts");
         assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
@@ -358,6 +362,11 @@ class SnapshotTest {
                       count-max: 5
                       mode: spread
                       spread: {x: 0.2, y: 0.3, z: 0.2}
+                  low-health-threshold-hearts: 5.0
+                  low-health-sounds:
+                    - sound: entity.glow_squid.hurt
+                      volume: 0.9
+                      pitch: 1.2
                 """, "", "", "").snapshot();
         HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
         assertEquals(HitFeedbackSettings.Preset.CUSTOM, s.preset());
@@ -368,6 +377,12 @@ class SnapshotTest {
         assertEquals(1, s.particles().size());
         assertEquals(HitFeedbackSettings.Mode.SPREAD, s.particles().get(0).mode());
         assertEquals(0.3, s.particles().get(0).spreadY(), 1e-9);
+        // The low-health extra layer reads its own list and threshold under custom.
+        assertEquals(5.0, s.lowHealthThresholdHearts(), 1e-9);
+        assertEquals(1, s.lowHealthSounds().size());
+        assertEquals("entity.glow_squid.hurt", s.lowHealthSounds().get(0).sound());
+        assertEquals(0.9f, s.lowHealthSounds().get(0).volume(), 1e-6);
+        assertEquals(1.2f, s.lowHealthSounds().get(0).pitch(), 1e-6);
     }
 
     @Test
@@ -380,6 +395,8 @@ class SnapshotTest {
         HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
         assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, s.sounds());
         assertEquals(HitFeedbackSettings.SIGNATURE_PARTICLES, s.particles());
+        // The signature preset also carries its own low-health extra sound layer.
+        assertEquals(HitFeedbackSettings.SIGNATURE_LOW_HEALTH_SOUNDS, s.lowHealthSounds());
     }
 
     @Test

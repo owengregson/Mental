@@ -560,6 +560,18 @@ modules:
 #             spread  → scatter 'count' particles with per-axis Gaussian spread.
 #   speed     the emanate outward speed (ignored by spread), clamped to [0, 2].
 #   spread    per-axis Gaussian sigma for spread mode (x/y/z), each in [0, 4].
+#
+# Low-health extra layer: an OPTIONAL sound played ON TOP of the sounds above when
+# the victim's health AFTER this hit drops below low-health-threshold-hearts (in
+# HEARTS; 2 health = 1 heart). It is SUPPRESSED on the killing hit — a hit that
+# leaves the victim at zero health plays only the normal sounds, never the layer.
+# Under preset: vanilla the layer is never added; under preset: signature it is a
+# glow-squid hurt chirp, which falls back to entity.squid.hurt below 1.17 (no glow
+# squid existed) — printed once in the boot report. Under preset: custom the
+# low-health-sounds list below is used verbatim (empty = no extra layer); its
+# entries take the same sound/volume/pitch fields as the sounds list.
+#   low-health-threshold-hearts  the post-hit HEARTS ceiling below which the layer
+#                                fires. Clamped to [0, 100]. Default 4.0.
 hit-feedback:
   preset: vanilla
   sounds:
@@ -574,6 +586,11 @@ hit-feedback:
       mode: emanate
       speed: 0.15
       spread: {x: 0.2, y: 0.3, z: 0.2}
+  low-health-threshold-hearts: 4.0
+  low-health-sounds:
+    - sound: entity.glow_squid.hurt
+      volume: 0.9
+      pitch: 1.2
 
 # Damage indicators, active when modules.damage-indicators is true. Pops a
 # floating damage number off the victim, drawn ONLY on the attacker's screen (a

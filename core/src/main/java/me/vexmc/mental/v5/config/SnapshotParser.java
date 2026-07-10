@@ -362,30 +362,34 @@ public final class SnapshotParser {
         HitFeedbackSettings.Preset preset =
                 reader.oneOf("preset", d.preset(), HitFeedbackSettings.Preset.class);
         // The custom lists are parsed regardless of the preset (so a `custom` switch
-        // finds them ready); the record's sounds()/particles() pick the effective set.
+        // finds them ready); the record's sounds()/particles()/lowHealthSounds() pick
+        // the effective set. The low-health threshold is a flat HEARTS ceiling.
         return new HitFeedbackSettings(
                 preset,
-                parseSounds(reader, d.customSounds()),
-                parseParticles(reader, d.customParticles()));
+                parseSounds(reader, "sounds", d.customSounds()),
+                parseParticles(reader, d.customParticles()),
+                parseSounds(reader, "low-health-sounds", d.customLowHealthSounds()),
+                reader.numberClamped("low-health-threshold-hearts", d.lowHealthThresholdHearts(), 0.0, 100.0));
     }
 
     /**
-     * The {@code sounds:} list — the config's first list-of-records shape. Each map
-     * entry is re-wrapped into its own {@link ConfigReader} (over a
-     * MemoryConfiguration-backed section) so every field read runs through the same
-     * warn-and-fallback contract the flat knobs use. A blank/absent name skips the
-     * entry loudly; the survivors are returned immutable.
+     * A list-of-records sound list under {@code key} — the config's first
+     * list-of-records shape, shared by {@code sounds:} and the low-health extra
+     * layer's {@code low-health-sounds:}. Each map entry is re-wrapped into its own
+     * {@link ConfigReader} (over a MemoryConfiguration-backed section) so every field
+     * read runs through the same warn-and-fallback contract the flat knobs use. A
+     * blank/absent name skips the entry loudly; the survivors are returned immutable.
      */
     private static List<HitFeedbackSettings.SoundSpec> parseSounds(
-            ConfigReader reader, List<HitFeedbackSettings.SoundSpec> fallback) {
+            ConfigReader reader, String key, List<HitFeedbackSettings.SoundSpec> fallback) {
         ConfigurationSection section = reader.section();
-        if (section == null || !section.isSet("sounds")) {
+        if (section == null || !section.isSet(key)) {
             return fallback;
         }
         List<HitFeedbackSettings.SoundSpec> sounds = new ArrayList<>();
-        List<Map<?, ?>> entries = section.getMapList("sounds");
+        List<Map<?, ?>> entries = section.getMapList(key);
         for (int i = 0; i < entries.size(); i++) {
-            ConfigReader entry = listEntry(reader, "sounds", i, entries.get(i));
+            ConfigReader entry = listEntry(reader, key, i, entries.get(i));
             String name = entry.text("sound", "");
             if (name.isBlank()) {
                 skipUnnamed(entry, "sound");
