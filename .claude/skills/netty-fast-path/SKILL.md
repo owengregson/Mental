@@ -239,30 +239,31 @@ it did server-side must be re-implemented or it silently vanishes:
   ~900 consecutive owner hits all `sprint=f`). Real vanilla never produced that
   side effect at spam cadence: its clear sits behind the ≥90%-charge gate,
   where the client simultaneously predicts the same clear and re-engages, so
-  the echo is always redundant. **The new contract is the WIRE cadence.** The
-  hit clears only the wire sprint (`SprintWire.onServerClear`, spending the
-  freshness the hit used), and the `SprintWire`'s post-clear re-arm re-engages
-  the bonus one tick later (`reconcile`, the era one-tick re-engage) when the
-  raw `clientSprinting` flag survived — i.e. no STOP followed the hit, so the
-  client's held sprint intent persisted. A STOP crosses the wire ONLY when the
-  client's same-tick re-arm is blocked — item-use / block-holding foremost, food
-  ≤6, or lost forward impulse — or for a double-tap-W sprinter (no rising edge
-  until a full re-gesture): those send STOP → `clientSprinting` false → NO auto
-  re-arm → a real START (the w-tap) is still required, freshness armed as ever. A
-  sprint-KEY-HOLDER's full-charge un-sprint prediction is wire-INVISIBLE: the
-  re-arm fires in the SAME tick's `aiStep` (the level-triggered hold path, which
-  runs BEFORE the per-tick diff sender `sendIsSprintingIfNeeded`), so no STOP
-  crosses and the held sprinter keeps the bonus — the client-side technique
-  contract is preserved exactly where a client expresses it (empirical 1.21.11
-  extraction, `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`).
+  the echo is always redundant. **The new contract is one engagement, one sprint
+  knock** (2.5.1, the owner's directive — supersedes the 2.5.0 post-clear
+  re-arm). The hit's wire clear (`SprintWire.onServerClear`) CONSUMES the
+  engagement: `sprinting` + `armed` drop and `clearedAt` opens the SPEND LATCH.
+  While that latch is open, `reconcile` is BLOCKED from adopting the stale-high
+  server flag — a held-W modern client's flag stays true forever (vanilla's own
+  clear lives inside the cancelled ATTACK, so its STOP never crosses the wire),
+  and re-adopting it would resurrect the engagement the hit just spent, arming
+  every held hit as a sprint knock (the 2.5.0 bug — holding W comboed forever).
+  Nothing re-arms automatically: re-arming takes a CLIENT-EXPRESSED re-gesture —
+  a wire STOP→START cycle (w-tap / s-tap / GUI open), or the `SwordBlockingUnit`
+  block re-arm (`onBlockSprintReset`) for block-hitting, since a modern item-use
+  never drops the client flag. The latch (`clearedAt`) closes on any client
+  START/STOP, the block re-arm, or an applied adopt, and only adopt-TRUE is
+  blocked (a genuine external un-sprint, adopt-FALSE, is never blocked).
   PLAYER_INPUT on 1.21.2+ DOES carry a sprint bit (0x40, raw `keySprint.isDown()`
   intent — false for double-tap sprinters, true for stationary ctrl-holders; the
-  server ignores it) — a future re-arm corroborator, never a verdict source. The
-  re-arm window is opened by `clearedAt` on `onServerClear` and reset
-  by any client START/STOP or a reconcile adopt, so a genuine un-sprint is
-  never overridden. Without ANY clear, no-w-tap seconds keep the sprint extra
-  forever — the wire clear is what spends it (measured: no-w-tap and w-tap
-  doubles both flew 10.09 blocks; real 1.8.9 separates them 7.2 vs 11.4).
+  server ignores it) — a re-arm corroborator for the two SWORD_BLOCKING block-hit
+  gates only, never a verdict source (empirical 1.21.11 extraction,
+  `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`). This is
+  the measured era server contract: real 1.8.9 consumed the flag inside every
+  bonus attack and re-armed only on a client START — a no-w-tap double flew 7.2
+  blocks where a w-tap double flew 11.4; the 2.5.0 auto re-arm collapsed that
+  separation (no-w-tap and w-tap doubles both flew 10.09, its bug signature).
+  Never re-add the deferred `setSprinting(false)`.
 - **Attack-time sprint truth**: a faithful client sends STOP_SPRINTING in
   the same flush as its attack; vanilla read the flag INSIDE
   `Player.attack`, ahead of that packet, while the owning-thread damage
@@ -282,14 +283,21 @@ it did server-side must be re-implemented or it silently vanishes:
   was `clearWireSprint`), and an owning-thread per-tick session reconcile (was
   `reconcileWire`) that seeds and re-adopts server-granted `setSprinting` after
   ≥3 ticks of wire silence (TickStamp compare — replaced the old 150 ms
-  constant), AND (2026-07-10) re-arms the bonus one tick after a post-hit clear
-  when the raw client flag survived — the deferred server-flag
-  `setSprinting(false)` that used to run beside the wire clear is GONE (its
-  modern-client echo latched sprint off), so this wire cadence IS the whole
-  contract. A null wire view (feature off, synthetic players) = published-view
-  fallback, byte-identical to pre-1.7.0. Bukkit toggle events must NEVER write
-  the wire view — they fire at packet application, so a boundary-applied STOP
-  would overwrite a newer wire START (in D1 they don't exist at all).
+  constant), EXCEPT adopt-TRUE is latch-guarded (2.5.1): while a hit-consume is
+  outstanding (`clearedAt` known — a bonus hit spent the engagement and no client
+  gesture followed) the reconcile does NOT re-adopt the stale-high server flag,
+  because a held-W modern client's flag stays true forever and re-adopting it
+  would resurrect the spent engagement — one engagement, one sprint knock. The
+  latch closes on any client START/STOP, the block re-arm, or an applied adopt;
+  adopt-FALSE (a genuine external un-sprint) is never blocked. The deferred
+  server-flag `setSprinting(false)` that used to run beside the wire clear is GONE
+  (its modern-client echo latched sprint off), so the wire clear alone consumes
+  the engagement. A null wire view (feature off, synthetic players) =
+  published-view fallback, byte-identical to pre-1.7.0 — and it has NO engagement
+  semantics: with no wire there is no latch, so every held hit carries the bonus
+  there, deliberate for packetless synthetics. Bukkit toggle events must NEVER
+  write the wire view — they fire at packet application, so a boundary-applied
+  STOP would overwrite a newer wire START (in D1 they don't exist at all).
 - Deliberate omissions stay deliberate: sweep, durability, statistics,
   hunger (1.7.10 target feel).
 

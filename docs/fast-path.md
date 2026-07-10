@@ -115,13 +115,19 @@ The `wtap-registration` feature (default on) restores the in-order read at
 packet granularity. The parse rim already observes each player's
 entity-action packets on their own netty thread; it additionally feeds the
 `SprintWire`'s **arrival-order view** — the flag replayed in packet order,
-freshness armed the instant a START arrives, vanilla's in-attack sprint clear
-mirrored beside the post-hit clear the delivery desk already issues. Because a
-player's packets all arrive on their own connection thread, the wire view an
-ATTACK reads is in program order with the toggles that preceded it: zero added
-latency, no races by construction. An owning-thread per-tick reconcile seeds
-first-sighted players and re-adopts server-initiated `setSprinting` (which
-never crosses the wire) once the wire has been quiet.
+freshness armed the instant a START arrives, and vanilla's in-attack sprint
+clear mirrored onto the wire alone (`onServerClear`). The deferred server-flag
+`setSprinting(false)` the delivery desk used to issue beside it is gone since
+2.5.0 (it echoed to the attacker's own modern client and latched sprint off), so
+the wire clear by itself CONSUMES the engagement. Because a player's packets all
+arrive on their own connection thread, the wire view an ATTACK reads is in
+program order with the toggles that preceded it: zero added latency, no races by
+construction. An owning-thread per-tick reconcile seeds first-sighted players and
+re-adopts server-initiated `setSprinting` (which never crosses the wire) once the
+wire has been quiet — EXCEPT it will not re-adopt a still-high server flag while a
+hit-consume is outstanding (the spend latch): one engagement, one sprint knock,
+re-armed past a consumed engagement only by a client-expressed re-gesture (a wire
+STOP→START, or the block-hit re-arm).
 
 Registration stamps the `SprintVerdict` it used — sprint and freshness — into
 the hit's context, so the pre-sent velocity and the authoritative damage pass

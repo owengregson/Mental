@@ -79,7 +79,8 @@ import org.bukkit.inventory.ItemStack;
  * treated as melee (B6); a server-side melee that never hit the fast path arrives
  * as {@code Vanilla(ENTITY_ATTACK)} and is knocked. Accepted sprint-bonus hits run
  * the vanilla obligations the cancelled attack left behind — its ledger
- * {@code ×0.6} self-slow and the wire sprint clear (the deferred
+ * {@code ×0.6} self-slow and the wire sprint clear, which CONSUMES the sprint
+ * engagement: one engagement, one sprint knock (the deferred
  * {@code setSprinting(false)} is gone: on 1.21.2+ its echo to the attacker's own
  * client latched sprint off — the modern-client sprint latch fix).</p>
  */
@@ -428,10 +429,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * a one-way latch. Real vanilla never produced that side effect at spam cadence
      * (its clear sits behind the ≥90% charge gate, where the client simultaneously
      * predicts the same clear and re-engages, so the echo is always redundant). The
-     * observable era contract is the WIRE cadence — bonus, a one-tick gap, then a
-     * re-arm on the client's held intent — which the {@link SprintWire}'s post-clear
-     * re-arm reproduces ({@link SprintWire#reconcile}); the server flag now simply
-     * keeps meaning "what the client last said," the only stable truth on 1.21.2+.</p>
+     * wire clear CONSUMES the sprint engagement instead — one engagement, one
+     * sprint knock, the measured era server contract (real 1.8.9 re-armed only on
+     * a client START: no-w-tap doubles flew 7.2 blocks, w-tap doubles 11.4) — and
+     * re-arming takes a client-expressed re-gesture: a wire STOP→START (w-tap,
+     * s-tap, a GUI open) or the {@code SwordBlockingUnit} block re-arm. The server
+     * flag now simply keeps meaning "what the client last said," the only stable
+     * truth on 1.21.2+.</p>
      *
      * <p>The wire clear is guarded by the hit's {@code verdict}. A wire-peeked verdict
      * carries the wire's arrival sequence at peek time ({@link SprintVerdict#wireSeq}),
@@ -486,10 +490,11 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // NO deferred player.setSprinting(false): on 1.21.2+ that server-flag write is
         // echoed to the attacker's own client, which drops its local sprint and never
         // re-sends START (item-use block-hitting blocks it) — a one-way latch that made
-        // every later melee verdict read plain. The wire clear above spends the
-        // freshness this hit used; the SprintWire's post-clear re-arm re-engages the
-        // bonus a tick later on the client's surviving sprint intent (the era wire
-        // cadence). See the method javadoc and the netty-fast-path skill.
+        // every later melee verdict read plain. The wire clear above CONSUMES the
+        // engagement this hit spent; the next sprint knock takes a client-expressed
+        // re-gesture (a wire STOP→START, or the SwordBlockingUnit block re-arm) — one
+        // engagement, one sprint knock. See the method javadoc and the netty-fast-path
+        // skill.
     }
 
     /**

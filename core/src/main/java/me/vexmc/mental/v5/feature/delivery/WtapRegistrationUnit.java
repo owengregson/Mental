@@ -16,6 +16,13 @@ import me.vexmc.mental.v5.feature.Scope;
  * fast path falls back to the tick-frozen published sprint flag (byte-identical to
  * the pre-module pipeline); synthetic players who send no packets fall back either
  * way.
+ *
+ * <p>Since 2.5.1 the toggle also flips sprint-knock SEMANTICS, not just read
+ * timing: the wire enforces the spend latch — one engagement, one sprint knock,
+ * re-armed only by a client re-gesture — while the published-flag fallback has no
+ * consume to enforce, so every held-sprint hit carries the bonus there. The
+ * fallback's behavior is deliberate (a view cannot express an engagement), not a
+ * regression; packetless synthetic players live on it by construction.</p>
  */
 public final class WtapRegistrationUnit implements FeatureUnit {
 

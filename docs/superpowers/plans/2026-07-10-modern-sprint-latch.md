@@ -27,6 +27,18 @@ Result: a one-way latch — every subsequent melee verdict reads plain. The jour
 
 ## S1 — kill the echo; re-arm from the client's persistent belief (the core fix)
 
+> **SUPERSEDED IN PART (2026-07-10, 2.5.1):** S1(a) — kill the echo — shipped and
+> STANDS. S1(b) — the `reconcile` post-clear re-arm from a surviving
+> `clientSprinting` — shipped in 2.5.0 and was REMOVED in 2.5.1 by owner
+> directive: **one engagement, one sprint knock.** The wire clear now CONSUMES the
+> engagement (a spend latch, `clearedAt`, blocks `reconcile` from re-adopting the
+> stale-high server flag — an adopt-true latch guard); re-arming requires a
+> client-expressed re-gesture (a wire STOP→START, or the `SwordBlockingUnit` block
+> re-arm), never an automatic one-tick re-engage. Held-W hits no longer each arm a
+> sprint knock (era-measured: a no-w-tap double flew 7.2 blocks, a w-tap double
+> 11.4; the 2.5.0 auto re-arm collapsed both to 10.09). Historical S1(b) plan text
+> below is untouched — read it under this banner.
+
 **Files:** `core/.../feature/knockback/KnockbackUnit.java` (the deferred-clear obligation),
 `kernel/.../wire/SprintWire.java`, `core/.../rim/PacketTap.java` (reconcile call unchanged),
 `kernel/src/test/java/.../wire/SprintWireTest.java`, plus skill/doc updates
