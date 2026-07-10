@@ -19,7 +19,9 @@ val japicmp: Configuration by configurations.creating {
 dependencies {
     compileOnly(libs.paper.api.floor)
     compileOnly(libs.jetbrains.annotations)
-    japicmp("com.github.siom79.japicmp:japicmp:0.23.1:jar-with-dependencies")
+    // The version lives in the catalog; the classifier cannot (TOML catalogs
+    // carry no classifier), so the coordinate is assembled here.
+    japicmp("com.github.siom79.japicmp:japicmp:${libs.versions.japicmp.get()}:jar-with-dependencies")
 }
 
 val apiBaselineJar = rootProject.layout.projectDirectory.file("gradle/api-baseline/api-2.2.2.jar").asFile

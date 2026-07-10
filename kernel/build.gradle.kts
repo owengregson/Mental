@@ -1,12 +1,11 @@
-plugins { `java-library` }
-
+// java-library, UTF-8/-parameters compilation, and JUnit-platform test wiring
+// all come from the root build's subprojects block; only the kernel-specific
+// pieces live here.
 dependencies {
-    testImplementation(platform("org.junit:junit-bom:5.10.2"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.launcher)
 }
-
-tasks.test { useJUnitPlatform() }
 
 // The kernel realm may never see Bukkit or PacketEvents — this is the
 // architecture's enforcement edge, so fail the build if anything sneaks in.

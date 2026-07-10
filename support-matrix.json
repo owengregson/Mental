@@ -6,7 +6,7 @@
     { "version": "1.10.2",  "jdk": 21, "platform": "paper", "suites": "full",          "ci": "release", "bytecodeTier": 61 },
     { "version": "1.11.2",  "jdk": 21, "platform": "paper", "suites": "full",          "ci": "release", "bytecodeTier": 61 },
     { "version": "1.12.2",  "jdk": 21, "platform": "paper", "suites": "full",          "ci": "release", "bytecodeTier": 61 },
-    { "version": "1.13.2",  "jdk": 13, "platform": "paper", "suites": "full",          "ci": "release", "bytecodeTier": 52 },
+    { "version": "1.13.2",  "jdk": 13, "platform": "paper", "suites": "full",          "ci": "pr",      "bytecodeTier": 52 },
     { "version": "1.14.4",  "jdk": 13, "platform": "paper", "suites": "full",          "ci": "release", "bytecodeTier": 52 },
     { "version": "1.15.2",  "jdk": 14, "platform": "paper", "suites": "full",          "ci": "release", "bytecodeTier": 52 },
     { "version": "1.16.5",  "jdk": 16, "platform": "paper", "suites": "full",          "ci": "release", "bytecodeTier": 52 },

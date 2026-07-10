@@ -8,4 +8,24 @@
 # Format (StarEnchants-style): one anchored key prefix per line. A key is
 #   "CLASS <owner>"  |  "METHOD <owner>#<name> <desc>"  |  "FIELD <owner>#<name> <desc>"
 # and an entry matches when it is a prefix of the key (so it pins the tag + owner, ideally the descriptor).
-# Lines starting with '#' and blank lines are ignored.
+# An entry may append " FROM <referrer-prefix>" to scope the exception to references made BY classes under
+# that prefix — the escape hatch stays pinned to the vetted namespace, and the SAME missing reference from
+# any other class (first-party above all) still fails the gate. Lines starting with '#' and blank lines are
+# ignored.
+#
+# ── packetevents ≥ 2.13.0: the guarded optional log managers (reviewed 2026-07-09) ────────────────────────
+# PacketEventsAPI.<init> calls LogManager.construct(), which probes ComponentLogManager.exists() then
+# Slf4jLogManager.exists() and falls back to JulLegacyLogManager (pure java.util.logging). Each manager's
+# <clinit> probes ONLY via Reflection.getClassByNameWithoutException("<fqcn>") — a string-named forName that
+# swallows the miss — and caches the boolean; exists() reads the cache. The unresolvable types below appear
+# solely in field/method descriptors and method bodies of the managers themselves, which execute only when
+# the probe already proved the class present (construct() news a manager only after exists() == true), and
+# the JVM resolves those references lazily at first use, never at class load. Upstream runs this exact path
+# on its supported Java-8 Spigot 1.8.8 servers, where neither optional library exists. Runtime outcome in
+# Mental's shade: the ComponentLogger probe string is relocated with the rest of net.kyori, so it can never
+# resolve (the logger module is not bundled) and that manager is permanently dormant; org.slf4j resolves on
+# modern Paper (server-provided) and is absent on legacy, where the chain lands on the JUL fallback.
+# Scoped to the shaded packetevents logger package: only the probe managers get this exception.
+CLASS me/vexmc/mental/lib/adventure/adventure/text/logger/slf4j/ComponentLogger FROM me/vexmc/mental/lib/packetevents/api/util/logger/
+CLASS org/slf4j/Logger FROM me/vexmc/mental/lib/packetevents/api/util/logger/
+CLASS org/slf4j/LoggerFactory FROM me/vexmc/mental/lib/packetevents/api/util/logger/

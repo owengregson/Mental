@@ -27,6 +27,9 @@
  * miss blocks). jdk/ sun/ com/sun/ -> class miss blocks, member miss WARNs (--strict-internal to enforce).
  * A --ignore-prefixed owner is never checked. Anything else must exist in-jar (class-level) or it is a HARD
  * miss. The anchored-prefix allowlist (--allow) starts EMPTY: a genuine miss is fixed, not allowlisted.
+ * An allow entry may append " FROM <referrer-prefix>" to scope the exception to references made BY classes
+ * under that prefix — the escape hatch stays pinned to the vetted namespace (e.g. a shaded library's own
+ * guarded optional probe) and the closed world stays fully strict for every other class, first-party above all.
  */
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
@@ -90,10 +93,19 @@ public final class Jdk8ApiGate {
         }
     }
 
+    /** One allowlist entry: an anchored key prefix, optionally scoped to referrers under fromPrefix. */
+    static final class AllowEntry {
+        final String keyPrefix;
+        final String fromPrefix; // null = any referrer (the original unscoped form)
+        AllowEntry(String keyPrefix, String fromPrefix) {
+            this.keyPrefix = keyPrefix; this.fromPrefix = fromPrefix;
+        }
+    }
+
     static final Map<String, ClassInfo> baseline = new HashMap<String, ClassInfo>();
     static final Map<String, ClassInfo> underTest = new HashMap<String, ClassInfo>();
     static final Map<String, Violation> violations = new LinkedHashMap<String, Violation>();
-    static final List<String> allow = new ArrayList<String>();
+    static final List<AllowEntry> allow = new ArrayList<AllowEntry>();
     static final List<String> ignorePrefixes = new ArrayList<String>();
 
     static boolean strictInternal = false;
@@ -404,8 +416,15 @@ public final class Jdk8ApiGate {
     static void record(Tier tier, boolean classMiss, String key, String src) {
         // Anchored match: an allow entry must be a PREFIX of the key (so it includes the METHOD/FIELD/CLASS tag
         // and owner, and ideally the descriptor) — never an unanchored substring that could swallow unrelated misses.
-        for (String a : allow) {
-            if (key.equals(a) || key.startsWith(a)) { allowlisted++; return; }
+        // A FROM-scoped entry additionally requires the REFERENCING class to sit under its referrer prefix, so a
+        // vetted shaded-library probe never grants the same miss to first-party code: the check runs per reference,
+        // and an out-of-scope referrer of the same key still records a violation here.
+        for (AllowEntry a : allow) {
+            if ((key.equals(a.keyPrefix) || key.startsWith(a.keyPrefix))
+                    && (a.fromPrefix == null || src.startsWith(a.fromPrefix))) {
+                allowlisted++;
+                return;
+            }
         }
         if (!violations.containsKey(key)) violations.put(key, new Violation(tier, classMiss, key, src));
     }
@@ -455,7 +474,15 @@ public final class Jdk8ApiGate {
         for (String line : Files.readAllLines(f.toPath())) {
             String s = line.trim();
             if (s.isEmpty() || s.charAt(0) == '#') continue;
-            allow.add(s);
+            // " FROM " splits the key prefix from the optional referrer scope. The token cannot occur inside
+            // a key: owners/descriptors are internal names (no spaces), so a key holds at most two spaces —
+            // after the tag and after the member name — neither of which precedes the word FROM.
+            int from = s.indexOf(" FROM ");
+            if (from >= 0) {
+                allow.add(new AllowEntry(s.substring(0, from).trim(), s.substring(from + 6).trim()));
+            } else {
+                allow.add(new AllowEntry(s, null));
+            }
         }
     }
 

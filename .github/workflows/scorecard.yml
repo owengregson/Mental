@@ -1,0 +1,52 @@
+# OSSF Scorecard — supply-chain security posture analysis (branch protection,
+# token permissions, dependency pinning, dangerous workflow patterns, …).
+# Runs on pushes to main (the branch it scores) and weekly to pick up new
+# checks; results land in Security → Code scanning, and publish_results feeds
+# the public OpenSSF REST API / badge.
+#
+# Note: actions here are pinned by major tag like the rest of this repo's
+# workflows. Scorecard's own Pinned-Dependencies check prefers SHA pins and
+# will dock points for that — a deliberate consistency trade-off.
+name: scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '41 5 * * 1' # Mondays 05:41 UTC
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # upload SARIF to code scanning
+      id-token: write        # publish_results verifies the workflow identity via OIDC
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard analysis
+        uses: ossf/scorecard-action@v2
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      # The SARIF rides along as an artifact for offline inspection.
+      - name: Upload Scorecard artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif

@@ -6,7 +6,13 @@
 paper-floor = "1.17.1-R0.1-SNAPSHOT"
 paper-folia = "1.20.4-R0.1-SNAPSHOT"
 paper-modern = "1.20.6-R0.1-SNAPSHOT"
-packetevents = "2.12.1"
+# 2.13.0's LogManager gained probe-guarded optional slf4j/ComponentLogger
+# backends; the closed-world verifyJdk8Api gate flags their (provably lazy,
+# never-resolved-unless-present) references, so they carry a reviewed,
+# referrer-scoped exception in scripts/tools/jdk8-api-gate.allow — the proof
+# lives there. A future packetevents bump that widens those references beyond
+# the shaded util/logger package will fail the gate again by design.
+packetevents = "2.13.0"
 # Shaded + relocated into the Mental jar (me.vexmc.mental.lib.adventure) so a
 # self-contained Adventure — the legacy-string serializer in particular — is
 # present below Paper 1.16.5, where net.kyori is absent from the server. Pinned to
@@ -15,10 +21,18 @@ packetevents = "2.12.1"
 # to what core compiles against.
 adventure = "4.9.3"
 annotations = "26.0.2"
-junit = "5.11.4"
+junit = "6.1.1"
 reflection-remapper = "0.1.3"
-shadow = "9.4.2"
+shadow = "9.5.1"
 run-paper = "3.0.2"
+bstats = "3.2.1"
+# testRuntimeOnly in core only — unit-test packet construction needs a real
+# netty allocator on the classpath; the SERVER provides netty at runtime.
+netty = "4.2.16.Final"
+# The :api japicmp binary-compatibility gate's CLI (self-contained fat jar).
+japicmp = "0.26.1"
+# ASM for the verifyJdk8Api gate tool (scripts/tools/Jdk8ApiGate.java).
+asm = "9.10.1"
 # JVMDowngrader — lowers the shaded Java-17 (v61) jar to a Multi-Release mega-jar
 # whose base tree is class v52 (Java 8) with the original v61 kept under
 # META-INF/versions/17, so the one artifact classloads from Java 8 up (the
@@ -33,13 +47,14 @@ packetevents-spigot = { module = "com.github.retrooper:packetevents-spigot", ver
 adventure-bom = { module = "net.kyori:adventure-bom", version.ref = "adventure" }
 adventure-api = { module = "net.kyori:adventure-api" }
 adventure-serializer-legacy = { module = "net.kyori:adventure-text-serializer-legacy" }
-bstats-bukkit = { module = "org.bstats:bstats-bukkit", version = "3.2.1" }
+bstats-bukkit = { module = "org.bstats:bstats-bukkit", version.ref = "bstats" }
 jetbrains-annotations = { module = "org.jetbrains:annotations", version.ref = "annotations" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 reflection-remapper = { module = "xyz.jpenilla:reflection-remapper", version.ref = "reflection-remapper" }
-netty-all = { module = "io.netty:netty-all", version = "4.1.97.Final" }
+netty-all = { module = "io.netty:netty-all", version.ref = "netty" }
+asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
 
 [plugins]
 shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
