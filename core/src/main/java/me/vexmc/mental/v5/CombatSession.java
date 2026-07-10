@@ -245,6 +245,23 @@ public final class CombatSession {
         desk.sweep(now, victimConnected);
     }
 
+    /**
+     * The decay-only fallback (2.5.2 tick armor) — drains the inbox and decays the
+     * ledger WITHOUT publishing a view or sweeping the desk. Used only when the view
+     * build itself threw this tick: there is no fresh view to publish, but ledger
+     * decay must NEVER freeze — a residual that never decays is the monotone stacking
+     * ramp (2026-07-10-downward-kb-and-stacking-diagnoses.md report 2). The stale
+     * published view keeps its own staleness gate ({@code PlayerView.fresh}), so the
+     * netty realm degrades safely; the next clean tick republishes. Owning thread only.
+     */
+    public void decayOnly(TickStamp now) {
+        LedgerEvent event;
+        while ((event = inbox.poll()) != null) {
+            apply(event);
+        }
+        ledger.tick(now);
+    }
+
     private void apply(LedgerEvent event) {
         if (event instanceof LedgerEvent.Liftoff liftoff) {
             ledger.recordLiftoff(liftoff.jumpVy(), liftoff.pushX(), liftoff.pushZ(), liftoff.tick());
