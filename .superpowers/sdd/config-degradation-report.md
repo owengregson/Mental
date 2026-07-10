@@ -96,4 +96,123 @@ This round matches (2). Concretely:
 
 ## What was done
 
-(implementation summary, test evidence, concerns — filled in below after implementation)
+### Resources (core/src/main/resources/)
+
+- **New bundled files**: `combo.yml`, `pots.yml`, `loadout.yml`,
+  `effects/hit-feedback.yml`, `effects/damage-indicators.yml`,
+  `effects/death-effects.yml`. Every section's YAML body is carried
+  value-identical from config.yml; the comments were carried and improved
+  (each file's header states where its toggle lives, the
+  extract-once/edits-sacred/delete-regenerates contract, and the effects files
+  document the full preset semantics — vanilla/signature/custom, the
+  lists-consulted-only-under-custom rule, per-field references, fallback
+  behavior on older servers). combo/pots/loadout ship their sections as
+  commented templates (as config.yml did — the defaults ARE the shown values);
+  the effects files ship live sections at the defaults (as config.yml did).
+- **config.yml** degraded to: header (updated file map naming every neighbour
+  file), `config-version`, `modules:` (comments updated to point at the new
+  files), `anticheat`, `metrics`, `debug`. All module toggles stay here.
+
+### Config layer (core/src/main/java/me/vexmc/mental/v5/config/)
+
+- `ConfigStore`: new file-name constants + `SPLIT_FILE_SECTIONS` (file → the
+  sections that moved into it — the one map both back-compat halves read).
+  `Sources` grows six typed roots (+ a `Sources.of(...)` test factory that
+  fills them empty). `ensureDefaultFiles` extracts each split file when
+  missing UNLESS config.yml still carries one of its sections (silent
+  suppression; the parser's line is the loud notice). `loadSources` loads the
+  six new roots.
+- `SnapshotParser`: `parse(ConfigStore.Sources)` replaces the five-arg entry.
+  A `movedSection(...)` resolver runs once per moved section per parse:
+  split-file section wins; old-location honoured verbatim + one loud line;
+  both-present → split file wins + one loud "ignored" line. The 2.4.3 nested
+  `combo-hold.reach-handicap` fallback reads the RESOLVED combo-hold reader,
+  so a straight 2.4.3 → 2.5.2 upgrade stacks both migrations (pinned).
+  Parsing semantics of every settings record are untouched.
+- `Overlay.apply(Sources)`; `route` learns the moved first-segment prefixes so
+  overlay keys on moved sections land on the root the parser reads (the
+  tester's ComboSuite already writes `combo-reach-handicap.reach-scale` and
+  `combo-hold.max-gap-ticks` through the real overlay path — verified those
+  keys now route to the combo root).
+- `MentalPluginV5.parseSnapshot` shrinks to `overlay.apply(sources)` +
+  `SnapshotParser.parse(sources)`.
+- Kernel untouched. Tester untouched (verified: no tester code assumes the
+  old config.yml layout; ComboSuite uses overlay keys only).
+
+### Tests
+
+Updated call sites (ProfileParserTest, OverlayTest, MigrationsTest,
+ReconcilerTest, JournalCaptureTest, CritArmourCompositionTest) and rerouted
+SnapshotTest's moved-section bodies to their new roots. New pins:
+
+- `bundledSplitFilesParseCleanAndKeepEveryEffectiveDefault` — the six real
+  bundled files parse with zero issues and every effective default intact
+  (fresh-install no-op; record-equality for the commented templates,
+  effective-view equality for the live effects templates whose editable
+  custom lists are non-default by design — exactly as the old config.yml was).
+- `eachBundledSplitFileParsesToTheSameSettingsFromTheOldConfigYmlLocation` —
+  requirement (a): the same bundled bytes load as either root and parse every
+  moved feature to the SAME settings; the old location earns exactly one
+  moved line per live section.
+- `aTunedOldLocationSectionIsHonouredWithOneLoudLine` — requirement (c): a
+  tuned config.yml hit-feedback section applies verbatim + one line naming
+  the section, both files, and the way out.
+- `aTunedOldLocationComboSectionKeepsItsNestedLegacyMigrationToo` — the
+  2.4.3 stack: old-location combo-hold + nested reach-handicap → both loud
+  lines, tuned gain and scale both carried.
+- `whenBothLocationsCarryASectionTheSplitFileWinsLoudly` — the shadow case.
+- ConfigStoreTest: `splitFileOwnerEditsSurviveAndADeletedSplitFileRegenerates`
+  (requirement (b)), `splitFileExtractionIsSuppressedWhileConfigYmlCarriesTheOldSection`
+  (suppression + release when the old section is deleted), and the
+  extraction sweep now covers all ten files.
+- OverlayTest: `overlayKeysOnMovedSectionsRouteToTheSplitRoots`.
+
+### Docs
+
+README config-file table (+combo/pots/loadout/effects rows), docs/combo-hold.md
+(knob location + the 2.5.2 note), the knockback-profiles skill's config-model
+paragraph, and the config.yml header file map.
+
+## Test evidence
+
+- `./gradlew :core:test` — **273 tests, 0 failures, 0 errors** (SnapshotTest
+  30, ConfigStoreTest 17, OverlayTest 4, MigrationsTest 5, all green).
+- `./gradlew build` — **BUILD SUCCESSFUL**: full unit suites, japicmp,
+  kernel-Bukkit-free gate, and all four mega-jar gates (`verifyDowngrade`,
+  `verifyJdk8Api`, `verifyTesterIsolation`, `verifyRelocation`); the jdk8-gate
+  scans of Mental-2.5.2.jar and MentalTester-2.5.2.jar both OK.
+
+## Concerns
+
+1. **Worktree base**: the worktree branch was cut at `6b394bb` (pre-FEEDBACK);
+   I fast-forwarded it onto `release/2.5.2`'s tip `c4cc4cc` (a clean ff — the
+   branch point was an ancestor) before working, since the effects modules this
+   round splits out live there. The controller's merge sees release/2.5.2's
+   history plus my two commits.
+2. **Upgraded 2.5.2-dev installs** (any server that booted a pre-split 2.5.2
+   build) carry the three effects sections live in config.yml, so they will see
+   three "moved to effects/…" lines per boot until the sections are deleted.
+   That is the designed contract (loud, once per reload, honoured verbatim) —
+   same as the 2.4.4 reach-handicap notice. No released version (≤2.5.1)
+   carries any moved section, so real-world installs upgrade silently.
+3. **The overlay-materialises-the-split-section edge**: if a future GUI screen
+   writes a settings override for a moved section while an install still keeps
+   the old-location section, the override makes the split root win and the
+   shadowed config.yml section is named loudly (the "ignored" line). Loud, not
+   silent — and today's GUI writes only `modules.*` + `knockback.profile`, so
+   the edge is theoretical.
+4. **Intentional non-move**: `anticheat`, `metrics`, `debug` stay in config.yml
+   as genuinely cross-cutting policy; `old-*`/`disable-attack-sounds`/
+   `disable-sword-sweep`/`sword-blocking`/`old-hitboxes` etc. have no settings
+   sections at all (toggle-only), so nothing of theirs exists to move.
+5. docs/combo-hold.md line ~130 still says the handicap "depends on combo-hold"
+   — stale since the 2.4.5 standalone split, pre-existing and unrelated to this
+   round; left alone to keep the diff config-layer-focused.
+
+## Branch + commits
+
+- Branch: `worktree-agent-a8d571516da97604a` (contains release/2.5.2 tip `c4cc4cc`)
+- `5fcd355` — docs: design note for the 2.5.2 config degradation round
+- `0e58038` — feat(config): degrade config.yml to switches + policy — the 2.5.2 per-concern split
+- Final commit hash: see the last line of `git log` on the branch (the report
+  copy commit follows this file's update).
