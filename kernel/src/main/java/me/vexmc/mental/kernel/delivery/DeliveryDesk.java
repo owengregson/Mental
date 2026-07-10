@@ -18,9 +18,10 @@ import me.vexmc.mental.kernel.port.TickClock;
  * atomic slot the owner drains at the start of each owning-thread operation.
  *
  * <p>The desk holds at most one pending decision (last-submitter-wins per victim
- * per tick) and writes the bounded per-victim journal — the single "what did we
- * actually ship" seam. Withdrawal is by exact {@link HitId}; there is no
- * withdraw-all (B4).</p>
+ * per tick — a supersede journals the displaced decision and carries any owed
+ * velocity event to the newest) and writes the bounded per-victim journal — the
+ * single "what did we actually ship" seam. Withdrawal is by exact {@link HitId};
+ * there is no withdraw-all (B4).</p>
  */
 public final class DeliveryDesk {
 
@@ -33,8 +34,17 @@ public final class DeliveryDesk {
     private final int journalCapacity;
     private final ArrayDeque<JournalEntry> journal = new ArrayDeque<>();
 
-    /** The netty→owner hand-off slot: a pre-sent/pinned transaction ahead of its damage task. */
-    private final AtomicReference<HitTransaction> wireSlot = new AtomicReference<>();
+    /**
+     * The netty→owner hand-off slot: pre-sent/pinned transactions ahead of their
+     * damage tasks, an immutable arrival-ordered chain. Registration runs on the
+     * ATTACKER's netty thread, so two attackers push from two different threads,
+     * and the owner may not drain between pushes — the old last-write-wins
+     * reference silently discarded the earlier transaction (never journaled, its
+     * vanilla duplicate never valve-consumed). The CAS push keeps every arrival;
+     * the owner drains the whole chain in arrival order so an overtaken
+     * transaction is journaled "superseded" through the one supersede path.
+     */
+    private final AtomicReference<Wire> wireSlot = new AtomicReference<>();
 
     private HitTransaction pending;
     private KnockbackVector pendingVector;
@@ -49,7 +59,7 @@ public final class DeliveryDesk {
 
     /** Netty entry: a PRE_SENT/PINNED transaction arriving ahead of its damage task. */
     public void submitFromWire(HitTransaction tx) {
-        wireSlot.set(tx);
+        wireSlot.getAndUpdate(prior -> new Wire(tx, prior));
     }
 
     /** Owning-thread entry: a feature submits/replaces the vector for a transaction. */
@@ -100,7 +110,11 @@ public final class DeliveryDesk {
      * The damage pass marks that the imminent velocity event resolves the pending
      * decision. It never resurrects a withdrawn or absent decision — the pending
      * transaction is established only by {@link #submit}/{@link #submitFromWire};
-     * a resolve with nothing pending passes through (item 1).
+     * a resolve with nothing pending passes through (item 1). The {@code tx}
+     * argument is deliberately unchecked against the pending: the arm declares that
+     * a velocity event is OWED to this desk (the caller's damage pass marked hurt);
+     * if a newer submission supersedes before the event lands, the debt carries and
+     * the newest decision answers it — the era's one-stamp-latest-fields wire.
      */
     public void awaitVelocityEvent(HitTransaction tx) {
         drainWire();
@@ -303,9 +317,19 @@ public final class DeliveryDesk {
     /* ------------------------------------------------------------------ */
 
     private void drainWire() {
-        HitTransaction fromWire = wireSlot.getAndSet(null);
-        if (fromWire != null) {
-            replacePending(fromWire, fromWire.carried());
+        Wire newestFirst = wireSlot.getAndSet(null);
+        if (newestFirst == null) {
+            return;
+        }
+        // Reverse to arrival order: each older arrival is superseded (journaled) by
+        // the next, and the newest becomes the pending decision — the era's
+        // latest-fields stamp.
+        Wire arrivalOrder = null;
+        for (Wire node = newestFirst; node != null; node = node.prior()) {
+            arrivalOrder = new Wire(node.tx(), arrivalOrder);
+        }
+        for (Wire node = arrivalOrder; node != null; node = node.prior()) {
+            replacePending(node.tx(), node.tx().carried());
         }
     }
 
@@ -318,13 +342,17 @@ public final class DeliveryDesk {
         pending = tx;
         pendingVector = vector;
         vectorSubmitted = true;
-        // A fresh submission has NOT been armed for its velocity event yet — its
-        // caller arms it explicitly right after (a fresh melee) or intentionally
-        // leaves it unarmed (an era-silent difference hit / a rod self-launch that
-        // ensures inline). Clearing the flag here keeps `awaiting` a truth about the
-        // CURRENT pending, so awaitingDeliveryFor never reads a superseded decision's
-        // stale arm — every submit that expects a velocity event re-arms next.
-        awaiting = false;
+        // `awaiting` is deliberately PRESERVED across the replace: it means "a
+        // velocity event is owed to this desk" (an armed decision's damage pass
+        // already marked hurt), not "the current pending was armed". The era wire
+        // ships ONE tracker stamp per tick reflecting the LATEST server fields, so
+        // the owed event must resolve against the newest decision. Resetting the
+        // flag here let a superseded hit's own event fall to PASS_THROUGH and ship
+        // vanilla's damage-pass velocity — base-only 0.4 with no sprint/enchant
+        // extras (they live in the cancelled Player.attack), kept falling-y when
+        // airborne: the close-range weak-knock leak. A supersede while nothing is
+        // armed (era-silent chains) stays unarmed exactly as before; the debt is
+        // cleared only by clearDecision (resolve / withdraw / sweep).
     }
 
     private void clearDecision() {
@@ -358,4 +386,7 @@ public final class DeliveryDesk {
             default -> null;
         };
     }
+
+    /** One wire arrival; {@code prior} chains the earlier un-drained arrivals (newest first). */
+    private record Wire(HitTransaction tx, Wire prior) { }
 }

@@ -34,6 +34,11 @@ class DeliveryDeskTest {
     private static final double EPSILON = 1.0e-9;
     private static final KnockbackVector VECTOR = new KnockbackVector(0.9, 0.4608, 0.0);
 
+    /** Sprint-bonus horizontal 0.4+0.5; vertical −0.0784×0.5 + 0.4 + 0.1 = 0.4608. */
+    private static final KnockbackVector SPRINT = new KnockbackVector(0.9, 0.4608, 0.0);
+    /** Standing knock: vertical −0.0784×0.5 + 0.4 = 0.3608, horizontal on the +z axis. */
+    private static final KnockbackVector STANDING = new KnockbackVector(0.0, 0.3608, 0.4);
+
     private final Clock clock = new Clock();
 
     private static final class Clock implements TickClock {
@@ -65,6 +70,14 @@ class DeliveryDeskTest {
         HitTransaction tx = new HitTransaction(ctx(id, new HitSource.Melee(), tick));
         tx.planned();
         tx.preSent(vector);
+        return tx;
+    }
+
+    /** A PINNED transaction carrying {@code vector} (a packetless victim), registered at {@code tick}. */
+    private static HitTransaction pinnedTx(long id, KnockbackVector vector, int tick) {
+        HitTransaction tx = new HitTransaction(ctx(id, new HitSource.Melee(), tick));
+        tx.planned();
+        tx.pinned(vector);
         return tx;
     }
 
@@ -441,20 +454,146 @@ class DeliveryDeskTest {
     }
 
     @Test
-    void awaitingDeliveryForDoesNotInheritASupersededDecisionsArm() {
+    void supersedeCarriesTheOwedEventArmToTheNewestDecision() {
         DeliveryDesk desk = desk();
         HitTransaction armed = new HitTransaction(ctx(1, new HitSource.Melee(), 5));
         desk.submit(armed, VECTOR);
-        desk.awaitVelocityEvent(armed); // decision 1 is armed
+        desk.awaitVelocityEvent(armed); // decision 1 is armed — a velocity event is OWED
 
-        // A fresh decision supersedes it (same-tick double region hit). The await arm
-        // must NOT carry over — the new pending was submitted, not yet armed.
+        // A fresh decision supersedes it (same-tick double region hit). The owed debt
+        // CARRIES to the newest: the era wire ships ONE stamp per tick reflecting the
+        // latest server fields, so the newest decision answers the owed event.
         HitTransaction fresh = new HitTransaction(ctx(2, new HitSource.Melee(), 5));
         desk.submit(fresh, VECTOR);
-        assertTrue(!desk.awaitingDeliveryFor(new HitId(2)),
-                "superseding resets the arm — the fresh pending is not yet awaiting delivery");
+        assertTrue(desk.awaitingDeliveryFor(new HitId(2)),
+                "the owed velocity event carries to the newest decision");
         assertTrue(!desk.awaitingDeliveryFor(new HitId(1)),
                 "the superseded decision is no longer the pending");
+
+        // A fresh desk: an era-silent chain (neither submit arms) never fabricates a debt.
+        DeliveryDesk quiet = desk();
+        HitTransaction c = new HitTransaction(ctx(3, new HitSource.Melee(), 5));
+        HitTransaction d = new HitTransaction(ctx(4, new HitSource.Melee(), 5));
+        quiet.submit(c, VECTOR);
+        quiet.submit(d, VECTOR);
+        assertTrue(!quiet.awaitingDeliveryFor(new HitId(4)),
+                "no debt is ever fabricated for an era-silent chain");
+    }
+
+    /* ── F4: supersede carries the owed velocity event to the newest decision ── */
+
+    @Test
+    void supersededArmedDecisionsOwnEventShipsTheNewestVectorNeverVanilla() {
+        // The confirmed close-range weak-KB leak: an armed hit's owed velocity event
+        // used to fall to PASS_THROUGH once a second submission superseded it — vanilla's
+        // base-0.4 damage-pass velocity stood. Now the owed debt survives the supersede
+        // and the newest decision ships its full stamp (era's one-stamp-latest-fields wire).
+        DeliveryDesk desk = desk();
+        HitTransaction a = preSent(1, SPRINT, 0);
+        desk.submit(a, SPRINT);
+        desk.awaitVelocityEvent(a);
+
+        // A second submission supersedes mid-window; B's caller has NOT armed yet.
+        HitTransaction b = preSent(2, STANDING, 0);
+        desk.submit(b, STANDING);
+
+        Directive d = desk.resolve(0.0, 0.3608, 0.4);
+        assertEquals(Action.SHIP_AND_ARM_VALVE, d.action());
+        assertSame(STANDING, d.ship(), "branch 3 ships tx.carried() — the exact newest object");
+        assertEquals(ValvePayload.of(VICTIM_ENTITY, STANDING), d.arm(),
+                "(42, (short)0, (short)2886, (short)3200)");
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals(1L, journal.get(0).id().value());
+        assertNull(journal.get(0).shipped());
+        assertTrue(!journal.get(0).wireCarried());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertEquals(STANDING, journal.get(1).shipped());
+        assertTrue(journal.get(1).wireCarried());
+        assertNull(journal.get(1).suppressReason());
+
+        assertEquals(HitTransaction.State.RECORDED, a.state());
+        assertEquals(HitTransaction.State.RECORDED, b.state());
+    }
+
+    @Test
+    void wireArrivalsNeverVanishBetweenDrains() {
+        // Two wire submits with no owner op between: the old last-write-wins slot silently
+        // discarded the first. The CAS chain keeps both; the owner drains in ARRIVAL order,
+        // so the newest ends pending and the overtaken one journals "superseded".
+        DeliveryDesk desk = desk();
+        HitTransaction a = preSent(1, SPRINT, 0);
+        HitTransaction b = preSent(2, STANDING, 0);
+        desk.submitFromWire(a);
+        desk.submitFromWire(b);
+
+        desk.awaitVelocityEvent(b); // drains the chain: A becomes pending, B supersedes it
+        Directive d = desk.resolve(0.0, 0.3608, 0.4);
+        assertEquals(Action.SHIP_AND_ARM_VALVE, d.action());
+        assertEquals(STANDING, d.ship(), "the NEWEST — proves arrival-order drain, not stack order");
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals(1L, journal.get(0).id().value());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertTrue(journal.get(1).wireCarried());
+        assertEquals(HitTransaction.State.RECORDED, a.state());
+    }
+
+    @Test
+    void pinnedDoubleSubmitShipsTheNewestWithoutAValve() {
+        // The default-config packetless double-submit (finding trigger (b)): two PINNED
+        // wire arrivals at spam CPS. The newest ships; PINNED never arms a valve (B4).
+        DeliveryDesk desk = desk();
+        HitTransaction a = pinnedTx(1, SPRINT, 0);
+        HitTransaction b = pinnedTx(2, STANDING, 0);
+        desk.submitFromWire(a);
+        desk.submitFromWire(b);
+        // The arm argument is deliberately the OLDER tx: the DEBT arms, not the tx identity.
+        desk.awaitVelocityEvent(a);
+
+        Directive d = desk.resolve(0.0, 0.3608, 0.4);
+        assertEquals(Action.SHIP, d.action(), "PINNED never arms a valve (B4)");
+        assertSame(STANDING, d.ship());
+        assertNull(d.arm());
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals(1L, journal.get(0).id().value());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertEquals(STANDING, journal.get(1).shipped());
+        assertTrue(!journal.get(1).wireCarried());
+    }
+
+    @Test
+    void eraSilentSupersedeOfAnArmedDecisionStillAnswersTheOwedEvent() {
+        // The documented single-slot residual: the owed event is answered by the desk's
+        // newest era-model knowledge, never vanilla's leak. The exact-era answer (A's
+        // armed vector) is unreachable in a single slot, and this window is the narrow
+        // boundary-combo + blockhit overlap; the recompute strictly dominates the leak.
+        DeliveryDesk desk = desk();
+        HitTransaction a = preSent(1, SPRINT, 0);
+        desk.submit(a, SPRINT);
+        desk.awaitVelocityEvent(a); // A is armed — a velocity event is OWED
+
+        // An era-silent region recompute (REGISTERED) submitted UNARMED.
+        HitTransaction b = new HitTransaction(ctx(2, new HitSource.Melee(), 0));
+        desk.submit(b, STANDING);
+
+        Directive d = desk.resolve(0.1, 0.2, 0.3); // the LIVE-REGISTERED branch ignores the api
+        assertEquals(Action.SHIP, d.action());
+        assertEquals(STANDING, d.ship());
+        assertNull(d.arm(), "the era-model recompute ships, never a valve");
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertEquals(STANDING, journal.get(1).shipped());
     }
 
     @Test
