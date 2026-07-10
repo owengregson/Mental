@@ -75,7 +75,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Classify the change and size the integration fan-out
+      - name: Classify the change, or defer to the PR run
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
