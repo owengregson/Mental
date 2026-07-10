@@ -14,9 +14,11 @@
 #                      can break any entry, so every entry must prove itself).
 #     The Folia entry stays release-only on purpose: an extra real server per
 #     PR is too costly (see .claude/skills/matrix-gate).
-#   - A push to a branch that already has an open PR skips itself — the
-#     pull_request run of the same commit owns CI (it tests the merge result,
-#     which is strictly more informative than the branch tip).
+#   - A push to a branch that already has an open PR DEFERS to the
+#     pull_request run of the same commit (it tests the merge result, which
+#     is strictly more informative than the branch tip) — and a deferred run
+#     renders NO verdict: its fan-in job skips, and only pull_request runs
+#     carry the required ci-ok name at all (other events report ci-checks).
 #
 # `ci-ok` is the single fan-in gate branch protection requires: it fails iff
 # any needed job failed, and reads success when jobs were legitimately skipped
@@ -62,13 +64,18 @@ jobs:
       run_build: ${{ steps.decide.outputs.run_build }}
       versions: ${{ steps.decide.outputs.versions }}
       build_jdk: ${{ steps.decide.outputs.build_jdk }}
+      # 'true' when this push run deferred to the open PR's run of the same
+      # commit. Distinct from a docs-only skip on purpose: deferring means this
+      # run renders NO verdict (the fan-in must not report), while docs-only
+      # means "no lanes needed" IS the verdict.
+      deferred: ${{ steps.decide.outputs.deferred }}
     steps:
       - name: Checkout (full history — the diff below is against main's merge-base)
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Classify the change and size the integration fan-out
+      - name: Classify the change, or defer to the PR run
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
@@ -82,13 +89,17 @@ jobs:
           # demand, exactly as locally. No JDK literal lives in this workflow —
           # support-matrix.json is the only home.
           echo "build_jdk=$(jq '[.entries[].jdk] | max' support-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "deferred=false" >> "$GITHUB_OUTPUT"
 
           # A push to a branch with an open PR duplicates that PR's own run of
-          # the same commit — skip it (the PR run tests the merge result, which
-          # is the stronger check).
+          # the same commit — DEFER to it (the PR run tests the merge result,
+          # which is the stronger check). Deferring is not a verdict: the
+          # fan-in job skips on this flag, so this run can never satisfy the
+          # required ci-ok check while the PR run is still deciding (that
+          # vacuous pass auto-merged PR #34 before its lanes had run).
           if [ "$EVENT" = "push" ] && [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
-            echo "Push to '$BRANCH' duplicates its open PR's run — skipping."
-            { echo "run_build=false"; echo "versions=[]"; } >> "$GITHUB_OUTPUT"
+            echo "Push to '$BRANCH' duplicates its open PR's run — deferring, no verdict from this run."
+            { echo "deferred=true"; echo "run_build=false"; echo "versions=[]"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -229,13 +240,26 @@ jobs:
           path: core/build/integration-test-logs/${{ matrix.version }}.log
 
   # The single stable fan-in for branch protection: required checks reference
-  # THIS job name only, so the lane set can vary per change class (or grow with
-  # support-matrix.json) without ever re-configuring protection. Skipped jobs
-  # are fine (a docs-only PR must merge); failed or cancelled ones are not.
+  # the ci-ok name only, so the lane set can vary per change class (or grow
+  # with support-matrix.json) without ever re-configuring protection. Skipped
+  # upstream jobs are fine (a docs-only PR must merge); failed or cancelled
+  # ones are not.
+  #
+  # Two hard rules keep this check honest (learned from PR #34, where the
+  # push run's vacuous pass satisfied protection and auto-merge fired while
+  # the PR run's lanes were still running):
+  #   1. Only pull_request runs carry the required name — every other event
+  #      reports as ci-checks, which protection ignores, so no push/dispatch
+  #      run can ever satisfy (or brick) the required check regardless of how
+  #      skipped conclusions are treated.
+  #   2. A deferred run (push with an open PR) renders NO verdict at all:
+  #      this job skips outright instead of blessing the skipped lanes.
+  #      Docs-only is different — there "no lanes needed" IS the verdict, and
+  #      the PR run passes it legitimately.
   ci-ok:
-    name: ci-ok
+    name: ${{ github.event_name == 'pull_request' && 'ci-ok' || 'ci-checks' }}
     needs: [context, build, integration]
-    if: always()
+    if: ${{ !cancelled() && needs.context.outputs.deferred != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Verify no needed job failed
