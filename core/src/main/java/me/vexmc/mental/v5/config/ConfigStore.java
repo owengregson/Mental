@@ -6,6 +6,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -220,15 +221,27 @@ public final class ConfigStore {
             // folder (profiles/legacy/, profiles/modern/), but resolution is by name
             // (stem), so a flat file from a pre-folder install is still discovered and
             // any user subfolder works too. Keyed by stem — the folder is organisational.
+            // Files.walk order is filesystem-dependent, so same-stem twins in
+            // different folders would otherwise shadow each other differently
+            // between boots. Sorting shallowest-first (then by path) makes the
+            // winner reproducible AND lets a pre-folder flat file outrank a
+            // foldered twin — the same preference extraction/upgrade apply.
             try (var stream = Files.walk(profilesDir)) {
                 stream.filter(Files::isRegularFile)
                         .filter(path -> path.getFileName().toString()
                                 .toLowerCase(Locale.ROOT).endsWith(".yml"))
+                        .sorted(Comparator.comparingInt(Path::getNameCount)
+                                .thenComparing(Path::toString))
                         .forEach(path -> {
                             String fileName = path.getFileName().toString();
                             String stem = fileName.substring(0, fileName.length() - 4);
-                            profiles.put(stem, loadYaml(path,
-                                    PROFILES_DIR + "/" + profilesDir.relativize(path)));
+                            String relative = PROFILES_DIR + "/" + profilesDir.relativize(path);
+                            if (profiles.containsKey(stem)) {
+                                log.accept("Ignoring " + relative + ": profile '" + stem
+                                        + "' is already loaded from another file — remove one of the two");
+                                return;
+                            }
+                            profiles.put(stem, loadYaml(path, relative));
                         });
             } catch (IOException failure) {
                 log.accept("Could not list " + profilesDir + ": " + failure);

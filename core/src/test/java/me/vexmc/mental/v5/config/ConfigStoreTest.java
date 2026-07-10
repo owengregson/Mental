@@ -120,6 +120,26 @@ class ConfigStoreTest {
     }
 
     @Test
+    void sameStemTwinsResolveDeterministicallyWithAWarning() throws Exception {
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+        // A user leaves a flat kohi.yml next to the extracted legacy/kohi.yml.
+        // Files.walk order is filesystem-dependent, so without the shallowest-
+        // first sort the winner could flip between boots; the flat file must
+        // win every time and the shadowed twin must be named in the log.
+        Path flat = dataFolder.resolve(ConfigStore.PROFILES_DIR).resolve("kohi.yml");
+        Files.writeString(flat, "display-name: Flat Wins\n", StandardCharsets.UTF_8);
+
+        var sources = store.loadSources();
+
+        assertEquals("Flat Wins", sources.profiles().get("kohi").getString("display-name"),
+                "the shallowest same-stem file must win deterministically");
+        assertTrue(logged.stream().anyMatch(line ->
+                        line.contains("legacy/kohi.yml") && line.contains("already loaded")),
+                () -> "expected a duplicate-profile warning, logged: " + logged);
+    }
+
+    @Test
     void unTunedSupersededPresetIsUpgradedInPlace() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("kohi").getParent());

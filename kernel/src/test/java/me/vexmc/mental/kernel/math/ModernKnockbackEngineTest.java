@@ -108,6 +108,20 @@ class ModernKnockbackEngineTest {
     }
 
     @Test
+    void sprintExtraAtYawNinetyPinsTheNegativeSineAxis() {
+        // Yaw 90 faces −x: sin = 1, cos = 0, so the extra's −sin term owns the
+        // whole X axis. Every yaw-0 pin has sin = 0 — without this one a flipped
+        // stage-2 X sign would ship green (the positional pin only anchors
+        // stage 1). Stage 1 still pushes +z off the attacker's position.
+        KnockbackVector vector = computed(
+                attacker(90.0f, true, 0), groundedVictim(0, 4, -0.0784, 0), modern(VANILLA), null);
+
+        assertEquals(-0.5, vector.x(), EPSILON); // 0·0.5 − sin(90°)·0.5
+        assertEquals(0.4, vector.y(), EPSILON);  // min(0.4, 0.3608·0.5 + 0.5)
+        assertEquals(0.2, vector.z(), EPSILON);  // 0.4·0.5 + cos(90°)·0.5
+    }
+
+    @Test
     void fractionalResistanceScalesEveryAddedStrengthNotTheResidual() {
         KnockbackVector vector = computed(
                 attacker(0.0f, false, 0), groundedVictim(0, 4, -0.0784, 0.5), modern(VANILLA), null);
