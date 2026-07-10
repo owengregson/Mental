@@ -364,7 +364,10 @@ public final class SessionService implements Listener, SessionAccess {
         // downward) velocity infiltrates on the late resolve — the exact inverse of
         // the packetless-net gate above (2.4.6 vanilla-knockback leak fix).
         session.tickStep(view, domains.has(player.getUniqueId()));
-        valve.clearStale(player.getUniqueId());
+        // Age-aware: a task-phase blocked-knock arm made THIS tick must survive to its
+        // end-of-tick tracker dup; only an arm >=2 ticks old (provably past any legal
+        // dup, the desk-sweep margin) is dropped. Same `now` the sweep/net use.
+        valve.clearStale(player.getUniqueId(), view.at());
         // One owning-thread position sample per tick — the fast path's reach
         // rewind source and its off-region-safe pre-send position source (the
         // netty thread reads frozen samples, never the live entity).

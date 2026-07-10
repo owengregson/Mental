@@ -554,15 +554,23 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                     // No registration burst reached the wire (server-side melee, or a
                     // paced-out velocity): ship VELOCITY + HURT now, exactly as the
                     // fast path would have — the client sees the era knock and flinch.
-                    burstSender().ship(user, entityId, era, hurtYaw, bundle);
-                    wireCopy = true;
+                    // Honor the ship Outcome (the blocked-path twin of F2): a burst the
+                    // wire refused (UNSENDABLE) placed no copy on the wire, so it must
+                    // NOT arm a valve for a wire copy that never existed.
+                    BurstSender.Outcome outcome = burstSender().ship(user, entityId, era, hurtYaw, bundle);
+                    wireCopy = outcome == BurstSender.Outcome.DELIVERED;
                 }
             }
             if (wireCopy) {
                 // A wire copy already carries the value; arm the valve so the
                 // authoritative tracker re-emission below (and any late vanilla
-                // velocity for this hit) is consumed once, never stacked on it.
-                valve.arm(victimId, ValvePayload.of(entityId, era));
+                // velocity for this hit) is consumed once, never stacked on it. The
+                // arm carries its tick stamp and survives the session sweep for the
+                // two-tick dup grace, so the end-of-tick tracker re-emission is
+                // consumed even when the session tick runs between this task-phase arm
+                // and sendChanges (the leg-b race); the burst itself is silent-written
+                // and cannot be eaten by this arm.
+                valve.arm(victimId, ValvePayload.of(entityId, era), clock.current());
             }
             // The victim's own hurt sound — the one client vanilla's blocked branch
             // leaves silent (see the javadoc). Play it to the victim alone; pitch
