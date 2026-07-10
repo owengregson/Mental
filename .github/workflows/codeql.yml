@@ -1,0 +1,57 @@
+# CodeQL static analysis for the Java sources. build-mode: none scans the
+# source tree without invoking Gradle at all — the right choice here, because
+# a full build would drag the whole mega-jar pipeline (shadow → jvmdg →
+# shade → four verification gates) plus foojay JDK downloads into every scan
+# for zero analysis benefit. Results land in the Security → Code scanning tab.
+#
+# PR runs are path-filtered to files that can contain or shape Java (a docs
+# PR has nothing to scan); pushes to main keep the code-scanning baseline
+# fresh so PR alerts diff against current main; the weekly schedule picks up
+# newly-published queries against unchanged code.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.java'
+      - '**/*.gradle.kts'
+      - 'gradle/**'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    - cron: '24 4 * * 1' # Mondays 04:24 UTC — off the top-of-hour rush
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # upload code-scanning results
+      actions: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: java-kotlin
+          build-mode: none
+          # Default query suite — the mandate is signal, not noise; extend to
+          # security-extended deliberately if the alert volume proves workable.
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:java-kotlin'
