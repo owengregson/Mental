@@ -98,7 +98,12 @@ public final class StepIsolator {
                 + (suppressed > 0 ? " (" + suppressed + " suppressed since the last line)" : "")
                 + " — ledger decay and the view publish are protected; this step's effect"
                 + " was skipped this tick. This should never happen; please report it.";
-        logger.log(Level.SEVERE, message, failure);
+        try {
+            logger.log(Level.SEVERE, message, failure);
+        } catch (Throwable logging) {
+            // A throwing log handler on the region thread would abort the rest of
+            // the tick body — the exact starvation this isolator exists to prevent.
+        }
     }
 
     /** Per-(player, step) throttle state — mutated only by that player's owning thread. */
