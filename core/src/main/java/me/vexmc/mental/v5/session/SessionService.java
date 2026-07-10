@@ -50,6 +50,7 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.potion.PotionEffect;
 
@@ -239,6 +240,16 @@ public final class SessionService implements Listener, SessionAccess {
         enqueue(event.getEntity().getUniqueId(), new LedgerEvent.Reset(clock.current()));
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(PlayerRespawnEvent event) {
+        // The ring survives death (only quit forgets), so its latest sample is the
+        // corpse position until the first post-respawn tick — re-seed at the actual
+        // respawn point so a first-instant hit reads the true origin, not the grave.
+        Location location = event.getRespawnLocation();
+        positions.record(event.getPlayer().getUniqueId(),
+                location.getX(), location.getY(), location.getZ(), System.nanoTime());
+    }
+
     void join(Player player) {
         UUID id = player.getUniqueId();
         int entityId = player.getEntityId();
@@ -248,6 +259,13 @@ public final class SessionService implements Listener, SessionAccess {
         entityIdByPlayer.put(id, entityId);
         playerIdByEntityId.put(entityId, id);
         samplers.put(id, new GroundFsm(clock));
+        // Seed the ring with the join location so a hit registered before the first
+        // session tick's record() never falls back to the fabricated (0,0,0) origin —
+        // the pre-send push direction and hurt yaw would otherwise point at the world
+        // origin (ring-origin-fallback-first-tick). buildView publishes before the tick's
+        // record(), so viewOf() is non-null while positions.latest() would be null.
+        Location location = player.getLocation();
+        positions.record(id, location.getX(), location.getY(), location.getZ(), System.nanoTime());
         scheduleTick(player, id);
     }
 
