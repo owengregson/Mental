@@ -6,7 +6,10 @@
 #
 # Note: actions here are pinned by major tag like the rest of this repo's
 # workflows. Scorecard's own Pinned-Dependencies check prefers SHA pins and
-# will dock points for that — a deliberate consistency trade-off.
+# will dock points for that — a deliberate consistency trade-off. The one
+# exception is scorecard-action itself: OSSF publishes NO floating major tag
+# (@v2 does not resolve — "Unable to resolve action"), only full release
+# tags, so it is pinned to its latest release.
 name: scorecard
 
 on:
@@ -32,7 +35,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Scorecard analysis
-        uses: ossf/scorecard-action@v2
+        uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: results.sarif
           results_format: sarif

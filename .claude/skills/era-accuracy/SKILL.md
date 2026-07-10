@@ -96,25 +96,30 @@ sends START only on a rising edge), so the raw client flag latches false and
 every later melee reads plain: a one-way latch. Real vanilla never produced this
 at spam cadence (its clear sits behind the ≥90%-charge gate, where the client
 predicts the same clear and re-engages, so the echo is always redundant). The
-observable era contract is the WIRE cadence — bonus, a one-tick gap, then a
-re-arm on the client's held sprint intent — which the `SprintWire` reproduces:
-the hit clears only the wire sprint (`onServerClear`, spending its freshness) and
-`reconcile` re-arms the bonus one tick later when the raw `clientSprinting` flag
-survived (no STOP followed the hit). A STOP crosses the wire ONLY when the
-client's same-tick re-arm is BLOCKED — item-use / block-holding foremost, food
-≤6, or lost forward impulse — or for a double-tap-W sprinter (no rising edge
-until a full re-gesture): those send STOP, no auto re-arm, so a real START (the
-w-tap) is required, freshness armed as ever. A sprint-KEY-HOLDER's full-charge
-un-sprint prediction is wire-INVISIBLE: the re-arm fires in the SAME tick's
-`aiStep` (the level-triggered hold path, which runs BEFORE the per-tick diff
-sender `sendIsSprintingIfNeeded`), so no STOP crosses and the held sprinter keeps
-the bonus — so the w-tap / block-hit techniques are preserved exactly where a
-client expresses them (empirical 1.21.11 extraction,
-`docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`). PLAYER_INPUT
-on 1.21.2+ DOES carry a sprint bit (0x40, raw `keySprint.isDown()` intent — false
-for double-tap sprinters, true for stationary ctrl-holders; the server ignores
-it) — a future re-arm corroborator, never a verdict source. Never re-add the
-deferred `setSprinting(false)`.
+observable era contract is **one engagement, one sprint knock** (2.5.1, the
+owner's directive — supersedes the 2.5.0 post-clear re-arm): the era server
+consumed the sprint flag INSIDE every bonus attack and re-armed only on a client
+START, so a no-w-tap double flew 7.2 blocks where a w-tap double flew 11.4
+(era-wire measurements, the reproduced target). The `SprintWire` mirrors that —
+the hit's wire clear (`onServerClear`) CONSUMES the engagement (`sprinting` +
+`armed` drop, `clearedAt` opens the SPEND LATCH), and while that latch is open
+`reconcile` is BLOCKED from resurrecting the bonus off the stale-high server
+flag. A held-W modern client's flag stays true forever (its STOP lives inside
+vanilla's cancelled ATTACK and never crosses the wire), so re-adopting it would
+hand every held hit a per-hit sprint knock — the 2.5.0 bug the owner ruled out
+(holding W comboed forever with zero reset skill). Re-arming takes a
+CLIENT-EXPRESSED re-gesture: a wire STOP→START cycle (w-tap / s-tap / GUI open),
+or the `SwordBlockingUnit` block re-arm (`onBlockSprintReset`) for block-hitting,
+since a modern item-use never drops the client flag. The 2.5.0 auto re-arm
+assumed a held-W era client kept the bonus; it did not — the era client
+auto-re-engaged by sending a genuine START, which a modern client at spam cadence
+never does (its local flag never drops, so it sends exactly ONE START per
+engagement). PLAYER_INPUT on 1.21.2+ DOES carry a sprint bit (0x40, raw
+`keySprint.isDown()` intent — false for double-tap sprinters, true for stationary
+ctrl-holders; the server ignores it) — a re-arm corroborator for the two
+SWORD_BLOCKING block-hit gates only, never a verdict source (empirical 1.21.11
+extraction, `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`).
+Never re-add the deferred `setSprinting(false)`.
 
 ## Myths (do not implement, do not "fix")
 

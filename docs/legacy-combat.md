@@ -94,11 +94,19 @@ config key.
 - **Entity targeting at 3.0–4.5 blocks.** 1.8.9 clients convert an
   aimed-at-but-out-of-range entity into a penalized miss; 1.7.10 clients
   charged nothing. Client raycast, client rule.
-- **The sprint-reset hitch.** All eras un-sprint the attacker after a
-  bonus-knockback hit and the client re-sprints next tick with the key
-  held; modern clients only do the client-side part of this at ≥90%
-  charge. Mental keeps the server's sprint flag client-authoritative —
-  fighting it would desync the +1 knockback level W-tapping manipulates.
+- **The sprint-reset hitch.** All eras un-sprint the attacker inside a
+  bonus-knockback hit — that part holds everywhere. But the "client
+  re-sprints next tick with the key held" half does NOT hold for a modern
+  client at spam cadence: it never drops its local sprint flag (its own
+  clear sits behind the ≥90%-charge gate it rarely reaches), so there is no
+  re-engage and no fresh START. Mental therefore treats the sprint extra as a
+  **per-engagement resource** — its `SprintWire` consumes the engagement on
+  each bonus hit and re-arms only on a client-expressed re-gesture (a w-tap /
+  s-tap / GUI STOP→START, or the block-hit re-arm): one engagement, one sprint
+  knock (era-measured: a no-w-tap double flew 7.2 blocks, a w-tap double 11.4).
+  Mental never writes the server's sprint flag DOWN — on 1.21.2+ that echoes to
+  the attacker's own modern client and latches its sprint off (the modern-client
+  echo latch) — so the flag stays client-authoritative.
 - **The attack indicator.** Modern clients render the charge meter from
   their own attributes. Mental makes charge irrelevant; it cannot hide
   the crosshair UI.

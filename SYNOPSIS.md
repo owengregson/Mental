@@ -143,7 +143,7 @@ Attack prediction: `PlayerControllerMP.attackEntity` sends `C02PacketUseEntity(A
 - Start by sprint key: same conditions **minus onGround**.
 - Stop when `moveForward < 0.8` **or** horizontal collision **or** food ≤ 6.
 - Using an item multiplies `moveForward ×0.2` first, so block-hitting drops you below 0.8 and kills sprint the same tick.
-- Sprint state reaches the server via `C0BPacketEntityAction` START/STOP_SPRINTING; the *server's* `isSprinting()` flag at the moment the attack packet is processed decides the +1 KB — this is what W-tapping manipulates. With the sprint key held, the client re-sprints on the very next tick after the attack's sprint-reset.
+- Sprint state reaches the server via `C0BPacketEntityAction` START/STOP_SPRINTING; the *server's* `isSprinting()` flag at the moment the attack packet is processed decides the +1 KB — this is what W-tapping manipulates. The era client's held-key re-sprint on the very next tick sent a genuine START (that is how era key-holders re-armed the bonus), but a *modern* client at spam cadence never drops its local sprint flag and so sends no new START — Mental therefore treats the sprint extra as a **per-engagement resource**, consumed by the bonus hit and re-armed only by a client re-gesture (w-tap / s-tap / GUI STOP→START, or the block-hit re-arm); measured era separation 7.2 vs 11.4 blocks (no-w-tap vs w-tap doubles).
 
 ### 2.7 Projectiles & rod
 

@@ -26,24 +26,29 @@ import me.vexmc.mental.kernel.port.TickClock;
  * remains the reconcile quiet clock. All timing is {@link TickStamp} deltas or
  * the monotonic {@code seq}; no wall clock.</p>
  *
- * <p><b>The post-clear re-arm</b> (the modern-client sprint latch fix,
- * 2026-07-10). Mental NO LONGER defers a {@code player.setSprinting(false)} after
- * a bonus hit: on 1.21.2+ that server-flag write is ECHOED to the attacker's own
- * client, which adopts it, drops its local sprint, and confirms with one
- * STOP_SPRINTING — latching {@link #clientSprinting} false with no START ever
- * returning (item-use block-hitting blocks a fresh sprint start). Only the WIRE
- * clear ({@link #onServerClear}) remains. To reproduce the era's observable wire
- * cadence (bonus → one-tick gap → re-arm on held intent) without that echo, the
- * clear records {@code clearedAt} and {@link #reconcile} re-arms {@code sprinting}
- * on the next movement packet ≥1 tick later WHEN the raw {@code clientSprinting}
- * flag survived (i.e. no STOP followed the hit — the client never expressed
- * un-sprint). A client that DID predict the attack un-sprint (legacy via Via, a
- * CADENCE-spoofed modern client, a slow full-charge clicker) sends STOP →
- * {@code clientSprinting} false → no auto re-arm → a real START (the w-tap) is
- * still required, freshness armed as ever: the client-side technique contract is
- * preserved exactly where a client expresses it. {@code clearedAt} is reset to
- * {@code NO_TICK} on any client START/STOP and on a reconcile ADOPT, so a genuine
- * un-sprint is never overridden.</p>
+ * <p><b>One engagement, one sprint knock</b> (the 2.5.1 arming contract; the
+ * owner's directive — supersedes the 2.5.0 post-clear re-arm). Mental does not
+ * defer a {@code player.setSprinting(false)} after a bonus hit: on 1.21.2+ that
+ * server-flag write is ECHOED to the attacker's own client, which adopts it,
+ * drops its local sprint, and confirms with one STOP_SPRINTING — latching
+ * {@link #clientSprinting} false with no START ever returning (the modern-client
+ * sprint latch; never re-add it). Only the WIRE clear ({@link #onServerClear})
+ * remains, and it CONSUMES the engagement: {@code sprinting} and {@code armed}
+ * drop, and {@code clearedAt} opens the SPEND LATCH. Nothing re-arms
+ * automatically — a modern client holding W sends exactly ONE START per
+ * engagement (at spam cadence its local flag never drops, so it never
+ * re-engages), and that engagement has been spent. Re-arming takes a
+ * client-expressed re-gesture: a wire STOP→START cycle (w-tap, s-tap, a GUI
+ * open), the sword-block re-arm ({@link #onBlockSprintReset}), a seed of an
+ * unseen wire, or a server-granted adopt while no consume is outstanding. This
+ * is the measured era server contract — real 1.8.9 consumed the flag inside
+ * every bonus attack and re-armed only on a client START: a no-w-tap double
+ * flew 7.2 blocks where a w-tap double flew 11.4 (era-wire measurements).
+ * While the latch is open {@link #reconcile} must not re-adopt the stale-high
+ * server flag (a held-W client's flag stays true forever — vanilla's own clear
+ * lives inside the cancelled ATTACK); the latch closes on any client
+ * START/STOP, the block re-arm, and an applied adopt, so a genuine re-gesture
+ * always reopens ordinary adoption.</p>
  *
  * <p><b>State is one immutable snapshot swapped by reference</b> (the codebase
  * idiom). The primary owner is the connection's netty thread (START/STOP,
@@ -81,23 +86,25 @@ public final class SprintWire {
      * raw client-packet flag; {@code sprinting}/{@code armed} are the era wire
      * view a hit consumes; {@code blockReset} is the held-sword-block sprint reset
      * (the universal blockhit contract — sticky across {@link #onServerClear});
-     * {@code clearedAt} is the tick a post-hit {@link #onServerClear} last fired —
-     * the re-arm window's open (its {@code NO_TICK} sentinel means "no hit clear is
-     * awaiting a re-engage"; reset by any client START/STOP and by a reconcile
-     * adopt so a genuine un-sprint is never re-armed over); {@code seen} gates
+     * {@code clearedAt} is the SPEND LATCH — the tick a post-hit
+     * {@link #onServerClear} last consumed the engagement (its {@code NO_TICK}
+     * sentinel means "no consume outstanding"; while known, {@link #reconcile}
+     * never adopts a stale-high server flag — reset by any client START/STOP, the
+     * block re-arm, and an applied adopt); {@code seen} gates
      * reconcile seeding; {@code lastWrite} is the reconcile quiet clock; {@code seq}
      * counts WIRE WRITES in arrival order — client START/STOP, the block-hit re-arm,
-     * the post-clear re-arm, a reconcile seed/adopt, and a PLAYER_INPUT key-intent
-     * write ({@link #onKeyIntent}) each bump it, so it IS this wire's era queue
-     * program order. {@link #onBlockReleased} and
+     * and a reconcile seed/adopt each bump it, so it IS this wire's era queue
+     * program order. {@link #onBlockReleased}, {@link #onKeyIntent} and
      * {@link #onServerClear} do NOT bump: a release only drops the sticky
      * {@code blockReset} (deliberately not a sprint write, matching its
-     * {@code lastWrite} exemption), and the clear is the CONSUMER of the ordering,
-     * never a producer. {@code keyIntent} is the raw PLAYER_INPUT sprint KEY
+     * {@code lastWrite} exemption), a key-intent sample is an OBSERVATION the
+     * clear carries through unchanged (bumping here handed any PLAYER_INPUT edge
+     * a veto over the deferred consume — see {@link #onKeyIntent}), and the clear
+     * is the CONSUMER of the ordering, never a producer. {@code keyIntent} is the
+     * raw PLAYER_INPUT sprint KEY
      * intent (1.21.2+, the 0x40 flag; {@code null} = UNKNOWN, the INITIAL value and
      * the value for every client that never sends it), written ONLY by
-     * {@link #onKeyIntent} (it bumps {@code seq} — an arrival-order wire write — but
-     * NOT {@code lastWrite}, since a key-state change is not a sprint-truth write);
+     * {@link #onKeyIntent} (which bumps NEITHER {@code seq} NOR {@code lastWrite});
      * clears and reconciles never touch it. {@code lastSprintingAt} is the tick the
      * wire was LAST left sprinting (any transition to {@code sprinting==true}
      * refreshes it); together with {@code keyIntent} it is the corroborator the two
@@ -133,8 +140,9 @@ public final class SprintWire {
 
     /**
      * A wire START: sets the flag, arms freshness, and raises the raw client flag
-     * (the re-engage is the w-tap). Resets {@code clearedAt} — a real START is a
-     * genuine sprint intent, not the automatic post-clear re-arm.
+     * (the re-engage is the w-tap). Resets {@code clearedAt} — a real START is
+     * the genuine re-gesture that closes the spend latch and arms a new
+     * engagement.
      */
     public void onSprintStart() {
         TickStamp now = clock.current();
@@ -144,8 +152,9 @@ public final class SprintWire {
 
     /**
      * A wire STOP: drops the flag and the raw client flag — armed freshness survives
-     * the release half. Resets {@code clearedAt} — the client expressed un-sprint, so
-     * the post-clear re-arm must never override it (the w-tap contract).
+     * the release half. Resets {@code clearedAt} — the client expressed un-sprint
+     * (the release half of a w-tap closes the spend latch; the re-press arms the
+     * new engagement).
      */
     public void onSprintStop() {
         TickStamp now = clock.current();
@@ -164,19 +173,26 @@ public final class SprintWire {
      * keyIntent — every pre-1.21.2 / Via / packetless client) leaves both gates
      * byte-identical to before, so defaults stay zero-touch.
      *
-     * <p>An arrival-order WIRE WRITE: it bumps {@code seq} so a deferred same-tick
-     * {@link #onServerClear(long)} cannot retro-eat a later intent write (the F1
-     * arrival-order rule the seq guard exists for). It deliberately does NOT refresh
-     * {@code lastWrite}: that field is the reconcile quiet clock for SPRINT adoption,
-     * and a key-state change is not a sprint-truth write — refreshing it would
-     * spuriously delay the server-flag adoption. Everything else — {@code sprinting},
-     * {@code armed}, the raw client flag, {@code blockReset}, {@code clearedAt} and
-     * {@code lastSprintingAt} — carries unchanged. Called on the connection's netty
-     * thread; the CAS keeps it atomic against the cross-thread readers.</p>
+     * <p>NOT a wire write: it bumps neither {@code seq} nor {@code lastWrite}. The
+     * seq guard exists so a deferred {@link #onServerClear(long)} cannot retro-eat
+     * a later GESTURE (a re-engage START) — but a key-intent sample is an
+     * observation, not a gesture, and the clear carries {@code keyIntent} through
+     * unchanged, so there is nothing for it to retro-eat. When this DID bump seq
+     * (24d9990, reverted in the 2.5.1 verification round), any PLAYER_INPUT edge —
+     * the packet fires on ANY of the 7 input bits flipping: a jump, a strafe
+     * reverse, a sneak — landing in the 1–2-tick deferred-clear window vetoed the
+     * consume, so a bunny-hopping W-holder's engagement was never spent and the
+     * per-hit sprint knock survived the spend-latch fix. {@code lastWrite} stays
+     * untouched for the same reason it always did: it is the reconcile quiet clock
+     * for SPRINT adoption, and a key-state change is not a sprint-truth write.
+     * Everything else — {@code sprinting}, {@code armed}, the raw client flag,
+     * {@code blockReset}, {@code clearedAt} and {@code lastSprintingAt} — carries
+     * unchanged. Called on the connection's netty thread; the CAS keeps it atomic
+     * against the cross-thread readers.</p>
      */
     public void onKeyIntent(boolean intent) {
         state.updateAndGet(s -> new State(s.seen(), s.sprinting(), s.armed(), s.clientSprinting(),
-                s.blockReset(), s.clearedAt(), s.lastWrite(), s.seq() + 1, intent, s.lastSprintingAt()));
+                s.blockReset(), s.clearedAt(), s.lastWrite(), s.seq(), intent, s.lastSprintingAt()));
     }
 
     /**
@@ -184,11 +200,11 @@ public final class SprintWire {
      * desk reports an accepted bonus hit whose verdict carries NO wire provenance
      * ({@code wtapConsultWire=false} fallback and non-melee mints — a wire-peeked
      * verdict uses {@link #onServerClear(long)}, the authoritative arrival-order
-     * guard). The flag drops and the freshness the hit used is spent, and
-     * {@code clearedAt} is recorded so the next movement reconcile can re-arm the
-     * bonus a tick later (the era one-tick re-engage) IF the raw client flag
-     * survived. The raw {@link #clientSprinting} flag is left ALONE — only
-     * START/STOP packets write it.
+     * guard). The flag drops, the freshness the hit used is spent, and
+     * {@code clearedAt} opens the spend latch: the engagement is consumed, and
+     * only a client-expressed re-gesture arms the next one. The raw
+     * {@link #clientSprinting} flag is left ALONE — only START/STOP packets
+     * write it.
      *
      * <p>NO-OPS ENTIRELY when the wire holds a write strictly newer than
      * {@code asOf} (the hit's verdict stamp): vanilla cleared sprint synchronously
@@ -206,8 +222,8 @@ public final class SprintWire {
             }
             // blockReset survives: a held sword-block re-arms every hit of the combo,
             // so the freshness this hit spent must NOT drop while the block is held.
-            // clearedAt = now opens the post-clear re-arm window (reconcile re-engages
-            // ≥1 tick later while the raw client flag survives).
+            // clearedAt = now opens the spend latch (reconcile never re-adopts the
+            // stale-high server flag until a client gesture closes it).
             return new State(true, false, false, s.clientSprinting(), s.blockReset(), now, now, s.seq(), s.keyIntent(), s.lastSprintingAt());
         });
     }
@@ -220,8 +236,8 @@ public final class SprintWire {
      * tick as (and after) the ATTACK survives the clear that belongs to that
      * ATTACK (the 2.4.x same-tick retro-clear defect; vanilla's synchronous
      * in-attack clear could never eat a later-arriving START). blockReset and the
-     * raw clientSprinting flag survive as ever, and {@code clearedAt} is recorded so
-     * the post-clear re-arm can re-engage a tick later; an applied clear still
+     * raw clientSprinting flag survive as ever, and {@code clearedAt} opens the
+     * spend latch (the engagement is consumed); an applied clear still
      * refreshes {@code lastWrite} so the reconcile's quiet window cannot re-adopt the
      * not-yet-cleared server flag, but it never bumps {@code seq} — the clear is
      * a consumer of the arrival order, never a producer.
@@ -290,48 +306,35 @@ public final class SprintWire {
 
     /**
      * Re-seed from the published server flag after the wire has been quiet for
-     * {@code quietTicks}, or when the wire has never been written (absent); AND
-     * re-arm the bonus after a post-hit clear when the raw client flag survived
-     * (the modern-client sprint latch fix). A fresh wire write inside the window is
-     * never overwritten by a stale-high server flag. The sole reconcile write to
-     * {@link #clientSprinting} — the {@code seen==false} SEED, which adopts the server flag as the
-     * client's last transmitted sprint state; every other reconcile path leaves it
-     * packet-only.
+     * {@code quietTicks}, or when the wire has never been written (absent). A
+     * fresh wire write inside the window is never overwritten by a stale-high
+     * server flag — and neither is a spent engagement, ever. The sole reconcile
+     * write to {@link #clientSprinting} — the {@code seen==false} SEED, which
+     * adopts the server flag as the client's last transmitted sprint state; every
+     * other reconcile path leaves it packet-only.
      *
-     * <p>Three branches, in priority order:</p>
+     * <p>Two branches, in priority order:</p>
      * <ol>
-     *   <li><b>Post-clear re-arm</b>: a movement reconcile ≥1 tick after an
-     *       {@link #onServerClear} ({@code clearedAt} known, {@code now} strictly
-     *       after it) with {@code !sprinting && clientSprinting} — the client never
-     *       sent a STOP, so its held sprint intent survived the hit. Re-engage
-     *       {@code sprinting} at the era one-tick re-engage cadence; {@code armed}
-     *       is UNTOUCHED (freshness comes only from a real START). {@code clearedAt}
-     *       is preserved so a re-fire is idempotent (the next {@code sprinting}
-     *       state fails the {@code !sprinting} guard) until the next hit's clear
-     *       reopens the window.</li>
      *   <li><b>Seed</b>: an unseen wire adopts the live server flag into BOTH
      *       {@code sprinting} AND the raw {@code clientSprinting} (the flag at seed
      *       time IS the client's last transmitted state; its own pre-wire START set
      *       it), so a mid-play plugin-load/reload of an already-sprinting player
-     *       keeps its post-hit re-arm and its blockhit gate. The seed is not
+     *       keeps its first-hit bonus and its blockhit gate. The seed is not
      *       fresh — no re-engage happened.</li>
      *   <li><b>Adopt</b>: after {@code quietTicks} of wire silence the server's own
-     *       flag wins a disagreement. {@code clearedAt} is reset — the server has
-     *       authoritatively asserted its flag, closing any post-hit re-arm window
-     *       (a genuine server un-sprint is never re-armed over).</li>
+     *       flag wins a disagreement — EXCEPT adopt-TRUE while the spend latch is
+     *       open ({@code clearedAt} known: a bonus hit consumed the engagement and
+     *       no client gesture followed). A held-W modern client's server flag
+     *       stays true forever (its STOP never comes — vanilla's own clear lives
+     *       inside the cancelled ATTACK), so re-adopting it would resurrect the
+     *       engagement the hit just spent: one engagement, one sprint knock.
+     *       Adopt-FALSE (a genuine external un-sprint) is never blocked. An
+     *       applied adopt resets {@code clearedAt} — the server has
+     *       authoritatively asserted its flag.</li>
      * </ol>
      */
     public void reconcile(boolean serverSprinting, TickStamp now, int quietTicks) {
         state.updateAndGet(s -> {
-            if (!s.sprinting() && s.clientSprinting()
-                    && s.clearedAt().known() && now.known()
-                    && now.value() > s.clearedAt().value()) {
-                // Post-clear re-arm: the client held sprint through the hit (no STOP),
-                // so re-engage the bonus the wire's own clear dropped — the era wire
-                // cadence the removed setSprinting(false) echo used to fake by proxy.
-                return new State(s.seen(), true, s.armed(), s.clientSprinting(), s.blockReset(),
-                        s.clearedAt(), now, s.seq() + 1, s.keyIntent(), now); // re-engaged ⇒ lastSprintingAt = now
-            }
             if (!s.seen()) {
                 // Seed clientSprinting = serverSprinting: the server flag at seed time IS
                 // the client's last transmitted sprint state — the client's own pre-wire
@@ -339,16 +342,24 @@ public final class SprintWire {
                 // setter on 1.21.11, empirically verified). A mid-play plugin load/reload
                 // creates the wire for an ALREADY-sprinting player; without this the seed
                 // carried the INITIAL false, and the post-hit clear then found the raw flag
-                // low, so neither the post-clear re-arm nor the SwordBlockingUnit blockhit
-                // gate would fire until a genuine STOP/START edge — the player stuck on
-                // plain knockback despite genuinely sprinting. The ADOPT branch below stays
-                // clientSprinting-blind: it must never overwrite live client-action state.
+                // low, so the SwordBlockingUnit blockhit gate would not fire until a
+                // genuine STOP/START edge — the player stuck on plain knockback despite
+                // genuinely sprinting. The ADOPT branch below stays clientSprinting-blind:
+                // it must never overwrite live client-action state.
                 return new State(true, serverSprinting, false, serverSprinting, s.blockReset(),
                         s.clearedAt(), now, s.seq() + 1, s.keyIntent(),
                         serverSprinting ? now : s.lastSprintingAt()); // seed to sprinting ⇒ refresh lastSprintingAt
             }
             if (s.sprinting() != serverSprinting && s.lastWrite().known() && now.known()
                     && now.value() - s.lastWrite().value() >= quietTicks) {
+                if (serverSprinting && s.clearedAt().known()) {
+                    // The spend latch: a bonus hit consumed this engagement and no
+                    // client gesture followed, so the still-high server flag IS the
+                    // spent engagement, not a new grant. The latch — not seq — is the
+                    // guard, deliberately: onKeyIntent bumps seq without being a
+                    // gesture, while only START/STOP/block re-arm reset clearedAt.
+                    return s;
+                }
                 return new State(true, serverSprinting, s.armed(), s.clientSprinting(), s.blockReset(),
                         TickStamp.NO_TICK, now, s.seq() + 1, s.keyIntent(),
                         serverSprinting ? now : s.lastSprintingAt()); // adopt-true ⇒ refresh lastSprintingAt
@@ -424,8 +435,8 @@ public final class SprintWire {
      * client's last transmitted state (the ADOPT branch never touches it). This is
      * the only signal that survives the wire's own post-hit clear, so block-hit re-arming
      * ({@code SwordBlockingUnit}) gates on it to avoid a phantom bonus on a
-     * stationary defensive block (era-accuracy contract), and the post-clear
-     * re-arm reads it to tell a client that held sprint from one that un-sprinted.
+     * stationary defensive block (era-accuracy contract) — which is what keeps
+     * the block-hit a valid re-gesture for a spent engagement.
      */
     public boolean clientSprinting() {
         return state.get().clientSprinting();
