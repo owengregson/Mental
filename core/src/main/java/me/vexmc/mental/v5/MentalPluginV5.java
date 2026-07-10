@@ -67,6 +67,7 @@ import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.feedback.DamageIndicatorsUnit;
 import me.vexmc.mental.v5.feature.feedback.DeathEffectsUnit;
 import me.vexmc.mental.v5.feature.feedback.FeedbackTrace;
 import me.vexmc.mental.v5.feature.feedback.HitFeedbackUnit;
@@ -683,6 +684,13 @@ public final class MentalPluginV5 extends JavaPlugin {
         // PlayerDeathEvent; its scope-owned destroy-task registry needs scheduling.
         reconciler.register(new HitFeedbackUnit(environment, clock, feedbackTrace, getLogger()));
         reconciler.register(new DeathEffectsUnit(environment, scheduling, feedbackTrace, getLogger()));
+        // Damage-indicators caches a per-attacker driver holding the attacker's
+        // PacketEvents User — a relogged player's stale driver must be dropped on
+        // quit or the fresh connection would keep addressing the dead one.
+        DamageIndicatorsUnit damageIndicators =
+                new DamageIndicatorsUnit(scheduling, feedbackTrace, getLogger());
+        sessions.addForgetHook(damageIndicators::forget);
+        reconciler.register(damageIndicators);
 
         // The sustain family (4C). Golden apples + potion durations compute era
         // values from the kernel and apply them at the confirmed terminal event
