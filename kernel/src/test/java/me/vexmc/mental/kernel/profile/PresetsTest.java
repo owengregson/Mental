@@ -142,6 +142,39 @@ class PresetsTest {
         // Speed-III feel tune.
         assertEquals(new PaceScaling(PaceScaling.Mode.ATTACKER, 0.95, 0.5, 2.0), signature.paceScaling());
 
+        // The modern (Paper 26.1.2) formula presets: the byte-exact vanilla port
+        // plus Mental's two example tunings. Every legacy knob is inert; the modern
+        // block carries the 26.1.2 constants (base 0.4, sprint/enchant 0.5, residual
+        // 0.5/0.5, cap 0.4). modern-vanilla keeps the mid-air slam and MUST keep
+        // verticalMin −3.9 (else the downward knock can never ship); uplift/combo
+        // drop the slam (downward off) and floor the vertical at 0.0.
+        KnockbackProfile modernVanilla = profiles.get("modern-vanilla");
+        assertNotNull(modernVanilla);
+        assertTrue(modernVanilla.modern().enabled());
+        assertEquals(new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true), modernVanilla.modern());
+        assertFalse(modernVanilla.combos());
+        assertEquals(KnockbackDelivery.IMMEDIATE, modernVanilla.meleeDelivery());
+        assertEquals(KnockbackDelivery.TRACKER, modernVanilla.projectileDelivery());
+        assertEquals(-3.9, modernVanilla.limits().verticalMin());
+
+        KnockbackProfile modernUplift = profiles.get("modern-uplift");
+        assertNotNull(modernUplift);
+        assertEquals(new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, false), modernUplift.modern());
+        assertFalse(modernUplift.combos());
+        assertEquals(KnockbackDelivery.IMMEDIATE, modernUplift.meleeDelivery());
+        assertEquals(0.0, modernUplift.limits().verticalMin());
+
+        KnockbackProfile modernCombo = profiles.get("modern-combo");
+        assertNotNull(modernCombo);
+        assertEquals(new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, false), modernCombo.modern());
+        assertTrue(modernCombo.combos());
+        assertEquals(KnockbackDelivery.TRACKER, modernCombo.meleeDelivery());
+        assertEquals(0.0, modernCombo.limits().verticalMin());
+
+        // The era/legacy presets carry the OFF modern component (the era-exact no-op).
+        assertEquals(ModernKnockback.OFF, legacy17.modern());
+        assertEquals(ModernKnockback.OFF, signature.modern());
+
         // 2.4.7 — the practice floor: the five archived practice presets floor
         // the FINAL vertical at 0.0. The archives carried no vertical floor
         // knob (−3.9 was Mental's schema filler), and with it a deep falling

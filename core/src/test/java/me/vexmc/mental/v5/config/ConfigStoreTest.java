@@ -44,7 +44,9 @@ class ConfigStoreTest {
     }
 
     private Path profile(String name) {
-        return dataFolder.resolve(ConfigStore.PROFILES_DIR).resolve(name + ".yml");
+        // Bundled presets extract under their formula-category folder.
+        return dataFolder.resolve(ConfigStore.PROFILES_DIR)
+                .resolve(ConfigStore.bundledFolder(name)).resolve(name + ".yml");
     }
 
     /** A UTF-8 test-classpath resource (the archived revisions and the current bundles). */
@@ -62,7 +64,7 @@ class ConfigStoreTest {
     }
 
     private String currentBundle(String preset) {
-        return resource("profiles/" + preset + ".yml");
+        return resource("profiles/" + ConfigStore.bundledFolder(preset) + "/" + preset + ".yml");
     }
 
     private boolean loggedUpgrade(String presetFile) {
@@ -97,6 +99,44 @@ class ConfigStoreTest {
         // Idempotent: a third pass changes nothing.
         store.ensureDefaultFiles();
         assertEquals(patchedKohi, Files.readString(profile("kohi"), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void aPreFolderFlatFileIsKeptInPlaceNotDuplicatedIntoTheFolder() throws Exception {
+        ConfigStore store = store();
+        // An install that predates the formula folders: an unedited pre-floor kohi
+        // sits FLAT at profiles/kohi.yml, not under profiles/legacy/.
+        Path flat = dataFolder.resolve(ConfigStore.PROFILES_DIR).resolve("kohi.yml");
+        Files.createDirectories(flat.getParent());
+        Files.writeString(flat, archived("kohi@1.8.0.yml"), StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+
+        // Upgraded in place at the flat path — never duplicated into the folder.
+        assertEquals(currentBundle("kohi"), Files.readString(flat, StandardCharsets.UTF_8),
+                "a flat pre-folder kohi must upgrade in place");
+        assertFalse(Files.exists(profile("kohi")),
+                "extraction must not create a foldered duplicate when a flat file already exists");
+    }
+
+    @Test
+    void sameStemTwinsResolveDeterministicallyWithAWarning() throws Exception {
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+        // A user leaves a flat kohi.yml next to the extracted legacy/kohi.yml.
+        // Files.walk order is filesystem-dependent, so without the shallowest-
+        // first sort the winner could flip between boots; the flat file must
+        // win every time and the shadowed twin must be named in the log.
+        Path flat = dataFolder.resolve(ConfigStore.PROFILES_DIR).resolve("kohi.yml");
+        Files.writeString(flat, "display-name: Flat Wins\n", StandardCharsets.UTF_8);
+
+        var sources = store.loadSources();
+
+        assertEquals("Flat Wins", sources.profiles().get("kohi").getString("display-name"),
+                "the shallowest same-stem file must win deterministically");
+        assertTrue(logged.stream().anyMatch(line ->
+                        line.contains("legacy/kohi.yml") && line.contains("already loaded")),
+                () -> "expected a duplicate-profile warning, logged: " + logged);
     }
 
     @Test

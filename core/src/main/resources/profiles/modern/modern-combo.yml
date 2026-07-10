@@ -1,0 +1,41 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  modern-combo — the modern formula with 1.7-style residual compounding
+#
+#  Mental's OWN tuning of the Paper 26.1.2 melee formula: the same two-stage
+#  math (a positional base knock then a yaw-directed sprint/enchant extra, each
+#  halving the surviving motion and scaling its added strength by
+#  (1 - knockback-resistance)), no mid-air slam (`downward-knockback: false`),
+#  but with 1.7-style COMBOS layered on — combos:true + the tracker wire keep a
+#  decaying ledger residual alive so the next hit compounds it, the way the
+#  1.7.10 server never reverted a victim's motion. The final vertical is floored
+#  at 0.0. The 26.1.2 constants are unchanged; this is an example modern feel,
+#  not a ported server config. The legacy knobs are inert while
+#  `formula: modern` — the `modern:` block is the whole tuning surface.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+#  For the modern formula in full, see modern-vanilla.yml.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Modern (Combo)
+description: "Mental's own — the modern 26.1.2 math with 1.7-style residual compounding (combos on, tracker wire)."
+
+knockback:
+  formula: modern
+
+  modern:
+    base-strength: 0.4
+    sprint-bonus: 0.5
+    enchant-bonus: 0.5
+    residual:
+      horizontal: 0.5
+      vertical: 0.5
+    vertical-cap: 0.4
+    downward-knockback: false
+
+  limits:
+    vertical-min: 0.0
+  # Tracker delivery keeps a decaying residual alive; combos:true compounds it.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    combos: true

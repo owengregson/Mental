@@ -1,16 +1,11 @@
 package me.vexmc.mental.v5.gui;
 
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.feature.Family;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.text.Brand;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -22,37 +17,22 @@ import org.jetbrains.annotations.NotNull;
  * me.vexmc.mental.v5.manage.Management#setModuleEnabled} and reloads live; the
  * screen repaints from the reconciler's new active state.
  *
- * <p>The {@link Family#KNOCKBACK} section additionally carries the server-wide
- * profile picker — the "knockback screen" — built from {@code
- * Snapshot.profileNames()/defaultProfile()} and applied through {@code
- * Management.setGlobalProfile}. Selecting a profile sets it for every player at
- * once (Mental's knockback is global; there is no per-player assignment).</p>
+ * <p>The {@link Family#KNOCKBACK} section additionally carries a nav tile to the
+ * "Melee Knockback Formula" chooser ({@link KnockbackFormulaMenu}) — the era
+ * formula, then a preset — which is where the server-wide profile is actually
+ * selected. The feature toggles keep their home here (the KNOCKBACK family must
+ * stay reachable).</p>
  */
 public final class FamilyMenu extends Menu {
-
-    /** Themed icon per shipped preset; unknown (custom) profiles fall back to paper. */
-    private static final Map<String, String> PROFILE_ICONS = Map.of(
-            "legacy-1.7", "STONE_SWORD",
-            "legacy-1.8", "IRON_SWORD",
-            "kohi", "DIAMOND_SWORD",
-            "minehq", "GOLDEN_SWORD",
-            "badlion", "IRON_AXE",
-            "velt", "DIAMOND_AXE",
-            "mmc", "BOW",
-            "lunar", "ENDER_EYE",
-            "signature", "NETHER_STAR",
-            "custom", "WRITABLE_BOOK");
-
-    /** The knockback screen's two profile rows (rows 2–3 of a six-row inventory). */
-    private static final int[] PROFILE_SLOTS = {
-            19, 20, 21, 22, 23, 24, 25,
-            28, 29, 30, 31, 32, 33, 34};
 
     /** The knockback screen's feature-toggle row (row 1). */
     private static final int TOGGLE_ROW_BASE = 9;
 
     /** A plain family screen's centred toggle row (row 2). */
     private static final int PLAIN_ROW_BASE = 18;
+
+    /** The knockback screen's nav tile to the formula chooser (row 2, centred). */
+    private static final int FORMULA_SLOT = 22;
 
     private final Family family;
 
@@ -68,8 +48,8 @@ public final class FamilyMenu extends Menu {
 
     @Override
     protected int rows() {
-        // The knockback screen carries the profile picker too, so it needs the
-        // full six rows; every other family is a compact toggle screen.
+        // The knockback screen carries the formula nav tile and its back at slot 49,
+        // so it needs the full six rows; every other family is a compact toggle screen.
         return family == Family.KNOCKBACK ? 6 : 4;
     }
 
@@ -82,7 +62,9 @@ public final class FamilyMenu extends Menu {
         List<Feature> entries = DashboardModel.entries(family);
         if (family == Family.KNOCKBACK) {
             drawToggles(viewer, entries, TOGGLE_ROW_BASE);
-            drawProfiles(viewer);
+            set(FORMULA_SLOT, Buttons.nav("PISTON", "Melee Knockback Formula",
+                    "Choose the era formula, then a preset."),
+                    click -> navigate(viewer, new KnockbackFormulaMenu(ctx)));
             set(49, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
         } else {
             drawToggles(viewer, entries, PLAIN_ROW_BASE);
@@ -127,64 +109,5 @@ public final class FamilyMenu extends Menu {
             columns[i] = startCol + (gapped ? i * 2 : i);
         }
         return columns;
-    }
-
-    /** The server-wide profile picker — the knockback screen's defining half. */
-    private void drawProfiles(@NotNull Player viewer) {
-        String active = ctx.plugin().snapshot().defaultProfile();
-        List<String> names = ctx.plugin().snapshot().profileNames().stream().sorted().toList();
-        for (int i = 0; i < names.size() && i < PROFILE_SLOTS.length; i++) {
-            String name = names.get(i);
-            KnockbackProfile profile = ctx.plugin().snapshot().profile(name);
-            boolean isActive = name.equals(active);
-            set(PROFILE_SLOTS[i], profileTile(profile, name, isActive),
-                    click -> apply(viewer, () -> ctx.management().setGlobalProfile(name)));
-        }
-    }
-
-    private @NotNull ItemStack profileTile(KnockbackProfile profile, @NotNull String name, boolean active) {
-        String material = PROFILE_ICONS.getOrDefault(name, "PAPER");
-        Icon icon = Buttons.title(material,
-                profile != null ? profile.displayName() : name,
-                active ? Brand.SUCCESS : Brand.PRIMARY);
-        icon.lore(Component.text("(" + name + ")", Brand.MUTED));
-        if (profile != null) {
-            if (!profile.description().isEmpty()) {
-                icon.blank();
-                Buttons.wrap(profile.description()).forEach(line -> icon.lore(line, Brand.MUTED));
-            }
-            icon.blank();
-            icon.lore(kv("Base h/v",
-                    round(profile.base().horizontal()) + " / " + round(profile.base().vertical())));
-            icon.lore(kv("Vertical", profile.verticalMode().name().toLowerCase(Locale.ROOT)));
-            icon.lore(kv("Delivery", profile.meleeDelivery().name().toLowerCase(Locale.ROOT).replace('_', '-')));
-            icon.lore(kv("Combos", profile.combos() ? "yes" : "no"));
-            icon.lore(kv("Sprint x", round(profile.sprintFactor())));
-            icon.lore(kv("Resistance", profile.resistance().name().toLowerCase(Locale.ROOT)));
-            // Speed-conformal knockback — shown only when a profile opts in, so
-            // the era-exact OFF presets stay uncluttered. Read-only, like every
-            // other line here (the knockback screen is a profile picker).
-            if (profile.paceScaling().active()) {
-                icon.lore(kv("Pace scale", "attacker x"
-                        + round(profile.paceScaling().min()) + "–" + round(profile.paceScaling().max())
-                        + " ^" + round(profile.paceScaling().exponent())));
-            }
-        }
-        icon.blank();
-        icon.lore(active
-                ? Component.text("● ACTIVE — server-wide", Brand.SUCCESS).decoration(TextDecoration.BOLD, true)
-                : Component.text("▸ Click to apply server-wide", Brand.SECONDARY));
-        return icon.glow(active).build();
-    }
-
-    private static @NotNull Component kv(@NotNull String label, @NotNull String value) {
-        return Component.text()
-                .append(Component.text(label + ": ", Brand.MUTED))
-                .append(Component.text(value, Brand.ACCENT))
-                .build();
-    }
-
-    private static @NotNull String round(double value) {
-        return String.valueOf(Math.round(value * 1000.0) / 1000.0);
     }
 }

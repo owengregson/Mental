@@ -78,7 +78,97 @@ public final class ProfileSuite {
                 new TestCase("profile: server-sprinting attacker with no wire journals paceFactor ~1.0 (F1)",
                         context -> runStanceMismatchBaseSpeed(mental, tester, context)),
                 new TestCase("profile: server-sprinting Speed III attacker with no wire journals ~1.563 (F1)",
-                        context -> runStanceMismatchSpeedThree(mental, tester, context)));
+                        context -> runStanceMismatchSpeedThree(mental, tester, context)),
+                new TestCase("profile: modern-vanilla plain hit ships the 26.1.2 wire (~0.4, 0.3608)", context ->
+                        runModernScenario(mental, tester, context, "modern-vanilla", false, 0.4, 0.3608)),
+                new TestCase("profile: modern-vanilla sprint hit ships the 26.1.2 wire (~0.7, 0.4)", context ->
+                        runModernScenario(mental, tester, context, "modern-vanilla", true, 0.7, 0.4)),
+                new TestCase("profile: modern-uplift grounded hit lifts to 0.3608 (no mid-air slam)", context ->
+                        runModernScenario(mental, tester, context, "modern-uplift", false, 0.4, 0.3608)));
+    }
+
+    /**
+     * A modern-formula ({@code formula: modern}) hit, end to end. The modern
+     * compute is direction-independent for a resting victim horizontally (the base
+     * push has magnitude {@code base-strength}, and the sprint impulse rides the
+     * attacker's facing — yaw 0 down +z, aligned with the away-from-attacker axis),
+     * so the horizontal MAGNITUDE is a robust pin: 0.4 plain, 0.7 sprint (base 0.4
+     * halved to 0.2 plus the 0.5 sprint impulse). The engine==applied assertion is
+     * the always-on core; the absolute VERTICAL is pinned only when the victim
+     * reads grounded (a clientless fake reads isOnGround() false on the 1.9/1.10
+     * NMS, and modern-vanilla's downward slam then ships the falling vy instead of
+     * the 0.3608 lift — version-noise the grounded guard sidesteps; the airborne
+     * branches are unit-pinned in ModernKnockbackEngineTest). The expectation reads
+     * the production victim capture over the session ledger — the EXACT grounded
+     * flag + residual the region path reads — so engine==applied holds on every
+     * version. modern-vanilla/uplift deliver IMMEDIATE (no wire decay).
+     */
+    private static void runModernScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context,
+            String preset, boolean sprinting, double expectedHorizontal, double expectedVertical)
+            throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+
+            context.syncRun(() -> context.expect(mental.management().setGlobalProfile(preset),
+                    preset + " preset missing — every bundled profile must be selectable"));
+            context.awaitTicks(PROPAGATE_TICKS);
+
+            KnockbackVector expected = context.sync(() -> {
+                KnockbackProfile resolved = profileFor(mental, victim);
+                context.expect(preset.equals(resolved.name()) && resolved.modern().enabled(),
+                        "the modern preset must resolve with formula modern (got " + resolved.name() + ")");
+                if (sprinting) {
+                    attacker.player().setSprinting(true);
+                }
+                victim.player().setNoDamageTicks(0);
+
+                CombatSession session = mental.sessions().sessionFor(victim.uuid());
+                context.expect(session != null, "no combat session for the victim");
+                EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
+                KnockbackVector vector = KnockbackEngine.compute(
+                        EntityStates.capture(attacker.player()), victimState, resolved, null);
+
+                // Horizontal magnitude is direction-independent for a resting victim
+                // (air multipliers are identity on the modern presets); the vertical
+                // is grounded-gated (the downward slam ships the falling vy airborne).
+                context.expectNear(expectedHorizontal, Math.hypot(vector.x(), vector.z()), EPSILON,
+                        preset + (sprinting ? " sprint" : " plain") + " horizontal magnitude");
+                if (victimState.grounded()) {
+                    context.expectNear(expectedVertical, vector.y(), EPSILON,
+                            preset + (sprinting ? " sprint" : " plain") + " grounded vertical");
+                }
+
+                captors.reset();
+                attacker.attack(victim.player());
+                return SuiteDelivery.melee(vector, resolved, victimState.grounded());
+            });
+            context.expect(expected != null, "engine returned no vector for the modern hit");
+
+            context.awaitUntil(() -> captors.velocityOf(victim.uuid()) != null, 40,
+                    "the modern knock's velocity event");
+            Vector applied = captors.velocityOf(victim.uuid());
+            context.expect(applied != null, preset + " hit produced no velocity event");
+            context.expectNear(expected.x(), applied.getX(), EPSILON, preset + " wire x");
+            context.expectNear(expected.y(), applied.getY(), EPSILON, preset + " wire y");
+            context.expectNear(expected.z(), applied.getZ(), EPSILON, preset + " wire z");
+        } finally {
+            context.syncRun(() -> {
+                mental.management().setGlobalProfile(DEFAULT_PROFILE);
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
     }
 
     /** A hit under a global kohi selection must equal kohi math, not the legacy default. */

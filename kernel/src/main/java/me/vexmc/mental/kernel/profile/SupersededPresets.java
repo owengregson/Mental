@@ -45,6 +45,14 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile.WtapExtra;
  * an owner directive that deliberately trades away the era-authentic
  * long-fall negative); the {@code *_2_4_7} revisions below are those presets
  * exactly as shipped through 2.4.7 (unchanged since they first bundled).</p>
+ *
+ * <p>The modern-formula round appends the commented {@code formula:}/{@code
+ * modern:} schema block to custom.yml (its parsed VALUES are unchanged — the
+ * block ships {@code formula: legacy} at the modern OFF defaults). Only the
+ * file's TEXT moved, so the custom hash set gains the {@code @2.4.8}
+ * pre-modern-block form (byte-only — no value revision, since the parsed value
+ * is identical to the current bundle) so an unedited custom.yml upgrades in
+ * place to gain the documentation.</p>
  */
 public final class SupersededPresets {
 
@@ -477,7 +485,8 @@ public final class SupersededPresets {
                     "7f367ca455f7126ff7203f25209ae29757c932b06f6bde329e6ecca0926828f3", // custom@1.3.x (raw — patcher excludes custom)
                     "50fcd1dae0b1934566ac909d90971c915cb9bb9f06e335f2a60081f0794dc2f1", // custom@1.4.0
                     "5df319ae3c706bb659e2b2c3c5c3b6e00837622bbf93dfb04b129bc708e0f7cb", // custom@1.5.0 → 2.2.2
-                    "fd3ab8a15f5e78b06def73ab5dcce1b2c5babb5b84e798bde50378c3f0716b56")); // custom@2.4.0 → 2.4.7
+                    "fd3ab8a15f5e78b06def73ab5dcce1b2c5babb5b84e798bde50378c3f0716b56", // custom@2.4.0 → 2.4.7
+                    "12e5fcb54b93d7095eaa9205e7ddba07fb284c3187bf8da552869839f9f03516")); // custom@2.4.8 (pre-modern-block)
 
     /** Whether {@code fileText} is byte-identical (newline-normalized) to a superseded bundled revision of {@code preset}. */
     public static boolean isSupersededBundleText(String preset, String fileText) {

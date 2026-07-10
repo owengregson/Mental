@@ -1,0 +1,42 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  modern-uplift — the modern formula WITHOUT the mid-air slam
+#
+#  Mental's OWN tuning of the Paper 26.1.2 melee formula: the same two-stage
+#  math (a positional base knock then a yaw-directed sprint/enchant extra, each
+#  halving the surviving motion and scaling its added strength by
+#  (1 - knockback-resistance)) but with the mid-air slam turned OFF
+#  (`downward-knockback: false`), so an airborne victim LIFTS like a grounded
+#  one instead of keeping its falling vertical. The final vertical is floored at
+#  0.0 (`limits.vertical-min: 0.0`) so a knock never points down. The 26.1.2
+#  constants are unchanged; this is an example modern feel, not a ported server
+#  config. The legacy knobs are inert while `formula: modern` — the `modern:`
+#  block is the whole tuning surface.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+#  For the modern formula in full, see modern-vanilla.yml.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Modern (Uplift)
+description: "Mental's own — the modern 26.1.2 math without the mid-air slam, vertical floored at 0.0."
+
+knockback:
+  formula: modern
+
+  modern:
+    base-strength: 0.4
+    sprint-bonus: 0.5
+    enchant-bonus: 0.5
+    residual:
+      horizontal: 0.5
+      vertical: 0.5
+    vertical-cap: 0.4
+    # false: airborne victims lift like grounded ones (no mid-air slam).
+    downward-knockback: false
+
+  limits:
+    # A knock never points down.
+    vertical-min: 0.0
+  delivery:
+    melee: immediate
+    projectile: tracker
+  modifiers:
+    combos: false

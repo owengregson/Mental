@@ -50,15 +50,24 @@ class KnockbackDocsTest {
             "armor-resistance",
             "shield-blocking-cancels",
             "speed-scaling",
-            "exponent");
+            "exponent",
+            "formula",
+            "modern",
+            "base-strength",
+            "sprint-bonus",
+            "enchant-bonus",
+            "residual",
+            "vertical-cap",
+            "downward-knockback");
 
     /**
      * KnockbackProfile's components: 3 identity fields (name, displayName,
-     * description) + 16 knob-bearing fields (the 16th is the {@code paceScaling}
-     * knob family). A change here is a schema change — update {@link #KNOB_KEYS},
-     * the doc, and this pin together.
+     * description) + 17 knob-bearing fields (the 16th is the {@code paceScaling}
+     * knob family, the 17th the {@code modern} knockback-formula family). A change
+     * here is a schema change — update {@link #KNOB_KEYS}, the doc, and this pin
+     * together.
      */
-    private static final int EXPECTED_COMPONENTS = 19;
+    private static final int EXPECTED_COMPONENTS = 20;
 
     private static String readDoc() {
         Path dir = Path.of("").toAbsolutePath();
