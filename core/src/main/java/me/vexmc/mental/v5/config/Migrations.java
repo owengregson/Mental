@@ -166,7 +166,10 @@ public final class Migrations {
         Map<String, Object> values = new LinkedHashMap<>();
         copyLeaves(oldKnockback, "knockback", values, "enabled");
         values.forEach(profile::set);
-        Path profilesDir = dataDir.resolve(ConfigStore.PROFILES_DIR);
+        // The migrated custom profile is a legacy-formula profile, so it lands in
+        // the legacy formula-category folder alongside the bundled legacy presets.
+        Path profilesDir = dataDir.resolve(ConfigStore.PROFILES_DIR)
+                .resolve(ConfigStore.bundledFolder("custom"));
         try {
             Files.createDirectories(profilesDir);
             Files.writeString(profilesDir.resolve("custom.yml"), profile.saveToString(),

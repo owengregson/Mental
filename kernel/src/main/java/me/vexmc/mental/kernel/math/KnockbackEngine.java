@@ -6,6 +6,7 @@ import java.util.random.RandomGenerator;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.profile.ModernKnockback;
 import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
@@ -188,6 +189,19 @@ public final class KnockbackEngine {
             boolean freshSprint,
             PocketServoConfig servo,
             PredictorInputs predictorInputs) {
+
+        if (profile.modern().enabled()) {
+            // The modern (Paper 26.1.2) melee formula: a self-contained compute
+            // that owns knockback-resistance internally via the vanilla fractional
+            // (1 − r), so the LEGACY roll below and the SCALING horizontal multiply
+            // in finish() are both bypassed. Pace scaling and the pocket servo do
+            // not participate in v1 (factors 1.0/1.0) — modern is cooldown-free
+            // vanilla math, not the combo-equilibrium the servo tunes. The branch
+            // lives inside this overload so both the netty pre-send call site and
+            // the authoritative call site select it off the frozen PlayerView
+            // profile with zero call-site change.
+            return new Paced(modernCompute(attacker, victim, profile, victimYOverride, random), 1.0, 1.0);
+        }
 
         if (resistanceCancels(victim, profile, random)) {
             return new Paced(null, 1.0, 1.0); // suppressed before compute ⇒ no factors applied
@@ -457,6 +471,106 @@ public final class KnockbackEngine {
         double dy = attacker.y() - victim.y();
         double dz = attacker.z() - victim.z();
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /**
+     * The modern (Paper 26.1.2) melee formula — decompiled from the server jar,
+     * constants read from the constant pool; the grounded closed form matches the
+     * live-measured modern wire (standing {@code (0.4, 0.3608)}, sprint
+     * {@code (0.7, 0.4)}). A melee hit is two sequential applications of the
+     * vanilla {@code knockback(strength, x, z)} core:
+     *
+     * <pre>
+     *   1. base   knock(baseStrength, victim − attacker.POSITION)  — every hit
+     *   2. extra  knock(sprintBonus? + kbLevels×enchantBonus, attacker.FACING)
+     *             — only when the bonus is positive
+     * </pre>
+     *
+     * <p>Each application scales its added strength by {@code (1 − resistance)}
+     * (so the family owns knockback-resistance internally — the legacy LEGACY roll
+     * and the SCALING horizontal multiply are both skipped), halves the surviving
+     * motion by {@code residualHorizontal}/{@code residualVertical} (the vanilla
+     * {@code ÷ 2}), and — grounded, or airborne with the downward toggle off —
+     * lifts the vertical to {@code min(verticalCap, vy·residualVertical +
+     * strength)}. An airborne victim with the toggle on keeps its own vy (zero
+     * lift — the modern mid-air slam). {@code victimYOverride} replaces the INPUT
+     * vy only, the same latency-compensation substitution the legacy ADD path
+     * makes. The shared post-pipeline (air multipliers, add offsets, vertical-min
+     * floor, ±3.9 clamp) then runs exactly as {@link #finish}, minus the
+     * resistance-policy multiply.</p>
+     *
+     * <p><b>Sign convention.</b> The legacy {@link #base} computes
+     * {@code (source − victim)} and SUBTRACTS the scaled push; here the direction
+     * is {@code (victim − source)} and the push is ADDED — the identical outward
+     * vector (away from the attacker), expressed the vanilla-26.1.2 way (its core
+     * normalizes the caller's {@code (x, z)}, and the hurt path passes
+     * {@code source − victim} which the core then subtracts). Pinned by a
+     * directional unit test.</p>
+     */
+    private static KnockbackVector modernCompute(
+            EntityState attacker,
+            EntityState victim,
+            KnockbackProfile profile,
+            Double victimYOverride,
+            RandomGenerator random) {
+
+        ModernKnockback m = profile.modern();
+        double resistance = Math.max(0.0, Math.min(1.0, victim.knockbackResistance()));
+        boolean grounded = victim.grounded();
+        boolean liftsVertical = grounded || !m.downwardKnockback();
+
+        double hx = victim.vx() * m.residualHorizontal();
+        double hz = victim.vz() * m.residualHorizontal();
+        double vy = victimYOverride != null ? victimYOverride : victim.vy();
+
+        // Stage 1 — base knock, directed away from the attacker's position.
+        double deltaX = victim.x() - attacker.x();
+        double deltaZ = victim.z() - attacker.z();
+        while (deltaX * deltaX + deltaZ * deltaZ < 1.0e-5) {
+            deltaX = (random.nextDouble() - random.nextDouble()) * 0.01;
+            deltaZ = (random.nextDouble() - random.nextDouble()) * 0.01;
+        }
+        double magnitude = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+        double strengthOne = m.baseStrength() * (1.0 - resistance);
+        hx += (deltaX / magnitude) * strengthOne;
+        hz += (deltaZ / magnitude) * strengthOne;
+        double y = liftsVertical
+                ? cappedVertical(vy * m.residualVertical() + strengthOne, m.verticalCap())
+                : vy;
+
+        // Stage 2 — extra knock, directed along the attacker's facing (yaw). The
+        // sprint bonus rides the same SprintWire verdict the legacy path reads
+        // ({@code attacker.sprinting()}), not the vanilla attack-strength gate —
+        // Mental's product is cooldown-free combat.
+        double bonus = (attacker.sprinting() ? m.sprintBonus() : 0.0)
+                + attacker.knockbackEnchantLevel() * m.enchantBonus();
+        if (bonus > 0.0) {
+            double strengthTwo = bonus * (1.0 - resistance);
+            double yawRadians = Math.toRadians(attacker.yaw());
+            hx = hx * m.residualHorizontal() - Math.sin(yawRadians) * strengthTwo;
+            hz = hz * m.residualHorizontal() + Math.cos(yawRadians) * strengthTwo;
+            y = liftsVertical
+                    ? cappedVertical(y * m.residualVertical() + strengthTwo, m.verticalCap())
+                    : y;
+        }
+
+        // Shared post-pipeline (finish() minus the resistance-policy multiply).
+        if (!grounded) {
+            hx *= profile.air().horizontal();
+            hz *= profile.air().horizontal();
+            y *= profile.air().vertical();
+        }
+        double[] vector = {hx, y, hz};
+        applyAdd(vector, profile.add());
+        if (vector[1] < profile.limits().verticalMin()) {
+            vector[1] = profile.limits().verticalMin();
+        }
+        return clamp(vector[0], vector[1], vector[2]);
+    }
+
+    /** The modern grounded vertical ceiling: {@code min(cap, v)} when the cap is positive, else uncapped. */
+    private static double cappedVertical(double value, double cap) {
+        return cap > 0.0 ? Math.min(cap, value) : value;
     }
 
     private static double[] base(

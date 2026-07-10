@@ -1,0 +1,83 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  lunar — Lunar Network's archived Season 5 values
+#
+#  The real config, not a recreation: archived from lunar.gg (S5) and
+#  cross-confirmed byte-identical in two independent archives
+#  (threeamnewacc/Server-Archive and sprytex/Knockback-Values, fetched and
+#  verified 2026-06-12). Lunar split its friction by axis — horizontal
+#  DIVISOR 1.46, vertical 1.31 — so the surviving fractions here differ:
+#  0.6849 horizontal, 0.7634 vertical. Far more residual survives each hit
+#  than vanilla's 0.5, the "carry-y" Lunar signature.
+#
+#  Original knobs:  h-friction 1.46 ÷ · v-friction 1.31 ÷ · h 0.54 ·
+#                   v 0.44 · vertical-limit 0.361735 · extra-h 0.38 ·
+#                   extra-v 0.0
+#
+#  Read the shape honestly before tuning: base 0.54 with a sprint extra of
+#  only 0.38 means sprinting adds LESS than the base — the weakest w-tap
+#  reward of any archived server — and the 0.3617 cap sits BELOW the 0.44
+#  base vertical, so every grounded hit pins at the cap and sprint adds no
+#  height at all. Era players complained you could "hold W and trade" on
+#  Lunar; that complaint is IN these numbers, faithfully. If you want
+#  Lunar-but-comboable, raise extra-h toward 0.5 in a copy of this file.
+#  The previous revision of this preset carried a community recreation
+#  (0.46/0.3535, extra 0.138) — superseded by the real archive.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Lunar
+description: "Lunar Network's archived S5 values — heavy base, high residual survival, weak sprint differential."
+
+knockback:
+  base:
+    horizontal: 0.54
+    vertical: 0.44
+  vertical-mode: add
+  extra:
+    horizontal: 0.38
+    vertical: 0.0
+  wtap-extra:
+    enabled: false
+    horizontal: 0.38
+    vertical: 0.0
+  friction:
+    x: 0.6849
+    # Lunar split friction by axis: vertical divisor 1.31 → 0.7634.
+    y: 0.7634
+    z: 0.6849
+  limits:
+    # Below the 0.44 base on purpose: every grounded hit pins at the cap.
+    vertical: 0.361735
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # Lunar Network (2019–2023) ran a custom, never-released "LunarSpigot";
+  # its 1.7-vs-1.8 base is genuinely unknown. Flat in-attack melee is the
+  # era norm for its years (even late 1.7-base forks carried the
+  # SportBukkit revert); rod/projectile knocks rode the tracker on BOTH
+  # eras.
+  delivery:
+    melee: immediate
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    # Flat melee per the late-practice-era norm (base unverified — see the
+    # delivery note); rod/projectile residuals still feed the next hit —
+    # and at 0.6849/0.7634 survival they feed HARD.
+    combos: false
+    # The fork code carried 1.8's probabilistic resistance roll, but no item
+    # on its pool could ever trigger it — `none` preserves the on-server
+    # feel on modern item pools.
+    armor-resistance: none
+    shield-blocking-cancels: true

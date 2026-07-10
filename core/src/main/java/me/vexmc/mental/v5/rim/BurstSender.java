@@ -28,6 +28,16 @@ import me.vexmc.mental.kernel.wire.FeedbackPlan;
  * design: the authoritative path re-emits through vanilla and clients treat them
  * as no-op corrections. A send to a reconfiguring target throws inside PE, so the
  * whole ship is wrapped and dropped (a missed burst beats a pipeline exception).</p>
+ *
+ * <p>The burst is written SILENTLY ({@code writePacketSilently} →
+ * {@code ChannelHelper.writeInContext(ENCODER_NAME)}) so it enters the pipeline AT
+ * Mental's own relocated-PE encoder context, skipping only Mental's own send-event
+ * stage — where the {@code ValveListener} watches ENTITY_VELOCITY. That listener
+ * therefore sees only server-originated velocity (the vanilla tracker's dup,
+ * foreign plugins) and can never consume Mental's OWN pre-send against a stale arm.
+ * The bytes on the wire are identical (the same {@code transformWrappers} encode,
+ * and every head-side handler — Via, compression, encryption — still runs), and
+ * external anticheats / bots on their own injectors still observe the burst.</p>
  */
 public final class BurstSender {
 
@@ -70,7 +80,7 @@ public final class BurstSender {
             List<FeedbackPlan.Step> plan =
                     FeedbackPlan.plan(velocity != null, bundleWanted, modernProtocol);
             for (FeedbackPlan.Step step : plan) {
-                user.writePacket(packetFor(step, victimEntityId, velocity, hurtYaw));
+                user.writePacketSilently(packetFor(step, victimEntityId, velocity, hurtYaw));
             }
             user.flushPackets();
             return Outcome.DELIVERED;

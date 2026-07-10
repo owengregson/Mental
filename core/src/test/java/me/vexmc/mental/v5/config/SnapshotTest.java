@@ -348,6 +348,25 @@ class SnapshotTest {
     }
 
     @Test
+    void retiredPingOffsetKeyReportsAndStillParses() throws Exception {
+        // ping-offset-ms was retired in 2.4.9 (never applied). A lingering key earns a
+        // one-line notice; the surviving spike/off-ground-sync knobs still parse.
+        SnapshotParser.Result result = parse("", "", "", """
+                latency-compensation:
+                  ping-offset-ms: 25
+                  spike-threshold-ms: 60
+                  off-ground-sync: false
+                """);
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("ping-offset-ms"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("retired"), () -> result.issues().get(0));
+
+        CompensationSettings comp = settings(result.snapshot(), Feature.LATENCY_COMPENSATION);
+        assertEquals(60, comp.spikeThresholdMillis());
+        assertFalse(comp.offGroundSync());
+    }
+
+    @Test
     void transactionProbeStrategyParsesAsAValidValue() throws Exception {
         SnapshotParser.Result result = parse("", "", "", """
                 latency-compensation:

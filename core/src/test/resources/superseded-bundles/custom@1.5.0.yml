@@ -1,0 +1,126 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  custom — your knockback profile
+#
+#  The full schema, every knob explained, starting from legacy-1.7 values.
+#  Select it in knockback.yml (profile: custom), per world, or per player
+#  (/mental kb set custom <player>). Copy this file under any name to make
+#  more profiles — every profiles/*.yml is loaded.
+#
+#  ⚠ THE #1 PORTING HAZARD when importing configs from 1.8 forks:
+#  "friction" means a DIVISOR in PandaSpigot/SportPaper/WindSpigot
+#  (typically 2.0) but a surviving-fraction MULTIPLIER here and in
+#  NachoSpigot (0.5). Same math, opposite direction — port a divisor d
+#  as friction 1/d:   2.0 ÷ → 0.5   ·   1.5 ÷ → 0.6667
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Custom
+description: "Your own knockback tuning — edit profiles/custom.yml."
+
+knockback:
+  # The push every hit applies, after friction shrinks the victim's
+  # residual motion. Vanilla: 0.4 / 0.4.
+  base:
+    horizontal: 0.4
+    vertical: 0.4
+
+  # add — vanilla: the base vertical stacks on the victim's (friction-
+  #       reduced) vertical motion, so rising victims launch higher.
+  # set — assign the base vertical outright: every hit launches at exactly
+  #       base.vertical no matter what the victim was doing. The "static
+  #       knockback" lever the improved-KB servers run.
+  vertical-mode: add
+
+  # Bonus per level, applied along the attacker's facing: sprinting counts
+  # as modifiers.sprint levels, each Knockback enchant level adds another.
+  # Vanilla: 0.5 / 0.1.
+  extra:
+    horizontal: 0.5
+    vertical: 0.1
+
+  # WindSpigot's w-tap split. When enabled, a sprint hit whose sprint was
+  # freshly (re-)engaged since the attacker's last attack — the w-tap
+  # timing — uses these values instead of extra: horizontally for the
+  # sprint levels only (enchant levels always use extra), and for the
+  # hit's single flat vertical bonus (vanilla applies it once, never per
+  # level). Disabled, sprint freshness changes nothing (the era behavior).
+  wtap-extra:
+    enabled: false
+    horizontal: 0.5
+    vertical: 0.1
+
+  # The fraction of the victim's residual motion that survives into the
+  # new vector, per axis. Vanilla halves each axis (0.5). This is the
+  # multiplier convention — see the porting hazard note above.
+  friction:
+    x: 0.5
+    y: 0.5
+    z: 0.5
+
+  limits:
+    # Clamps the BASE vertical before bonus levels are added (vanilla
+    # ordering: a sprint hit reaches 0.5). Values <= 0 disable.
+    vertical: 0.4
+    # Floors the FINAL vertical after every addition. -3.9 (the packet
+    # encoding limit) is a no-op; raise it toward 0 to keep hard downward
+    # residuals from smashing victims into the ground.
+    vertical-min: -3.9
+    # Caps the post-friction base horizontal magnitude. <= 0 disables.
+    horizontal: -1
+
+  # Multipliers applied to the whole vector while the victim is airborne
+  # (1.0 = no change). KnockbackMaster-style; used to tame air combos.
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+
+  # WindSpigot's flat post-formula offsets: the horizontal addition
+  # distributes across X/Z by each axis's share of the motion and matches
+  # its sign; the vertical addition matches the vertical sign. A zero axis
+  # receives nothing, so the offset can never reverse a direction.
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+
+  # The MMC-style distance taper: full knockback within start-distance,
+  # beyond it the horizontal base push is reduced by
+  # min(factor × (distance − offset), max-reduction) — max-reach hits land
+  # slightly softer. Melee only; rods and projectiles never taper.
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+
+  # ── delivery ─────────────────────────────────────────────────────────
+  # WHEN the victim's client receives the knock relative to their physics
+  # tick — the wire half of era accuracy, independent of the math above.
+  # The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on real
+  # vanilla, both orders): the tracker ran before the per-connection network
+  # phase, so whether the victim's physics decayed the just-written fields
+  # first depended on who joined first.
+  #   tracker          ships the full stamp — what a victim who joined
+  #                    BEFORE their attacker received, identical to 1.8.9
+  #                    for single hits; the dominant era experience.
+  #   tracker-decayed  the later-joiner wire: one victim physics tick of
+  #                    decay. Ground hits lose a full ground-friction step
+  #                    (x0.546 horizontal!) — a standing sprint hit ships
+  #                    (0.491, 0.373) instead of the formula's (0.9, 0.461).
+  #   immediate        the 1.8.9 melee path: sent in the attack itself.
+  # Rod and projectile knocks rode the tracker on BOTH eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    # Bonus levels granted by sprinting.
+    sprint: 1.0
+    # 1.7.10 hit stacking. The legacy server never reverted a victim's
+    # motion after knockback, so quick successive hits compounded into
+    # combos. Set false for 1.8.9 delivery: every melee hit lands flat
+    # (rod and projectile residuals still feed the next melee hit once).
+    combos: true
+    # Knockback resistance (netherite): none (ignore it — the 1.7.10 item
+    # pool), legacy (probabilistic all-or-nothing, the era's rule), or
+    # scaling (deterministic 1 - resistance).
+    armor-resistance: none
+    # Skip Mental knockback when a shield absorbed the hit.
+    shield-blocking-cancels: true

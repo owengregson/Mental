@@ -1,0 +1,68 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  modern-vanilla — the Paper 26.1.2 melee knockback formula
+#
+#  Ported byte-exact from the decompiled Paper 26.1.2 server jar: every
+#  constant below was read from the bytecode, not assumed, and the grounded
+#  closed form reproduces the live-measured modern wire — a standing hit ships
+#  (0.4, 0.3608), a sprint hit (0.7, 0.4). Selecting `formula: modern` swaps
+#  the legacy 1.7/1.8 math for the modern server's TWO-STAGE knock:
+#
+#      stage 1  a positional BASE knock away from the attacker's position
+#      stage 2  a yaw-directed SPRINT/ENCHANT extra (only when a bonus exists)
+#
+#  each halving the surviving motion (residual 0.5) and scaling its added
+#  strength by (1 - knockback-resistance). This is the vanilla feel, including
+#  the mid-air slam: an airborne victim keeps its own falling vertical and gets
+#  ZERO lift (`downward-knockback: true`), sliding sideways/down instead of
+#  popping up. combos:false + immediate delivery mirror vanilla's
+#  send-then-restore (the server ships one motion packet then restores its own
+#  copy). NOTE `limits.vertical-min: -3.9` is REQUIRED here — it is the packet
+#  floor, and floored any higher the downward knock could never ship.
+#
+#  These are Mental's OWN example presets of the modern formula; the numbers
+#  are the real 26.1.2 constants, but only `modern-vanilla` claims the vanilla
+#  feel. The legacy knobs (base/extra/friction/wtap-extra/range-reduction/
+#  speed-scaling) are INERT while `formula: modern` — the `modern:` block is the
+#  whole tuning surface.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Modern (Vanilla)
+description: "The byte-exact Paper 26.1.2 melee formula — two-stage knock, mid-air slam, send-then-restore delivery."
+
+knockback:
+  # legacy | modern. `modern` swaps in the two-stage 26.1.2 formula below;
+  # `legacy` (the default everywhere else) keeps the 1.7/1.8 math.
+  formula: modern
+
+  # The modern (26.1.2) formula's knobs — the whole tuning surface in this mode.
+  modern:
+    # The base positional knock strength (vanilla 0.4).
+    base-strength: 0.4
+    # The flat sprint addition to the yaw-directed extra knock (vanilla 0.5).
+    sprint-bonus: 0.5
+    # The addition per Knockback enchant level (vanilla 0.5/level).
+    enchant-bonus: 0.5
+    residual:
+      # Surviving fraction of the victim's motion per application (vanilla ÷2 = 0.5).
+      horizontal: 0.5
+      vertical: 0.5
+    # The grounded vertical ceiling: min(vertical-cap, vy*residual + strength).
+    # <= 0 disables the ceiling.
+    vertical-cap: 0.4
+    # true = vanilla: an AIRBORNE victim keeps its own vy (zero lift — the
+    # mid-air slam). false = an airborne victim lifts like a grounded one.
+    downward-knockback: true
+
+  limits:
+    # REQUIRED at -3.9 (the packet floor / no-op) for the mid-air slam: a higher
+    # floor would clamp away the downward knock the vanilla formula ships.
+    vertical-min: -3.9
+  # Vanilla ships one motion packet in-attack then restores its own copy — no
+  # server-side residual survives, so melee never feeds itself: combos off,
+  # immediate delivery.
+  delivery:
+    melee: immediate
+    projectile: tracker
+  modifiers:
+    combos: false

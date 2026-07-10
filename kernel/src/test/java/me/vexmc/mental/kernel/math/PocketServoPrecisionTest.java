@@ -23,6 +23,8 @@ class PocketServoPrecisionTest {
     private static final double EPSILON = 1.0e-9;
     private static final double Q = Decay.AIR_DRAG; // 0.91
     private static final PocketServoConfig SERVO = PocketServoConfig.of(2.75, 1.0, 0.8, 1.2, 10);
+    /** The shipped 2.4.6/2.4.7 clamp band (min 0.93, max 1.35) — the saturation deadband floor is 0.86. */
+    private static final PocketServoConfig SHIPPED_BAND = PocketServoConfig.of(2.85, 1.0, 0.93, 1.35, 10);
 
     /* ── closed forms hand-checked against the derivation numbers ──────────── */
 
@@ -729,6 +731,64 @@ class PocketServoPrecisionTest {
             }
         }
         assertEquals(36, checked, "the 2×3×2×3 strafe cross exercised");
+    }
+
+    /* ── the sprint-fresh saturation deadband (2026-07-09 weak-KB round) ─────── */
+
+    @Test
+    void saturationFloorIsTwiceMinMinusOne() {
+        // The derived boundary 2·min − 1: past it the clamped shave leaves a bigger
+        // pocket miss than the whole benefit it buys, so the servo declines to σ = 1.
+        assertEquals(0.86, PocketServo.saturationFloor(0.93), EPSILON); // 0.93 − (1 − 0.93)
+        assertEquals(0.6, PocketServo.saturationFloor(0.8), EPSILON);   // 0.8  − (1 − 0.8)
+    }
+
+    @Test
+    void sprintFreshSaturatedSolveDeclinesTheShaveToTheEraStamp() {
+        // A sprint-fresh hit (freshEra 0.9), grounded stone, static target 2.85, the
+        // shipped [0.93, 1.35] band. The attribute chase (0.2806·10 = 2.806, floor
+        // 1.9642 below) leaves constant = 3.0 − 2.806 = 0.194; the grounded D_g(10)
+        // fold gives σ* = (2.85 − 0.194) / (0.9·4.470559213) = 2.656/4.023503291 =
+        // 0.660121245, far below the 0.86 floor. The clamped shave (σ = 0.93) would
+        // leave the victim 4.023503291·(0.93 − 0.660121245) = 1.0859 blocks past the
+        // pocket while buying only 4.023503291·(1 − 0.93) = 0.2816 blocks — so the
+        // deadband declines it to the era σ = 1 and the victim lands at the era stamp.
+        PredictorInputs in = degradedGround(true, 0.0);
+        PocketServo.Solution s = PocketServo.solve(SHIPPED_BAND, in, 3.0, 0.0, 0.9, 0.35716, 0.10);
+        assertEquals(0.660121245, s.sigmaStar(), 1.0e-9);
+        assertEquals(1.0, s.sigma(), 0.0, "the min clamp is saturation-pinned — ship the era stamp");
+        assertFalse(s.declined(), "fully priced (σ* preserved), not a decline");
+        assertEquals(4.217503291, s.predictedDNext(), 1.0e-9, "0.194 + 4.023503291 — the era landing");
+    }
+
+    @Test
+    void justAboveTheSaturationFloorStillShavesToMin() {
+        // A measured chase of 0.38 b/t (3.8 blocks over w' = 10) drives constant to
+        // 3.0 − 3.8 = −0.8, so σ* = (2.85 + 0.8)/4.023503291 = 3.65/4.023503291 =
+        // 0.907169632. That sits in [0.86, 0.93): below min, but the clamped shave
+        // still recovers MORE than half the residual miss — the calibrated 0.93 shave
+        // stands, no deadband.
+        PredictorInputs in = new PredictorInputs(
+                true, 0.6, 0.6, 0.0, 0.0, 0.38, 0.10, -1, -1,
+                Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
+        PocketServo.Solution s = PocketServo.solve(SHIPPED_BAND, in, 3.0, 0.0, 0.9, 0.35716, 0.10);
+        assertEquals(0.907169632, s.sigmaStar(), 1.0e-9);
+        assertEquals(0.93, s.sigma(), EPSILON, "0.86 ≤ σ* < 0.93 — the calibrated min shave holds");
+    }
+
+    @Test
+    void interiorPlainSolveIsUntouchedUnderTheShippedBand() {
+        // The 2.4.6 airborne "blind" geometry (theChaseFloorPreventsTheAirborneFalseLowMode)
+        // under the shipped band: the chase floor holds σ* = 0.965362591 interior, so
+        // the deadband's `blended < min` guard never fires and the solve is
+        // bit-identical to the pre-round path — the deadband is inert for plain
+        // interior solves.
+        PredictorInputs in = new PredictorInputs(
+                false, 0.6, 0.6, 0.30, 0.0, 0.116, 0.10, -1, -1,
+                Double.NaN, Double.NaN, Double.NaN, 0.0, 0);
+        PocketServo.Solution s = PocketServo.solve(SHIPPED_BAND, in, 2.55, 0.02, 0.325, 0.35716, 0.10);
+        assertEquals(0.965362591, s.sigmaStar(), 1.0e-9);
+        assertEquals(s.sigmaStar(), s.sigma(), EPSILON, "interior in [0.93, 1.35] — untouched");
     }
 
     /* ── independent fold + brute references (never the production sum code) ─── */

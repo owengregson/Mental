@@ -14,6 +14,7 @@ import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.Directive;
+import me.vexmc.mental.kernel.delivery.JournalObserver;
 import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.GroundFriction;
 import me.vexmc.mental.kernel.model.HitContext;
@@ -30,6 +31,7 @@ import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
+import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
@@ -49,6 +51,7 @@ import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.potion.PotionEffect;
 
@@ -83,6 +86,7 @@ public final class SessionService implements Listener, SessionAccess {
     private final PositionRing positions;
     private final ConnectionDomains domains;
     private final ComboEvents comboEvents;
+    private final JournalObserver journalObserver;
 
     private final ConcurrentHashMap<UUID, CombatSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Integer> entityIdByPlayer = new ConcurrentHashMap<>();
@@ -118,7 +122,8 @@ public final class SessionService implements Listener, SessionAccess {
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
             VelocityValve valve, Supplier<Snapshot> snapshot,
-            PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents) {
+            PositionRing positions, ConnectionDomains domains, ComboEvents comboEvents,
+            JournalObserver journalObserver) {
         this.scheduling = scheduling;
         this.clock = clock;
         this.viewBuilder = viewBuilder;
@@ -127,6 +132,7 @@ public final class SessionService implements Listener, SessionAccess {
         this.positions = positions;
         this.domains = domains;
         this.comboEvents = comboEvents;
+        this.journalObserver = journalObserver;
     }
 
     /** The per-player position ring the fast path rewinds through (reach) and reads latest (pre-send). */
@@ -238,15 +244,32 @@ public final class SessionService implements Listener, SessionAccess {
         enqueue(event.getEntity().getUniqueId(), new LedgerEvent.Reset(clock.current()));
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(PlayerRespawnEvent event) {
+        // The ring survives death (only quit forgets), so its latest sample is the
+        // corpse position until the first post-respawn tick — re-seed at the actual
+        // respawn point so a first-instant hit reads the true origin, not the grave.
+        Location location = event.getRespawnLocation();
+        positions.record(event.getPlayer().getUniqueId(),
+                location.getX(), location.getY(), location.getZ(), System.nanoTime());
+    }
+
     void join(Player player) {
         UUID id = player.getUniqueId();
         int entityId = player.getEntityId();
         double gravity = Attributes.valueOr(player, Attributes.gravity(), Decay.DEFAULT_GRAVITY);
-        CombatSession session = new CombatSession(gravity, entityId, clock, JOURNAL_CAPACITY);
+        CombatSession session = new CombatSession(gravity, entityId, clock, JOURNAL_CAPACITY, journalObserver);
         sessions.put(id, session);
         entityIdByPlayer.put(id, entityId);
         playerIdByEntityId.put(entityId, id);
         samplers.put(id, new GroundFsm(clock));
+        // Seed the ring with the join location so a hit registered before the first
+        // session tick's record() never falls back to the fabricated (0,0,0) origin —
+        // the pre-send push direction and hurt yaw would otherwise point at the world
+        // origin (ring-origin-fallback-first-tick). buildView publishes before the tick's
+        // record(), so viewOf() is non-null while positions.latest() would be null.
+        Location location = player.getLocation();
+        positions.record(id, location.getX(), location.getY(), location.getZ(), System.nanoTime());
         scheduleTick(player, id);
     }
 
@@ -345,7 +368,10 @@ public final class SessionService implements Listener, SessionAccess {
         // downward) velocity infiltrates on the late resolve — the exact inverse of
         // the packetless-net gate above (2.4.6 vanilla-knockback leak fix).
         session.tickStep(view, domains.has(player.getUniqueId()));
-        valve.clearStale(player.getUniqueId());
+        // Age-aware: a task-phase blocked-knock arm made THIS tick must survive to its
+        // end-of-tick tracker dup; only an arm >=2 ticks old (provably past any legal
+        // dup, the desk-sweep margin) is dropped. Same `now` the sweep/net use.
+        valve.clearStale(player.getUniqueId(), view.at());
         // One owning-thread position sample per tick — the fast path's reach
         // rewind source and its off-region-safe pre-send position source (the
         // netty thread reads frozen samples, never the live entity).
@@ -503,6 +529,12 @@ public final class SessionService implements Listener, SessionAccess {
         // immune to wire-vs-server stance disagreement (F1). Unavailable below the
         // attribute API ⇒ the sentinel ⇒ pace factor 1.0.
         double moveSpeedAttr = Attributes.movementSpeedWalkNormalized(player);
+        // The attacker's held Knockback level, frozen per tick so the netty pre-send
+        // ships the enchant extra off the same truth the region path reads live. Era
+        // read the held item inside attack(); the netty realm cannot (Folia
+        // ensureTickThread), so this owning-thread freeze is the carrier — one tick of
+        // staleness on a swap-click is the accepted sprint-view-class divergence.
+        int kbEnchantLevel = EntityStates.heldKnockbackLevel(player);
         double slipperiness = GroundFriction.of(blockUnderFeet(player, location));
         KnockbackProfile profile = snapshot.get().profileFor(player.getWorld().getName());
         KinematicState kinematics = new KinematicState(
@@ -537,7 +569,7 @@ public final class SessionService implements Listener, SessionAccess {
                 knockbackResistance, profile, Pings.of(player), kinematics,
                 moveSpeedAttr, session.comboAttackerId(),
                 measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks,
-                yawRate);
+                yawRate, kbEnchantLevel);
     }
 
     /**

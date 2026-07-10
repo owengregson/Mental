@@ -11,6 +11,7 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile.Limits;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.Push;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.RangeReduction;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.WtapExtra;
+import me.vexmc.mental.kernel.profile.ModernKnockback;
 import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
@@ -50,7 +51,10 @@ public final class ProfileParser {
         ConfigReader modifiers = reader.sub("modifiers");
         ConfigReader delivery = reader.sub("delivery");
         ConfigReader speed = reader.sub("speed-scaling");
+        ConfigReader modern = reader.sub("modern");
+        ConfigReader residual = modern.sub("residual");
         PaceScaling pace = legacy.paceScaling();
+        ModernKnockback offModern = legacy.modern();
         return new KnockbackProfile(
                 name,
                 displayName,
@@ -96,7 +100,42 @@ public final class ProfileParser {
                         paceMode(speed, pace.mode()),
                         speed.numberAtLeast("exponent", pace.exponent(), 0),
                         speed.numberAtLeast("min", pace.min(), 0),
-                        speed.numberAtLeast("max", pace.max(), 0)));
+                        speed.numberAtLeast("max", pace.max(), 0)),
+                new ModernKnockback(
+                        modernFormula(reader, offModern.enabled()),
+                        modern.numberAtLeast("base-strength", offModern.baseStrength(), 0),
+                        modern.numberAtLeast("sprint-bonus", offModern.sprintBonus(), 0),
+                        modern.numberAtLeast("enchant-bonus", offModern.enchantBonus(), 0),
+                        residual.numberAtLeast("horizontal", offModern.residualHorizontal(), 0),
+                        residual.numberAtLeast("vertical", offModern.residualVertical(), 0),
+                        modern.number("vertical-cap", offModern.verticalCap()),
+                        modern.flag("downward-knockback", offModern.downwardKnockback())));
+    }
+
+    /**
+     * Reads the {@code formula} switch — {@code legacy} (the fallback) or
+     * {@code modern} — into {@link ModernKnockback#enabled}. Unlike
+     * {@code speed-scaling.mode} there is no YAML-1.1 boolean trap ({@code legacy}
+     * and {@code modern} are not reserved words), so a plain string read with a
+     * loud warn-and-fallback on any other value suffices.
+     */
+    private static boolean modernFormula(ConfigReader reader, boolean fallback) {
+        ConfigurationSection section = reader.section();
+        if (section == null || !section.isSet("formula")) {
+            return fallback;
+        }
+        String raw = String.valueOf(section.getString("formula", "")).trim().toLowerCase(Locale.ROOT);
+        String path = reader.prefix().isEmpty() ? "formula" : reader.prefix() + ".formula";
+        return switch (raw) {
+            case "legacy" -> false;
+            case "modern" -> true;
+            default -> {
+                reader.issues().warn(path,
+                        "expected legacy/modern, found '" + section.getString("formula") + "'",
+                        fallback ? "modern" : "legacy");
+                yield fallback;
+            }
+        };
     }
 
     /**

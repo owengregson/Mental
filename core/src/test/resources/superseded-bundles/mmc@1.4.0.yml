@@ -1,0 +1,77 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  mmc — the community remake of the Minemen Club feel
+#
+#  Derived from the fanmade ClubSpigot remake's shipped `mmc` profile
+#  (MatiasNoble3/ClubSpigot, "feels very close") — NOT the private server's
+#  exact values, which nobody outside MMC has. What this preset reproduces
+#  is the architecture that makes the feel:
+#
+#    · vertical-mode SET — every hit launches at the same height no matter
+#      what the victim was doing (the "static KB" signature)
+#    · a distance taper — full knockback inside 3 blocks, max-reach hits
+#      land slightly softer (capped at −0.12)
+#    · flat 1.8 delivery, zero randomness anywhere in the path
+#
+#  Translation notes from the remake's formula (its loader swaps the
+#  horizontal/vertical labels; resolved here by plausibility — the flat,
+#  low, combo-friendly launch every description of MMC agrees on):
+#    horizontal knob h = 0.9055
+#    push  = 0.4 × (1 − 0.4 × (1 − h))     = 0.38488   → base.horizontal
+#    friction divisor = 1 + h = 1.9055     → 0.5248     (surviving fraction)
+#    assigned vertical                     = 0.25635   → base.vertical (set)
+#  The remake adds its 0.5/0.1 bonus on EVERY hit; Mental applies it on
+#  sprint hits — in practice identical, since players sprint into hits.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: MMC
+description: "Community remake of the Minemen Club feel: assigned vertical, distance taper, flat delivery."
+
+knockback:
+  base:
+    horizontal: 0.38488
+    vertical: 0.25635
+  # Assigned, not accumulated: the victim's vertical motion cannot change
+  # the launch. The single biggest "every hit lands the same" lever.
+  vertical-mode: set
+  extra:
+    horizontal: 0.5
+    vertical: 0.1
+  wtap-extra:
+    enabled: false
+    horizontal: 0.5
+    vertical: 0.1
+  friction:
+    x: 0.5248
+    # Vertical friction is moot under vertical-mode: set.
+    y: 0.5248
+    z: 0.5248
+  limits:
+    # The remake's vertical-limit-value: effectively uncapped.
+    vertical: 4.0
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  # The MMC signature reach softening: push − min(0.025 × (d − 1.2), 0.12)
+  # for hits beyond 3 blocks. Melee only; rods and projectiles never taper.
+  range-reduction:
+    enabled: true
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # The MMC remake is 1.8.9-fork-era feel: flat assigned values, no wire
+  # decay anywhere.
+  delivery:
+    melee: immediate
+    projectile: immediate
+  modifiers:
+    sprint: 1.0
+    combos: false
+    armor-resistance: legacy
+    shield-blocking-cancels: true

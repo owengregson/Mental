@@ -7,6 +7,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import me.vexmc.mental.api.event.ComboEndEvent;
 import me.vexmc.mental.api.event.ComboStartEvent;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
+import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
@@ -146,6 +147,7 @@ public final class ComboSuite {
             // stationary clientless fakes carry ~0 measured drift/chase and no probed
             // RTT, so a fresh LatencyModel matches the production model for them.
             double[] expected = new double[1];
+            PocketServo.Solution[] solution = new PocketServo.Solution[1];
             int shipsBefore = context.sync(() -> {
                 CombatSession session = mental.sessions().sessionFor(victim.uuid());
                 PlayerView view = session.view();
@@ -172,6 +174,8 @@ public final class ComboSuite {
                 // stub type out of this cross-jar call's descriptor (a RandomGenerator descriptor
                 // resolves a mismatched per-plugin stub and NoSuchMethodErrors on the v52 tier).
                 // The seed is fixed so the resistance roll is deterministic against the desk's solve.
+                solution[0] = KnockbackEngine.explainServo(
+                        attackerState, victimState, profile, null, false, servo, inputs);
                 expected[0] = KnockbackEngine.computePaced(
                         attackerState, victimState, profile, null, new Random(0L), false, servo, inputs)
                         .comboFactor();
@@ -185,8 +189,10 @@ public final class ComboSuite {
             double sigma = ship.comboFactor();
             context.expect(sigma >= SERVO_MIN - 1e-9 && sigma <= SERVO_MAX + 1e-9,
                     "the servo factor must sit inside the [0.93, 1.35] honesty clamps (got " + sigma + ")");
-            context.expect(Math.abs(sigma - 1.0) > 1e-6,
-                    "an active-combo hit must be servo-shaped, not 1.0 (got " + sigma + ")");
+            context.expect(Math.abs(sigma - 1.0) > 1e-6
+                            || solution[0].sigmaStar() < PocketServo.saturationFloor(SERVO_MIN),
+                    "an active-combo hit must be servo-shaped or honestly saturation-declined (σ=" + sigma
+                            + " σ*=" + solution[0].sigmaStar() + ")");
             context.expectNear(expected[0], sigma, SIGMA_EPSILON,
                     "the journaled σ must equal the production solve on the same inputs");
         } finally {

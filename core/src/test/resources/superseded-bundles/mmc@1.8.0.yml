@@ -1,0 +1,82 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  mmc — Minemen Club's archived dev123 values (2017)
+#
+#  Archived values, not a remake: both independent archives carry this set
+#  byte-identically as Minemen's older config ("dev123.minemen.club
+#  (2017)" in threeamnewacc/Server-Archive; dev123.json in
+#  sprytex/Knockback-Values; fetched and verified 2026-06-12). One
+#  attribution caveat, recorded honestly: "dev123" is also a documented
+#  MineHQ dev-host convention, so the Minemen labeling rests on the
+#  archivists. Published as a friction DIVISOR of 1.8 — Mental's friction
+#  is the SURVIVING FRACTION, so 1.8 ÷ becomes 0.5556 here: more of the
+#  victim's motion survives than vanilla's 0.5, a slightly heavier carry
+#  between rod boosts and pearls.
+#
+#  Original knobs:  friction 1.8 ÷ · horizontal 0.32 · vertical 0.32 ·
+#                   vertical-limit 0.4 · extra-h 0.5 · extra-v 0.1
+#
+#  The softer base with the FULL vanilla sprint bonus is the MMC trademark:
+#  plain hits sit down (0.32 vs vanilla 0.4) while w-tapped hits still ship
+#  the whole +0.5/+0.1 — sprint discipline is rewarded harder than vanilla.
+#
+#  Minemen's post-2019 engine moved to a different knob family entirely
+#  (final-velocity multipliers ×0.9055 h / ×0.8835 v plus an "Idle
+#  Reduction" no six-knob engine can express); those constants are archived
+#  but their semantics are not public, so Mental ships the confirmed 2017
+#  set instead of a guess. The previous revision of this preset was built
+#  from the fanmade ClubSpigot remake (assigned vertical 0.25635, distance
+#  taper) — superseded by the real archive.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: MMC
+description: "Minemen Club's archived dev123 (2017) values — soft base, full vanilla sprint bonus, flat 1.8 delivery."
+
+knockback:
+  base:
+    horizontal: 0.32
+    vertical: 0.32
+  vertical-mode: add
+  extra:
+    horizontal: 0.5
+    vertical: 0.1
+  wtap-extra:
+    enabled: false
+    horizontal: 0.5
+    vertical: 0.1
+  friction:
+    x: 0.5556
+    y: 0.5556
+    z: 0.5556
+  limits:
+    vertical: 0.4
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # MMC's 1.8.8 base (the ClubSpigot fork) is well-attested: melee sends
+  # in attack() (immediate), and rod/projectile knocks rode the tracker on
+  # BOTH eras.
+  delivery:
+    melee: immediate
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    # 1.8 lineage: attack() restores the victim's motion after the velocity
+    # packet — melee never feeds itself, rod/projectile residuals still do.
+    combos: false
+    # The fork code carried 1.8's probabilistic resistance roll, but no item
+    # on its pool could ever trigger it — `none` preserves the on-server
+    # feel on modern item pools (no surprise zero-knock cancels).
+    armor-resistance: none
+    shield-blocking-cancels: true

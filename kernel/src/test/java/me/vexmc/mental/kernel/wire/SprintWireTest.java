@@ -311,4 +311,117 @@ class SprintWireTest {
         assertTrue(after.sprinting());
         assertEquals(Boolean.TRUE, after.fresh());
     }
+
+    /* ── the arrival-sequence clear (F1: same-tick w-tap retro-clear) ───────── */
+
+    @Test
+    void wireSeqStampsIntoTheVerdictAtPeek() {
+        Clock clock = new Clock();
+        SprintWire wire = new SprintWire(clock);
+
+        // A fresh wire peeks at INITIAL seq 0, and a live peek is always wire-provenanced.
+        SprintVerdict fresh = wire.verdictAt(new TickStamp(0));
+        assertEquals(0L, fresh.wireSeq());
+        assertTrue(fresh.fromWire());
+
+        // A START bumps the arrival sequence 0 → 1; the peek carries it.
+        wire.onSprintStart();
+        SprintVerdict armed = wire.verdictAt(new TickStamp(0));
+        assertEquals(1L, armed.wireSeq());
+        assertTrue(armed.sprinting());
+        assertEquals(Boolean.TRUE, armed.fresh());
+
+        // The compat 3-arg constructor mints a verdict with no wire provenance.
+        SprintVerdict mint = new SprintVerdict(false, null, new TickStamp(0));
+        assertEquals(SprintVerdict.NO_WIRE_SEQ, mint.wireSeq());
+        assertFalse(mint.fromWire());
+    }
+
+    @Test
+    void sameTickReEngageAfterTheAttackSurvivesTheSeqGuardedClear() {
+        Clock clock = new Clock();
+        SprintWire wire = new SprintWire(clock);
+
+        clock.tick = 4;
+        wire.onSprintStart();                                    // engagement: seq 1, sprinting+armed
+        clock.tick = 5;
+        SprintVerdict first = wire.verdictAt(new TickStamp(5));  // the ATTACK's peek
+        assertTrue(first.sprinting());
+        assertEquals(1L, first.wireSeq());
+        wire.onSprintStop();                                     // the attack-flush STOP: seq 2 (armed survives)
+        wire.onSprintStart();                                    // the same-tick w-tap re-press: seq 3
+        clock.tick = 7;
+        wire.onServerClear(first.wireSeq());                     // deferred EDBEE clear: 3 > 1 ⇒ no-op
+        SprintVerdict second = wire.verdictAt(new TickStamp(7)); // the next-tick ATTACK's peek
+        assertTrue(second.sprinting());                         // ships the sprint knock (0.9 h, not 0.4)
+        assertEquals(Boolean.TRUE, second.fresh());
+        assertEquals(3L, second.wireSeq());
+    }
+
+    @Test
+    void seqGuardedClearWithNoLaterWriteClears() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                                    // seq 1
+        SprintVerdict peek = wire.verdictAt(new TickStamp(5));
+        assertEquals(1L, peek.wireSeq());
+        clock.tick = 7;
+        wire.onServerClear(1L);                                  // 1 <= 1 ⇒ clears
+        SprintVerdict cleared = wire.verdictAt(new TickStamp(7));
+        assertFalse(cleared.sprinting());
+        assertEquals(Boolean.FALSE, cleared.fresh());
+        assertTrue(wire.clientSprinting(), "the raw client flag is untouched, as ever");
+    }
+
+    @Test
+    void aStopAfterTheAttackIsNotRetroEatenButStaysNonSprinting() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                                    // seq 1
+        SprintVerdict peek = wire.verdictAt(new TickStamp(5));
+        assertEquals(1L, peek.wireSeq());
+        wire.onSprintStop();                                     // the s-tap: seq 2, sprinting=false, armed survives
+        wire.onServerClear(1L);                                  // 2 > 1 ⇒ no-op
+        SprintVerdict verdict = wire.verdictAt(new TickStamp(5));
+        assertFalse(verdict.sprinting(), "STOP's value stands — no bonus possible without sprinting");
+        assertEquals(Boolean.TRUE, verdict.fresh(),
+                "armed survives the release half; the newer-write semantic now at arrival granularity");
+    }
+
+    @Test
+    void heldBlockResetSurvivesTheSeqGuardedClear() {
+        Clock clock = new Clock();
+        clock.tick = 5;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                                    // seq 1
+        wire.onBlockSprintReset();                               // seq 2, sticky blockReset
+        SprintVerdict peek = wire.verdictAt(new TickStamp(5));
+        assertEquals(2L, peek.wireSeq());
+        wire.onServerClear(2L);                                  // 2 <= 2 ⇒ clears sprinting/armed, blockReset survives
+        SprintVerdict held = wire.verdictAt(new TickStamp(5));
+        assertTrue(held.sprinting(), "blockReset && clientSprinting ⇒ fresh sprint on the seq overload");
+        assertEquals(Boolean.TRUE, held.fresh());
+    }
+
+    @Test
+    void reconcileWritesCountForTheSeqGuard() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart();                                    // engage at tick 0: seq 1
+        SprintVerdict peek = wire.verdictAt(new TickStamp(0));
+        assertEquals(1L, peek.wireSeq());
+        // A reconcile adopt IS a wire write — it bumps the seq (parity with the
+        // lastWrite guard, which reconcile already refreshes today).
+        wire.reconcile(false, new TickStamp(10), 3);            // disagree + age 10 ≥ 3 ⇒ adopt, seq 2
+        wire.onServerClear(1L);                                  // 2 > 1 ⇒ no-op
+        SprintVerdict verdict = wire.verdictAt(new TickStamp(10));
+        assertFalse(verdict.sprinting(), "the adopted server flag stands; the stale clear no-ops against it");
+    }
 }

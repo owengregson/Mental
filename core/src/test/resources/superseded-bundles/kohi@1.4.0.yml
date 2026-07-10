@@ -1,0 +1,61 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  kohi — the canonical Kohi/HCF knockback
+#
+#  The most-shared knockback preset in the 1.8 ecosystem, confirmed across
+#  three independent sources (and matching the claimed ClubSpigot leak).
+#  Kohi published these as a friction DIVISOR of 2.0 — Mental's friction is
+#  the SURVIVING FRACTION, so 2.0 ÷ becomes 0.5 here. Flat 1.8 delivery.
+#
+#  Original knobs:  friction 2.0 ÷ · horizontal 0.35 · vertical 0.35 ·
+#                   vertical-limit 0.4 · extra-h 0.425 · extra-v 0.085
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Kohi
+description: "The canonical Kohi/HCF values — lower base, smaller per-level bonus (0.425/0.085), flat delivery."
+
+knockback:
+  base:
+    horizontal: 0.35
+    vertical: 0.35
+  vertical-mode: add
+  extra:
+    horizontal: 0.425
+    vertical: 0.085
+  wtap-extra:
+    enabled: false
+    horizontal: 0.425
+    vertical: 0.085
+  friction:
+    x: 0.5
+    y: 0.5
+    z: 0.5
+  limits:
+    vertical: 0.4
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # When the victim's client receives the knock relative to their physics
+  # tick. tracker = the 1.7.10 wire (one decay tick before the packet ships
+  # — ground hits lose a full friction step; measured on vanilla). immediate
+  # = the 1.8.9 melee path. Rod/projectile knocks rode the tracker on BOTH
+  # eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    combos: false
+    armor-resistance: legacy
+    shield-blocking-cancels: true

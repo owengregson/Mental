@@ -3,8 +3,18 @@
 A **profile** is one complete knockback feel — every knob the engine
 consumes, in one file under `plugins/Mental/profiles/`. The server picks one
 default and worlds can override it; the selection is **server-wide** — there
-is no per-player pin. Mental ships ten presets and loads every `profiles/*.yml`
-it finds, so you can keep as many as you like.
+is no per-player pin. Mental ships thirteen presets and loads every profile
+file it finds, so you can keep as many as you like.
+
+Every profile picks a **melee formula** — `legacy` (the 1.7/1.8 math) or
+`modern` (the byte-exact Paper 26.1.2 math) — and profiles are organised on
+disk **by that formula category**: `profiles/legacy/` holds the legacy-formula
+presets, `profiles/modern/` the modern ones. The folder is purely
+organisational — a profile is still resolved by its **name**, so it does not
+matter which folder a file sits in (an old flat `profiles/*.yml` install keeps
+working, and the folder mirrors the GUI's formula chooser). Snowball, rod and
+projectile knockback always use the legacy positional push, independent of the
+selected melee formula.
 
 ## Resolution
 
@@ -29,10 +39,11 @@ profile is irrelevant for that hit.
 
 Presets are extracted when missing and **never overwritten** — edits are
 yours, and deleting a preset regenerates the original. One exception, in
-your favor: a preset file that still carries a *superseded bundled
-revision* verbatim (every value untouched — you never tuned it) is
-upgraded in place when research corrects the preset, with a console
-notice. Any edited value freezes the file forever.
+your favor: a preset file that is still **byte-identical** to a
+*superseded bundled revision* (you never touched it, not even a comment)
+is upgraded in place when research corrects the preset, with a console
+notice. Any edit at all — a value, a comment, whitespace — freezes the
+file forever.
 
 | Preset | What it is | Provenance |
 | --- | --- | --- |
@@ -45,7 +56,10 @@ notice. Any edited value freezes the file forever.
 | `mmc` | Minemen Club's archived **dev123 (2017)** values — soft 0.32 base with the full vanilla sprint bonus, flat 1.8 delivery. Replaces the remake-derived revision (assigned vertical + taper). | Two independent archives, byte-identical |
 | `lunar` | Lunar Network's archived **Season 5** values — heavy base, split friction, the weakest sprint differential of any archived server (the era's "hold W" complaints are in the numbers, faithfully). Replaces the community-recreation revision. | Two independent archives, byte-identical |
 | `signature` | **Mental's own**, derived from `velt` and tuned by playtesting: the same residual wipe and full 0.5 sprint horizontal, with `air.horizontal 0.92` + `air.vertical 0.98` trimming the airborne follow-ups (hits 2+) so the victim holds the reach pocket instead of drifting out, and `base.vertical 0.365` keeping a touch more lift on descending hits (the 0.36 cap still bites on the grounded opener). The only preset that opts into **speed-conformal knockback** (`speed-scaling: attacker`, `exponent 0.95` — the owner's Speed-III feel tune) so Speed/Slowness fights keep the base-speed combo rhythm. | Original Mental tuning (a velt derivative) |
-| `custom` | Yours. Ships as legacy-1.7 values with every knob documented in the file. | — |
+| `modern-vanilla` | The byte-exact **Paper 26.1.2** melee formula (`formula: modern`) — a two-stage knock (positional base then yaw-directed sprint/enchant extra) with the mid-air slam on and vanilla send-then-restore delivery. The modern server feel. | Decompiled Paper 26.1.2 (constants read from bytecode) |
+| `modern-uplift` | **Mental's own** — the modern 26.1.2 math **without** the mid-air slam (`downward-knockback: false`, so airborne victims lift like grounded ones) and the vertical floored at 0.0. | Original Mental tuning (a modern derivative) |
+| `modern-combo` | **Mental's own** — the modern 26.1.2 math with **1.7-style residual compounding** (combos on, tracker wire) and no mid-air slam. | Original Mental tuning (a modern derivative) |
+| `custom` | Yours. Ships as legacy-1.7 values with every knob documented in the file (including the `formula`/`modern` block). | — |
 
 The full research trail behind these numbers — fork lineage, formula
 archaeology, flagged fakes — is in
@@ -128,6 +142,25 @@ knockback:
                             # (the PARSE DEFAULT; signature ships 0.95)
     min: 0.5                # clamp on the final factor
     max: 2.0
+  formula: legacy           # legacy = the 1.7/1.8 math above (the default);
+                            # modern = the byte-exact Paper 26.1.2 two-stage
+                            # knock (below). Every knob above is INERT under
+                            # modern — the modern block is the whole surface
+  modern:                   # the modern (26.1.2) formula — consulted only when
+                            # formula: modern. A hit is TWO sequential vanilla
+                            # knockback applications: a positional base knock,
+                            # then a yaw-directed sprint/enchant extra
+    base-strength: 0.4      # the positional base knock strength (vanilla 0.4)
+    sprint-bonus: 0.5       # flat sprint addition to the extra knock
+    enchant-bonus: 0.5      # addition per Knockback enchant level
+    residual:               # surviving fraction of the victim's motion per
+      horizontal: 0.5       # application (vanilla ÷2 = 0.5), the modern analog
+      vertical: 0.5         # of the legacy friction knob
+    vertical-cap: 0.4       # grounded ceiling: min(cap, vy × residual.vertical
+                            # + strength); <= 0 = off
+    downward-knockback: true  # true = an AIRBORNE victim keeps its own vy (zero
+                            # lift — the modern mid-air slam); false = it lifts
+                            # like a grounded victim
 ```
 
 ### Blocked hits still knock (the `BLOCKS_ATTACKS` silent-knock trap)
@@ -228,6 +261,64 @@ unaffected.
 no-op. Only Mental's own `signature` preset opts in (`exponent 0.95`). Reach
 (`3.0`) cannot scale, so the `max` clamp marks where the conformal window ends
 (Speed V+ still compresses the margin).
+
+### The modern formula (26.1.2)
+
+`formula: modern` swaps the legacy 1.7/1.8 math for the **Paper 26.1.2** melee
+knockback, ported byte-exact from the decompiled server jar — every constant
+read from the bytecode, and the grounded closed form reproduces the
+live-measured modern wire: a standing hit ships `(0.4, 0.3608)`, a sprint hit
+`(0.7, 0.4)` (the two cross-validation points the port was verified against).
+
+A modern melee hit is **two sequential applications** of one vanilla core,
+both landing before a single motion packet ships:
+
+1. **base** — a positional knock of `base-strength` (vanilla `0.4`) directed
+   away from the *attacker's position*.
+2. **extra** — a yaw-directed knock along the *attacker's facing*, of
+   `sprint-bonus` (vanilla `0.5`, added while sprinting) plus
+   `enchant-bonus × Knockback-level` (vanilla `0.5`/level). Applied only when
+   the bonus is positive.
+
+Each application scales its added strength by the fractional
+`(1 − knockback-resistance)` — so the modern formula owns resistance itself, no
+separate `armor-resistance` policy — halves the surviving motion
+(`residual.horizontal` / `residual.vertical`, the vanilla `÷ 2`), and lifts the
+vertical to `min(vertical-cap, vy × residual.vertical + strength)` when the
+victim is grounded. An **airborne** victim's vertical is the `downward-knockback`
+toggle:
+
+- `downward-knockback: true` (vanilla) — the airborne victim keeps its own
+  falling `vy` and gets *zero lift*, sliding sideways/down: the modern
+  "slammed mid-air" feel. This needs `limits.vertical-min: -3.9` (the packet
+  floor) or the downward knock is clamped away.
+- `downward-knockback: false` — the airborne victim lifts like a grounded one
+  (Mental's `modern-uplift`/`modern-combo` tunings, floored at `0.0`).
+
+**Inert under `modern`.** The legacy knobs do nothing while the modern formula
+is selected: `base`, `vertical-mode`, `extra`, `wtap-extra`, `friction`,
+`limits.vertical`/`limits.horizontal`, `range-reduction`, `modifiers.sprint`,
+`armor-resistance`, `speed-scaling` — plus the pocket servo. The `modern:` block
+is the whole tuning surface. Still applied: `air`, `add`,
+`limits.vertical-min`, `modifiers.combos`, `delivery`,
+`shield-blocking-cancels`, and the `±3.9` packet clamp.
+
+**Deliberate porting decisions.** The `generic.attack_knockback` attribute is
+not consulted (it defaults to `0.0` for players; the `sprint-bonus` /
+`enchant-bonus` knobs are the tuning surface). There is no `attackStrengthScale
+> 0.9` charge gate — Mental registers the sprint bonus off the same SprintWire
+verdict the legacy path reads, because Mental's product is cooldown-free combat
+(the `CADENCE` family owns cooldown). And the victim's "current motion" is the
+`MotionLedger` residual, the same substitution the legacy formula makes and the
+correct analog of the era server's input-free physics fields. The 26.1.2
+`stabAttack` (mace/spear) path is not on the left-click melee path — out of
+scope.
+
+Which presets opt in: `modern-vanilla` (the byte-exact port, mid-air slam on),
+`modern-uplift` (no slam, floored), `modern-combo` (no slam, floored,
+1.7-style residual compounding). Formula is a **per-profile** property, so
+worlds can mix formulas via `per-world`. Snowball/rod/projectile knockback is
+always the legacy positional push — unchanged by the melee formula.
 
 ## Runtime control
 

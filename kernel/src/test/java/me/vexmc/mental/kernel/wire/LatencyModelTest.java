@@ -62,6 +62,69 @@ class LatencyModelTest {
     }
 
     @Test
+    void filteredPingIsNullUntilFirstResponse() {
+        assertNull(tracker.forPlayer(player).filteredPingMillis(20));
+    }
+
+    @Test
+    void filteredPingReturnsTheOnlySampleWhenPreviousIsAbsent() {
+        LatencyModel.Record record = tracker.forPlayer(player);
+        record.onProbeSent(1L, 0L);
+        record.onResponse(1L, 40_000_000L); // rtt 40.0, prev null
+        assertEquals(40.0, record.filteredPingMillis(20), 1.0e-9);
+    }
+
+    @Test
+    void filteredPingRejectsAOneOffSpikeAndItsBounceBack() {
+        LatencyModel.Record record = tracker.forPlayer(player);
+        record.onProbeSent(1L, 0L);
+        record.onResponse(1L, 40_000_000L);            // 40.0
+        record.onProbeSent(2L, 1_000_000_000L);
+        record.onResponse(2L, 1_240_000_000L);         // 240.0, prev 40.0
+        // |240 − 40| = 200 > 20 → trust the smaller; storage stays raw.
+        assertEquals(40.0, record.filteredPingMillis(20), 1.0e-9);
+        assertEquals(240.0, record.pingMillis(), 1.0e-9);
+        record.onProbeSent(3L, 2_000_000_000L);
+        record.onResponse(3L, 2_040_000_000L);         // 40.0, prev 240.0
+        // |40 − 240| = 200 > 20 → the recovered sample is trusted immediately.
+        assertEquals(40.0, record.filteredPingMillis(20), 1.0e-9);
+    }
+
+    @Test
+    void filteredPingAdoptsASustainedShiftOnItsSecondSample() {
+        LatencyModel.Record record = tracker.forPlayer(player);
+        record.onProbeSent(1L, 0L);
+        record.onResponse(1L, 40_000_000L);            // 40.0
+        record.onProbeSent(2L, 1_000_000_000L);
+        record.onResponse(2L, 1_240_000_000L);         // 240.0, prev 40.0 → filtered 40.0
+        record.onProbeSent(3L, 2_000_000_000L);
+        record.onResponse(3L, 2_240_000_000L);         // 240.0, prev 240.0
+        // |240 − 240| = 0 ≤ 20 → the shift is now adopted.
+        assertEquals(240.0, record.filteredPingMillis(20), 1.0e-9);
+    }
+
+    @Test
+    void filteredPingTreatsTheThresholdAsStrictlyGreater() {
+        LatencyModel.Record record = tracker.forPlayer(player);
+        record.onProbeSent(1L, 0L);
+        record.onResponse(1L, 40_000_000L);            // 40.0
+        record.onProbeSent(2L, 1_000_000_000L);
+        record.onResponse(2L, 1_060_000_000L);         // 60.0, prev 40.0
+        // |60 − 40| = 20 is NOT > 20 → the reading stands.
+        assertEquals(60.0, record.filteredPingMillis(20), 1.0e-9);
+    }
+
+    @Test
+    void filteredPingWithNonPositiveThresholdIsDisabled() {
+        LatencyModel.Record record = tracker.forPlayer(player);
+        record.onProbeSent(1L, 0L);
+        record.onResponse(1L, 40_000_000L);            // 40.0
+        record.onProbeSent(2L, 1_000_000_000L);
+        record.onResponse(2L, 1_240_000_000L);         // 240.0, prev 40.0
+        assertEquals(240.0, record.filteredPingMillis(0), 1.0e-9); // filter off → raw
+    }
+
+    @Test
     void outstandingProbesAreBoundedByEvictingTheOldest() {
         LatencyModel.Record record = tracker.forPlayer(player);
         for (long id = 0; id < 33; id++) {

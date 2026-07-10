@@ -24,6 +24,7 @@ import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitGeometry;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
@@ -42,6 +43,7 @@ import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -327,18 +329,31 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
             HitContext context = new HitContext(
                     ids.next(), new HitSource.Melee(), attackerId, victimId,
-                    verdict, victimHasWire, compensationY, clock.current());
+                    verdict, victimHasWire, compensationY, clock.current(), registrationYaw(attackerId));
             HitTransaction tx = new HitTransaction(context);
 
-            // The pre-send only exists for player victims with published views.
-            if (playerVictim == null || victimId == null || attackerView == null || victimView == null
-                    || !settings.preSendFeedback() || victimView.damageImmune()) {
+            // The pre-send only exists for player victims with published views —
+            // each absence stamps its own F9 pre-send disposition before returning.
+            if (playerVictim == null || victimId == null || attackerView == null || victimView == null) {
+                tx.presend("no-view");
                 return tx;
             }
+            if (!settings.preSendFeedback()) {
+                tx.presend("off");
+                return tx;
+            }
+            if (victimView.damageImmune()) {
+                tx.presend("suppressed:frozen-immune");
+                return tx;
+            }
+            tx.profileName(victimView.profile().name());
 
             KnockbackProfile profile = victimView.profile();
             KnockbackVector vector = null;
             String suppressed = suppressorFor(profile, victimView);
+            if (suppressed != null) {
+                tx.presend("suppressed:" + suppressed); // suppressed:anticheat / suppressed:resistance-roll
+            }
             if (suppressed == null) {
                 // The pocket servo (combo-hold §3.2): active only when THIS attacker
                 // holds the victim's active combo (read from the victim's frozen view
@@ -362,6 +377,9 @@ public final class HitRegistrationUnit implements FeatureUnit {
                                 victimView.grounded(), victimView.slipperiness(), victimView.moveSpeedAttr());
                 EntityState preAttacker = preAttackerState(attackerId, attackerView, verdict);
                 EntityState preVictim = preVictimState(victimId, victimView);
+                // The exact base() geometry this hit consumed (F9 journal attribution).
+                tx.geometry(new HitGeometry(preAttacker.x(), preAttacker.z(), preAttacker.yaw(),
+                        preVictim.x(), preVictim.z()));
                 boolean freshSprint = verdict.fresh() != null && verdict.fresh() && verdict.sprinting();
                 KnockbackEngine.Paced paced = KnockbackEngine.computePaced(
                         preAttacker, preVictim, profile, compensationY, ThreadLocalRandom.current(),
@@ -400,17 +418,16 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     : Math.max(0, victimView.maxNoDamageTicks() / 2 - 1) * 50L;
             boolean velocityShips = admitVelocityPreSend(
                     feedbackGate, victimId, victimHasWire, vector != null, now, minInterval);
-
-            KnockbackVector shipped = null;
+            // The F9 pre-send disposition: wire/pinned when the velocity ships, paced-out
+            // when an eligible velocity lost this window. commitPreSendState overwrites this
+            // with "unsendable-downgrade" if the wire then refuses the burst (F2).
             if (velocityShips) {
-                shipped = vector; // TRACKER (full stamp); TRACKER_DECAYED handled by the desk record
-                tx.planned();
-                if (victimHasWire) {
-                    tx.preSent(shipped);
-                } else {
-                    tx.pinned(shipped);
-                }
+                tx.presend(victimHasWire ? "wire" : "pinned");
+            } else if (vector != null) {
+                tx.presend("paced-out");
             }
+
+            KnockbackVector shipped = velocityShips ? vector : null; // TRACKER (full stamp); TRACKER_DECAYED handled by the desk record
 
             float hurtYaw = HurtYaw.hurtYaw(
                     attackerView == null ? 0 : positionX(attackerId),
@@ -423,10 +440,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
             // nothing. An eligible velocity paced out this window skips the wire
             // (the authoritative pass delivers it), preserving the pacing.
             boolean shipBurst = victimHasWire && (vector == null || velocityShips);
+            // The burst ships FIRST and the transaction state commits off its
+            // Outcome — BurstSender's contract: an UNSENDABLE burst (user-null
+            // race, mid-ship throw) must be PINNED, never accounted
+            // wire-delivered. Committing PRE_SENT ahead of the ship let a failed
+            // burst arm the valve, which then ate the authoritative
+            // ENTITY_VELOCITY — the victim's only copy (F2).
+            BurstSender.Outcome outcome = null;
             if (shipBurst) {
-                senders.ship(PacketEvents.getAPI().getPlayerManager().getUser(playerVictim),
+                outcome = senders.ship(PacketEvents.getAPI().getPlayerManager().getUser(playerVictim),
                         victimView.entityId(), shipped, hurtYaw, settings.bundleFeedback());
             }
+            commitPreSendState(tx, shipped, velocityShips, victimHasWire, outcome);
             if (tx.state() == HitTransaction.State.PRE_SENT || tx.state() == HitTransaction.State.PINNED) {
                 sessions.sessionFor(victimId).desk().submitFromWire(tx);
             }
@@ -450,17 +475,11 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
         private EntityState preAttackerState(UUID attackerId, PlayerView view, SprintVerdict verdict) {
             PositionRing.Sample sample = sessions.positions().latest(attackerId);
-            double x = sample != null ? sample.x() : 0;
-            double y = sample != null ? sample.y() : 0;
-            double z = sample != null ? sample.z() : 0;
-            // Attacker velocity/enchant/resistance/grounded are unused by the
-            // formula's attacker terms; yaw comes from the connection's last
-            // movement packet, enchant is corrected on the authoritative pass.
-            // The movement-speed attribute rides the published view so the
-            // pre-sent knock's pace scaling matches the tick path (one truth).
-            return new EntityState(x, y, z, lastYaw(attackerId),
-                    0, 0, 0, view.grounded(), verdict.sprinting(), 0, view.knockbackResistance(),
-                    view.moveSpeedAttr());
+            return HitRegistrationUnit.preAttackerState(
+                    sample != null ? sample.x() : 0,
+                    sample != null ? sample.y() : 0,
+                    sample != null ? sample.z() : 0,
+                    lastYaw(attackerId), view, verdict);
         }
 
         private EntityState preVictimState(UUID victimId, PlayerView view) {
@@ -494,6 +513,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
             ConnectionDomains.Domain domain = domains.peek(id);
             return domain == null ? 0f : domain.lastYaw();
         }
+
+        /**
+         * The click-flush attacker yaw for the era-moment stamp — the same
+         * connection-domain value the pre-send directs the extras along — or null
+         * when the attacker has no connection domain (packetless attacker: no wire
+         * yaw exists, and the region recompute's live capture IS its attack-time
+         * yaw). NON-creating peek — the 2.4.4 domain-poisoning rule.
+         */
+        private Float registrationYaw(UUID id) {
+            ConnectionDomains.Domain domain = domains.peek(id);
+            return domain == null ? null : domain.lastYaw();
+        }
     }
 
     /* ---------------------------- shared helpers ---------------------------- */
@@ -520,6 +551,52 @@ public final class HitRegistrationUnit implements FeatureUnit {
         return gate.tryPreSend(victimId, nowMillis, minIntervalMillis);
     }
 
+    /**
+     * The pre-send attacker capture, pure over its frozen inputs so the enchant
+     * parity is unit-pinned at this seam. Attacker velocity is unused by the
+     * formula's attacker terms; sprint is the stamped verdict; the Knockback
+     * enchant level is the view's per-tick freeze — the netty thread cannot read
+     * inventory (Folia), and an adopted PRE_SENT/PINNED vector is never
+     * recomputed, so the value shipped HERE is the value the era extra rides. The
+     * movement-speed attribute rides the published view so the pre-sent knock's
+     * pace scaling matches the tick path (one truth).
+     */
+    static EntityState preAttackerState(
+            double x, double y, double z, float lastYaw, PlayerView view, SprintVerdict verdict) {
+        return new EntityState(x, y, z, lastYaw,
+                0, 0, 0, view.grounded(), verdict.sprinting(),
+                view.kbEnchantLevel(), view.knockbackResistance(), view.moveSpeedAttr());
+    }
+
+    /**
+     * Commits the transaction state for a planned velocity pre-send off the
+     * burst's actual ship {@link BurstSender.Outcome}. Only a DELIVERED burst may
+     * account wire-carried (PRE_SENT — the valve will consume the tracker
+     * duplicate); anything else on a wired victim is the wire-failed pin — the
+     * era-moment vector ships once via the genuine velocity event and no valve
+     * arms (a phantom PRE_SENT would let the valve eat the victim's only copy).
+     * A connectionless victim pins plain (the pre-existing B4 path). A no-velocity
+     * plan (hurt-only burst) commits nothing — the hit stays REGISTERED for the
+     * authoritative recompute. Pure over the transaction so the contract is
+     * unit-pinned at this seam.
+     */
+    static void commitPreSendState(
+            HitTransaction tx, KnockbackVector shipped, boolean velocityShips,
+            boolean victimHasWire, BurstSender.Outcome outcome) {
+        if (!velocityShips) {
+            return;
+        }
+        tx.planned();
+        if (victimHasWire && outcome == BurstSender.Outcome.DELIVERED) {
+            tx.preSent(shipped);
+        } else if (victimHasWire) {
+            tx.pinnedWireFailed(shipped);
+            tx.presend("unsendable-downgrade"); // the wire refused the burst — journal it (F9 namespace)
+        } else {
+            tx.pinned(shipped);
+        }
+    }
+
     private SprintVerdict sprintVerdict(UUID attackerId) {
         if (wtapConsultWire.get()) {
             // NON-creating peek: a packetless attacker has no wire, so it falls
@@ -535,12 +612,21 @@ public final class HitRegistrationUnit implements FeatureUnit {
     }
 
     private Double compensationFor(UUID victimId, PlayerView victimView) {
-        if (victimId == null || victimView == null || !snapshot.get().enabled(Feature.LATENCY_COMPENSATION)) {
+        if (victimId == null || victimView == null
+                || !snapshot.get().enabled(Feature.LATENCY_COMPENSATION)) {
             return null;
         }
-        Double ping = latency.forPlayer(victimId).pingMillis();
+        CompensationSettings settings = compensationSettings();
+        Double ping = latency.forPlayer(victimId).filteredPingMillis(settings.spikeThresholdMillis());
         int rtt = ping == null ? 0 : (int) Math.round(ping);
-        return CompensationQuery.verticalFor(victimView, rtt, victimView.motion().vy());
+        return CompensationQuery.verticalFor(
+                victimView, rtt, victimView.motion().vy(), settings.offGroundSync());
+    }
+
+    @SuppressWarnings("unchecked")
+    private CompensationSettings compensationSettings() {
+        return snapshot.get().settings(
+                (SettingsKey<CompensationSettings>) Feature.LATENCY_COMPENSATION.settingsKey());
     }
 
     /** The velocity-pre-send suppressor reason, or null when the pre-send is eligible. */

@@ -25,8 +25,11 @@ import org.junit.jupiter.api.Test;
 class ProfileParserTest {
 
     private static YamlConfiguration resource(String stem) {
+        // Bundled presets live under their formula-category folder (profiles/legacy/,
+        // profiles/modern/); the loader resolves them by stem regardless.
+        String classpath = "profiles/" + ConfigStore.bundledFolder(stem) + "/" + stem + ".yml";
         return YamlConfiguration.loadConfiguration(new InputStreamReader(
-                ProfileParserTest.class.getClassLoader().getResourceAsStream("profiles/" + stem + ".yml"),
+                ProfileParserTest.class.getClassLoader().getResourceAsStream(classpath),
                 StandardCharsets.UTF_8));
     }
 

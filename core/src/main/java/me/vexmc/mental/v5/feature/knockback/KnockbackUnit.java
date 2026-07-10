@@ -19,6 +19,7 @@ import me.vexmc.mental.kernel.math.PocketServoConfig;
 import me.vexmc.mental.kernel.math.PredictorInputs;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitGeometry;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.model.PlayerView;
@@ -29,6 +30,7 @@ import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.CompensationQuery;
 import me.vexmc.mental.kernel.wire.LatencyModel;
+import me.vexmc.mental.kernel.wire.SprintWire;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
@@ -36,6 +38,7 @@ import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
 import me.vexmc.mental.v5.delivery.HitIds;
@@ -263,13 +266,21 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             }
             // Adopt the pre-delivered vector — the era stamped once.
             desk.awaitVelocityEvent(tx);
-            applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
+            applyAttackerObligations(attacker, sprinting, tx.context().sprint());
             return;
         }
 
         Double compensationY = compensationFor(source, tx, session, victim);
         EntityState victimState = EntityStates.captureVictim(victim, session.ledger());
-        EntityState attackerState = EntityStates.capture(attacker, sprinting);
+        // The era-moment yaw: the extras are directed along the attacker's facing,
+        // which vanilla read synchronously inside attack() at click-flush. A
+        // fast-path REGISTERED hit recomputes here 1–2 ticks later, so the live
+        // location yaw has drifted with the attacker's mouse — consume the
+        // registration stamp instead (the SprintVerdict's exact sibling). Null
+        // stamp (Vanilla-source mint, packetless attacker) keeps the live capture,
+        // which is the click-flush yaw for both of those cases.
+        EntityState attackerState = adoptRegistrationYaw(
+                EntityStates.capture(attacker, sprinting), tx.context().attackerYaw());
         boolean freshSprint = source instanceof HitSource.Melee && sprinting
                 && tx.context().sprint().fresh() != null && tx.context().sprint().fresh();
         // The pocket servo (combo-hold §3.2): active only when THIS attacker holds
@@ -298,6 +309,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         KnockbackVector vector = paced.vector();
         tx.paceFactor(paced.paceFactor()); // journal the factor actually applied (D-6)
         tx.comboFactor(paced.comboFactor());
+        // The exact base() geometry + effective profile this hit consumed (F9). A
+        // region-path Vanilla(ENTITY_ATTACK) hit gets these too; its presend stays null
+        // (the formatter prints "none"). The PRE_SENT/PINNED adopt branch returns before
+        // this — its stamps were written at plan(), where the adopted vector was computed.
+        tx.profileName(profile.name());
+        tx.geometry(new HitGeometry(attackerState.x(), attackerState.z(), attackerState.yaw(),
+                victimState.x(), victimState.z()));
         // Commit the post-hit chase window on EVERY active servo hit (servo-lab
         // 2.4.5): this hit's attacker position/tick anchors the next window's
         // measurement, and the EMA the inputs carried is persisted. Load-bearing —
@@ -341,7 +359,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             // so only the (never-firing) velocity-event arm changes.
             desk.awaitVelocityEvent(tx);
         }
-        applyAttackerObligations(attacker, sprinting, tx.context().sprint().at());
+        applyAttackerObligations(attacker, sprinting, tx.context().sprint());
     }
 
     /** A protection plugin cancelling the melee hit withdraws the queued knock. */
@@ -382,9 +400,16 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (view == null) {
             return null;
         }
-        Double ping = latency.forPlayer(victim.getUniqueId()).pingMillis();
+        CompensationSettings settings = compensationSettings();
+        Double ping = latency.forPlayer(victim.getUniqueId()).filteredPingMillis(settings.spikeThresholdMillis());
         int rtt = ping == null ? 0 : (int) Math.round(ping);
-        return CompensationQuery.verticalFor(view, rtt, view.motion().vy());
+        return CompensationQuery.verticalFor(view, rtt, view.motion().vy(), settings.offGroundSync());
+    }
+
+    @SuppressWarnings("unchecked")
+    private CompensationSettings compensationSettings() {
+        return snapshot.get().settings(
+                (SettingsKey<CompensationSettings>) Feature.LATENCY_COMPENSATION.settingsKey());
     }
 
     /**
@@ -393,15 +418,22 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * sprint clear, and {@code setSprinting(false)} (a no-op when vanilla's own
      * attack already cleared it on the server-side melee path).
      *
-     * <p>Both clears are guarded by the hit's verdict stamp ({@code asOf}). Vanilla
-     * cleared sprint synchronously inside {@code attack}, so it could never eat a
-     * re-engage that arrived afterwards; Mental's clears run 1–2 ticks late at the
-     * deferred EDBEE, so a w-tap START in that window must survive. The wire clear
-     * no-ops under a newer wire write ({@link SprintWire#onServerClear(TickStamp)}),
-     * and the deferred {@code setSprinting(false)} is skipped when the wire has
-     * re-armed to sprinting by execution time (F2).</p>
+     * <p>Both clears are guarded by the hit's {@code verdict}. A wire-peeked verdict
+     * carries the wire's arrival sequence at peek time ({@link SprintVerdict#wireSeq}),
+     * so the clear is ordered by ARRIVAL, not by tick granularity: vanilla cleared
+     * sprint synchronously inside {@code attack}, so it could never eat a re-engage
+     * that arrived afterwards; Mental's clears run 1–2 ticks late at the deferred
+     * EDBEE, so a w-tap START that landed in the SAME tick as (and after) the ATTACK
+     * must survive — the 2.4.x same-tick retro-clear defect a tick stamp could not
+     * separate. The wire clear no-ops under a wire write with a larger seq
+     * ({@link SprintWire#onServerClear(long)}), and the deferred
+     * {@code setSprinting(false)} is skipped when the wire has re-armed past this
+     * hit's peek seq by execution time (F1). A verdict with no wire provenance
+     * ({@link SprintVerdict#fromWire} false) falls back to the tick-stamp guard
+     * ({@link SprintWire#onServerClear(TickStamp)}) and the plain live-wire read,
+     * byte-identical to 2.4.1.</p>
      */
-    private void applyAttackerObligations(LivingEntity attacker, boolean sprinting, TickStamp asOf) {
+    private void applyAttackerObligations(LivingEntity attacker, boolean sprinting, SprintVerdict verdict) {
         if (!(attacker instanceof Player player)) {
             return;
         }
@@ -430,18 +462,26 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // its ledger to a zero vertical (the 2.4.4 domain-poisoning bug; the
         // SwordBlockingUnit:259 non-creating idiom is the precedent).
         if (domains.has(attackerId)) {
-            domains.domainFor(attackerId).sprint().onServerClear(asOf);
+            SprintWire wire = domains.domainFor(attackerId).sprint();
+            if (verdict.fromWire()) {
+                wire.onServerClear(verdict.wireSeq());
+            } else {
+                // No wire provenance (wtap-registration off / view-fallback verdict):
+                // the stamp guard is the best available ordering, byte-identical to 2.4.1.
+                wire.onServerClear(verdict.at());
+            }
         }
         if (player.isSprinting()) {
             scheduling.runOn(player, () -> {
-                // At execution time (the attacker's own thread), skip the clear when
-                // the wire re-armed to sprinting after the hit — a re-engage newer
-                // than asOf that vanilla's synchronous clear would never have eaten.
-                // With no wire (a packetless attacker) there is nothing to consult,
-                // so mirror vanilla's unconditional clear directly.
-                if (domains.has(attackerId)
-                        && domains.domainFor(attackerId).sprint().verdictAt(clock.current()).sprinting()) {
-                    return;
+                // Skip the server-flag clear only for a re-engage NEWER than this hit's
+                // verdict peek (arrival order) — vanilla's synchronous clear could never
+                // eat it. With no wire provenance, keep the plain live-wire read (2.4.1).
+                if (domains.has(attackerId)) {
+                    SprintVerdict live = domains.domainFor(attackerId).sprint().verdictAt(clock.current());
+                    if (live.sprinting()
+                            && (!verdict.fromWire() || live.wireSeq() > verdict.wireSeq())) {
+                        return;
+                    }
                 }
                 player.setSprinting(false);
             }, () -> {});
@@ -492,7 +532,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
             CombatSession session, Player victim, LivingEntity attacker, HitSource source,
             HitTransaction original, KnockbackVector era, boolean wirePreSent, boolean sprinting,
             double paceFactor, double comboFactor) {
-        applyAttackerObligations(attacker, sprinting, original.context().sprint().at());
+        applyAttackerObligations(attacker, sprinting, original.context().sprint());
         if (era == null) {
             return; // nothing carried/computed — leave vanilla's (absent) knock
         }
@@ -503,7 +543,12 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // superseding id and a retired delivery can journal a correlated drop. It
         // carries the ORIGINAL sprint verdict — the journal context stays honest.
         HitTransaction fresh = mint(source, attackerId, victimId, original.context().sprint(),
-                paceFactor, comboFactor);
+                paceFactor, comboFactor, original.context().attackerYaw());
+        // Carry the original's F9 stamps like the factor carry above — the redelivery
+        // journals the same geometry/profile/pre-send disposition the original computed.
+        fresh.presend(original.presend());
+        fresh.geometry(original.geometry());
+        fresh.profileName(original.profileName());
         // Withdraw + JOURNAL the original (a PRE_SENT/PINNED submitFromWire) so the
         // tick sweep cannot record it as a false "no-velocity-event"; a REGISTERED
         // region-path original was never on the desk, so this is a no-op there.
@@ -522,15 +567,23 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                     // No registration burst reached the wire (server-side melee, or a
                     // paced-out velocity): ship VELOCITY + HURT now, exactly as the
                     // fast path would have — the client sees the era knock and flinch.
-                    burstSender().ship(user, entityId, era, hurtYaw, bundle);
-                    wireCopy = true;
+                    // Honor the ship Outcome (the blocked-path twin of F2): a burst the
+                    // wire refused (UNSENDABLE) placed no copy on the wire, so it must
+                    // NOT arm a valve for a wire copy that never existed.
+                    BurstSender.Outcome outcome = burstSender().ship(user, entityId, era, hurtYaw, bundle);
+                    wireCopy = outcome == BurstSender.Outcome.DELIVERED;
                 }
             }
             if (wireCopy) {
                 // A wire copy already carries the value; arm the valve so the
                 // authoritative tracker re-emission below (and any late vanilla
-                // velocity for this hit) is consumed once, never stacked on it.
-                valve.arm(victimId, ValvePayload.of(entityId, era));
+                // velocity for this hit) is consumed once, never stacked on it. The
+                // arm carries its tick stamp and survives the session sweep for the
+                // two-tick dup grace, so the end-of-tick tracker re-emission is
+                // consumed even when the session tick runs between this task-phase arm
+                // and sendChanges (the leg-b race); the burst itself is silent-written
+                // and cannot be eaten by this arm.
+                valve.arm(victimId, ValvePayload.of(entityId, era), clock.current());
             }
             // The victim's own hurt sound — the one client vanilla's blocked branch
             // leaves silent (see the javadoc). Play it to the victim alone; pitch
@@ -552,13 +605,19 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
 
     private HitTransaction mint(
             HitSource source, UUID attackerId, UUID victimId, SprintVerdict verdict,
-            double paceFactor, double comboFactor) {
+            double paceFactor, double comboFactor, Float attackerYaw) {
         HitContext context = new HitContext(
-                ids.next(), source, attackerId, victimId, verdict, false, null, clock.current());
+                ids.next(), source, attackerId, victimId, verdict, false, null,
+                clock.current(), attackerYaw);
         HitTransaction fresh = new HitTransaction(context);
         fresh.paceFactor(paceFactor); // carry the factors the original applied (D-6)
         fresh.comboFactor(comboFactor);
         return fresh;
+    }
+
+    /** The registration-time yaw stamp folded over the live capture; null = no stamp, live wins. */
+    static EntityState adoptRegistrationYaw(EntityState captured, Float registrationYaw) {
+        return registrationYaw == null ? captured : captured.withYaw(registrationYaw);
     }
 
     /**

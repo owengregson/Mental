@@ -1,0 +1,124 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  signature — Mental's signature knockback
+#
+#  An ORIGINAL Mental tuning (not a ported fork config) derived from the
+#  archived `velt` shape, then refined by playtesting. It keeps velt's late-era
+#  "dead consistent" feel — near-total residual wipe (friction 0.1, nothing
+#  stacks) and the full 0.5 sprint horizontal so w-tapping still decides
+#  trades — and tunes the combo arc with three small changes from velt:
+#
+#      air.horizontal  1.0  -> 0.92   (airborne horizontal trim — the pocket)
+#      base.vertical   0.36 -> 0.365  (a touch more lift on descending hits)
+#      air.vertical    1.0  -> 0.98   (airborne vertical trim — the follow-ups)
+#
+#  Horizontal — holding the reach pocket:  a combo's opener lands on a GROUNDED
+#  victim, whose launch tick decays at ground drag (stone ~0.546); every
+#  follow-up lands on an AIRBORNE victim, whose launch tick decays at air drag
+#  (0.91). For the same launch velocity the airborne hit keeps 0.91/0.546 ~
+#  1.67x as much horizontal on that first tick, so hits 2+ carry the victim a
+#  hair past the reach pocket and the combo "drifts." The engine applies the
+#  `air` multipliers ONLY to airborne victims, so air.horizontal is the one
+#  knob that retunes the follow-ups without touching the grounded opener.
+#  air.horizontal 0.92 removes ~0.063 (~8%) of horizontal launch velocity per
+#  airborne hit — full grounded-parity over the 2-tick combo window would be
+#  ~0.81, which over-damps; 0.92 is ~40% of the way there: enough to hold
+#  reach, small enough to keep velt's punch.
+#
+#  Vertical — the arc:  base.vertical 0.365 sits just above the 0.36 cap, so a
+#  resting/rising victim still pins at 0.36 (the cap bites) while a DESCENDING
+#  victim — the combo case — keeps a touch more lift (up to +0.005). air.vertical
+#  0.98 then trims the airborne follow-ups' vertical 2%. Net of the two: the
+#  opener gets a hair more height on a falling victim, the follow-ups a hair
+#  less — the arc the owner found held combos best.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Signature
+description: "Mental's signature feel — velt's residual wipe and full sprint horizontal, tuned to hold the combo reach pocket (airborne hits trimmed h x0.92 / v x0.98, base vertical 0.365)."
+
+knockback:
+  base:
+    horizontal: 0.325
+    # Just above the 0.36 cap: resting hits pin at 0.36, descending (combo)
+    # hits keep a touch more lift. See the header.
+    vertical: 0.365
+  vertical-mode: add
+  extra:
+    horizontal: 0.5
+    vertical: 0.0
+  wtap-extra:
+    enabled: false
+    horizontal: 0.5
+    vertical: 0.0
+  friction:
+    x: 0.1
+    y: 0.1
+    z: 0.1
+  limits:
+    # The cap stays 0.36; base.vertical 0.365 sits just above it so the cap
+    # bites on resting/rising hits while descending hits land a hair under.
+    vertical: 0.36
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    # The signature tweaks, applied to AIRBORNE victims only — i.e. the
+    # second-and-later combo hits. horizontal 0.92 trims the follow-ups' push
+    # 8% to hold the reach pocket without touching the grounded opener (hit 1);
+    # vertical 0.98 trims their height 2%. See the header for the derivation.
+    horizontal: 0.92
+    vertical: 0.98
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # When the victim's client receives the knock relative to their physics
+  # tick. The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on
+  # vanilla, both orders: a victim who joined before their attacker received
+  # the full stamp — identical to 1.8.9 — a victim who joined after, one
+  # friction step less). tracker ships the full stamp, the dominant era
+  # experience; tracker-decayed opts into the later-joiner wire (ground
+  # hits lose ×0.546 horizontal); immediate = the 1.8.9 in-attack send.
+  # Rod/projectile knocks rode the tracker on BOTH eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    # Matches velt: at 0.1 survival a ledger residual contributes under 0.03
+    # blocks of push, so the flat feel the wipe was built for is preserved.
+    combos: false
+    # `none` avoids surprise zero-knock cancels on modern gear.
+    armor-resistance: none
+    shield-blocking-cancels: true
+
+  # ── speed-scaling ────────────────────────────────────────────────────
+  # Speed-conformal knockback ("pace scaling"). A combo is a spacing
+  # equilibrium between three speeds: the victim's knock-FLIGHT (absolute —
+  # it does NOT scale with the Speed attribute) and the attacker's ground
+  # CHASE and victim's ground FLEE (both x1.6 at Speed III). At base speed
+  # they balance ("buttery"); Speed III scales chase+flee but not flight, so
+  # nobody can combo anyone. This scales the horizontal knock Mental delivers
+  # by the attacker's movement speed over its stance baseline, so every LENGTH
+  # scales together while every TIME (flight, cadence, immunity) stays fixed —
+  # a spatially-zoomed replica with identical rhythm. VERTICAL is never scaled
+  # (that would stretch flight TIME and desync the rhythm).
+  #   mode      off | attacker.  off = the era stamp ships byte-identical
+  #             (every archived-server preset). Signature — Mental's own
+  #             preset — opts in.
+  #   exponent  s = (attr / baseline)^exponent. 1.0 = fully conformal; lower
+  #             tempers the effect.
+  #   min/max   clamp on the final factor. reach (3.0) can't scale, so extreme
+  #             factors (Speed V+) still compress the margin — max marks where
+  #             the conformal window ends.
+  # Base-speed play yields factor 1.0 exactly (byte-identical era stamp);
+  # Speed III sprint (attr 0.208 / baseline 0.13) yields 1.6.
+  speed-scaling:
+    mode: attacker
+    exponent: 1.0
+    min: 0.5
+    max: 2.0

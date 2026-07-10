@@ -22,19 +22,23 @@ public final class DebugMenu extends Menu {
     private static final String ENABLED_KEY = "debug.enabled";
     private static final String CATEGORY_PREFIX = "debug.categories.";
 
-    private static final Map<DebugCategory, String> ICONS = Map.of(
-            DebugCategory.HITREG, "IRON_SWORD",
-            DebugCategory.KNOCKBACK, "PISTON",
-            DebugCategory.COMPENSATION, "CLOCK",
-            DebugCategory.FISHING, "FISHING_ROD",
-            DebugCategory.PROJECTILE, "SNOWBALL",
-            DebugCategory.PACKETS, "PAPER",
-            DebugCategory.ANTICHEAT, "IRON_BARS",
-            DebugCategory.SCHEDULING, "COMPASS",
-            DebugCategory.COMMANDS, "OAK_SIGN",
-            DebugCategory.CONFIG, "WRITABLE_BOOK");
+    // Map.ofEntries (not Map.of) — the JOURNAL channel takes the ICONS map to 11
+    // pairs, past Map.of's 10-pair ceiling. BOOK exists across the whole material
+    // range; WRITABLE_BOOK is already taken by CONFIG.
+    private static final Map<DebugCategory, String> ICONS = Map.ofEntries(
+            Map.entry(DebugCategory.HITREG, "IRON_SWORD"),
+            Map.entry(DebugCategory.KNOCKBACK, "PISTON"),
+            Map.entry(DebugCategory.JOURNAL, "BOOK"),
+            Map.entry(DebugCategory.COMPENSATION, "CLOCK"),
+            Map.entry(DebugCategory.FISHING, "FISHING_ROD"),
+            Map.entry(DebugCategory.PROJECTILE, "SNOWBALL"),
+            Map.entry(DebugCategory.PACKETS, "PAPER"),
+            Map.entry(DebugCategory.ANTICHEAT, "IRON_BARS"),
+            Map.entry(DebugCategory.SCHEDULING, "COMPASS"),
+            Map.entry(DebugCategory.COMMANDS, "OAK_SIGN"),
+            Map.entry(DebugCategory.CONFIG, "WRITABLE_BOOK"));
 
-    private static final int[] CATEGORY_SLOTS = {20, 21, 22, 23, 24, 29, 30, 31, 32, 33};
+    private static final int[] CATEGORY_SLOTS = {20, 21, 22, 23, 24, 29, 30, 31, 32, 33, 38};
 
     /** Row-4 centre: the "stream to my chat" toggle, set apart from the log-channel grid. */
     private static final int SUBSCRIBE_SLOT = 40;

@@ -87,8 +87,11 @@ public final class PocketServo {
      * and under-reads the post-knock chase burst, so without this floor σ* sinks
      * into the false-low min-clamp (the measured undershoot). Calibrated so σ*
      * centres near 1.0–1.1 at a typical mid-combo residual, landing inside the
-     * {@code [0.93, 1.35]} clamp band (owner playtest, 2026-07-07). A genuinely
-     * harder MEASURED chase still exceeds the floor and is used as-is.
+     * {@code [0.93, 1.35]} clamp band (owner playtest, 2026-07-07). That
+     * calibration was measured at plain-hit freshEra 0.40; sprint-fresh hits
+     * (F ≈ 0.9) saturate below the band on every chase channel and take the
+     * {@link #saturationFloor} deadband instead. A genuinely harder MEASURED chase
+     * still exceeds the floor and is used as-is.
      */
     public static final double CHASE_ALIGNMENT = 0.70;
 
@@ -340,6 +343,16 @@ public final class PocketServo {
         double sigmaStar = (fold.target - fold.constant - slope * residualCarry) / (freshEra * slope);
         double blended = 1.0 + config.gain() * (sigmaStar - 1.0);
         double sigma = Math.max(config.min(), Math.min(config.max(), blended));
+        // The saturation deadband (the 2026-07-09 sprint-fresh finding): when the min
+        // clamp binds AND σ* sits below the saturation floor, the clamped shave leaves
+        // the victim farther past the pocket than everything the shave bought — a
+        // pointless 7% era deviation on exactly the hit class (sprint-fresh, F ≈ 0.9)
+        // the [0.93, 1.35] band was never calibrated for. Ship the era stamp instead.
+        // The Solution stays fully priced (declined = false, σ* preserved) so the
+        // debug sink reads the saturation as σ = 1 with σ* far below min.
+        if (blended < config.min() && sigmaStar < saturationFloor(config.min())) {
+            sigma = 1.0;
+        }
         double predictedDNext = fold.constant + slope * (residualCarry + sigma * freshEra);
         return new Solution(
                 sigma, sigmaStar,
@@ -757,6 +770,23 @@ public final class PocketServo {
             return 1.0;
         }
         return Math.max(MIN_CHASE_ALIGNMENT, Math.min(1.0, alignment));
+    }
+
+    /**
+     * The min-clamp saturation floor (the sprint-fresh deadband; the 2026-07-09
+     * weak-KB round): below {@code σ* < minFactor − (1 − minFactor)} even the
+     * fully-clamped shave (σ = min) leaves the victim farther past the pocket than
+     * the whole budget the shave spent — the pocket miss at the clamp,
+     * {@code slope·F·(min − σ*)}, exceeds the shave's entire benefit,
+     * {@code slope·F·(1 − min)} — so the solve declines the shave and ships the
+     * era stamp (σ = 1). Both sides scale by the same {@code slope·freshEra}, so
+     * the boundary is exactly {@code 2·min − 1} for every geometry: derived, not a
+     * knob. Sprint-fresh hits (F ≈ 0.9) solve σ* 0.10–0.51 across the whole chase
+     * pocket — permanently below this floor at the shipped 0.93 min — while the
+     * 2.4.6 [0.93, 1.35] calibration was measured at plain-hit F 0.40 only.
+     */
+    public static double saturationFloor(double minFactor) {
+        return minFactor - (1.0 - minFactor);
     }
 
     /* ── shared flight helpers ────────────────────────────────────────────── */

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import me.vexmc.mental.kernel.delivery.Directive.Action;
@@ -12,6 +13,7 @@ import me.vexmc.mental.kernel.math.Decay;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitGeometry;
 import me.vexmc.mental.kernel.model.HitId;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.JournalEntry;
@@ -33,6 +35,11 @@ class DeliveryDeskTest {
     private static final int VICTIM_ENTITY = 42;
     private static final double EPSILON = 1.0e-9;
     private static final KnockbackVector VECTOR = new KnockbackVector(0.9, 0.4608, 0.0);
+
+    /** Sprint-bonus horizontal 0.4+0.5; vertical −0.0784×0.5 + 0.4 + 0.1 = 0.4608. */
+    private static final KnockbackVector SPRINT = new KnockbackVector(0.9, 0.4608, 0.0);
+    /** Standing knock: vertical −0.0784×0.5 + 0.4 = 0.3608, horizontal on the +z axis. */
+    private static final KnockbackVector STANDING = new KnockbackVector(0.0, 0.3608, 0.4);
 
     private final Clock clock = new Clock();
 
@@ -65,6 +72,14 @@ class DeliveryDeskTest {
         HitTransaction tx = new HitTransaction(ctx(id, new HitSource.Melee(), tick));
         tx.planned();
         tx.preSent(vector);
+        return tx;
+    }
+
+    /** A PINNED transaction carrying {@code vector} (a packetless victim), registered at {@code tick}. */
+    private static HitTransaction pinnedTx(long id, KnockbackVector vector, int tick) {
+        HitTransaction tx = new HitTransaction(ctx(id, new HitSource.Melee(), tick));
+        tx.planned();
+        tx.pinned(vector);
         return tx;
     }
 
@@ -157,6 +172,32 @@ class DeliveryDeskTest {
         JournalEntry entry = desk.journal().get(0);
         assertEquals(VECTOR, entry.shipped());
         assertTrue(!entry.wireCarried(), "PINNED is never wire-carried");
+        assertNull(entry.suppressReason(), "an ordinary pin journals no note");
+    }
+
+    /* ── 5b. wire-failed pin (F2) = ship, never a valve, journals the downgrade ─ */
+
+    @Test
+    void wireFailedPinnedResolvesAsShipWithoutValveAndJournalsTheDowngrade() {
+        DeliveryDesk desk = desk();
+        HitTransaction tx = new HitTransaction(ctx(1, new HitSource.Melee(), 0));
+        tx.planned();
+        tx.pinnedWireFailed(VECTOR);
+        desk.submitFromWire(tx); // the real netty entry
+        desk.awaitVelocityEvent(tx);
+
+        Directive directive = desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+        assertEquals(Action.SHIP, directive.action());
+        assertNull(directive.arm(),
+                "a wire-failed pin never arms a valve — the authoritative ENTITY_VELOCITY is the victim's only copy");
+        assertEquals(VECTOR, directive.ship());
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(1, journal.size());
+        assertEquals(VECTOR, journal.get(0).shipped());
+        assertTrue(!journal.get(0).wireCarried());
+        assertEquals("wire-failed", journal.get(0).suppressReason());
+        assertEquals(HitTransaction.State.RECORDED, tx.state());
     }
 
     /* ── 6. last-submitter-wins ────────────────────────────────────────── */
@@ -441,20 +482,146 @@ class DeliveryDeskTest {
     }
 
     @Test
-    void awaitingDeliveryForDoesNotInheritASupersededDecisionsArm() {
+    void supersedeCarriesTheOwedEventArmToTheNewestDecision() {
         DeliveryDesk desk = desk();
         HitTransaction armed = new HitTransaction(ctx(1, new HitSource.Melee(), 5));
         desk.submit(armed, VECTOR);
-        desk.awaitVelocityEvent(armed); // decision 1 is armed
+        desk.awaitVelocityEvent(armed); // decision 1 is armed — a velocity event is OWED
 
-        // A fresh decision supersedes it (same-tick double region hit). The await arm
-        // must NOT carry over — the new pending was submitted, not yet armed.
+        // A fresh decision supersedes it (same-tick double region hit). The owed debt
+        // CARRIES to the newest: the era wire ships ONE stamp per tick reflecting the
+        // latest server fields, so the newest decision answers the owed event.
         HitTransaction fresh = new HitTransaction(ctx(2, new HitSource.Melee(), 5));
         desk.submit(fresh, VECTOR);
-        assertTrue(!desk.awaitingDeliveryFor(new HitId(2)),
-                "superseding resets the arm — the fresh pending is not yet awaiting delivery");
+        assertTrue(desk.awaitingDeliveryFor(new HitId(2)),
+                "the owed velocity event carries to the newest decision");
         assertTrue(!desk.awaitingDeliveryFor(new HitId(1)),
                 "the superseded decision is no longer the pending");
+
+        // A fresh desk: an era-silent chain (neither submit arms) never fabricates a debt.
+        DeliveryDesk quiet = desk();
+        HitTransaction c = new HitTransaction(ctx(3, new HitSource.Melee(), 5));
+        HitTransaction d = new HitTransaction(ctx(4, new HitSource.Melee(), 5));
+        quiet.submit(c, VECTOR);
+        quiet.submit(d, VECTOR);
+        assertTrue(!quiet.awaitingDeliveryFor(new HitId(4)),
+                "no debt is ever fabricated for an era-silent chain");
+    }
+
+    /* ── F4: supersede carries the owed velocity event to the newest decision ── */
+
+    @Test
+    void supersededArmedDecisionsOwnEventShipsTheNewestVectorNeverVanilla() {
+        // The confirmed close-range weak-KB leak: an armed hit's owed velocity event
+        // used to fall to PASS_THROUGH once a second submission superseded it — vanilla's
+        // base-0.4 damage-pass velocity stood. Now the owed debt survives the supersede
+        // and the newest decision ships its full stamp (era's one-stamp-latest-fields wire).
+        DeliveryDesk desk = desk();
+        HitTransaction a = preSent(1, SPRINT, 0);
+        desk.submit(a, SPRINT);
+        desk.awaitVelocityEvent(a);
+
+        // A second submission supersedes mid-window; B's caller has NOT armed yet.
+        HitTransaction b = preSent(2, STANDING, 0);
+        desk.submit(b, STANDING);
+
+        Directive d = desk.resolve(0.0, 0.3608, 0.4);
+        assertEquals(Action.SHIP_AND_ARM_VALVE, d.action());
+        assertSame(STANDING, d.ship(), "branch 3 ships tx.carried() — the exact newest object");
+        assertEquals(ValvePayload.of(VICTIM_ENTITY, STANDING), d.arm(),
+                "(42, (short)0, (short)2886, (short)3200)");
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals(1L, journal.get(0).id().value());
+        assertNull(journal.get(0).shipped());
+        assertTrue(!journal.get(0).wireCarried());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertEquals(STANDING, journal.get(1).shipped());
+        assertTrue(journal.get(1).wireCarried());
+        assertNull(journal.get(1).suppressReason());
+
+        assertEquals(HitTransaction.State.RECORDED, a.state());
+        assertEquals(HitTransaction.State.RECORDED, b.state());
+    }
+
+    @Test
+    void wireArrivalsNeverVanishBetweenDrains() {
+        // Two wire submits with no owner op between: the old last-write-wins slot silently
+        // discarded the first. The CAS chain keeps both; the owner drains in ARRIVAL order,
+        // so the newest ends pending and the overtaken one journals "superseded".
+        DeliveryDesk desk = desk();
+        HitTransaction a = preSent(1, SPRINT, 0);
+        HitTransaction b = preSent(2, STANDING, 0);
+        desk.submitFromWire(a);
+        desk.submitFromWire(b);
+
+        desk.awaitVelocityEvent(b); // drains the chain: A becomes pending, B supersedes it
+        Directive d = desk.resolve(0.0, 0.3608, 0.4);
+        assertEquals(Action.SHIP_AND_ARM_VALVE, d.action());
+        assertEquals(STANDING, d.ship(), "the NEWEST — proves arrival-order drain, not stack order");
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals(1L, journal.get(0).id().value());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertTrue(journal.get(1).wireCarried());
+        assertEquals(HitTransaction.State.RECORDED, a.state());
+    }
+
+    @Test
+    void pinnedDoubleSubmitShipsTheNewestWithoutAValve() {
+        // The default-config packetless double-submit (finding trigger (b)): two PINNED
+        // wire arrivals at spam CPS. The newest ships; PINNED never arms a valve (B4).
+        DeliveryDesk desk = desk();
+        HitTransaction a = pinnedTx(1, SPRINT, 0);
+        HitTransaction b = pinnedTx(2, STANDING, 0);
+        desk.submitFromWire(a);
+        desk.submitFromWire(b);
+        // The arm argument is deliberately the OLDER tx: the DEBT arms, not the tx identity.
+        desk.awaitVelocityEvent(a);
+
+        Directive d = desk.resolve(0.0, 0.3608, 0.4);
+        assertEquals(Action.SHIP, d.action(), "PINNED never arms a valve (B4)");
+        assertSame(STANDING, d.ship());
+        assertNull(d.arm());
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals(1L, journal.get(0).id().value());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertEquals(STANDING, journal.get(1).shipped());
+        assertTrue(!journal.get(1).wireCarried());
+    }
+
+    @Test
+    void eraSilentSupersedeOfAnArmedDecisionStillAnswersTheOwedEvent() {
+        // The documented single-slot residual: the owed event is answered by the desk's
+        // newest era-model knowledge, never vanilla's leak. The exact-era answer (A's
+        // armed vector) is unreachable in a single slot, and this window is the narrow
+        // boundary-combo + blockhit overlap; the recompute strictly dominates the leak.
+        DeliveryDesk desk = desk();
+        HitTransaction a = preSent(1, SPRINT, 0);
+        desk.submit(a, SPRINT);
+        desk.awaitVelocityEvent(a); // A is armed — a velocity event is OWED
+
+        // An era-silent region recompute (REGISTERED) submitted UNARMED.
+        HitTransaction b = new HitTransaction(ctx(2, new HitSource.Melee(), 0));
+        desk.submit(b, STANDING);
+
+        Directive d = desk.resolve(0.1, 0.2, 0.3); // the LIVE-REGISTERED branch ignores the api
+        assertEquals(Action.SHIP, d.action());
+        assertEquals(STANDING, d.ship());
+        assertNull(d.arm(), "the era-model recompute ships, never a valve");
+
+        List<JournalEntry> journal = desk.journal();
+        assertEquals(2, journal.size());
+        assertEquals("superseded", journal.get(0).suppressReason());
+        assertEquals(2L, journal.get(1).id().value());
+        assertEquals(STANDING, journal.get(1).shipped());
     }
 
     @Test
@@ -583,5 +750,173 @@ class DeliveryDeskTest {
         JournalEntry entry = desk.journal().get(0);
         assertSame(vector, entry.shipped(), "the desk ships exactly the engine's vector");
         assertTrue(entry.wireCarried());
+    }
+
+    /* ── F9: journal capture enrichment ────────────────────────────────── */
+
+    @Test
+    void legacyAritiesBuildWithNullCapture() {
+        HitId id = new HitId(1);
+        HitSource src = new HitSource.Melee();
+        TickStamp stamp = new TickStamp(3);
+        JournalEntry sixArg = new JournalEntry(id, src, VECTOR, true, null, stamp);
+        JournalEntry sevenArg = new JournalEntry(id, src, VECTOR, true, null, stamp, 1.0);
+        JournalEntry eightArg = new JournalEntry(id, src, VECTOR, true, null, stamp, 1.0, 1.0);
+        assertNull(sixArg.capture(), "the pre-F9 arities default capture to null (additive growth)");
+        assertNull(sevenArg.capture());
+        assertNull(eightArg.capture());
+        assertEquals(1.0, sixArg.paceFactor(), EPSILON);
+        assertEquals(1.0, sixArg.comboFactor(), EPSILON);
+    }
+
+    @Test
+    void observerSeesEveryAppendInOrderWithTheContext() {
+        List<HitContext> contexts = new ArrayList<>();
+        List<JournalEntry> entries = new ArrayList<>();
+        DeliveryDesk desk = new DeliveryDesk(VICTIM_ENTITY, clock, 4, (context, entry) -> {
+            contexts.add(context);
+            entries.add(entry);
+        });
+
+        HitTransaction tx = preSent(1, VECTOR, 0);
+        desk.submit(tx, VECTOR);
+        desk.awaitVelocityEvent(tx);
+        desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z()); // ship-valve — journal entry 0
+
+        HitTransaction dropped = new HitTransaction(ctx(2, new HitSource.Melee(), 0));
+        desk.journalDrop(dropped, "victim-retired"); // journal entry 1
+
+        assertEquals(2, contexts.size());
+        assertEquals(2, entries.size());
+        List<JournalEntry> journal = desk.journal();
+        assertSame(journal.get(0), entries.get(0), "the observer saw the exact appended instance");
+        assertSame(journal.get(1), entries.get(1));
+        assertEquals(1L, contexts.get(0).id().value(), "order preserved with the context");
+        assertEquals(2L, contexts.get(1).id().value());
+    }
+
+    @Test
+    void captureCopiesStampsAndVerdict() {
+        DeliveryDesk desk = desk();
+        HitTransaction tx = new HitTransaction(ctx(1, new HitSource.Melee(), 0));
+        tx.presend("paced-out");
+        tx.profileName("legacy-1.7");
+        HitGeometry geometry = new HitGeometry(1.5, -2.25, 90f, 3.0, 4.5);
+        tx.geometry(geometry);
+        desk.submit(tx, VECTOR);
+        desk.awaitVelocityEvent(tx);
+        desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z()); // REGISTERED live branch → ship-formula
+
+        JournalEntry.Capture capture = desk.journal().get(0).capture();
+        assertTrue(capture.sprinting());
+        assertEquals(Boolean.TRUE, capture.sprintFresh());
+        assertEquals("paced-out", capture.presend());
+        assertEquals("ship-formula", capture.resolution());
+        assertEquals(geometry, capture.geometry());
+        assertEquals("legacy-1.7", capture.profile());
+    }
+
+    @Test
+    void resolutionTagsPerBranch() {
+        // 3. unmodified PRE_SENT → ship-valve
+        DeliveryDesk valveDesk = desk();
+        HitTransaction preSentTx = preSent(1, VECTOR, 0);
+        valveDesk.submit(preSentTx, VECTOR);
+        valveDesk.awaitVelocityEvent(preSentTx);
+        valveDesk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+        assertEquals("ship-valve", valveDesk.journal().get(0).capture().resolution());
+
+        // 4. api-modified PRE_SENT → ship-corrected
+        DeliveryDesk correctedDesk = desk();
+        HitTransaction modifiedTx = preSent(2, VECTOR, 0);
+        correctedDesk.submit(modifiedTx, VECTOR);
+        correctedDesk.awaitVelocityEvent(modifiedTx);
+        correctedDesk.resolve(0.5, 0.5, 0.5);
+        assertEquals("ship-corrected", correctedDesk.journal().get(0).capture().resolution());
+
+        // 5. PINNED → ship-pinned
+        DeliveryDesk pinnedDesk = desk();
+        HitTransaction pinned = pinnedTx(3, VECTOR, 0);
+        pinnedDesk.submit(pinned, VECTOR);
+        pinnedDesk.awaitVelocityEvent(pinned);
+        pinnedDesk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+        assertEquals("ship-pinned", pinnedDesk.journal().get(0).capture().resolution());
+
+        // 2. null-formula resistance roll → cancel
+        DeliveryDesk cancelDesk = desk();
+        HitTransaction roll = new HitTransaction(ctx(4, new HitSource.Melee(), 0));
+        cancelDesk.submit(roll, null);
+        cancelDesk.awaitVelocityEvent(roll);
+        cancelDesk.resolve(0.0, 0.4, 0.0);
+        assertEquals("cancel", cancelDesk.journal().get(0).capture().resolution());
+
+        // 6. supersede → superseded
+        DeliveryDesk supersedeDesk = desk();
+        supersedeDesk.submit(preSent(5, VECTOR, 0), VECTOR);
+        supersedeDesk.submit(preSent(6, VECTOR, 0), VECTOR); // the earlier is superseded
+        assertEquals("superseded", supersedeDesk.journal().get(0).capture().resolution());
+
+        // packetless sweep age-2 → drop
+        DeliveryDesk dropDesk = desk();
+        HitTransaction stranded = preSent(7, VECTOR, 5);
+        dropDesk.submit(stranded, VECTOR);
+        dropDesk.awaitVelocityEvent(stranded);
+        dropDesk.sweep(new TickStamp(7)); // age 2, packetless
+        assertEquals("drop", dropDesk.journal().get(0).capture().resolution());
+
+        // ensure → ensured
+        DeliveryDesk ensureDesk = desk();
+        HitTransaction rod = new HitTransaction(ctx(8, new HitSource.RodPull(), 0));
+        rod.planned();
+        ensureDesk.submit(rod, VECTOR);
+        ensureDesk.ensure(new HitId(8));
+        assertEquals("ensured", ensureDesk.journal().get(0).capture().resolution());
+
+        // F6 terminal late-resolve → late-resolve
+        DeliveryDesk lateDesk = desk();
+        HitTransaction late = preSent(9, VECTOR, 5);
+        lateDesk.submit(late, VECTOR);
+        lateDesk.awaitVelocityEvent(late);
+        lateDesk.sweep(new TickStamp(7)); // drop → RECORDED
+        lateDesk.submit(late, VECTOR);
+        lateDesk.awaitVelocityEvent(late);
+        lateDesk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+        assertEquals("late-resolve", lateDesk.journal().get(1).capture().resolution());
+
+        // withdrawSuperseded → superseded (reason string unchanged)
+        DeliveryDesk withdrawDesk = desk();
+        withdrawDesk.submit(preSent(10, VECTOR, 0), VECTOR);
+        withdrawDesk.withdrawSuperseded(new HitId(10), "blocked-redeliver", new HitId(11));
+        assertEquals("superseded", withdrawDesk.journal().get(0).capture().resolution());
+        assertEquals("blocked-redeliver -> 11", withdrawDesk.journal().get(0).suppressReason());
+    }
+
+    @Test
+    void captureHandlesANullSprintVerdictWithoutNpe() {
+        DeliveryDesk desk = desk();
+        HitContext noSprint = new HitContext(new HitId(1), new HitSource.Melee(),
+                UUID.randomUUID(), UUID.randomUUID(), null, true, null, new TickStamp(0));
+        HitTransaction tx = new HitTransaction(noSprint);
+        desk.submit(tx, VECTOR);
+        desk.awaitVelocityEvent(tx);
+        desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+
+        JournalEntry.Capture capture = desk.journal().get(0).capture();
+        assertTrue(!capture.sprinting(), "a null verdict reads not-sprinting");
+        assertNull(capture.sprintFresh(), "a null verdict has no wire freshness");
+    }
+
+    @Test
+    void observerThrowNeverBreaksDelivery() {
+        DeliveryDesk desk = new DeliveryDesk(VICTIM_ENTITY, clock, 4, (context, entry) -> {
+            throw new RuntimeException("a debug tap must never break delivery");
+        });
+        HitTransaction tx = preSent(1, VECTOR, 0);
+        desk.submit(tx, VECTOR);
+        desk.awaitVelocityEvent(tx);
+        Directive directive = desk.resolve(VECTOR.x(), VECTOR.y(), VECTOR.z());
+        assertEquals(Action.SHIP_AND_ARM_VALVE, directive.action(),
+                "the SHIP directive still returns despite a throwing observer");
+        assertEquals(1, desk.journal().size(), "the entry is still held");
     }
 }

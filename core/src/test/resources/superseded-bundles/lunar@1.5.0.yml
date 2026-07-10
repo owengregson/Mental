@@ -1,0 +1,71 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  lunar — a community recreation of Lunar-network-era knockback
+#
+#  From the most-circulated community recreation (confidence: likely, not
+#  confirmed). Published as friction DIVISOR 1.5 — Mental's friction is the
+#  surviving fraction, so 1.5 ÷ becomes 0.6667 here: noticeably more of the
+#  victim's motion survives each hit than vanilla's 0.5, which is what
+#  makes this profile feel "carry-y". Flat 1.8 delivery.
+#
+#  Original knobs:  friction 1.5 ÷ · h 0.46 · v 0.3535 · limit 0.3535 ·
+#                   sprint-h ×1.3 · slowdown-h 0.6
+#  Translation notes:
+#    · sprint ×1.3 is a multiplier on the push there; Mental's sprint bonus
+#      is additive along the attacker's facing — extra.horizontal 0.138
+#      (= 0.3 × 0.46) matches the fresh-hit distance.
+#    · slowdown-h (attacker recoil) is client-predicted on every server;
+#      a plugin neither can nor should touch it.
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Lunar
+description: "Community recreation of Lunar-network-era knockback — higher friction survival, soft vertical."
+
+knockback:
+  base:
+    horizontal: 0.46
+    vertical: 0.3535
+  vertical-mode: add
+  extra:
+    horizontal: 0.138
+    vertical: 0.0
+  wtap-extra:
+    enabled: false
+    horizontal: 0.138
+    vertical: 0.0
+  friction:
+    x: 0.6667
+    y: 0.6667
+    z: 0.6667
+  limits:
+    vertical: 0.3535
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # When the victim's client receives the knock relative to their physics
+  # tick. The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on
+  # vanilla, both orders: a victim who joined before their attacker received
+  # the full stamp — identical to 1.8.9 — a victim who joined after, one
+  # friction step less). tracker ships the full stamp, the dominant era
+  # experience; tracker-decayed opts into the later-joiner wire (ground
+  # hits lose ×0.546 horizontal); immediate = the 1.8.9 in-attack send.
+  # Rod/projectile knocks rode the tracker on BOTH eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    combos: false
+    armor-resistance: legacy
+    shield-blocking-cancels: true

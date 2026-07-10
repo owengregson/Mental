@@ -84,7 +84,16 @@ public final class EntityStates {
                 heldKnockbackLevel(player), clampedResistance(player));
     }
 
-    private static int heldKnockbackLevel(LivingEntity entity) {
+    /**
+     * The held Knockback enchant level (main-hand, else off-hand). Public for the
+     * {@code SessionService} view freeze — the per-tick owning-thread read that lets
+     * the netty pre-send carry the enchant extra ({@link
+     * me.vexmc.mental.kernel.model.PlayerView#kbEnchantLevel()}). Present 1.9+;
+     * {@code Enchantment.KNOCKBACK} kept its name across the whole range (the
+     * platform seam's own doc), and this exact code already runs on every matrix
+     * entry via the live captures, so the freeze adds no cross-version surface.
+     */
+    public static int heldKnockbackLevel(LivingEntity entity) {
         EntityEquipment equipment = entity.getEquipment();
         if (equipment == null) {
             return 0;

@@ -78,6 +78,35 @@ class HitTransactionTest {
     }
 
     @Test
+    void pinnedWireFailedCarriesTheNoteAndIsNeverWireCarried() {
+        HitTransaction tx = fresh();
+        tx.planned();
+        tx.pinnedWireFailed(VECTOR);
+        assertEquals(State.PINNED, tx.state());
+        assertEquals(VECTOR, tx.carried());
+        assertFalse(tx.wireCarried(), "a wire-failed pin never arms a valve");
+        assertEquals(HitTransaction.WIRE_FAILED, tx.deliveryNote());
+        assertEquals("wire-failed", tx.deliveryNote());
+    }
+
+    @Test
+    void ordinaryPinnedCarriesNoDeliveryNote() {
+        HitTransaction tx = fresh();
+        tx.planned();
+        tx.pinned(VECTOR);
+        assertNull(tx.deliveryNote(), "an ordinary pin journals no note (byte-identical default)");
+    }
+
+    @Test
+    void pinnedWireFailedFromRegisteredIsIllegal() {
+        HitTransaction tx = fresh();
+        IllegalStateException error =
+                assertThrows(IllegalStateException.class, () -> tx.pinnedWireFailed(VECTOR));
+        assertTrue(error.getMessage().contains("REGISTERED"), "names the current state");
+        assertTrue(error.getMessage().contains("PINNED"), "names the target state");
+    }
+
+    @Test
     void suppressedRetractedDroppedEnsuredAllResolveToRecorded() {
         HitTransaction suppressed = fresh();
         suppressed.suppressed("resistance-roll");

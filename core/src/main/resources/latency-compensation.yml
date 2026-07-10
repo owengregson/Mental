@@ -10,11 +10,9 @@ latency-compensation:
   # PING uses the dedicated 1.17+ play ping/pong channel (recommended);
   # KEEPALIVE measures over keep-alive packets.
   probe-strategy: PING
-  # Subtracted from each measured round trip before compensation
-  # (tournament-derived constant).
-  ping-offset-ms: 25
-  # A ping jump larger than this is treated as a one-off spike and the
-  # previous reading is used instead.
+  # A jump larger than this between consecutive probe readings is a one-off
+  # spike: the smaller of the two readings is trusted (a round trip can be
+  # overstated by a delayed echo, never understated).
   spike-threshold-ms: 20
   # How often probes are sent to players in combat.
   probe-interval-ticks: 5
