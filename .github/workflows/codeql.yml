@@ -1,13 +1,21 @@
-# CodeQL static analysis for the Java sources. build-mode: none scans the
-# source tree without invoking Gradle at all — the right choice here, because
-# a full build would drag the whole mega-jar pipeline (shadow → jvmdg →
-# shade → four verification gates) plus foojay JDK downloads into every scan
-# for zero analysis benefit. Results land in the Security → Code scanning tab.
+# CodeQL static analysis — the ADVANCED setup; GitHub's default setup is
+# deliberately disabled (the two are mutually exclusive: default setup rejects
+# SARIF from workflow-based analyses). Coverage matches what default setup
+# scanned, minus its noise: java-kotlin for the plugin, javascript-typescript
+# for the legacy-lab harness scripts, actions for the workflows themselves.
 #
-# PR runs are path-filtered to files that can contain or shape Java (a docs
+# build-mode: none scans sources without invoking Gradle at all — the right
+# choice here, because a full build would drag the whole mega-jar pipeline
+# (shadow → jvmdg → shade → four verification gates) plus foojay JDK downloads
+# into every scan for zero analysis benefit. Results land in Security → Code
+# scanning.
+#
+# PR runs are path-filtered to files the analyzers can actually see (a docs
 # PR has nothing to scan); pushes to main keep the code-scanning baseline
 # fresh so PR alerts diff against current main; the weekly schedule picks up
-# newly-published queries against unchanged code.
+# newly-published queries against unchanged code. Query suite: the default
+# (precision over breadth) — flip `queries: security-extended` in the init
+# step to widen it.
 name: codeql
 
 on:
@@ -17,9 +25,11 @@ on:
     branches: [main]
     paths:
       - '**/*.java'
+      - '**/*.js'
+      - '**/*.ts'
       - '**/*.gradle.kts'
       - 'gradle/**'
-      - '.github/workflows/codeql.yml'
+      - '.github/workflows/**'
   schedule:
     - cron: '24 4 * * 1' # Mondays 04:24 UTC — off the top-of-hour rush
 
@@ -32,12 +42,17 @@ concurrency:
 
 jobs:
   analyze:
+    name: analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       security-events: write # upload code-scanning results
       actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java-kotlin, javascript-typescript, actions]
 
     steps:
       - name: Checkout
@@ -46,12 +61,10 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: java-kotlin
+          languages: ${{ matrix.language }}
           build-mode: none
-          # Default query suite — the mandate is signal, not noise; extend to
-          # security-extended deliberately if the alert volume proves workable.
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4
         with:
-          category: '/language:java-kotlin'
+          category: '/language:${{ matrix.language }}'
