@@ -69,8 +69,17 @@ range-wide).
   boot-safety suite only; `combat-smoke` = the Folia same-region pair; absent
   property = today's full behaviour (modern entries untouched). All 8 legacy
   versions are at `full` — none stay at `boot`.
-- **The floor 1.9.4 is on the PR lane** (`ci: "pr"`), so floor classload
-  regressions surface per-PR; the other legacy entries stay `release`.
+- **The floor 1.9.4 AND 1.13.2 are on the PR lane** (`ci: "pr"`): the floor
+  surfaces classload regressions per-PR, and 1.13.2 (Java 13, `bytecodeTier`
+  52) gives the PR lane its only v52/downgraded-tier coverage — without it the
+  base tree would only ever be proven at release. The other legacy entries
+  stay `release`. On CI, the PR lane runs only when the change class warrants
+  it: build.yml's `context` job diffs the branch against main — docs-only
+  changes boot nothing, code changes run the `ci: "pr"` lanes, and
+  build-toolchain changes (gradle files, `support-matrix.json`, `scripts/`,
+  workflows) run the FULL paper fan-out. Pushes to main never run build.yml
+  at all (release.yml owns them); `ci-ok` is the single fan-in status check
+  branch protection requires.
 
 ## Reading results honestly
 
