@@ -66,3 +66,17 @@ the servo entirely. Verified: the 27 precision pins (four re-derived by hand for
 the floored chase — including the renamed `theChaseFloorPreventsTheAirborneFalseLowMode`
 which now proves the floor holds σ* interior instead of collapsing to 0.60), a
 live 1.21.4 ComboSuite pass in the new band, and the full unit gate.
+
+## Addendum (2026-07-09): the calibration covered plain hits only — sprint-fresh saturates
+
+The instrument's freshEra 0.40 is a PLAIN hit. A sprint-fresh hit (freshEra ≈ 0.9 =
+base 0.4 + aligned sprint extra 0.5) more than doubles the σ-sensitivity, and the
+inverse solve lands σ* ≈ 0.10–0.51 across the whole 2.5–3.5-block chase band under
+EVERY chase channel (un-saturating needs chaseTravel ≈ 4.1 blocks, above the max
+attribute channel's ~3.37) — permanently below the 0.93 min clamp. Result: a
+deterministic ×0.93 fresh shave (≈ 0.28 blocks of settle: 4.4706·0.9·0.07) on every
+hit-3+ chase sprint hit that ALSO missed the 2.85 pocket by ~1–3 blocks. Fixed by the
+saturation deadband: σ* < PocketServo.saturationFloor(min) = 2·min − 1 declines the
+shave to the era σ = 1 (the clamped shave would recover less than half the residual
+pocket miss there). Finding: chase-pocket-sprint-hits-pin-min-clamp-everywhere in
+docs/superpowers/research/2026-07-09-weak-kb-close-range-pathway-findings.md.

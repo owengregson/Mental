@@ -354,6 +354,10 @@ modules:
 #                  centres sigma near 1.0-1.1, so the floor rarely pulls below 0.93
 #                  and the ceiling admits the harder "apply more" closes; past them
 #                  the pocket is honestly lost and era physics wins over a non-era knock.
+#                  When the solve lands so far below min-factor that even the clamped
+#                  shave cannot approach the pocket (sigma* < 2*min-factor - 1 — every
+#                  sprint-fresh chase hit does), the servo declines the shave entirely
+#                  and ships the FULL era knock instead of a pointless min-factor shave.
 #   window-ticks the cadence horizon (t*) the flight is projected over — the era
 #                full-hit cadence (10). The predictor already folds the shipped
 #                vertical stamp's air-time, ping horizons and the ground tail into
