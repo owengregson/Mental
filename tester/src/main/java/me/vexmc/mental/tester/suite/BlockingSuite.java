@@ -741,12 +741,20 @@ public final class BlockingSuite {
 
             // Era truth (every tier): a blocked hit still knocks the victim FULL —
             // only the DAMAGE is reduced. The module never cancels the event or
-            // touches velocity, so a knock must have arrived (a velocity event, or
-            // Mental's own KnockbackApplyEvent when Mental owns the knock).
-            boolean knocked = captors.velocityOf(blocker.uuid()) != null
-                    || captors.knockbackAppliesTo(blocker.uuid()) > 0;
-            context.expect(knocked,
-                    "a blocked hit produced no knockback — era blocks must knock FULL");
+            // touches velocity, so a knock must arrive (a velocity event, or
+            // Mental's own KnockbackApplyEvent when Mental owns the knock). AWAIT
+            // it: the damage event is captured mid-tick during the EDBEE dispatch,
+            // while both knock signals land at the END-of-tick tracker phase
+            // (setVelocity's hurtMarked → PlayerVelocityEvent; the desk resolve →
+            // KnockbackApplyEvent) — an instant read here races the same tick and
+            // loses. This assertion first went live when the S2 trigger fix let a
+            // clientless fake actually enter the interact-staged block state; the
+            // race predates it.
+            context.awaitUntil(() -> captors.velocityOf(blocker.uuid()) != null
+                            || captors.knockbackAppliesTo(blocker.uuid()) > 0, 40,
+                    () -> "a blocked hit produced no knockback — era blocks must knock FULL"
+                            + " (velocity=" + captors.velocityOf(blocker.uuid())
+                            + ", applies=" + captors.knockbackAppliesTo(blocker.uuid()) + ")");
         } finally {
             toggleModule(context, "sword-blocking", false);
             context.syncRun(() -> {
