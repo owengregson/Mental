@@ -278,9 +278,11 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // published view — the SAME frozen truth the netty pre-send's preVictimState
         // reads — so the region recompute and any pre-send agree on the clamped
         // vertical. Null view (pre-first-tick) ⇒ NaN ⇒ the clamp is a strict no-op.
-        // For server-driven fakes the measurement EXISTS but tracks the ledger
-        // residual (their Δy IS the decayed knock), so the clamp is a behavioral
-        // no-op there — the divergence that bites needs a client that hovers.
+        // For server-driven fakes the measurement EXISTS: where the server
+        // integrates their motion (1.11+) it tracks the ledger residual and the
+        // clamp is a behavioral no-op; below 1.11 an unintegrated fake HOVERS —
+        // exactly the diverging real-client posture the fix targets — and the
+        // clamp bites (the KnockbackSuite leak-class cases pin it live).
         PlayerView clampView = session.view();
         double victimMeasuredVy = clampView == null ? Double.NaN : clampView.measuredVy();
         EntityState victimState = EntityStates.captureVictim(victim, session.ledger(), victimMeasuredVy);

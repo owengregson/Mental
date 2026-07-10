@@ -152,10 +152,13 @@ public final class HitFeedbackListener implements Listener {
         }
 
         // 3. Post-hit health decides the extra low-health layer. A killing hit
-        //    plays the NORMAL set but NEVER the extra — death-effects owns the moment.
+        //    plays the NORMAL set but NEVER the extra — death-effects owns the
+        //    moment. An EMPTY effective layer (the VANILLA preset, a bare custom)
+        //    never reads as LOW_HP either: the decision describes what the module
+        //    DID, and with no layer configured nothing extra was played.
         double postHitHealth = victim.getHealth() - finalDamage;
         boolean killing = postHitHealth <= 0.0;
-        boolean lowHealth = !killing && postHitHealth < lowHealthCeiling;
+        boolean lowHealth = !killing && postHitHealth < lowHealthCeiling && !lowHealthSounds.isEmpty();
 
         if (!nearby.isEmpty()) {
             emit(loc, nearby, victimId, lowHealth);

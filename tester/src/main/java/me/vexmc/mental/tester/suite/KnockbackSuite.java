@@ -9,6 +9,7 @@ import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.EntityState;
 import me.vexmc.mental.kernel.model.JournalEntry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.kernel.model.PlayerView;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
@@ -130,13 +131,18 @@ public final class KnockbackSuite {
      * negative once the victim's LEDGER vy falls past −(base + extra)/friction.y
      * — kohi sprint: −0.87 — which a free-falling airborne ledger reaches
      * ~15–20 ticks after an airborne hit. velt/signature were immune
-     * (friction.y 0.1); every practice preset leaked. The fix floors the five
-     * practice presets' final vertical at 0.0 (limits.vertical-min), and this
-     * stages exactly the leak class live and asserts the SHIP through the
-     * journal — the "what did we actually ship" seam: y ≥ 0, exactly the
-     * floored 0.0, and exactly the engine expectation (formula parity survives
-     * the floor; the floored value is also tick-slack-immune, since one more
-     * decay tick only deepens the pre-floor negative).
+     * (friction.y 0.1); every practice preset leaked. 2.4.7 floored the five
+     * practice presets' final vertical at 0.0 (limits.vertical-min); 2.5.2's
+     * measured-reality clamp then fixed the ROOT — the diverged ledger itself.
+     * The victim here never physically falls (the float holds it hovering /
+     * rising), so the view's measured Δy pulls the capture up to
+     * {@code max(ledgerVy, measuredVy − 0.15)} and the hit ships era-POSITIVE
+     * lift; the 0.0 floor stops being load-bearing and stays only as the belt
+     * for the no-measurement path. This stages exactly the leak class live and
+     * asserts the SHIP through the journal — the "what did we actually ship"
+     * seam: the sampler feeds a real measurement, y &gt; 0, and exactly the
+     * engine expectation computed through the SAME clamped capture production
+     * uses (formula parity survives the clamp).
      *
      * <p>Staging: a clientless fake never moves from a knock and never lands its
      * ledger through the rim, so the ledger is driven airborne PHYSICALLY — the
@@ -196,8 +202,9 @@ public final class KnockbackSuite {
             // kohi sprint ships negative below vy −0.87 (−1.0 gives a pre-floor
             // y of −1.0 × 0.5 + 0.35 + 0.085 = −0.065 — unambiguously
             // leak-class); legacy-1.7 sprint sits exactly at its −1.0 threshold
-            // and every further decay tick goes negative — either way the SHIP
-            // must be the floored 0.0 (2.4.8 extended the floor to legacy).
+            // and every further decay tick goes negative. The RAW ledger is what
+            // must reach the leak zone — the 2.5.2 clamp then repairs it at the
+            // capture, which is exactly what hit 2 pins.
             CombatSession session = mental.sessions().sessionFor(victim.uuid());
             context.expect(session != null, "no combat session for the victim");
             double[] lastSeenVy = new double[] {Double.NaN};
@@ -217,13 +224,21 @@ public final class KnockbackSuite {
                     + " ~+0.4 means the float re-stamps it)");
 
             // Hit 2 — the reported downward hit. Same-tick engine expectation
-            // (null override: latency compensation is off for this case).
+            // (null override: latency compensation is off for this case),
+            // captured through the SAME measured-reality clamp production
+            // applies: the published view's measured Δy (the hovering/rising
+            // float, never a fall) pulls the diverged residual up to
+            // measuredVy − 0.15 before the formula runs.
             KnockbackVector[] expected = new KnockbackVector[1];
             double[] ledgerVy = new double[1];
+            double[] measuredVy = new double[1];
             int shipsBefore = context.sync(() -> {
                 EntityState attackerState = EntityStates.capture(attacker.player());
-                EntityState victimState = EntityStates.captureVictim(victim.player(), session.ledger());
-                ledgerVy[0] = victimState.vy();
+                ledgerVy[0] = EntityStates.captureVictim(victim.player(), session.ledger()).vy();
+                PlayerView view = session.view();
+                measuredVy[0] = view == null ? Double.NaN : view.measuredVy();
+                EntityState victimState =
+                        EntityStates.captureVictim(victim.player(), session.ledger(), measuredVy[0]);
                 KnockbackProfile profile = profileFor(mental, victim);
                 expected[0] = SuiteDelivery.melee(
                         KnockbackEngine.compute(attackerState, victimState, profile, null),
@@ -235,6 +250,9 @@ public final class KnockbackSuite {
             });
             context.expect(ledgerVy[0] <= -1.0,
                     "staging failed — the ledger vy must be leak-class (got " + ledgerVy[0] + ")");
+            context.expect(!Double.isNaN(measuredVy[0]),
+                    "the packetless sampler fed no measured Δy into the view — the"
+                            + " 2.5.2 clamp's live input is unwired for this victim");
 
             JournalEntry ship = awaitNewShip(context, mental, victim, shipsBefore);
             context.expect(ship != null && ship.shipped() != null,
@@ -242,8 +260,13 @@ public final class KnockbackSuite {
             context.expect(ship.shipped().y() >= 0.0,
                     "a practice-preset knock must NEVER point down (shipped y "
                             + ship.shipped().y() + " off ledger vy " + ledgerVy[0] + ")");
-            context.expectNear(0.0, ship.shipped().y(), 1.0e-9,
-                    "the leak-class hit must ship exactly the floored 0.0 vertical");
+            context.expect(ship.shipped().y() > 0.0,
+                    "the clamped hit must ship POSITIVE lift — the 2.5.2"
+                            + " measured-reality clamp restores the era vertical on a"
+                            + " hovering victim; an exact-0.0 ship means the diverged"
+                            + " ledger reached the formula unclamped (shipped y "
+                            + ship.shipped().y() + " off ledger vy " + ledgerVy[0]
+                            + ", measured Δy " + measuredVy[0] + ")");
             context.expect(expected[0] != null, "engine returned no vector for the staged hit");
             context.expectNear(expected[0].y(), ship.shipped().y(), 1.0e-9,
                     "the journaled SHIP must equal the engine expectation (formula parity)");

@@ -8,13 +8,14 @@ import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import me.vexmc.mental.tester.fake.FakePlayer;
+import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.feedback.FeedbackTrace;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.inventory.ItemStack;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -351,12 +352,18 @@ public final class FeedbackSuite {
      * layer does fire below the threshold), so the killing-hit assertion
      * cannot pass vacuously on a layer that never fires at all.
      *
-     * <p>Health staging: iron-sword damage spans [1.2, 6.0] across the 1.9+
-     * attack-charge range, so 9.0 hp leaves every possible post-hit health
-     * inside (0, 8.0) — below the default 4-heart threshold, above death —
-     * and 1.0 hp dies to any charge. The preset overlay is written BEFORE the
-     * enable: the reconciler assembles settings only on the disabled→enabled
-     * transition, so a preset landing after the toggle would never be read.</p>
+     * <p>Health staging: the attacker's damage rides pinned ATTRIBUTES (the
+     * BlockingSuite idiom — base 7.0, attack-speed 40.0 for a full meter every
+     * hit), never a held item: a clientless fake's equipment attribute
+     * modifiers apply through the living-entity equipment tick, which legacy
+     * servers do not reliably run for it before the staged hit (1.9.4 landed
+     * fist-tier damage off a held iron sword and the low-HP window never
+     * opened). With the attribute pinned, 9.0 hp lands post-hit at 2.0 — and
+     * anywhere in [2.0, 7.6] under any residual charge — inside (0, 8.0):
+     * below the default 4-heart threshold, above death; 1.0 hp dies to any
+     * charge (min 1.4). The preset overlay is written BEFORE the enable: the
+     * reconciler assembles settings only on the disabled→enabled transition,
+     * so a preset landing after the toggle would never be read.</p>
      */
     private static void runDeathEffectsSignature(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -367,8 +374,13 @@ public final class FeedbackSuite {
         FeedbackTrace trace = mental.feedbackTrace();
 
         try {
-            // Preset first (see the javadoc), then the two enables.
-            setDeathEffectsPreset(context, "signature");
+            // Presets first (see the javadoc), then the two enables. Hit-feedback
+            // runs SIGNATURE too: its low-HP layer is non-empty there, so the
+            // contrast pin observes the layer actually firing — the label is
+            // gated on a non-empty effective layer, and the vanilla preset would
+            // read plain EMITTED at any health.
+            setPreset(context, "death-effects", "signature");
+            setPreset(context, "hit-feedback", "signature");
             toggleModule(context, "death-effects", true);
             toggleModule(context, "hit-feedback", true);
             context.expect(moduleActive(mental, "death-effects"),
@@ -380,9 +392,11 @@ public final class FeedbackSuite {
                 Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
                 attacker.spawn(Arena.offset(centre, 0, -2));
                 victim.spawn(Arena.offset(centre, 0, 1));
-                attacker.player().getInventory().setItemInMainHand(new ItemStack(Material.IRON_SWORD));
             });
             context.awaitTicks(5);
+            context.expect(context.sync(() -> armAttacker(attacker)),
+                    "attack-damage/attack-speed attributes unresolved — cannot stage"
+                            + " deterministic damage for the health windows");
 
             // The contrast hit: non-killing, post-hit below the 4-heart
             // threshold — the low-HP layer MUST fire here. setHealth and the
@@ -406,9 +420,9 @@ public final class FeedbackSuite {
             context.expect(entriesFor(trace, "death-effects").isEmpty(),
                     "death-effects fired on a non-killing hit: " + trace.entries());
 
-            // The killing hit. Full recharge first (Player#attack reset the
-            // meter) so the sword lands its full 6.0 against 1.0 hp.
-            context.awaitTicks(16);
+            // The killing hit. A short settle re-fills the meter (attack-speed
+            // 40 recharges within a tick) so the pinned 7.0 lands against 1.0 hp.
+            context.awaitTicks(4);
             trace.clear();
             captors.reset();
             context.syncRun(() -> {
@@ -460,8 +474,9 @@ public final class FeedbackSuite {
             toggleModule(context, "hit-feedback", false);
             toggleModule(context, "death-effects", false);
             // The parse default IS vanilla, so writing it back restores the
-            // pre-test effective config even though the overlay key persists.
-            setDeathEffectsPreset(context, "vanilla");
+            // pre-test effective config even though the overlay keys persist.
+            setPreset(context, "death-effects", "vanilla");
+            setPreset(context, "hit-feedback", "vanilla");
             context.syncRun(() -> {
                 attacker.remove();
                 victim.remove();
@@ -475,6 +490,30 @@ public final class FeedbackSuite {
     /*  Helpers                                                            */
     /* ------------------------------------------------------------------ */
 
+    /**
+     * Pins the attacker's damage and meter through ATTRIBUTES (the BlockingSuite
+     * idiom): base 7.0 kills the 1.0-hp stage and lands the 9.0-hp stage inside
+     * the low-HP window under any charge; attack-speed 40.0 re-fills the meter
+     * within a tick. A held weapon is deliberately not used — its attribute
+     * modifiers ride the living-entity equipment tick, which legacy servers do
+     * not reliably run for a clientless fake before the staged hit.
+     */
+    private static boolean armAttacker(FakePlayer attacker) {
+        Attribute damageAttribute = Attributes.attackDamage();
+        Attribute speedAttribute = Attributes.attackSpeed();
+        if (damageAttribute == null || speedAttribute == null) {
+            return false;
+        }
+        AttributeInstance attackDamage = attacker.player().getAttribute(damageAttribute);
+        AttributeInstance attackSpeed = attacker.player().getAttribute(speedAttribute);
+        if (attackDamage == null || attackSpeed == null) {
+            return false;
+        }
+        attackDamage.setBaseValue(7.0);
+        attackSpeed.setBaseValue(40.0);
+        return true;
+    }
+
     /** The trace entries one module journaled, in ring order. */
     private static List<FeedbackTrace.Entry> entriesFor(FeedbackTrace trace, String module) {
         List<FeedbackTrace.Entry> matching = new ArrayList<>();
@@ -487,13 +526,13 @@ public final class FeedbackSuite {
     }
 
     /**
-     * Writes the {@code death-effects.preset} machine-overlay key and reloads —
-     * the same overlay-wins path the GUI uses; the human YAML is never touched.
+     * Writes one module's {@code <module>.preset} machine-overlay key and reloads
+     * — the same overlay-wins path the GUI uses; the human YAML is never touched.
      */
-    private static void setDeathEffectsPreset(TestContext context, String preset) throws Exception {
+    private static void setPreset(TestContext context, String module, String preset) throws Exception {
         context.syncRun(() -> {
             MentalPluginV5 plugin = (MentalPluginV5) Bukkit.getPluginManager().getPlugin("Mental");
-            plugin.overlaySet("death-effects.preset", preset);
+            plugin.overlaySet(module + ".preset", preset);
             plugin.management().reload();
         });
         context.awaitTicks(1);
