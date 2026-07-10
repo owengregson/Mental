@@ -12,6 +12,7 @@ import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
+import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
 import me.vexmc.mental.v5.config.settings.DebugSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
@@ -125,6 +126,8 @@ public final class SnapshotParser {
             case HIT_FEEDBACK -> parseHitFeedback(reader(main, "hit-feedback", "config.yml", issues));
             case DAMAGE_INDICATORS ->
                     parseDamageIndicators(reader(main, "damage-indicators", "config.yml", issues));
+            case DEATH_EFFECTS ->
+                    parseDeathEffects(reader(main, "death-effects", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
         };
     }
@@ -455,6 +458,18 @@ public final class SnapshotParser {
             entry.issues().warn(entry.prefix() + "." + nameKey,
                     "no " + nameKey + " name — entry skipped", "(skipped)");
         }
+    }
+
+    private static DeathEffectsSettings parseDeathEffects(ConfigReader reader) {
+        DeathEffectsSettings d = DeathEffectsSettings.DEFAULTS;
+        // Same contract as hit-feedback: the custom knobs are parsed regardless of
+        // the preset (a `custom` switch finds them ready); the record's
+        // lightning()/sounds()/particles() pick the effective set per preset.
+        return new DeathEffectsSettings(
+                reader.oneOf("preset", d.preset(), DeathEffectsSettings.Preset.class),
+                reader.flag("lightning", d.customLightning()),
+                parseSounds(reader, "sounds", d.customSounds()),
+                parseParticles(reader, d.customParticles()));
     }
 
     private static DamageIndicatorsSettings parseDamageIndicators(ConfigReader reader) {

@@ -13,6 +13,7 @@ import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
+import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
@@ -87,6 +88,14 @@ class SnapshotTest {
         assertTrue(feedback.lowHealthSounds().isEmpty(), "no low-health layer by default (VANILLA)");
         assertEquals(4.0, feedback.lowHealthThresholdHearts(), 0.0, "default low-health threshold is 4 hearts");
         assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
+        assertEquals(DeathEffectsSettings.DEFAULTS, settings(snapshot, Feature.DEATH_EFFECTS));
+        // The VANILLA death preset is a strict nothing — no lightning, no sounds,
+        // no particles (the module toggle owns zero-touch; enabled-but-vanilla is
+        // a no-op by construction).
+        DeathEffectsSettings death = settings(snapshot, Feature.DEATH_EFFECTS);
+        assertFalse(death.lightning(), "vanilla death preset strikes no lightning");
+        assertTrue(death.sounds().isEmpty(), "vanilla death preset plays nothing");
+        assertTrue(death.particles().isEmpty(), "vanilla death preset pops nothing");
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -447,6 +456,67 @@ class SnapshotTest {
         assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, s.lifetimeTicks());
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
         assertTrue(result.issues().get(0).contains("lifetime-ticks"), () -> result.issues().get(0));
+    }
+
+    @Test
+    void deathEffectsCustomKnobsReadFromTheConfig() throws Exception {
+        // preset: custom reads the lightning flag and the sounds:/particles:
+        // lists — the same list-of-records shape hit-feedback introduced. A
+        // dust particle carries its RRGGBB hex color in the block field (the
+        // runtime maps particle "dust" that way; there is no block state).
+        Snapshot snapshot = parse("""
+                death-effects:
+                  preset: custom
+                  lightning: true
+                  sounds:
+                    - sound: entity.lightning_bolt.thunder
+                      volume: 0.8
+                      pitch: 1.4
+                  particles:
+                    - particle: dust
+                      block: ff00aa
+                      count-min: 4
+                      count-max: 6
+                      mode: spread
+                      spread: {x: 0.4, y: 0.5, z: 0.4}
+                """, "", "", "").snapshot();
+        DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
+        assertEquals(DeathEffectsSettings.Preset.CUSTOM, s.preset());
+        assertTrue(s.lightning(), "custom preset honours the lightning flag");
+        assertEquals(1, s.sounds().size());
+        assertEquals("entity.lightning_bolt.thunder", s.sounds().get(0).sound());
+        assertEquals(0.8f, s.sounds().get(0).volume(), 1e-6);
+        assertEquals(1.4f, s.sounds().get(0).pitch(), 1e-6);
+        assertEquals(1, s.particles().size());
+        assertEquals("dust", s.particles().get(0).particle());
+        assertEquals("ff00aa", s.particles().get(0).block(),
+                "the dust hex color rides the block field");
+        assertEquals(HitFeedbackSettings.Mode.SPREAD, s.particles().get(0).mode());
+        assertEquals(0.5, s.particles().get(0).spreadY(), 1e-9);
+    }
+
+    @Test
+    void deathEffectsPresetsDispatchTheirInCodeSets() throws Exception {
+        // A named preset resolves the in-code constants and ignores the custom
+        // knobs entirely — signature strikes its cosmetic lightning even with
+        // the custom flag written false alongside it.
+        Snapshot snapshot = parse("""
+                death-effects:
+                  preset: signature
+                  lightning: false
+                """, "", "", "").snapshot();
+        DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
+        assertTrue(s.lightning(), "signature strikes lightning regardless of the custom flag");
+        assertEquals(DeathEffectsSettings.SIGNATURE_SOUNDS, s.sounds());
+        assertEquals(DeathEffectsSettings.SIGNATURE_PARTICLES, s.particles());
+        // The owner's tune, pinned by value: the glow-squid death call over a
+        // white/yellow/gold dust burst plus uncolored firework sparks.
+        assertEquals("entity.glow_squid.death", s.sounds().get(0).sound());
+        assertEquals(4, s.particles().size());
+        assertEquals("ffffff", s.particles().get(0).block());
+        assertEquals("ffff55", s.particles().get(1).block());
+        assertEquals("ffaa00", s.particles().get(2).block());
+        assertEquals("firework", s.particles().get(3).particle());
     }
 
     @Test

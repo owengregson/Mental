@@ -305,8 +305,9 @@ modules:
   # redirected (this aids the instant splash, not the cloud). Tuned in the fast-pots
   # section below. Default OFF.
   fast-pots: false
-  # FEEDBACK family — cosmetic hit presentation. Both default OFF (zero-touch: a
-  # disabled module changes nothing the game does or shows).
+  # FEEDBACK family — the Combat Effects modules, cosmetic presentation only.
+  # All three default OFF (zero-touch: a disabled module changes nothing the
+  # game does or shows).
   #
   # hit-feedback: replaces the vanilla melee hurt-sound broadcast with your own
   # configured sounds and pops particles at the victim's chest. Its scope matches
@@ -317,6 +318,11 @@ modules:
   # ATTACKER's screen only (a client-only packet armour stand). Tuned in the
   # damage-indicators section below. Default OFF.
   damage-indicators: false
+  # death-effects: a cosmetic strike the moment a player dies, from ANY cause
+  # (PlayerDeathEvent) — optional packet-rendered lightning, sounds, and a
+  # particle burst at the death spot. Tuned in the death-effects section below.
+  # Default OFF.
+  death-effects: false
 
 # Off-hand slot filter, active when modules.disable-offhand is true.
 #
@@ -629,6 +635,71 @@ damage-indicators:
   text: "&f-{HEALTH} &c❤&r"
   crit-text: "&c&l** -{HEALTH} ❤ **"
   crit-threshold-hearts: 5.0
+
+# Death effects, active when modules.death-effects is true. A cosmetic strike
+# the moment a player dies, from ANY cause (PlayerDeathEvent) — lightning, a
+# sound, and a particle burst at the death spot.
+#
+# The lightning is a PACKET RENDER only, never a real entity: the bolt and its
+# flash are drawn client-side, so by construction there is no fire, no damage,
+# and no block interaction — nothing about the world changes.
+#
+# preset: vanilla   → a strict nothing (the default). Even with the module
+#                     enabled this preset changes nothing — the toggle owns
+#                     zero-touch, the preset owns the tune.
+# preset: signature → Mental's own tune: the cosmetic lightning bolt, the
+#                     glow-squid death call (falls back to entity.squid.death
+#                     below 1.17, where no glow squid existed — printed once in
+#                     the boot report), and a white/yellow/gold burst. Vanilla's
+#                     firework particle is not colorable, so the burst is an
+#                     honest approximation: colored dust shaped like a firework
+#                     blast, plus uncolored firework sparks on top.
+# preset: custom    → reads the lightning flag and the sounds:/particles:
+#                     lists below verbatim.
+#
+# The knobs below are consulted ONLY under preset: custom; they are shown here
+# at the signature values as an editable template. The list entries take the
+# same fields as hit-feedback's lists (sound/volume/pitch; particle/block/
+# count-min/count-max/mode/speed/spread), with ONE twist:
+#   particle: dust  is the colorable burst particle — its RRGGBB hex color
+#                   rides the block field (block: ffaa00 = gold dust). For
+#                   every other particle, block keeps its usual meaning (the
+#                   block-state name for block-crack particles).
+death-effects:
+  preset: vanilla
+  lightning: false
+  sounds:
+    - sound: entity.glow_squid.death
+      volume: 1.0
+      pitch: 0.95
+  particles:
+    - particle: dust
+      block: ffffff
+      count-min: 8
+      count-max: 12
+      mode: spread
+      speed: 0.0
+      spread: {x: 0.5, y: 0.5, z: 0.5}
+    - particle: dust
+      block: ffff55
+      count-min: 8
+      count-max: 12
+      mode: spread
+      speed: 0.0
+      spread: {x: 0.5, y: 0.5, z: 0.5}
+    - particle: dust
+      block: ffaa00
+      count-min: 8
+      count-max: 12
+      mode: spread
+      speed: 0.0
+      spread: {x: 0.5, y: 0.5, z: 0.5}
+    - particle: firework
+      count-min: 10
+      count-max: 14
+      mode: emanate
+      speed: 0.12
+      spread: {x: 0, y: 0, z: 0}
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

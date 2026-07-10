@@ -52,7 +52,8 @@ class FeatureRegistryTest {
             "fast-pots",
             // FEEDBACK (2.5.2)
             "hit-feedback",
-            "damage-indicators");
+            "damage-indicators",
+            "death-effects");
 
     @Test
     void yamlKeysAreExactlyTheOperatorContractSetUniqueAndNonNull() {
