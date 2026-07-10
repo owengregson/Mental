@@ -64,7 +64,8 @@ public final class DamageRouter implements Listener {
         // attack) is Vanilla(ENTITY_ATTACK) — the knockback unit treats that as
         // melee; a RodPull is never re-derived here (B6).
         session.beginEvent(mintVanilla(
-                new HitSource.Vanilla(event.getCause().name()), attackerId(event), victim.getUniqueId()));
+                new HitSource.Vanilla(event.getCause().name()), attackerId(event), victim.getUniqueId(),
+                attackerSprinting(event)));
     }
 
     /** The typed source of this hit: an in-flight transaction's, or a fresh Vanilla one. */
@@ -72,16 +73,32 @@ public final class DamageRouter implements Listener {
         return active != null ? active.context().source() : new HitSource.Vanilla(cause.name());
     }
 
-    /** Mints a REGISTERED Vanilla transaction with an owning-thread-built context. */
-    HitTransaction mintVanilla(HitSource source, UUID attackerId, UUID victimId) {
+    /**
+     * Mints a REGISTERED Vanilla transaction with an owning-thread-built context. The
+     * {@code attackerSprinting} value is the SAME live {@code isSprinting()} the
+     * knockback engine reads for a Vanilla-source hit (the region thread, ahead of the
+     * MONITOR engine read within the one event dispatch — {@code isSprinting()} cannot
+     * change between them), carried into the sprint verdict PURELY so the delivery
+     * journal tells the truth: the engine reads live, so a hardcoded
+     * {@code SprintVerdict(false)} printed {@code sprint=f} for hits that shipped
+     * sprint-scale (S4). {@code fresh} stays null — no wire view exists for a Vanilla
+     * mint (the journal prints {@code -}) — and the engine still re-reads live for a
+     * Vanilla source, so which value the ENGINE consumes is unchanged.
+     */
+    HitTransaction mintVanilla(HitSource source, UUID attackerId, UUID victimId, boolean attackerSprinting) {
         HitContext context = new HitContext(
                 ids.next(), source, attackerId, victimId,
-                new SprintVerdict(false, null, clock.current()), false, null, clock.current());
+                new SprintVerdict(attackerSprinting, null, clock.current()), false, null, clock.current());
         return new HitTransaction(context);
     }
 
     private static UUID attackerId(EntityDamageByEntityEvent event) {
         Entity damager = event.getDamager();
         return damager == null ? null : damager.getUniqueId();
+    }
+
+    /** The attacker's live sprint flag — the same read the Vanilla-source engine uses; false for a non-player damager. */
+    private static boolean attackerSprinting(EntityDamageByEntityEvent event) {
+        return event.getDamager() instanceof Player player && player.isSprinting();
     }
 }

@@ -1,7 +1,10 @@
 package me.vexmc.mental.v5.delivery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.UUID;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -47,7 +50,8 @@ class DamageRouterTest {
     void mintVanillaBuildsARegisteredTransactionStampedFromTheClock() {
         DamageRouter router = new DamageRouter(null, () -> new TickStamp(7), new HitIds());
 
-        HitTransaction tx = router.mintVanilla(new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM);
+        HitTransaction tx = router.mintVanilla(
+                new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM, false);
 
         assertEquals(HitTransaction.State.REGISTERED, tx.state());
         assertEquals(new HitSource.Vanilla("ENTITY_ATTACK"), tx.context().source());
@@ -55,7 +59,26 @@ class DamageRouterTest {
         assertEquals(VICTIM, tx.context().victimId());
         assertEquals(new TickStamp(7), tx.context().registeredAt());
 
-        HitTransaction second = router.mintVanilla(new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM);
+        HitTransaction second = router.mintVanilla(
+                new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM, false);
         assertNotEquals(tx.context().id().value(), second.context().id().value(), "ids are monotonic");
+    }
+
+    @Test
+    void mintVanillaCarriesTheLiveSprintValueForTheJournal() {
+        DamageRouter router = new DamageRouter(null, () -> new TickStamp(3), new HitIds());
+
+        // A sprinting vanilla attacker mints a SPRINTING verdict so the journal reads
+        // sprint=t (the engine reads live isSprinting() — the mint must match it, S4).
+        HitTransaction sprinting = router.mintVanilla(
+                new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM, true);
+        assertTrue(sprinting.context().sprint().sprinting(),
+                "a sprinting vanilla attacker mints a sprinting verdict (journal honesty)");
+        assertNull(sprinting.context().sprint().fresh(),
+                "fresh stays null — no wire view exists for a Vanilla mint");
+
+        HitTransaction notSprinting = router.mintVanilla(
+                new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM, false);
+        assertFalse(notSprinting.context().sprint().sprinting());
     }
 }

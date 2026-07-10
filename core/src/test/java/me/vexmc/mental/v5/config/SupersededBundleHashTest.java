@@ -25,13 +25,14 @@ import org.junit.jupiter.api.Test;
  */
 class SupersededBundleHashTest {
 
-    /** Every hashed archive resource → its preset (the §1.3 enumeration, 28 forms). */
+    /** Every hashed archive resource → its preset (the §1.3 enumeration, 29 forms). */
     private static final Map<String, String> ARCHIVE = archive();
 
-    /** The ten current bundles — none may hash-match any archived revision. */
+    /** The current bundles — none may hash-match any archived revision. */
     private static final String[] CURRENT_PRESETS = {
             "legacy-1.7", "legacy-1.8", "kohi", "minehq", "badlion", "velt",
-            "mmc", "lunar", "signature", "custom"
+            "mmc", "lunar", "signature",
+            "modern-vanilla", "modern-uplift", "modern-combo", "custom"
     };
 
     private static Map<String, String> archive() {
@@ -64,6 +65,7 @@ class SupersededBundleHashTest {
         map.put("custom@1.4.0.yml", "custom");
         map.put("custom@1.5.0.yml", "custom");
         map.put("custom@2.4.0.yml", "custom");
+        map.put("custom@2.4.8.yml", "custom");
         return map;
     }
 
@@ -95,7 +97,7 @@ class SupersededBundleHashTest {
         // The self-upgrade-loop guard: if any archived hash equalled a current
         // bundle, that bundle would upgrade to itself forever.
         for (String preset : CURRENT_PRESETS) {
-            String current = read("profiles/" + preset + ".yml");
+            String current = read("profiles/" + ConfigStore.bundledFolder(preset) + "/" + preset + ".yml");
             assertFalse(SupersededPresets.isSupersededBundleText(preset, current),
                     () -> "the current " + preset + " bundle must NOT be a superseded revision");
         }
@@ -119,7 +121,8 @@ class SupersededBundleHashTest {
                 "null text must never match");
         // velt has no superseded revision (combos moot at 0.1 survival) — any text is
         // an owner edit; an unknown preset name likewise.
-        assertFalse(SupersededPresets.isSupersededBundleText("velt", read("profiles/velt.yml")),
+        assertFalse(SupersededPresets.isSupersededBundleText("velt",
+                        read("profiles/" + ConfigStore.bundledFolder("velt") + "/velt.yml")),
                 "velt carries no superseded revision");
         assertFalse(SupersededPresets.isSupersededBundleText("nope", "anything\n"),
                 "an unknown preset must never match");

@@ -88,6 +88,28 @@ class JournalCaptureTest {
     }
 
     @Test
+    void rendersVanillaSourceWithSprintingAttacker() {
+        // S4 journal honesty: a Vanilla(ENTITY_ATTACK) hit whose attacker was live-
+        // sprinting mints a sprinting verdict; fresh stays null (no wire view). The
+        // journal must read sprint=t fresh=- — not the pre-S4 sprint=f that a hardcoded
+        // SprintVerdict(false) printed for a hit that shipped sprint-scale.
+        HitContext context = context(4, new HitSource.Vanilla("ENTITY_ATTACK"), ATTACKER, VICTIM,
+                new SprintVerdict(true, null, new TickStamp(0)), new TickStamp(0));
+        JournalEntry.Capture capture = new JournalEntry.Capture(
+                true, null, null, "ship-formula", null, "legacy-1.7");
+        // shipped (0.3, 0.36, 0.4): h = hypot(0.3, 0.4) = 0.5; v = 0.36 → 0.360.
+        JournalEntry entry = new JournalEntry(new HitId(4), new HitSource.Vanilla("ENTITY_ATTACK"),
+                new KnockbackVector(0.3, 0.36, 0.4), false, null, new TickStamp(2), 1.0, 1.0, capture);
+
+        String line = JournalCapture.format(context, entry, "-");
+        assertEquals(
+                "hit=4 src=vanilla(ENTITY_ATTACK) out=ship-formula presend=none reason=-"
+                        + " ship=h=0.500 v=0.360 wire=f sprint=t fresh=- pace=1.00 combo=1.00"
+                        + " geom=- profile=legacy-1.7 families=- attacker=aaaaaaaa victim=bbbbbbbb tick=2",
+                line);
+    }
+
+    @Test
     void familiesOfListsTheEnabledFeaturesAndSkipsTheDisabled() {
         YamlConfiguration empty = new YamlConfiguration();
         Snapshot snapshot = SnapshotParser.parse(empty, empty, empty, empty, Map.of()).snapshot();

@@ -75,7 +75,7 @@ class MigrationsTest {
         assertEquals("custom", knockback.getString("knockback.profile"));
         assertEquals("cancel", knockback.getString("fishing-knockback.reel-in"));
 
-        YamlConfiguration custom = load("profiles/custom.yml");
+        YamlConfiguration custom = load("profiles/legacy/custom.yml");
         assertEquals(0.42, custom.getDouble("knockback.base.horizontal"));
         assertEquals(0.36, custom.getDouble("knockback.base.vertical"));
         assertEquals(1.5, custom.getDouble("knockback.modifiers.sprint"));
@@ -108,7 +108,7 @@ class MigrationsTest {
         new ConfigStore(dataFolder, resources, message -> {}).ensureDefaultFiles();
 
         assertEquals("legacy-1.7", load("knockback.yml").getString("knockback.profile"));
-        assertEquals("Custom", load("profiles/custom.yml").getString("display-name"),
+        assertEquals("Custom", load("profiles/legacy/custom.yml").getString("display-name"),
                 "an untuned migration keeps the bundled custom preset, not a migrated one");
     }
 

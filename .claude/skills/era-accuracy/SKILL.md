@@ -76,11 +76,37 @@ resetting sprint. Mental reconstructs it: the `SwordBlockingUnit` (was
 `SwordBlockingModule.resetSprintForBlock`) re-arms the sprint ledgers on the
 block right-click via the `SprintWire` (was `SprintTracker.armSprintReset`),
 gated on the RAW client sprint flag (the wire's client-sprint read, was
-`SprintTracker.isClientSprinting` — the only signal that survives Mental's own
-post-hit `setSprinting(false)`) so a stationary defensive block never gains a
-phantom bonus. NOTE the local-player sprint-particle visual during a block is
-client-authoritative rendering and cannot be removed server-side (same family as
-the right-click "item rises" cosmetic) — only the FUNCTIONAL reset is restored.
+`SprintTracker.isClientSprinting` — the only signal that survives the wire's own
+post-hit clear) so a stationary defensive block never gains a phantom bonus. The
+right-click that re-arms it is the born-cancelled `RIGHT_CLICK_AIR`
+`PlayerInteractEvent` (the listener is `ignoreCancelled=false`, self-filtering on
+`useItemInHand() != DENY`) or the victim-aimed `PlayerInteractEntityEvent` — both
+reach the re-arm (2026-07-10). NOTE the local-player sprint-particle visual during
+a block is client-authoritative rendering and cannot be removed server-side (same
+family as the right-click "item rises" cosmetic) — only the FUNCTIONAL reset is
+restored.
+
+**The modern-client sprint latch — why Mental no longer runs
+`setSprinting(false)`.** Vanilla's in-attack server-flag clear (the server half
+of w-tap) is deliberately NOT reconstructed (removed 2026-07-10). On 1.21.2+ a
+server-side `setSprinting(false)` is ECHOED to the attacker's own client, which
+adopts it, drops its local sprint, and confirms with one STOP_SPRINTING — and no
+START returns (item-use block-hitting blocks a fresh sprint start; the client
+sends START only on a rising edge), so the raw client flag latches false and
+every later melee reads plain: a one-way latch. Real vanilla never produced this
+at spam cadence (its clear sits behind the ≥90%-charge gate, where the client
+predicts the same clear and re-engages, so the echo is always redundant). The
+observable era contract is the WIRE cadence — bonus, a one-tick gap, then a
+re-arm on the client's held sprint intent — which the `SprintWire` reproduces:
+the hit clears only the wire sprint (`onServerClear`, spending its freshness) and
+`reconcile` re-arms the bonus one tick later when the raw `clientSprinting` flag
+survived (no STOP followed the hit). A client that DID express un-sprint (Via
+legacy, a spoofed modern client, a slow full-charge clicker) sends STOP → no auto
+re-arm → a real START (the w-tap) required, freshness armed as ever — so the
+w-tap / block-hit techniques are preserved exactly where a client expresses them,
+and only a client that never un-sprinted keeps the bonus (matching both its own
+belief and the modern-vanilla baseline). Never re-add the deferred
+`setSprinting(false)`.
 
 ## Myths (do not implement, do not "fix")
 

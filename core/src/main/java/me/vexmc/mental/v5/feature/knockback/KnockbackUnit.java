@@ -78,9 +78,10 @@ import org.bukkit.inventory.ItemStack;
  * <p>Dispatch is on the typed {@link HitSource}: a {@code RodPull} is never
  * treated as melee (B6); a server-side melee that never hit the fast path arrives
  * as {@code Vanilla(ENTITY_ATTACK)} and is knocked. Accepted sprint-bonus hits run
- * the vanilla obligations the cancelled attack left behind — the attacker's
- * {@code setSprinting(false)}, its ledger {@code ×0.6} self-slow, and the wire
- * sprint clear.</p>
+ * the vanilla obligations the cancelled attack left behind — its ledger
+ * {@code ×0.6} self-slow and the wire sprint clear (the deferred
+ * {@code setSprinting(false)} is gone: on 1.21.2+ its echo to the attacker's own
+ * client latched sprint off — the modern-client sprint latch fix).</p>
  */
 public final class KnockbackUnit implements FeatureUnit, Listener {
 
@@ -414,24 +415,35 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
 
     /**
      * The vanilla obligations the cancelled attack left behind, for an accepted
-     * sprint-bonus hit: the attacker's ledger {@code ×0.6} self-slow, the wire
-     * sprint clear, and {@code setSprinting(false)} (a no-op when vanilla's own
-     * attack already cleared it on the server-side melee path).
+     * sprint-bonus hit: the attacker's ledger {@code ×0.6} self-slow and the wire
+     * sprint clear.
      *
-     * <p>Both clears are guarded by the hit's {@code verdict}. A wire-peeked verdict
+     * <p>The deferred {@code player.setSprinting(false)} vanilla ran at the end of a
+     * sprint-bonus attack is deliberately NOT reconstructed (the modern-client
+     * sprint latch fix, 2026-07-10). On 1.21.2+ that server-flag write is ECHOED to
+     * the attacker's own client ({@code sendDirtyEntityData →
+     * sendToTrackingPlayersAndSelf}), which adopts it, drops its local sprint, and
+     * confirms with one STOP_SPRINTING — and no START ever returns (item-use
+     * block-hitting blocks a fresh sprint start), so every later verdict reads plain:
+     * a one-way latch. Real vanilla never produced that side effect at spam cadence
+     * (its clear sits behind the ≥90% charge gate, where the client simultaneously
+     * predicts the same clear and re-engages, so the echo is always redundant). The
+     * observable era contract is the WIRE cadence — bonus, a one-tick gap, then a
+     * re-arm on the client's held intent — which the {@link SprintWire}'s post-clear
+     * re-arm reproduces ({@link SprintWire#reconcile}); the server flag now simply
+     * keeps meaning "what the client last said," the only stable truth on 1.21.2+.</p>
+     *
+     * <p>The wire clear is guarded by the hit's {@code verdict}. A wire-peeked verdict
      * carries the wire's arrival sequence at peek time ({@link SprintVerdict#wireSeq}),
      * so the clear is ordered by ARRIVAL, not by tick granularity: vanilla cleared
      * sprint synchronously inside {@code attack}, so it could never eat a re-engage
-     * that arrived afterwards; Mental's clears run 1–2 ticks late at the deferred
+     * that arrived afterwards; Mental's clear runs 1–2 ticks late at the deferred
      * EDBEE, so a w-tap START that landed in the SAME tick as (and after) the ATTACK
      * must survive — the 2.4.x same-tick retro-clear defect a tick stamp could not
      * separate. The wire clear no-ops under a wire write with a larger seq
-     * ({@link SprintWire#onServerClear(long)}), and the deferred
-     * {@code setSprinting(false)} is skipped when the wire has re-armed past this
-     * hit's peek seq by execution time (F1). A verdict with no wire provenance
+     * ({@link SprintWire#onServerClear(long)}). A verdict with no wire provenance
      * ({@link SprintVerdict#fromWire} false) falls back to the tick-stamp guard
-     * ({@link SprintWire#onServerClear(TickStamp)}) and the plain live-wire read,
-     * byte-identical to 2.4.1.</p>
+     * ({@link SprintWire#onServerClear(TickStamp)}), byte-identical to 2.4.1.</p>
      */
     private void applyAttackerObligations(LivingEntity attacker, boolean sprinting, SprintVerdict verdict) {
         if (!(attacker instanceof Player player)) {
@@ -471,21 +483,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                 wire.onServerClear(verdict.at());
             }
         }
-        if (player.isSprinting()) {
-            scheduling.runOn(player, () -> {
-                // Skip the server-flag clear only for a re-engage NEWER than this hit's
-                // verdict peek (arrival order) — vanilla's synchronous clear could never
-                // eat it. With no wire provenance, keep the plain live-wire read (2.4.1).
-                if (domains.has(attackerId)) {
-                    SprintVerdict live = domains.domainFor(attackerId).sprint().verdictAt(clock.current());
-                    if (live.sprinting()
-                            && (!verdict.fromWire() || live.wireSeq() > verdict.wireSeq())) {
-                        return;
-                    }
-                }
-                player.setSprinting(false);
-            }, () -> {});
-        }
+        // NO deferred player.setSprinting(false): on 1.21.2+ that server-flag write is
+        // echoed to the attacker's own client, which drops its local sprint and never
+        // re-sends START (item-use block-hitting blocks it) — a one-way latch that made
+        // every later melee verdict read plain. The wire clear above spends the
+        // freshness this hit used; the SprintWire's post-clear re-arm re-engages the
+        // bonus a tick later on the client's surviving sprint intent (the era wire
+        // cadence). See the method javadoc and the netty-fast-path skill.
     }
 
     /**

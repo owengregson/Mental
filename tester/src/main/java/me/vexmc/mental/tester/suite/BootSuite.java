@@ -15,7 +15,10 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.gui.DashboardMenu;
+import me.vexmc.mental.v5.gui.KnockbackFormulaMenu;
+import me.vexmc.mental.v5.gui.MeleeFormula;
 import me.vexmc.mental.v5.gui.MenuContext;
+import me.vexmc.mental.v5.gui.ProfileMenu;
 import me.vexmc.mental.v5.platform.ManifestEntry;
 import me.vexmc.mental.v5.platform.SwordBlockAdapter;
 import me.vexmc.mental.v5.platform.WeaponTooltipAdapter;
@@ -135,6 +138,25 @@ public final class BootSuite {
                                 "dashboard inventory size " + inventory.getSize() + " != 54");
                         context.expect(inventory.getHolder() == dashboard,
                                 "inventory holder is not the menu — the click-router identity test would break");
+
+                        // The melee-formula chooser and both per-formula preset lists render the
+                        // same String/Adventure sink path, and the modern presets pull the
+                        // Netherite/Trident icon names (absent below 1.16 → MenuMaterials fallback);
+                        // exercise them so a legacy classload break or a stray null icon surfaces at
+                        // boot rather than on first open.
+                        KnockbackFormulaMenu formula = new KnockbackFormulaMenu(menuContext);
+                        assertIconsRender(context, formula.selfTestIcons(), "formula chooser");
+                        context.expect(formula.selfTestInventory().getHolder() == formula,
+                                "formula-chooser inventory holder is not the menu");
+                        for (MeleeFormula which : MeleeFormula.values()) {
+                            ProfileMenu presets = new ProfileMenu(menuContext, which);
+                            assertIconsRender(context, presets.selfTestIcons(), "profile list " + which);
+                            Inventory list = presets.selfTestInventory();
+                            context.expect(list.getSize() == 54,
+                                    "profile-list (" + which + ") inventory size " + list.getSize() + " != 54");
+                            context.expect(list.getHolder() == presets,
+                                    "profile-list (" + which + ") holder is not the menu");
+                        }
                     });
                 }),
                 new TestCase("legacy: era weapon damage resolves through the flattening name seam", context ->
@@ -357,6 +379,16 @@ public final class BootSuite {
             context.expect(!containsAttack(after, "attackspeed"),
                     "attack_speed must be gone after the strip (saw " + after + ")");
         });
+    }
+
+    /** Asserts every icon in a menu's headless self-test render built as a non-AIR Bukkit item. */
+    private static void assertIconsRender(
+            @NotNull TestContext context, @NotNull List<ItemStack> icons, @NotNull String label) {
+        context.expect(!icons.isEmpty(), label + " rendered no icons");
+        for (ItemStack icon : icons) {
+            context.expect(icon != null && icon.getType() != Material.AIR,
+                    "a " + label + " icon rendered as null/AIR — an Icon build sink failed");
+        }
     }
 
     /** Underscore-insensitive membership: matches {@code generic.attackSpeed} and {@code attack_speed}. */

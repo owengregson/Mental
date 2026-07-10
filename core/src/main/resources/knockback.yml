@@ -20,7 +20,15 @@ knockback:
   #   lunar        Lunar Network's archived Season 5 values
   #   signature    Mental's own — velt's wipe feel, airborne combo hits
   #                trimmed 8% to hold the reach pocket
+  #   modern-vanilla  the byte-exact Paper 26.1.2 melee formula (the modern feel)
+  #   modern-uplift   the modern formula without the mid-air slam
+  #   modern-combo    the modern formula with 1.7-style residual compounding
   #   custom       yours — a fully commented schema to edit freely
+  #
+  # Each profile picks a FORMULA: `legacy` (the 1.7/1.8 math the fork presets
+  # tune, the default) or `modern` (the byte-exact Paper 26.1.2 two-stage knock,
+  # the modern-* presets). Snowball/rod/projectile knockback is always the
+  # legacy positional push, independent of the melee formula.
   profile: legacy-1.7
 
   # Per-world overrides: world name -> profile name. Worlds not listed use
