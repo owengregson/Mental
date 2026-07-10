@@ -67,6 +67,8 @@ import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.feedback.FeedbackTrace;
+import me.vexmc.mental.v5.feature.feedback.HitFeedbackUnit;
 import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
@@ -142,6 +144,8 @@ public final class MentalPluginV5 extends JavaPlugin {
 
     /** The verbose debug seam (zero-cost when off) — config-driven, re-applied on reload. */
     private final DebugLog debug = new DebugLog();
+    /** The FEEDBACK family's decision ring — one shared instance the hit-feedback unit writes and the tester reads. */
+    private final FeedbackTrace feedbackTrace = new FeedbackTrace();
     /** The player-facing debug sink — streams to opted-in admins; empty-set zero-touch. */
     private PlayerDebugSink playerDebugSink;
 
@@ -504,6 +508,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         return playerDebugSink;
     }
 
+    /** The FEEDBACK family's decision seam the tester reads — see the class's own Javadoc. */
+    public @NotNull FeedbackTrace feedbackTrace() {
+        return feedbackTrace;
+    }
+
     /** Boot-time capability report (Folia, knockback event, …). */
     public @NotNull Capabilities capabilities() {
         return capabilities;
@@ -665,6 +674,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new AttackCooldownUnit(this, scheduling, platformProfile.weaponTooltip()));
         reconciler.register(new AttackSoundsUnit());
         reconciler.register(new SweepUnit(this));
+
+        // The feedback family (4C). Hit-feedback assembles the era-correct hit
+        // sound/particle emitter plus the mark-correlated hurt-sound suppressor,
+        // sharing the one boot FeedbackTrace decision ring the tester asserts against.
+        reconciler.register(new HitFeedbackUnit(environment, clock, feedbackTrace, getLogger()));
 
         // The sustain family (4C). Golden apples + potion durations compute era
         // values from the kernel and apply them at the confirmed terminal event
