@@ -6,7 +6,13 @@
 paper-floor = "1.17.1-R0.1-SNAPSHOT"
 paper-folia = "1.20.4-R0.1-SNAPSHOT"
 paper-modern = "1.20.6-R0.1-SNAPSHOT"
-packetevents = "2.12.1"
+# 2.13.0's LogManager gained probe-guarded optional slf4j/ComponentLogger
+# backends; the closed-world verifyJdk8Api gate flags their (provably lazy,
+# never-resolved-unless-present) references, so they carry a reviewed,
+# referrer-scoped exception in scripts/tools/jdk8-api-gate.allow — the proof
+# lives there. A future packetevents bump that widens those references beyond
+# the shaded util/logger package will fail the gate again by design.
+packetevents = "2.13.0"
 # Shaded + relocated into the Mental jar (me.vexmc.mental.lib.adventure) so a
 # self-contained Adventure — the legacy-string serializer in particular — is
 # present below Paper 1.16.5, where net.kyori is absent from the server. Pinned to
