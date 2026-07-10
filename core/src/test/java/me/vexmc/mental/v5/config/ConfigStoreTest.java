@@ -44,7 +44,9 @@ class ConfigStoreTest {
     }
 
     private Path profile(String name) {
-        return dataFolder.resolve(ConfigStore.PROFILES_DIR).resolve(name + ".yml");
+        // Bundled presets extract under their formula-category folder.
+        return dataFolder.resolve(ConfigStore.PROFILES_DIR)
+                .resolve(ConfigStore.bundledFolder(name)).resolve(name + ".yml");
     }
 
     /** A UTF-8 test-classpath resource (the archived revisions and the current bundles). */
@@ -62,7 +64,7 @@ class ConfigStoreTest {
     }
 
     private String currentBundle(String preset) {
-        return resource("profiles/" + preset + ".yml");
+        return resource("profiles/" + ConfigStore.bundledFolder(preset) + "/" + preset + ".yml");
     }
 
     private boolean loggedUpgrade(String presetFile) {

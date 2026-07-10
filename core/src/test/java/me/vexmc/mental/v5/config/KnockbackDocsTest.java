@@ -50,7 +50,15 @@ class KnockbackDocsTest {
             "armor-resistance",
             "shield-blocking-cancels",
             "speed-scaling",
-            "exponent");
+            "exponent",
+            "formula",
+            "modern",
+            "base-strength",
+            "sprint-bonus",
+            "enchant-bonus",
+            "residual",
+            "vertical-cap",
+            "downward-knockback");
 
     /**
      * KnockbackProfile's components: 3 identity fields (name, displayName,

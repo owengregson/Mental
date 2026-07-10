@@ -253,6 +253,98 @@ public final class Presets {
             new PaceScaling(PaceScaling.Mode.ATTACKER, 0.95, 0.5, 2.0));
 
     /**
+     * The byte-exact Paper 26.1.2 melee formula — the modern server knockback,
+     * ported from the decompiled server jar (constants read from the bytecode;
+     * the grounded closed form reproduces the live-measured modern wire —
+     * standing (0.4, 0.3608), sprint (0.7, 0.4)). {@code downward-knockback} on:
+     * a falling victim is slammed sideways/down with no lift. combos false and
+     * immediate delivery mirror the vanilla send-then-restore; {@code
+     * limits.vertical-min −3.9} is REQUIRED or the downward knock can never ship.
+     * Every legacy knob is inert in modern mode (see {@link ModernKnockback}).
+     */
+    public static final KnockbackProfile MODERN_VANILLA = new KnockbackProfile(
+            "modern-vanilla",
+            "Modern (Vanilla)",
+            "The byte-exact Paper 26.1.2 melee formula — two-stage knock, mid-air"
+                    + " slam, send-then-restore delivery.",
+            new Push(0.4, 0.4),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0), // −3.9 REQUIRED: the downward knock must be able to ship
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.IMMEDIATE,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true,
+            PaceScaling.OFF,
+            new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true));
+
+    /**
+     * Mental's own tuning of the modern formula — the two-stage 26.1.2 math
+     * WITHOUT the mid-air slam ({@code downward-knockback} off, so airborne
+     * victims lift like grounded ones) and the vertical floored at 0.0 (a knock
+     * never points down). An example modern feel, not a ported server config.
+     */
+    public static final KnockbackProfile MODERN_UPLIFT = new KnockbackProfile(
+            "modern-uplift",
+            "Modern (Uplift)",
+            "Mental's own — the modern 26.1.2 math without the mid-air slam,"
+                    + " vertical floored at 0.0.",
+            new Push(0.4, 0.4),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, 0.0, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.IMMEDIATE,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true,
+            PaceScaling.OFF,
+            new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, false));
+
+    /**
+     * Mental's own tuning of the modern formula with 1.7-style residual
+     * compounding: the two-stage 26.1.2 math, no mid-air slam, but combos on and
+     * tracker delivery so a decaying ledger residual feeds the next hit (the
+     * legacy stacking layered over the modern math). An example modern feel, not
+     * a ported server config.
+     */
+    public static final KnockbackProfile MODERN_COMBO = new KnockbackProfile(
+            "modern-combo",
+            "Modern (Combo)",
+            "Mental's own — the modern 26.1.2 math with 1.7-style residual"
+                    + " compounding (combos on, tracker wire).",
+            new Push(0.4, 0.4),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, 0.0, -1.0),
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            true,
+            KnockbackDelivery.TRACKER,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            true,
+            PaceScaling.OFF,
+            new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, false));
+
+    /**
      * Ships as legacy-1.7 values — selecting it changes nothing until the
      * owner edits the file.
      */
@@ -279,7 +371,8 @@ public final class Presets {
     /** Every bundled preset by name, the built-in default included. */
     public static final Map<String, KnockbackProfile> ALL = List.of(
                     KnockbackProfile.LEGACY_17, LEGACY_18, KOHI, MMC, LUNAR,
-                    MINEHQ, BADLION, VELT, SIGNATURE, CUSTOM)
+                    MINEHQ, BADLION, VELT, SIGNATURE,
+                    MODERN_VANILLA, MODERN_UPLIFT, MODERN_COMBO, CUSTOM)
             .stream()
             .collect(Collectors.toUnmodifiableMap(KnockbackProfile::name, Function.identity()));
 }

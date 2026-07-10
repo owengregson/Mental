@@ -12,6 +12,8 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import me.vexmc.mental.kernel.profile.KnockbackProfile;
+import me.vexmc.mental.kernel.profile.Presets;
 import me.vexmc.mental.kernel.profile.SupersededPresets;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.InvalidConfigurationException;
@@ -42,10 +44,34 @@ public final class ConfigStore {
     public static final String STATE_DIR = "state";
     public static final String OVERRIDES_FILE = "overrides.yml";
 
-    /** Presets shipped in the jar; regenerated individually when missing. */
+    /** The formula-category folder for a legacy-formula profile. */
+    public static final String LEGACY_FOLDER = "legacy";
+    /** The formula-category folder for a modern-formula profile. */
+    public static final String MODERN_FOLDER = "modern";
+
+    /**
+     * Presets shipped in the jar; regenerated individually when missing. Each
+     * lives under its FORMULA-category folder ({@code profiles/legacy/} or
+     * {@code profiles/modern/}) — the on-disk mirror of the GUI's formula
+     * chooser. Resolution is still by name (stem), so the folder is purely
+     * organisational; discovery walks the whole {@code profiles/} tree.
+     */
     public static final List<String> BUNDLED_PROFILES = List.of(
             "legacy-1.7", "legacy-1.8", "kohi", "minehq", "badlion", "velt",
-            "mmc", "lunar", "signature", "custom");
+            "mmc", "lunar", "signature",
+            "modern-vanilla", "modern-uplift", "modern-combo", "custom");
+
+    /**
+     * The formula-category folder a bundled preset lives in — derived from the
+     * preset's own formula ({@code modern} presets live under {@code modern/},
+     * everything else under {@code legacy/}), so the folder can never disagree
+     * with the file's {@code formula:}. Unknown names default to the legacy
+     * folder (the migrated {@code custom} and any hand-added preset).
+     */
+    public static String bundledFolder(String preset) {
+        KnockbackProfile profile = Presets.ALL.get(preset);
+        return profile != null && profile.modern().enabled() ? MODERN_FOLDER : LEGACY_FOLDER;
+    }
 
     /** Every file loaded into typed configuration roots for {@link SnapshotParser}. */
     public record Sources(
@@ -87,8 +113,9 @@ public final class ConfigStore {
             return;
         }
         for (String preset : BUNDLED_PROFILES) {
-            Path file = profilesDir.resolve(preset + ".yml");
-            extractIfMissing(PROFILES_DIR + "/" + preset + ".yml", file);
+            String folder = bundledFolder(preset);
+            Path file = profilesDir.resolve(folder).resolve(preset + ".yml");
+            extractIfMissing(PROFILES_DIR + "/" + folder + "/" + preset + ".yml", file);
             ensureDeliverySection(preset, file);
             upgradeSupersededPreset(preset, file);
         }
@@ -121,9 +148,10 @@ public final class ConfigStore {
         if (!SupersededPresets.isSupersededBundleText(preset, onDisk)) {
             return;
         }
-        String current = readResource(PROFILES_DIR + "/" + preset + ".yml");
+        String resource = PROFILES_DIR + "/" + bundledFolder(preset) + "/" + preset + ".yml";
+        String current = readResource(resource);
         if (current == null) {
-            log.accept("Bundled resource " + PROFILES_DIR + "/" + preset + ".yml is missing from the jar");
+            log.accept("Bundled resource " + resource + " is missing from the jar");
             return;
         }
         try {
@@ -180,13 +208,19 @@ public final class ConfigStore {
         Map<String, Configuration> profiles = new TreeMap<>();
         Path profilesDir = dataDir.resolve(PROFILES_DIR);
         if (Files.isDirectory(profilesDir)) {
-            try (var stream = Files.list(profilesDir)) {
-                stream.filter(path -> path.getFileName().toString()
+            // Walk the whole profiles/ tree: profiles live under a formula-category
+            // folder (profiles/legacy/, profiles/modern/), but resolution is by name
+            // (stem), so a flat file from a pre-folder install is still discovered and
+            // any user subfolder works too. Keyed by stem — the folder is organisational.
+            try (var stream = Files.walk(profilesDir)) {
+                stream.filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString()
                                 .toLowerCase(Locale.ROOT).endsWith(".yml"))
                         .forEach(path -> {
                             String fileName = path.getFileName().toString();
                             String stem = fileName.substring(0, fileName.length() - 4);
-                            profiles.put(stem, loadYaml(path, PROFILES_DIR + "/" + fileName));
+                            profiles.put(stem, loadYaml(path,
+                                    PROFILES_DIR + "/" + profilesDir.relativize(path)));
                         });
             } catch (IOException failure) {
                 log.accept("Could not list " + profilesDir + ": " + failure);
