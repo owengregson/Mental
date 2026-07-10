@@ -4,8 +4,8 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateAttributes;
-import org.bukkit.entity.Player;
 
 /**
  * The CLIENT-presentation half of attack-cooldown removal (mandate B5(b)):
@@ -21,6 +21,15 @@ import org.bukkit.entity.Player;
  *
  * <p>Mental's {@code onLoad} sets {@code reEncodeByDefault(false)}, so a mutation
  * must call {@code markForReEncode(true)} or the original bytes ship.</p>
+ *
+ * <p>The receiver's identity comes from the PacketEvents cached {@code User},
+ * never a Bukkit handle accessor: {@code Player.getEntityId()} routes through
+ * {@code getHandle()} and THROWS off the owning region on Folia (netty-fast-path
+ * rule), and the old {@code getPlayer().getEntityId()} read was thrown-and-
+ * swallowed by the blanket catch — silently disabling this half for every
+ * outbound UPDATE_ATTRIBUTES on Folia. The PE {@code User#getEntityId()} is
+ * cached connection state (netty-safe), {@code -1} until PE learns it from
+ * JOIN_GAME.</p>
  */
 public final class CooldownSpoofListener extends PacketListenerAbstract {
 
@@ -33,12 +42,13 @@ public final class CooldownSpoofListener extends PacketListenerAbstract {
         if (event.getPacketType() != PacketType.Play.Server.UPDATE_ATTRIBUTES) {
             return;
         }
-        if (!(event.getPlayer() instanceof Player receiver)) {
-            return; // no Bukkit player attached yet (pre-Play or console)
+        User user = event.getUser();
+        if (user == null || user.getEntityId() == -1) {
+            return; // no connection identity yet (pre-JOIN_GAME) — nothing to compare against
         }
         try {
             WrapperPlayServerUpdateAttributes packet = new WrapperPlayServerUpdateAttributes(event);
-            if (packet.getEntityId() != receiver.getEntityId()) {
+            if (packet.getEntityId() != user.getEntityId()) {
                 return; // another entity's attribute update routed through this connection
             }
             if (CooldownSpoof.forceFullAttackSpeed(packet)) {

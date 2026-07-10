@@ -15,11 +15,16 @@ import me.vexmc.mental.kernel.port.TickClock;
  *
  * <p>Freshness (WindSpigot's {@code isExtraKnockback}): a START arms it (the
  * re-engage IS the w-tap signal); the release half of a tap never disarms it;
- * a hit spends it via {@link #onServerClear(TickStamp)}. Server-initiated
+ * a hit spends it via {@link #onServerClear(long)}. Server-initiated
  * {@code setSprinting} drift never crosses the wire, so {@link #reconcile}
  * adopts the live flag only after the wire has been quiet — a fresh wire write
- * always wins the within-tick window it exists for. All timing is
- * {@link TickStamp} deltas; no wall clock.</p>
+ * always wins the within-tick window it exists for. The newer-wire-write-wins
+ * rule that protects a re-engage from the deferred post-hit clear is sequenced
+ * by a per-wire monotonic {@code seq} (arrival order, bumped by every wire
+ * write) for wire-peeked verdicts, so a same-tick START-after-ATTACK cannot
+ * collide with the hit the way it did at tick granularity; {@code lastWrite}
+ * remains the reconcile quiet clock. All timing is {@link TickStamp} deltas or
+ * the monotonic {@code seq}; no wall clock.</p>
  *
  * <p><b>State is one immutable snapshot swapped by reference</b> (the codebase
  * idiom). The primary owner is the connection's netty thread (START/STOP,
@@ -54,14 +59,20 @@ public final class SprintWire {
      * raw client-packet flag; {@code sprinting}/{@code armed} are the era wire
      * view a hit consumes; {@code blockReset} is the held-sword-block sprint reset
      * (the universal blockhit contract — sticky across {@link #onServerClear});
-     * {@code seen} gates reconcile seeding; {@code lastWrite} is the
-     * newer-wire-write-wins clock.
+     * {@code seen} gates reconcile seeding; {@code lastWrite} is the reconcile
+     * quiet clock; {@code seq} counts WIRE WRITES in arrival order — client
+     * START/STOP, the block-hit re-arm, and a reconcile seed/adopt each bump it,
+     * so it IS this wire's era queue program order. {@link #onBlockReleased} and
+     * {@link #onServerClear} do NOT bump: a release only drops the sticky
+     * {@code blockReset} (deliberately not a sprint write, matching its
+     * {@code lastWrite} exemption), and the clear is the CONSUMER of the ordering,
+     * never a producer.
      */
     private record State(boolean seen, boolean sprinting, boolean armed,
-                         boolean clientSprinting, boolean blockReset, TickStamp lastWrite) {}
+                         boolean clientSprinting, boolean blockReset, TickStamp lastWrite, long seq) {}
 
     private static final State INITIAL =
-            new State(false, false, false, false, false, TickStamp.NO_TICK);
+            new State(false, false, false, false, false, TickStamp.NO_TICK, 0L);
 
     private final TickClock clock;
     private final AtomicReference<State> state = new AtomicReference<>(INITIAL);
@@ -73,20 +84,22 @@ public final class SprintWire {
     /** A wire START: sets the flag, arms freshness, and raises the raw client flag (the re-engage is the w-tap). */
     public void onSprintStart() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, true, true, true, s.blockReset(), now));
+        state.updateAndGet(s -> new State(true, true, true, true, s.blockReset(), now, s.seq() + 1));
     }
 
     /** A wire STOP: drops the flag and the raw client flag — armed freshness survives the release half. */
     public void onSprintStop() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, false, s.armed(), false, s.blockReset(), now));
+        state.updateAndGet(s -> new State(true, false, s.armed(), false, s.blockReset(), now, s.seq() + 1));
     }
 
     /**
      * Stamp-guarded mirror of vanilla's in-attack sprint clear, applied when the
-     * desk reports an accepted bonus hit: the flag drops and the freshness the hit
-     * used is spent. The raw {@link #clientSprinting} flag is left ALONE — only
-     * START/STOP packets write it.
+     * desk reports an accepted bonus hit whose verdict carries NO wire provenance
+     * ({@code wtapConsultWire=false} fallback and non-melee mints — a wire-peeked
+     * verdict uses {@link #onServerClear(long)}, the authoritative arrival-order
+     * guard). The flag drops and the freshness the hit used is spent. The raw
+     * {@link #clientSprinting} flag is left ALONE — only START/STOP packets write it.
      *
      * <p>NO-OPS ENTIRELY when the wire holds a write strictly newer than
      * {@code asOf} (the hit's verdict stamp): vanilla cleared sprint synchronously
@@ -94,8 +107,7 @@ public final class SprintWire {
      * afterwards, but Mental's clear runs 1–2 ticks late at the deferred EDBEE. A
      * later START must survive — the same newer-wire-write-wins rule
      * {@link #reconcile} implements. A later wire write also refreshes
-     * {@code lastWrite}, so this clear never counts as a wire write. (A same-tick
-     * START-after-ATTACK is an accepted residual — physically implausible input.)</p>
+     * {@code lastWrite}, so this clear never counts as a wire write.</p>
      */
     public void onServerClear(TickStamp asOf) {
         TickStamp now = clock.current();
@@ -105,7 +117,30 @@ public final class SprintWire {
             }
             // blockReset survives: a held sword-block re-arms every hit of the combo,
             // so the freshness this hit spent must NOT drop while the block is held.
-            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now);
+            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now, s.seq());
+        });
+    }
+
+    /**
+     * Sequence-guarded mirror of vanilla's in-attack sprint clear. {@code asOfSeq}
+     * is the wire sequence the hit's verdict peeked ({@link SprintVerdict#wireSeq()});
+     * the clear applies only when NO wire write has arrived since that peek —
+     * arrival order, not tick granularity, so a w-tap START landing in the SAME
+     * tick as (and after) the ATTACK survives the clear that belongs to that
+     * ATTACK (the 2.4.x same-tick retro-clear defect; vanilla's synchronous
+     * in-attack clear could never eat a later-arriving START). blockReset and the
+     * raw clientSprinting flag survive as ever; an applied clear still refreshes
+     * {@code lastWrite} so the reconcile's quiet window cannot re-adopt the
+     * not-yet-cleared server flag, but it never bumps {@code seq} — the clear is
+     * a consumer of the arrival order, never a producer.
+     */
+    public void onServerClear(long asOfSeq) {
+        TickStamp now = clock.current();
+        state.updateAndGet(s -> {
+            if (s.seq() > asOfSeq) {
+                return s; // a wire write arrived after the verdict peek — never retro-clear it
+            }
+            return new State(true, false, false, s.clientSprinting(), s.blockReset(), now, s.seq());
         });
     }
 
@@ -121,7 +156,7 @@ public final class SprintWire {
     @Deprecated
     public void onServerClear() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, false, false, s.clientSprinting(), s.blockReset(), now));
+        state.updateAndGet(s -> new State(true, false, false, s.clientSprinting(), s.blockReset(), now, s.seq()));
     }
 
     /**
@@ -139,7 +174,7 @@ public final class SprintWire {
      */
     public void onBlockSprintReset() {
         TickStamp now = clock.current();
-        state.updateAndGet(s -> new State(true, true, true, true, true, now));
+        state.updateAndGet(s -> new State(true, true, true, true, true, now, s.seq() + 1));
     }
 
     /**
@@ -154,7 +189,7 @@ public final class SprintWire {
      */
     public void onBlockReleased() {
         state.updateAndGet(s -> s.blockReset()
-                ? new State(s.seen(), s.sprinting(), s.armed(), s.clientSprinting(), false, s.lastWrite())
+                ? new State(s.seen(), s.sprinting(), s.armed(), s.clientSprinting(), false, s.lastWrite(), s.seq())
                 : s);
     }
 
@@ -167,11 +202,11 @@ public final class SprintWire {
     public void reconcile(boolean serverSprinting, TickStamp now, int quietTicks) {
         state.updateAndGet(s -> {
             if (!s.seen()) {
-                return new State(true, serverSprinting, false, s.clientSprinting(), s.blockReset(), now);
+                return new State(true, serverSprinting, false, s.clientSprinting(), s.blockReset(), now, s.seq() + 1);
             }
             if (s.sprinting() != serverSprinting && s.lastWrite().known() && now.known()
                     && now.value() - s.lastWrite().value() >= quietTicks) {
-                return new State(true, serverSprinting, s.armed(), s.clientSprinting(), s.blockReset(), now);
+                return new State(true, serverSprinting, s.armed(), s.clientSprinting(), s.blockReset(), now, s.seq() + 1);
             }
             return s;
         });
@@ -194,7 +229,7 @@ public final class SprintWire {
         boolean blockHeldReset = s.blockReset() && s.clientSprinting();
         boolean sprinting = blockHeldReset || s.sprinting();
         boolean fresh = blockHeldReset || s.armed();
-        return new SprintVerdict(sprinting, fresh, now);
+        return new SprintVerdict(sprinting, fresh, now, s.seq());
     }
 
     /**

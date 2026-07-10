@@ -108,7 +108,7 @@ class CritArmourCompositionTest {
         // A bare SessionService: sessionFor answers null, so the per-hit gate reads
         // every staged event as a vanilla-landing melee (the audit scenario).
         return new CritFallbackUnit(() -> snapshot,
-                new SessionService(null, null, null, null, null, null, null, null));
+                new SessionService(null, null, null, null, null, null, null, null, null));
     }
 
     private static Snapshot parse(String main, String hitReg) throws Exception {

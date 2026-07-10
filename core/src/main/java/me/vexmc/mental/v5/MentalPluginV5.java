@@ -36,6 +36,7 @@ import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.command.MentalCommand;
+import me.vexmc.mental.v5.debug.JournalCapture;
 import me.vexmc.mental.v5.debug.PlayerDebugSink;
 import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.v5.gui.MenuManager;
@@ -278,9 +279,13 @@ public final class MentalPluginV5 extends JavaPlugin {
         // transition-firing sites share the one dispatcher instance.
         this.comboReachHandicap = new ComboReachHandicap(this, scheduling, this::snapshot);
         this.comboEvents = new ComboEvents(comboReachHandicap);
+        // The per-hit delivery journal capture (F9): formats one greppable line per
+        // journaled hit into the JOURNAL debug channel — zero cost until the channel
+        // is on. The desk stays the sole journal writer; this only reads each entry.
+        JournalCapture journalCapture = new JournalCapture(debug.scoped(DebugCategory.JOURNAL), this::snapshot);
         this.sessions = new SessionService(
                 scheduling, clock, viewBuilder, valve, this::snapshot, positions, domains,
-                comboEvents);
+                comboEvents, journalCapture);
         sessions.start(this);
 
         // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —

@@ -1,0 +1,74 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  minehq — MineHQ's archived HCF knockback
+#
+#  Archived values from MineHQ (sprytex/Knockback-Values, fetched and
+#  verified 2026-06-12). Published as a friction DIVISOR of 2.0 — Mental's
+#  friction is the SURVIVING FRACTION, so 2.0 ÷ becomes 0.5 here.
+#
+#  Original knobs:  friction 2.0 ÷ · horizontal 0.36 · vertical 0.36 ·
+#                   vertical-limit 0.4 · extra-h 0.45 · extra-v 0.09
+#
+#  Sits exactly between Kohi 2016 (0.35/0.425) and vanilla (0.4/0.5):
+#  the slightly-hotter HCF trade feel players asked Lunar for by name
+#  ("kb like MineHQ kitmap"). MineHQ's 1.7 base is source-verified — its
+#  HCF core (HCTeams/foxtrot) imports v1_7_R3 and its PotPvP build
+#  depends on a 1.7.10 server artifact — so melee residuals persist and
+#  combos compound through the ledger like Kohi's (same late-era-revert
+#  caveat as kohi.yml).
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: MineHQ
+description: "MineHQ's archived HCF values — between Kohi and vanilla, 1.7.10 ledger combos."
+
+knockback:
+  base:
+    horizontal: 0.36
+    vertical: 0.36
+  vertical-mode: add
+  extra:
+    horizontal: 0.45
+    vertical: 0.09
+  wtap-extra:
+    enabled: false
+    horizontal: 0.45
+    vertical: 0.09
+  friction:
+    x: 0.5
+    y: 0.5
+    z: 0.5
+  limits:
+    vertical: 0.4
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # When the victim's client receives the knock relative to their physics
+  # tick. The 1.7.10 tracker wire was CONNECTION-ORDER bimodal (measured on
+  # vanilla, both orders: a victim who joined before their attacker received
+  # the full stamp — identical to 1.8.9 — a victim who joined after, one
+  # friction step less). tracker ships the full stamp, the dominant era
+  # experience; tracker-decayed opts into the later-joiner wire (ground
+  # hits lose ×0.546 horizontal); immediate = the 1.8.9 in-attack send.
+  # Rod/projectile knocks rode the tracker on BOTH eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    # 1.7.10 lineage: melee residuals persist — ledger combos compound.
+    combos: true
+    # The 1.7 item pool had nothing knockback-resistant: `none` avoids
+    # surprise zero-knock cancels on modern gear.
+    armor-resistance: none
+    shield-blocking-cancels: true

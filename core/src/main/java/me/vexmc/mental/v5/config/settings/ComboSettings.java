@@ -15,7 +15,11 @@ import me.vexmc.mental.kernel.math.TargetMode;
  * detector thresholds ({@code minHits 2} — the SECOND hit fires COMBO START;
  * {@code maxGapTicks}/{@code groundedRunTicks}/{@code blowoutBlocks}) size the
  * chain; the clamps {@code [0.8, 1.2]} are the honesty boundary — past them the
- * pocket is honestly lost and era physics wins.</p>
+ * pocket is honestly lost and era physics wins. On the min side the loss can be
+ * TOTAL: when the solve lands below {@code PocketServo.saturationFloor(minFactor)}
+ * (= 2·min − 1) even the clamped shave cannot approach the pocket, and the servo
+ * declines to the full era knock instead of shipping a pointless min-factor shave
+ * (sprint-fresh hits always saturate there).</p>
  *
  * <p><b>The answer-denial-boundary target (§3.2b).</b> {@code targetMode} is
  * {@link TargetMode#BOUNDARY} by default: the servo lands the victim right at the

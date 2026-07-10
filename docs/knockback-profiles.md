@@ -29,10 +29,11 @@ profile is irrelevant for that hit.
 
 Presets are extracted when missing and **never overwritten** — edits are
 yours, and deleting a preset regenerates the original. One exception, in
-your favor: a preset file that still carries a *superseded bundled
-revision* verbatim (every value untouched — you never tuned it) is
-upgraded in place when research corrects the preset, with a console
-notice. Any edited value freezes the file forever.
+your favor: a preset file that is still **byte-identical** to a
+*superseded bundled revision* (you never touched it, not even a comment)
+is upgraded in place when research corrects the preset, with a console
+notice. Any edit at all — a value, a comment, whitespace — freezes the
+file forever.
 
 | Preset | What it is | Provenance |
 | --- | --- | --- |

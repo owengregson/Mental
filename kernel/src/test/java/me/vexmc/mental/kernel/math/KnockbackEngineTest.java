@@ -154,6 +154,21 @@ class KnockbackEngineTest {
     }
 
     @Test
+    void sprintKnockbackTwoShipsThreeBonusLevelsAlongYaw() {
+        // KB II + sprint on a resting victim straight down +z (attacker at origin,
+        // victim two blocks up the +z axis). Base is the plain 0.4/0.4; the extras
+        // are (1 sprint + 2 enchant) × 0.5 = 1.5 horizontal along yaw 0, plus the
+        // flat +0.1 vertical. The finding's KB-II-sprint pin — Mental currently
+        // pre-sends 0.9 on z here (enchant-blind), so this locks the full 1.9.
+        KnockbackVector vector = computed(
+                attacker(0, 0, 0.0f, true, 2), victim(0, 2, 0, 0, 0, 0), DEFAULTS, null);
+
+        assertEquals(0.0, vector.x(), EPSILON);
+        assertEquals(0.5, vector.y(), EPSILON);  // base 0.4 (capped) + 0.1 flat vertical bonus
+        assertEquals(1.9, vector.z(), EPSILON);  // base 0.4 + 1.5 (three bonus levels along yaw 0)
+    }
+
+    @Test
     void horizontalLimitRescalesBothAxes() {
         KnockbackProfile capped = new KnockbackProfile(
                 DEFAULTS.name(), DEFAULTS.displayName(), DEFAULTS.description(),

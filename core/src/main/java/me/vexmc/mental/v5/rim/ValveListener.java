@@ -26,6 +26,12 @@ import me.vexmc.mental.v5.VelocityValve;
  * third-party trackers receive the same entity's velocity under a different
  * recipient UUID and never match. In 4A1 nothing arms the valve, so this listener
  * cancels nothing (zero-touch).</p>
+ *
+ * <p>Mental's own pre-send bursts are written SILENTLY by the {@code BurstSender}
+ * and never reach this listener (silent writes skip Mental's own relocated-PE
+ * send-event stage), so every ENTITY_VELOCITY seen here is the vanilla tracker's
+ * or a foreign plugin's — the consume can never eat a pre-send against a stale
+ * arm (F3).</p>
  */
 public final class ValveListener extends PacketListenerAbstract {
 

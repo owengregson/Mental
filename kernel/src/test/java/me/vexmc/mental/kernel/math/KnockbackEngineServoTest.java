@@ -132,6 +132,35 @@ class KnockbackEngineServoTest {
     }
 
     @Test
+    void saturatedSprintChaseHitShipsTheEraVector() {
+        // The 2026-07-09 saturation deadband end to end: a sprint-fresh hit whose
+        // servo solve pins the min clamp far below the saturation floor ships the
+        // FULL era stamp, not a pointless ×0.93 shave. Attacker 3 blocks along −z,
+        // yaw 0 (axis-aligned sprint down +z), victim standing. The engine builds the
+        // degraded grounded-stone inputs and solves σ* = 0.660121245 (< the 0.86 floor
+        // at min 0.93), so the deadband declines to σ = 1: comboFactor 1.0 and a vector
+        // bit-identical to the servo-inactive path (fresh × 1.0 == fresh × 1.0). The
+        // era stamp is (0, 0.5, 0.9): horizontal base 0.4 + sprint extra 0.5 along +z,
+        // vertical base 0.4 + sprint extra 0.1.
+        PocketServoConfig shipped = PocketServoConfig.of(2.85, 1.0, 0.93, 1.35, 10);
+        EntityState attacker = attacker(0, -3.0, true); // 3 blocks along −z, facing +z
+        EntityState victim = victim(0, 0);
+
+        KnockbackEngine.Paced active =
+                KnockbackEngine.computePaced(attacker, victim, DEFAULTS, null, rng(), false, shipped);
+        KnockbackEngine.Paced inactive = KnockbackEngine.computePaced(
+                attacker, victim, DEFAULTS, null, rng(), false, PocketServoConfig.INACTIVE);
+
+        assertEquals(1.0, active.comboFactor(), 0.0, "the saturated min-pin declines to the era σ = 1");
+        assertEquals(inactive.vector().x(), active.vector().x(), 0.0, "era stamp, bit-identical to servo-off");
+        assertEquals(inactive.vector().y(), active.vector().y(), 0.0);
+        assertEquals(inactive.vector().z(), active.vector().z(), 0.0);
+        assertEquals(0.0, active.vector().x(), EPSILON);
+        assertEquals(0.5, active.vector().y(), EPSILON, "vertical untouched: base 0.4 + sprint 0.1");
+        assertEquals(0.9, active.vector().z(), EPSILON, "horizontal: base 0.4 + sprint 0.5, unshaved");
+    }
+
+    @Test
     void suppressedHitReportsBothFactorsAsOne() {
         // A LEGACY resistance roll that cancels returns a null vector with both
         // factors at 1.0 (nothing was applied).

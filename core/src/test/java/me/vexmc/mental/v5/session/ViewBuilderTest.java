@@ -56,6 +56,35 @@ class ViewBuilderTest {
     }
 
     @Test
+    void enchantOverloadCarriesTheLevelAndOldOverloadsDefaultZero() {
+        ViewBuilder builder = new ViewBuilder(() -> new TickStamp(1));
+        UUID id = UUID.randomUUID();
+        Decay.Motion motion = Decay.Motion.ZERO;
+        KnockbackProfile profile = KnockbackProfile.LEGACY_17;
+        KinematicState kinematics = new KinematicState(64.0, 0.0, true);
+
+        // The full enchant-freeze overload carries the level.
+        PlayerView enchanted = builder.build(
+                id, 1, motion, true, 0.6, 0.08, 0.42, -1, false, false, true,
+                0, 20, 0.0, profile, 0, kinematics, 0.1, null,
+                0.0, 0.0, 0.0f, 1.62, 0, Double.NaN, 2);
+        assertEquals(2, enchanted.kbEnchantLevel());
+
+        // The 18-arg overload defaults it to 0.
+        PlayerView base = builder.build(
+                id, 1, motion, true, 0.6, 0.08, 0.42, -1, false, false, true,
+                0, 20, 0.0, profile, 0, kinematics, 0.1);
+        assertEquals(0, base.kbEnchantLevel());
+
+        // The precision (pre-freeze) overload defaults it to 0.
+        PlayerView precision = builder.build(
+                id, 1, motion, true, 0.6, 0.08, 0.42, -1, false, false, true,
+                0, 20, 0.0, profile, 0, kinematics, 0.1, null,
+                0.0, 0.0, 0.0f, 1.62, 0, Double.NaN);
+        assertEquals(0, precision.kbEnchantLevel());
+    }
+
+    @Test
     void everyBuildRestampsFromTheCurrentClock() {
         int[] tick = {0};
         ViewBuilder builder = new ViewBuilder(() -> new TickStamp(tick[0]));

@@ -12,10 +12,8 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.profile.SupersededPresets;
 import org.bukkit.configuration.Configuration;
-import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 
@@ -23,16 +21,16 @@ import org.bukkit.configuration.file.YamlConfiguration;
  * File layout and default extraction (the migration chain lives in
  * {@link Migrations}). Bundled files are extracted only when missing — owner
  * edits belong to the server and survive every restart; deleting a preset
- * regenerates the original. A preset file whose parsed values still match a
- * superseded bundled revision ({@link SupersededPresets}) was never tuned and
- * is upgraded in place to the corrected bundle; any value difference is an
- * owner edit and the file is frozen.
+ * regenerates the original. A preset file whose RAW BYTES still match a
+ * superseded bundled revision ({@link SupersededPresets#isSupersededBundleText})
+ * was never touched and is upgraded in place to the corrected bundle; ANY
+ * difference — a value, a comment, formatting — is an owner edit and the file
+ * is frozen.
  *
  * <p>Ported from the retired {@code config.ConfigStore} — {@link Path} instead
- * of {@code File}, and reading the frozen kernel {@code SupersededPresets} /
- * v5 {@code ProfileParser}. The resource loader and log sink are injectable so
- * the pins port faithfully; the plain {@link #ConfigStore(Path)} uses the
- * classpath and a silent log.</p>
+ * of {@code File}, and reading the frozen kernel {@code SupersededPresets}. The
+ * resource loader and log sink are injectable so the pins port faithfully; the
+ * plain {@link #ConfigStore(Path)} uses the classpath and a silent log.</p>
  */
 public final class ConfigStore {
 
@@ -97,22 +95,30 @@ public final class ConfigStore {
     }
 
     /**
-     * Replaces a preset file whose parsed values still match a superseded
-     * shipped revision verbatim — the owner never tuned it, so only research
-     * corrections separate it from the current bundle. Any value difference is
-     * an owner edit and the file is untouched.
+     * Replaces a preset file whose RAW BYTES still match a superseded shipped
+     * revision — the owner never touched it, so only research corrections
+     * separate it from the current bundle. Matching on bytes (not parsed values,
+     * as before 2.4.9) is what makes owner edits sacred: value matching reverted
+     * an edit that landed on old values, and the bundled files' own comment
+     * invites exactly one ("Restore -3.9 to unfloor") — such an edit is never
+     * byte-identical to any archived bundle, so it now freezes correctly. It is
+     * also parser-drift-proof. This runs AFTER {@link #ensureDeliverySection}, so
+     * a pre-1.4.0 file has already had its {@code delivery} block inserted and the
+     * archived hashes for those forms are the patched text (see
+     * {@link SupersededPresets}).
      */
     private void upgradeSupersededPreset(String preset, Path file) {
-        if (SupersededPresets.of(preset).isEmpty() || !Files.isRegularFile(file)) {
+        if (!Files.isRegularFile(file)) {
             return;
         }
-        ConfigurationSection yaml = loadYaml(file, PROFILES_DIR + "/" + preset + ".yml");
-        KnockbackProfile parsed = ProfileParser.parse(
-                preset,
-                yaml.getString("display-name", preset),
-                yaml.getString("description", ""),
-                new ConfigReader(yaml.getConfigurationSection("knockback"), "", new ConfigIssues()));
-        if (!SupersededPresets.isSupersededVerbatim(preset, parsed)) {
+        String onDisk;
+        try {
+            onDisk = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException failure) {
+            log.accept("Could not read profiles/" + preset + ".yml: " + failure);
+            return;
+        }
+        if (!SupersededPresets.isSupersededBundleText(preset, onDisk)) {
             return;
         }
         String current = readResource(PROFILES_DIR + "/" + preset + ".yml");
@@ -122,8 +128,8 @@ public final class ConfigStore {
         }
         try {
             Files.writeString(file, current, StandardCharsets.UTF_8);
-            log.accept("profiles/" + preset + ".yml carried a superseded bundled revision"
-                    + " unedited — upgraded to the corrected values"
+            log.accept("profiles/" + preset + ".yml is a superseded bundled revision,"
+                    + " byte-identical and unedited — upgraded to the corrected bundle"
                     + " (delete the file to regenerate anytime)");
         } catch (IOException failure) {
             log.accept("Could not upgrade profiles/" + preset + ".yml: " + failure);

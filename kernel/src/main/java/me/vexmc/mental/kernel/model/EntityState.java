@@ -54,4 +54,15 @@ public record EntityState(
         this(x, y, z, yaw, vx, vy, vz, grounded, sprinting,
                 knockbackEnchantLevel, knockbackResistance, MOVE_SPEED_UNAVAILABLE);
     }
+
+    /**
+     * A copy with the yaw replaced — the registration-time yaw stamp folded over a
+     * live owning-thread capture (the recompute half of the era-moment freeze:
+     * the SprintVerdict is stamped and consumed; the yaw the extras are directed
+     * along must be the same click-flush instant, not the 1–2-tick-later live read).
+     */
+    public EntityState withYaw(float yaw) {
+        return new EntityState(x, y, z, yaw, vx, vy, vz, grounded, sprinting,
+                knockbackEnchantLevel, knockbackResistance, moveSpeedAttr);
+    }
 }

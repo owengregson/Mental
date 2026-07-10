@@ -8,6 +8,7 @@ import org.jetbrains.annotations.NotNull;
 public enum DebugCategory {
     HITREG,
     KNOCKBACK,
+    JOURNAL,
     COMPENSATION,
     FISHING,
     PROJECTILE,

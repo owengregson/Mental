@@ -78,4 +78,33 @@ class CompensationQueryTest {
         PlayerView airborne = view(0, new KinematicState(70.0, 10.0, false));
         assertEquals(0.42, CompensationQuery.verticalFor(airborne, 40, 0.42), EPSILON);
     }
+
+    @Test
+    void offGroundSyncFalseSkipsTheAirborneRewrite() {
+        // Airborne and rising, no landing within the 2-tick window: off-ground-sync
+        // false leaves the raw ledger vertical (null); true runs the forward sim.
+        PlayerView airborne = view(0, new KinematicState(70.0, 10.0, false));
+        assertNull(CompensationQuery.verticalFor(airborne, 100, 0.42, false));
+        assertEquals(0.248136, CompensationQuery.verticalFor(airborne, 100, 0.42, true), EPSILON);
+        assertEquals(MotionMath.simulateVerticalVelocity(0.42, GRAVITY, 2),
+                CompensationQuery.verticalFor(airborne, 100, 0.42, true), EPSILON);
+    }
+
+    @Test
+    void offGroundSyncFalseKeepsTheLandingFold() {
+        // Falling and about to land (0.4 up at −0.5 → ticksToFall 1 ≤ 2): the landing
+        // case IS the on-ground case, so BOTH modes park at the grounded equilibrium.
+        PlayerView landing = view(0, new KinematicState(64.4, 0.4, false));
+        assertEquals(Decay.groundedEquilibrium(GRAVITY),
+                CompensationQuery.verticalFor(landing, 100, -0.5, false), EPSILON);
+        assertEquals(Decay.groundedEquilibrium(GRAVITY),
+                CompensationQuery.verticalFor(landing, 100, -0.5, true), EPSILON);
+    }
+
+    @Test
+    void defaultOverloadIsOffGroundSyncTrue() {
+        PlayerView airborne = view(0, new KinematicState(70.0, 10.0, false));
+        assertEquals(CompensationQuery.verticalFor(airborne, 100, 0.42, true),
+                CompensationQuery.verticalFor(airborne, 100, 0.42), EPSILON);
+    }
 }

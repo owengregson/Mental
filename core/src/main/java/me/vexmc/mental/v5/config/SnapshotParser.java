@@ -168,9 +168,15 @@ public final class SnapshotParser {
         // knows the server version — MentalPluginV5.parseSnapshot via
         // ProbeStrategy.resolveEffective, where the loud info/warn line is emitted.
         ProbeStrategy probeStrategy = reader.oneOf("probe-strategy", d.probeStrategy(), ProbeStrategy.class);
+        // ping-offset-ms was retired in 2.4.9 — it was never applied (the measured round
+        // trip is used as-is), so honour a lingering key with a one-line notice instead of
+        // silently dropping a value the operator may believe is doing something.
+        if (reader.section() != null && reader.section().isSet("ping-offset-ms")) {
+            reader.issues().add("latency-compensation.ping-offset-ms: retired — it was never"
+                    + " applied (the measured round trip is used as-is); delete the line");
+        }
         return new CompensationSettings(
                 probeStrategy,
-                reader.intAtLeast("ping-offset-ms", d.pingOffsetMillis(), 0),
                 reader.intAtLeast("spike-threshold-ms", d.spikeThresholdMillis(), 1),
                 reader.ticksAtLeast("probe-interval-ticks", d.probeIntervalTicks(), 1),
                 reader.ticksAtLeast("combat-timeout-ticks", d.combatTimeoutTicks(), 1),

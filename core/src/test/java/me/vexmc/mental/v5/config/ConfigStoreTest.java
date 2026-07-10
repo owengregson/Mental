@@ -2,10 +2,13 @@ package me.vexmc.mental.v5.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,10 +20,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Default extraction and superseded-preset upgrade, ported from the retired
- * config.ConfigStoreTest (File → Path): extract once and never overwrite,
- * complete pre-1.4.0 files then upgrade untouched superseded revisions in place,
- * freeze owner edits, and never throw on a missing resource.
+ * Default extraction and superseded-preset upgrade: extract once and never
+ * overwrite, complete pre-1.4.0 files then upgrade byte-identical superseded
+ * revisions in place, and — the 2.4.9 byte-identity redesign — freeze ANY owner
+ * edit, including one that lands on old values (the file's own "Restore -3.9"
+ * invitation, the collision the old value-match reverted). The archived texts
+ * are the real released bytes ({@code superseded-bundles/}, pinned per-hash by
+ * {@link SupersededBundleHashTest}), not synthesised value bodies.
  */
 class ConfigStoreTest {
 
@@ -39,6 +45,28 @@ class ConfigStoreTest {
 
     private Path profile(String name) {
         return dataFolder.resolve(ConfigStore.PROFILES_DIR).resolve(name + ".yml");
+    }
+
+    /** A UTF-8 test-classpath resource (the archived revisions and the current bundles). */
+    private String resource(String classpath) {
+        try (InputStream stream = getClass().getClassLoader().getResourceAsStream(classpath)) {
+            assertNotNull(stream, () -> "missing test resource: " + classpath);
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+    }
+
+    private String archived(String name) {
+        return resource("superseded-bundles/" + name);
+    }
+
+    private String currentBundle(String preset) {
+        return resource("profiles/" + preset + ".yml");
+    }
+
+    private boolean loggedUpgrade(String presetFile) {
+        return logged.stream().anyMatch(line -> line.contains(presetFile) && line.contains("upgraded"));
     }
 
     @Test
@@ -71,96 +99,32 @@ class ConfigStoreTest {
         assertEquals(patchedKohi, Files.readString(profile("kohi"), StandardCharsets.UTF_8));
     }
 
-    private static final String MMC_1_3_BODY = """
-            display-name: MMC
-            description: "Community remake of the Minemen Club feel: assigned vertical, distance taper, flat delivery."
-            knockback:
-              base:
-                horizontal: 0.38488
-                vertical: 0.25635
-              vertical-mode: set
-              extra:
-                horizontal: 0.5
-                vertical: 0.1
-              friction:
-                x: 0.5248
-                y: 0.5248
-                z: 0.5248
-              limits:
-                vertical: 4.0
-                # Explicit like the real v1.3.0 bundle (git-verified): since the
-                # 2.4.8 owner floor moved the LEGACY_17 parse fallback to 0.0,
-                # relying on the fallback here would no longer parse to the
-                # MMC_1_3 revision's -3.9.
-                vertical-min: -3.9
-              range-reduction:
-                enabled: true
-              modifiers:
-                combos: false
-                armor-resistance: legacy
-            """;
-
     @Test
     void unTunedSupersededPresetIsUpgradedInPlace() throws Exception {
         ConfigStore store = store();
-        Files.createDirectories(profile("mmc").getParent());
-        Files.writeString(profile("mmc"), MMC_1_3_BODY, StandardCharsets.UTF_8);
+        Files.createDirectories(profile("kohi").getParent());
+        // The RAW, unpatched 1.3.0 kohi: ensureDeliverySection inserts the delivery
+        // block first, THEN the byte hash matches the patched 1.3.x form and the upgrade
+        // overwrites with the current bundle. The end-to-end patch → hash → upgrade proof.
+        Files.writeString(profile("kohi"), archived("kohi@1.3.x-raw.yml"), StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
 
-        YamlConfiguration upgraded = YamlConfiguration.loadConfiguration(profile("mmc").toFile());
-        assertEquals(0.32, upgraded.getDouble("knockback.base.horizontal"),
-                "superseded mmc must carry the archived dev123 values");
-        assertEquals("add", upgraded.getString("knockback.vertical-mode"));
-        assertTrue(logged.stream().anyMatch(line -> line.contains("mmc.yml") && line.contains("upgraded")),
-                () -> "expected an upgrade report, logged: " + logged);
+        assertEquals(currentBundle("kohi"), Files.readString(profile("kohi"), StandardCharsets.UTF_8),
+                "an unedited pre-1.4.0 kohi must upgrade to the current bundle byte-for-byte");
+        assertTrue(loggedUpgrade("kohi.yml"), () -> "expected an upgrade report, logged: " + logged);
 
-        String afterFirst = Files.readString(profile("mmc"), StandardCharsets.UTF_8);
+        String afterFirst = Files.readString(profile("kohi"), StandardCharsets.UTF_8);
         store.ensureDefaultFiles();
-        assertEquals(afterFirst, Files.readString(profile("mmc"), StandardCharsets.UTF_8));
+        assertEquals(afterFirst, Files.readString(profile("kohi"), StandardCharsets.UTF_8),
+                "the upgraded file IS the current bundle — a second pass never re-flags it");
     }
-
-    private static final String SIGNATURE_2_2_0_BODY = """
-            display-name: Signature
-            description: "Mental's signature feel — velt's residual wipe and pinned 0.36 vertical, with airborne combo hits trimmed 8% to hold the reach pocket."
-            knockback:
-              base:
-                horizontal: 0.325
-                vertical: 0.36
-              vertical-mode: add
-              extra:
-                horizontal: 0.5
-                vertical: 0.0
-              wtap-extra:
-                enabled: false
-                horizontal: 0.5
-                vertical: 0.0
-              friction:
-                x: 0.1
-                y: 0.1
-                z: 0.1
-              limits:
-                vertical: 0.36
-                vertical-min: -3.9
-                horizontal: -1
-              air:
-                horizontal: 0.92
-                vertical: 1.0
-              delivery:
-                melee: tracker
-                projectile: tracker
-              modifiers:
-                sprint: 1.0
-                combos: false
-                armor-resistance: none
-                shield-blocking-cancels: true
-            """;
 
     @Test
     void unTunedSignaturePresetUpgradesToTheVerticalTuning() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("signature").getParent());
-        Files.writeString(profile("signature"), SIGNATURE_2_2_0_BODY, StandardCharsets.UTF_8);
+        Files.writeString(profile("signature"), archived("signature@2.2.0.yml"), StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
 
@@ -171,9 +135,7 @@ class ConfigStoreTest {
                 "the upgrade must carry the 2.2.1 airborne vertical trim");
         assertEquals(0.92, upgraded.getDouble("knockback.air.horizontal"),
                 "the horizontal pocket trim is unchanged");
-        assertTrue(logged.stream().anyMatch(line ->
-                line.contains("signature.yml") && line.contains("upgraded")),
-                () -> "expected an upgrade report, logged: " + logged);
+        assertTrue(loggedUpgrade("signature.yml"), () -> "expected an upgrade report, logged: " + logged);
 
         String afterFirst = Files.readString(profile("signature"), StandardCharsets.UTF_8);
         store.ensureDefaultFiles();
@@ -184,7 +146,7 @@ class ConfigStoreTest {
     void tunedSignaturePresetIsNeverTouched() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("signature").getParent());
-        String tuned = SIGNATURE_2_2_0_BODY.replace("horizontal: 0.92", "horizontal: 0.95");
+        String tuned = archived("signature@2.2.0.yml").replace("horizontal: 0.92", "horizontal: 0.95");
         Files.writeString(profile("signature"), tuned, StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
@@ -193,8 +155,7 @@ class ConfigStoreTest {
         assertEquals(0.95, kept.getDouble("knockback.air.horizontal"),
                 "owner-tuned values must survive every upgrade pass");
         assertEquals(1.0, kept.getDouble("knockback.air.vertical"), "an owner-tuned file is never upgraded");
-        assertFalse(logged.stream().anyMatch(line ->
-                line.contains("signature.yml") && line.contains("upgraded")),
+        assertFalse(loggedUpgrade("signature.yml"),
                 () -> "no upgrade may be reported for a tuned file, logged: " + logged);
     }
 
@@ -202,7 +163,7 @@ class ConfigStoreTest {
     void tunedSupersededPresetIsNeverTouched() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("mmc").getParent());
-        String tuned = MMC_1_3_BODY.replace("horizontal: 0.38488", "horizontal: 0.42");
+        String tuned = archived("mmc@1.8.0.yml").replace("horizontal: 0.32", "horizontal: 0.42");
         Files.writeString(profile("mmc"), tuned, StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
@@ -210,62 +171,27 @@ class ConfigStoreTest {
         YamlConfiguration kept = YamlConfiguration.loadConfiguration(profile("mmc").toFile());
         assertEquals(0.42, kept.getDouble("knockback.base.horizontal"),
                 "owner-tuned values must survive every upgrade pass");
-        assertEquals("set", kept.getString("knockback.vertical-mode"));
-        assertFalse(logged.stream().anyMatch(line ->
-                line.contains("mmc.yml") && line.contains("upgraded")),
+        assertEquals("add", kept.getString("knockback.vertical-mode"));
+        assertFalse(loggedUpgrade("mmc.yml"),
                 () -> "no upgrade may be reported for a tuned file, logged: " + logged);
     }
-
-    /**
-     * A kohi file exactly as 2.4.6 shipped it (vertical-min −3.9, every other
-     * value the current archive) — parses to the KOHI_1_8 superseded revision.
-     * Keys omitted here fall back to LEGACY_17 values, which for kohi equal the
-     * constant's (friction 0.5, air 1.0, sprint 1.0, combos true, tracker wire).
-     */
-    private static final String KOHI_2_4_6_BODY = """
-            display-name: Kohi
-            description: "The canonical Kohi/HCF values — lower base, smaller per-level bonus (0.425/0.085), 1.7.10 ledger combos."
-            knockback:
-              base:
-                horizontal: 0.35
-                vertical: 0.35
-              extra:
-                horizontal: 0.425
-                vertical: 0.085
-              wtap-extra:
-                enabled: false
-                horizontal: 0.425
-                vertical: 0.085
-              limits:
-                vertical: 0.4
-                vertical-min: -3.9
-                horizontal: -1
-              delivery:
-                melee: tracker
-                projectile: tracker
-              modifiers:
-                combos: true
-                armor-resistance: none
-            """;
 
     @Test
     void unTunedPreFloorKohiUpgradesToThePracticeFloor() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("kohi").getParent());
-        Files.writeString(profile("kohi"), KOHI_2_4_6_BODY, StandardCharsets.UTF_8);
+        // kohi exactly as 1.8.0 → 2.4.6 shipped it (vertical-min −3.9, archived values).
+        Files.writeString(profile("kohi"), archived("kohi@1.8.0.yml"), StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
 
         YamlConfiguration upgraded = YamlConfiguration.loadConfiguration(profile("kohi").toFile());
         assertEquals(0.0, upgraded.getDouble("knockback.limits.vertical-min"),
-                "an unedited pre-floor kohi must gain the 2.4.7 practice floor");
+                "an unedited pre-floor kohi must gain the practice floor");
         assertEquals(0.35, upgraded.getDouble("knockback.base.horizontal"),
                 "the archived kohi values are untouched by the floor upgrade");
-        assertTrue(logged.stream().anyMatch(line ->
-                line.contains("kohi.yml") && line.contains("upgraded")),
-                () -> "expected an upgrade report, logged: " + logged);
+        assertTrue(loggedUpgrade("kohi.yml"), () -> "expected an upgrade report, logged: " + logged);
 
-        // Idempotent: the upgraded file IS the current bundle — never re-flagged.
         String afterFirst = Files.readString(profile("kohi"), StandardCharsets.UTF_8);
         store.ensureDefaultFiles();
         assertEquals(afterFirst, Files.readString(profile("kohi"), StandardCharsets.UTF_8));
@@ -275,7 +201,7 @@ class ConfigStoreTest {
     void tunedPreFloorKohiKeepsItsOldFloorForever() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("kohi").getParent());
-        String tuned = KOHI_2_4_6_BODY.replace("horizontal: 0.35", "horizontal: 0.37");
+        String tuned = archived("kohi@1.8.0.yml").replace("horizontal: 0.35", "horizontal: 0.37");
         Files.writeString(profile("kohi"), tuned, StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
@@ -285,46 +211,26 @@ class ConfigStoreTest {
                 "owner-tuned values must survive every upgrade pass");
         assertEquals(-3.9, kept.getDouble("knockback.limits.vertical-min"),
                 "a tuned file keeps its own floor — frozen forever");
-        assertFalse(logged.stream().anyMatch(line ->
-                line.contains("kohi.yml") && line.contains("upgraded")),
+        assertFalse(loggedUpgrade("kohi.yml"),
                 () -> "no upgrade may be reported for a tuned file, logged: " + logged);
     }
-
-    /**
-     * A legacy-1.7 file exactly as 2.4.7 shipped it (vertical-min −3.9, every
-     * other value the era default). Keys omitted here fall back to LEGACY_17
-     * values, which for legacy-1.7 equal the constant's by definition — only
-     * the pre-floor vertical-min differs from the current bundle.
-     */
-    private static final String LEGACY17_2_4_7_BODY = """
-            display-name: Legacy 1.7
-            description: "The 1.7.10 combat model: vanilla-era values with ledger combos."
-            knockback:
-              limits:
-                vertical: 0.4
-                vertical-min: -3.9
-                horizontal: -1
-            """;
 
     @Test
     void unTunedPreFloorLegacyUpgradesToTheOwnerFloor() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("legacy-1.7").getParent());
-        Files.writeString(profile("legacy-1.7"), LEGACY17_2_4_7_BODY, StandardCharsets.UTF_8);
+        // legacy-1.7 exactly as 2.4.7 shipped it (vertical-min −3.9, era values).
+        Files.writeString(profile("legacy-1.7"), archived("legacy-1.7@2.4.7.yml"), StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
 
-        YamlConfiguration upgraded =
-                YamlConfiguration.loadConfiguration(profile("legacy-1.7").toFile());
+        YamlConfiguration upgraded = YamlConfiguration.loadConfiguration(profile("legacy-1.7").toFile());
         assertEquals(0.0, upgraded.getDouble("knockback.limits.vertical-min"),
                 "an unedited pre-floor legacy-1.7 must gain the 2.4.8 owner floor");
         assertEquals(0.4, upgraded.getDouble("knockback.base.horizontal"),
                 "the era values are untouched by the floor upgrade");
-        assertTrue(logged.stream().anyMatch(line ->
-                line.contains("legacy-1.7.yml") && line.contains("upgraded")),
-                () -> "expected an upgrade report, logged: " + logged);
+        assertTrue(loggedUpgrade("legacy-1.7.yml"), () -> "expected an upgrade report, logged: " + logged);
 
-        // Idempotent: the upgraded file IS the current bundle — never re-flagged.
         String afterFirst = Files.readString(profile("legacy-1.7"), StandardCharsets.UTF_8);
         store.ensureDefaultFiles();
         assertEquals(afterFirst, Files.readString(profile("legacy-1.7"), StandardCharsets.UTF_8));
@@ -334,20 +240,58 @@ class ConfigStoreTest {
     void tunedPreFloorLegacyKeepsItsOldFloorForever() throws Exception {
         ConfigStore store = store();
         Files.createDirectories(profile("legacy-1.7").getParent());
-        String tuned = LEGACY17_2_4_7_BODY.replace("vertical: 0.4", "vertical: 0.45");
+        String tuned = archived("legacy-1.7@2.4.7.yml").replace("vertical-min: -3.9", "vertical-min: -2.0");
         Files.writeString(profile("legacy-1.7"), tuned, StandardCharsets.UTF_8);
 
         store.ensureDefaultFiles();
 
-        YamlConfiguration kept =
-                YamlConfiguration.loadConfiguration(profile("legacy-1.7").toFile());
-        assertEquals(0.45, kept.getDouble("knockback.limits.vertical"),
-                "owner-tuned values must survive every upgrade pass");
-        assertEquals(-3.9, kept.getDouble("knockback.limits.vertical-min"),
+        YamlConfiguration kept = YamlConfiguration.loadConfiguration(profile("legacy-1.7").toFile());
+        assertEquals(-2.0, kept.getDouble("knockback.limits.vertical-min"),
                 "a tuned file keeps its own floor — frozen forever");
-        assertFalse(logged.stream().anyMatch(line ->
-                line.contains("legacy-1.7.yml") && line.contains("upgraded")),
+        assertFalse(loggedUpgrade("legacy-1.7.yml"),
                 () -> "no upgrade may be reported for a tuned file, logged: " + logged);
+    }
+
+    @Test
+    void ownerUnfloorEditOnTheCurrentBundleIsFrozen() throws Exception {
+        ConfigStore store = store();
+        Files.createDirectories(profile("legacy-1.7").getParent());
+        // The current bundle's OWN comment invites this edit ("Restore -3.9 to unfloor").
+        // It parses to exactly the LEGACY17_2_4_7 values the old value-match reverted, but
+        // its BYTES differ from every archived revision (the current comment block differs
+        // from every one ever shipped), so byte identity freezes it — owner edits are sacred.
+        String edited = currentBundle("legacy-1.7").replace("vertical-min: 0.0", "vertical-min: -3.9");
+        Files.writeString(profile("legacy-1.7"), edited, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+        store.ensureDefaultFiles();
+
+        assertEquals(edited, Files.readString(profile("legacy-1.7"), StandardCharsets.UTF_8),
+                "an owner's -3.9 unfloor edit on the current bundle must survive byte-identical");
+        assertTrue(Files.readString(profile("legacy-1.7"), StandardCharsets.UTF_8).contains("vertical-min: -3.9"),
+                "the edit must take effect (not be reverted to the 0.0 floor)");
+        assertFalse(loggedUpgrade("legacy-1.7.yml"),
+                () -> "an owner edit must never be reported as upgraded, logged: " + logged);
+    }
+
+    @Test
+    void ownerSignatureBlockDeletionIsFrozen() throws Exception {
+        ConfigStore store = store();
+        Files.createDirectories(profile("signature").getParent());
+        // Deleting the whole speed-scaling block makes the file parse to the
+        // SIGNATURE_2_2_1 values (pace OFF) — the case the old value-match would revert —
+        // but its bytes match no archived signature form, so it must freeze.
+        String current = currentBundle("signature");
+        String edited = current.substring(0, current.indexOf("  speed-scaling:"));
+        Files.writeString(profile("signature"), edited, StandardCharsets.UTF_8);
+
+        store.ensureDefaultFiles();
+        store.ensureDefaultFiles();
+
+        assertEquals(edited, Files.readString(profile("signature"), StandardCharsets.UTF_8),
+                "an owner who removed the speed-scaling block must keep their file byte-identical");
+        assertFalse(loggedUpgrade("signature.yml"),
+                () -> "an owner edit must never be reported as upgraded, logged: " + logged);
     }
 
     @Test

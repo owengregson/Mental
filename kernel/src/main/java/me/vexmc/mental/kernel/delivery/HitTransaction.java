@@ -2,6 +2,7 @@ package me.vexmc.mental.kernel.delivery;
 
 import java.util.EnumSet;
 import me.vexmc.mental.kernel.model.HitContext;
+import me.vexmc.mental.kernel.model.HitGeometry;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 
 /**
@@ -13,8 +14,9 @@ import me.vexmc.mental.kernel.model.KnockbackVector;
  *
  * <pre>
  *   REGISTERED → PLANNED → PRE_SENT            (the wire carried the burst)
- *                        → PINNED              (value pinned; ships once via the
- *                                               velocity event, never a valve — B4)
+ *                        → PINNED              (value pinned — connectionless victim
+ *                                               OR wire-failed burst; ships once via
+ *                                               the velocity event, never a valve — B4)
  *             → { ADOPTED | SUPPRESSED | RETRACTED | DROPPED | ENSURED }   (resolved)
  *             → RECORDED                        (terminal; journal entry written)
  * </pre>
@@ -38,11 +40,15 @@ public final class HitTransaction {
     private static final EnumSet<State> LIVE =
             EnumSet.of(State.REGISTERED, State.PLANNED, State.PRE_SENT, State.PINNED);
 
+    /** The journal note for a burst the wire refused (BurstSender UNSENDABLE) — the pin downgrade. */
+    public static final String WIRE_FAILED = "wire-failed";
+
     private final HitContext context;
     private State state = State.REGISTERED;
     private KnockbackVector carried;
     private boolean wireCarried;
     private String suppressReason;
+    private String deliveryNote;
     private double paceFactor = 1.0;
     private double comboFactor = 1.0;
 
@@ -89,6 +95,24 @@ public final class HitTransaction {
         this.comboFactor = factor;
     }
 
+    /*
+     * The F9 journal-attribution stamps: the pre-send disposition, the base()
+     * geometry actually consumed, and the effective victim profile. Written by the
+     * compute/registration site (netty plan() or the region EDBEE), copied into the
+     * journal entry's capture by the desk — the same one-writer hand-off pattern as
+     * paceFactor/comboFactor. Null until a compute stamped them.
+     */
+    private String presend;          // pre-send disposition (F9 namespace), null = region path
+    private HitGeometry geometry;    // the base() geometry actually consumed, null until a compute stamped it
+    private String profileName;      // the effective victim profile at compute time, null until stamped
+
+    public String presend() { return presend; }
+    public void presend(String disposition) { this.presend = disposition; }
+    public HitGeometry geometry() { return geometry; }
+    public void geometry(HitGeometry geometry) { this.geometry = geometry; }
+    public String profileName() { return profileName; }
+    public void profileName(String name) { this.profileName = name; }
+
     public State state() {
         return state;
     }
@@ -127,6 +151,24 @@ public final class HitTransaction {
         transition(EnumSet.of(State.PLANNED), State.PINNED);
         this.carried = eraVector;
         this.wireCarried = false;
+    }
+
+    /**
+     * The wire refused this hit's burst (a user-null race or a mid-ship throw —
+     * BurstSender returned UNSENDABLE having written nothing): pin the era-moment
+     * vector so it ships once via the genuine velocity event and no valve ever
+     * arms to eat the victim's only authoritative ENTITY_VELOCITY. The note is
+     * journaled by the desk on the pinned ship, so a wire failure is visible in
+     * one journal read instead of masquerading as a healthy wire-carried SHIP.
+     */
+    public void pinnedWireFailed(KnockbackVector eraVector) {
+        pinned(eraVector);
+        this.deliveryNote = WIRE_FAILED;
+    }
+
+    /** The delivery note the desk journals on a pinned ship ({@link #WIRE_FAILED}), or null. */
+    public String deliveryNote() {
+        return deliveryNote;
     }
 
     public void adopted() {

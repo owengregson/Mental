@@ -6,7 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Per-player latency state: outstanding probe ids, the last two RTT samples
- * (spike detection), and rolling jitter.
+ * (consumed by {@link Record#filteredPingMillis}), and rolling jitter.
  *
  * <p>{@link Record#onResponse} is exact-match and only mutates on a hit, so
  * the probe listener can blindly offer every inbound response id: vanilla and
@@ -77,6 +77,27 @@ public final class LatencyModel {
 
         public Double previousPingMillis() {
             return previousPingMillis;
+        }
+
+        /**
+         * The spike-filtered RTT reading (the spike-threshold-ms contract): when the two
+         * most recent samples disagree by more than the threshold, the SMALLER is trusted —
+         * a round trip can be overstated by a delayed echo but never understated, so a
+         * one-off upward spike is rejected on arrival AND on bounce-back while a sustained
+         * shift is adopted on its second sample. {@code threshold <= 0} disables the
+         * filter. Null until the first response.
+         */
+        public Double filteredPingMillis(int spikeThresholdMillis) {
+            Double ping = this.pingMillis;
+            Double previous = this.previousPingMillis;
+            if (ping == null) {
+                return null;
+            }
+            if (spikeThresholdMillis > 0 && previous != null
+                    && Math.abs(ping - previous) > spikeThresholdMillis) {
+                return Math.min(ping, previous);
+            }
+            return ping;
         }
 
         public double jitterMillis() {
