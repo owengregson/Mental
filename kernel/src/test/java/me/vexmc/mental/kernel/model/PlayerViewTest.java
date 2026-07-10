@@ -1,5 +1,6 @@
 package me.vexmc.mental.kernel.model;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -35,6 +36,21 @@ class PlayerViewTest {
         // A fresh full window is immune; an open window is not.
         assertTrue(view(new TickStamp(0), 20, 20).damageImmune());
         assertFalse(view(new TickStamp(0), 0, 20).damageImmune());
+    }
+
+    @Test
+    void preEnchantArityDefaultsKbEnchantToZero() {
+        // The 18-arg helper (below the enchant freeze) defaults the level to 0 —
+        // the enchant-blind pre-send's historical value.
+        assertEquals(0, view(new TickStamp(0), 0, 20).kbEnchantLevel());
+
+        // The full canonical carries the frozen level.
+        PlayerView enchanted = new PlayerView(
+                UUID.randomUUID(), 1, new TickStamp(0), Decay.Motion.ZERO, true, 0.6, 0.08,
+                0.42, -1, false, false, true, 0, 20,
+                0.0, KnockbackProfile.LEGACY_17, 0, KINEMATICS, 0.13, null,
+                0.0, 0.0, 0.0f, 1.62, 0, Double.NaN, 2);
+        assertEquals(2, enchanted.kbEnchantLevel());
     }
 
     @Test

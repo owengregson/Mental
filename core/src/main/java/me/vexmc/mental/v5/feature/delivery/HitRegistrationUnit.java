@@ -327,7 +327,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
             HitContext context = new HitContext(
                     ids.next(), new HitSource.Melee(), attackerId, victimId,
-                    verdict, victimHasWire, compensationY, clock.current());
+                    verdict, victimHasWire, compensationY, clock.current(), registrationYaw(attackerId));
             HitTransaction tx = new HitTransaction(context);
 
             // The pre-send only exists for player victims with published views.
@@ -450,17 +450,11 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
         private EntityState preAttackerState(UUID attackerId, PlayerView view, SprintVerdict verdict) {
             PositionRing.Sample sample = sessions.positions().latest(attackerId);
-            double x = sample != null ? sample.x() : 0;
-            double y = sample != null ? sample.y() : 0;
-            double z = sample != null ? sample.z() : 0;
-            // Attacker velocity/enchant/resistance/grounded are unused by the
-            // formula's attacker terms; yaw comes from the connection's last
-            // movement packet, enchant is corrected on the authoritative pass.
-            // The movement-speed attribute rides the published view so the
-            // pre-sent knock's pace scaling matches the tick path (one truth).
-            return new EntityState(x, y, z, lastYaw(attackerId),
-                    0, 0, 0, view.grounded(), verdict.sprinting(), 0, view.knockbackResistance(),
-                    view.moveSpeedAttr());
+            return HitRegistrationUnit.preAttackerState(
+                    sample != null ? sample.x() : 0,
+                    sample != null ? sample.y() : 0,
+                    sample != null ? sample.z() : 0,
+                    lastYaw(attackerId), view, verdict);
         }
 
         private EntityState preVictimState(UUID victimId, PlayerView view) {
@@ -494,6 +488,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
             ConnectionDomains.Domain domain = domains.peek(id);
             return domain == null ? 0f : domain.lastYaw();
         }
+
+        /**
+         * The click-flush attacker yaw for the era-moment stamp — the same
+         * connection-domain value the pre-send directs the extras along — or null
+         * when the attacker has no connection domain (packetless attacker: no wire
+         * yaw exists, and the region recompute's live capture IS its attack-time
+         * yaw). NON-creating peek — the 2.4.4 domain-poisoning rule.
+         */
+        private Float registrationYaw(UUID id) {
+            ConnectionDomains.Domain domain = domains.peek(id);
+            return domain == null ? null : domain.lastYaw();
+        }
     }
 
     /* ---------------------------- shared helpers ---------------------------- */
@@ -518,6 +524,23 @@ public final class HitRegistrationUnit implements FeatureUnit {
             return true; // connectionless: pinned pre-send, no wire pacing
         }
         return gate.tryPreSend(victimId, nowMillis, minIntervalMillis);
+    }
+
+    /**
+     * The pre-send attacker capture, pure over its frozen inputs so the enchant
+     * parity is unit-pinned at this seam. Attacker velocity is unused by the
+     * formula's attacker terms; sprint is the stamped verdict; the Knockback
+     * enchant level is the view's per-tick freeze — the netty thread cannot read
+     * inventory (Folia), and an adopted PRE_SENT/PINNED vector is never
+     * recomputed, so the value shipped HERE is the value the era extra rides. The
+     * movement-speed attribute rides the published view so the pre-sent knock's
+     * pace scaling matches the tick path (one truth).
+     */
+    static EntityState preAttackerState(
+            double x, double y, double z, float lastYaw, PlayerView view, SprintVerdict verdict) {
+        return new EntityState(x, y, z, lastYaw,
+                0, 0, 0, view.grounded(), verdict.sprinting(),
+                view.kbEnchantLevel(), view.knockbackResistance(), view.moveSpeedAttr());
     }
 
     private SprintVerdict sprintVerdict(UUID attackerId) {

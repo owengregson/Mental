@@ -30,6 +30,7 @@ import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.v5.CombatSession;
+import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.Vectors;
 import me.vexmc.mental.v5.VelocityValve;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
@@ -503,6 +504,12 @@ public final class SessionService implements Listener, SessionAccess {
         // immune to wire-vs-server stance disagreement (F1). Unavailable below the
         // attribute API ⇒ the sentinel ⇒ pace factor 1.0.
         double moveSpeedAttr = Attributes.movementSpeedWalkNormalized(player);
+        // The attacker's held Knockback level, frozen per tick so the netty pre-send
+        // ships the enchant extra off the same truth the region path reads live. Era
+        // read the held item inside attack(); the netty realm cannot (Folia
+        // ensureTickThread), so this owning-thread freeze is the carrier — one tick of
+        // staleness on a swap-click is the accepted sprint-view-class divergence.
+        int kbEnchantLevel = EntityStates.heldKnockbackLevel(player);
         double slipperiness = GroundFriction.of(blockUnderFeet(player, location));
         KnockbackProfile profile = snapshot.get().profileFor(player.getWorld().getName());
         KinematicState kinematics = new KinematicState(
@@ -537,7 +544,7 @@ public final class SessionService implements Listener, SessionAccess {
                 knockbackResistance, profile, Pings.of(player), kinematics,
                 moveSpeedAttr, session.comboAttackerId(),
                 measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks,
-                yawRate);
+                yawRate, kbEnchantLevel);
     }
 
     /**

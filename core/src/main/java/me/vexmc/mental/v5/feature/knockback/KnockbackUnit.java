@@ -270,7 +270,15 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
 
         Double compensationY = compensationFor(source, tx, session, victim);
         EntityState victimState = EntityStates.captureVictim(victim, session.ledger());
-        EntityState attackerState = EntityStates.capture(attacker, sprinting);
+        // The era-moment yaw: the extras are directed along the attacker's facing,
+        // which vanilla read synchronously inside attack() at click-flush. A
+        // fast-path REGISTERED hit recomputes here 1–2 ticks later, so the live
+        // location yaw has drifted with the attacker's mouse — consume the
+        // registration stamp instead (the SprintVerdict's exact sibling). Null
+        // stamp (Vanilla-source mint, packetless attacker) keeps the live capture,
+        // which is the click-flush yaw for both of those cases.
+        EntityState attackerState = adoptRegistrationYaw(
+                EntityStates.capture(attacker, sprinting), tx.context().attackerYaw());
         boolean freshSprint = source instanceof HitSource.Melee && sprinting
                 && tx.context().sprint().fresh() != null && tx.context().sprint().fresh();
         // The pocket servo (combo-hold §3.2): active only when THIS attacker holds
@@ -519,7 +527,7 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // superseding id and a retired delivery can journal a correlated drop. It
         // carries the ORIGINAL sprint verdict — the journal context stays honest.
         HitTransaction fresh = mint(source, attackerId, victimId, original.context().sprint(),
-                paceFactor, comboFactor);
+                paceFactor, comboFactor, original.context().attackerYaw());
         // Withdraw + JOURNAL the original (a PRE_SENT/PINNED submitFromWire) so the
         // tick sweep cannot record it as a false "no-velocity-event"; a REGISTERED
         // region-path original was never on the desk, so this is a no-op there.
@@ -568,13 +576,19 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
 
     private HitTransaction mint(
             HitSource source, UUID attackerId, UUID victimId, SprintVerdict verdict,
-            double paceFactor, double comboFactor) {
+            double paceFactor, double comboFactor, Float attackerYaw) {
         HitContext context = new HitContext(
-                ids.next(), source, attackerId, victimId, verdict, false, null, clock.current());
+                ids.next(), source, attackerId, victimId, verdict, false, null,
+                clock.current(), attackerYaw);
         HitTransaction fresh = new HitTransaction(context);
         fresh.paceFactor(paceFactor); // carry the factors the original applied (D-6)
         fresh.comboFactor(comboFactor);
         return fresh;
+    }
+
+    /** The registration-time yaw stamp folded over the live capture; null = no stamp, live wins. */
+    static EntityState adoptRegistrationYaw(EntityState captured, Float registrationYaw) {
+        return registrationYaw == null ? captured : captured.withYaw(registrationYaw);
     }
 
     /**

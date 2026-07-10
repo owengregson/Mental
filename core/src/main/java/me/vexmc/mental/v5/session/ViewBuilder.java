@@ -86,11 +86,36 @@ public final class ViewBuilder {
             KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId,
             double measuredVx, double measuredVz, float yaw, double eyeHeight, int groundedTicks,
             double yawRateDegPerTick) {
+        return build(id, entityId, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, profile, pingMillis, kinematics,
+                moveSpeedAttr, comboAttackerId, measuredVx, measuredVz, yaw, eyeHeight,
+                groundedTicks, yawRateDegPerTick, 0);
+    }
+
+    /**
+     * The enchant-freeze overload — carries the attacker's held Knockback level so
+     * the netty pre-send ships the enchant extra off the same frozen truth the
+     * region path reads live (the {@code moveSpeedAttr} pattern). The pre-freeze
+     * overload defaults it to 0 (the historical enchant-blind pre-send).
+     */
+    public PlayerView build(
+            UUID id, int entityId,
+            Decay.Motion motion, boolean grounded, double slipperiness,
+            double gravity, double jumpImpulse, int jumpBoostAmplifier,
+            boolean sprinting, boolean creative, boolean pvpAllowed,
+            int noDamageTicks, int maxNoDamageTicks,
+            double knockbackResistance,
+            KnockbackProfile profile, int pingMillis,
+            KinematicState kinematics, double moveSpeedAttr, UUID comboAttackerId,
+            double measuredVx, double measuredVz, float yaw, double eyeHeight, int groundedTicks,
+            double yawRateDegPerTick, int kbEnchantLevel) {
         return new PlayerView(
                 id, entityId, clock.current(), motion, grounded, slipperiness,
                 gravity, jumpImpulse, jumpBoostAmplifier, sprinting, creative, pvpAllowed,
                 noDamageTicks, maxNoDamageTicks, knockbackResistance,
                 profile, pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
-                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick);
+                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick,
+                kbEnchantLevel);
     }
 }

@@ -22,10 +22,37 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                          UUID comboAttackerId,
                          double measuredVx, double measuredVz, float yaw,
                          double eyeHeight, int groundedTicks,
-                         double yawRateDegPerTick) {
+                         double yawRateDegPerTick, int kbEnchantLevel) {
 
     /** The standing eye height above feet — the pocket-servo precision default (ReachValidator.EYE_HEIGHT). */
     private static final double DEFAULT_EYE_HEIGHT = 1.62;
+
+    /**
+     * The pre-enchant-freeze arity: the attacker's held Knockback level defaults
+     * to 0 — the pre-send's historical (enchant-blind) value, so a view built
+     * without the freeze is byte-identical to the pre-fix pre-send. The netty realm
+     * may never read inventory (Folia {@code ensureTickThread}), so this frozen
+     * per-tick value is the only lawful way a pre-sent knock can carry the enchant
+     * extra — the {@code moveSpeedAttr} precedent.
+     */
+    public PlayerView(UUID id, int entityId, TickStamp at,
+                      Decay.Motion motion, boolean grounded, double slipperiness,
+                      double gravity, double jumpImpulse, int jumpBoostAmplifier,
+                      boolean sprinting, boolean creative, boolean pvpAllowed,
+                      int noDamageTicks, int maxNoDamageTicks,
+                      double knockbackResistance,
+                      KnockbackProfile profile, int pingMillis,
+                      KinematicState kinematics, double moveSpeedAttr,
+                      UUID comboAttackerId,
+                      double measuredVx, double measuredVz, float yaw,
+                      double eyeHeight, int groundedTicks,
+                      double yawRateDegPerTick) {
+        this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, profile,
+                pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
+                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick, 0);
+    }
 
     /**
      * The pre-target-v2 precision arity: carries the five §3.2b inputs but no
