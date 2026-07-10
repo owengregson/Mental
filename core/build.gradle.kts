@@ -375,7 +375,7 @@ val jdk8GateAsm: Configuration by configurations.creating {
     isCanBeConsumed = false
     isCanBeResolved = true
 }
-dependencies { jdk8GateAsm("org.ow2.asm:asm:9.7") }
+dependencies { jdk8GateAsm(libs.asm) }
 
 // Server-provided packages: present on the running server, never bundled, so never validated or required
 // in-jar. Each is documented — an addition must be a package the scan PROVES the server provides.
