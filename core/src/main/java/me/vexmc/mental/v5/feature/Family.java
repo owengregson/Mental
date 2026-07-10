@@ -28,7 +28,9 @@ public enum Family {
     COMBO("Combo Solver", "TRIPWIRE_HOOK",
             "Solve the fresh knock to hold a sweet-spot combo, plus a reach handicap on the juggled victim."),
     POTS("Potions", "SPLASH_POTION",
-            "Splash-potion utilities — the /potfill command and steep-throw fast pots.");
+            "Splash-potion utilities — the /potfill command and steep-throw fast pots."),
+    FEEDBACK("Hit Feedback", "NOTE_BLOCK",
+            "Custom hit sounds and particles, and pop-off damage indicators.");
 
     private final String displayName;
     private final String iconName;

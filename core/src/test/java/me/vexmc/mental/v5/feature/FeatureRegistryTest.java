@@ -49,7 +49,10 @@ class FeatureRegistryTest {
             "combo-hold",
             "combo-reach-handicap",
             "pot-fill",
-            "fast-pots");
+            "fast-pots",
+            // FEEDBACK (2.5.2)
+            "hit-feedback",
+            "damage-indicators");
 
     @Test
     void yamlKeysAreExactlyTheOperatorContractSetUniqueAndNonNull() {
