@@ -100,13 +100,21 @@ observable era contract is the WIRE cadence — bonus, a one-tick gap, then a
 re-arm on the client's held sprint intent — which the `SprintWire` reproduces:
 the hit clears only the wire sprint (`onServerClear`, spending its freshness) and
 `reconcile` re-arms the bonus one tick later when the raw `clientSprinting` flag
-survived (no STOP followed the hit). A client that DID express un-sprint (Via
-legacy, a spoofed modern client, a slow full-charge clicker) sends STOP → no auto
-re-arm → a real START (the w-tap) required, freshness armed as ever — so the
-w-tap / block-hit techniques are preserved exactly where a client expresses them,
-and only a client that never un-sprinted keeps the bonus (matching both its own
-belief and the modern-vanilla baseline). Never re-add the deferred
-`setSprinting(false)`.
+survived (no STOP followed the hit). A STOP crosses the wire ONLY when the
+client's same-tick re-arm is BLOCKED — item-use / block-holding foremost, food
+≤6, or lost forward impulse — or for a double-tap-W sprinter (no rising edge
+until a full re-gesture): those send STOP, no auto re-arm, so a real START (the
+w-tap) is required, freshness armed as ever. A sprint-KEY-HOLDER's full-charge
+un-sprint prediction is wire-INVISIBLE: the re-arm fires in the SAME tick's
+`aiStep` (the level-triggered hold path, which runs BEFORE the per-tick diff
+sender `sendIsSprintingIfNeeded`), so no STOP crosses and the held sprinter keeps
+the bonus — so the w-tap / block-hit techniques are preserved exactly where a
+client expresses them (empirical 1.21.11 extraction,
+`docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`). PLAYER_INPUT
+on 1.21.2+ DOES carry a sprint bit (0x40, raw `keySprint.isDown()` intent — false
+for double-tap sprinters, true for stationary ctrl-holders; the server ignores
+it) — a future re-arm corroborator, never a verdict source. Never re-add the
+deferred `setSprinting(false)`.
 
 ## Myths (do not implement, do not "fix")
 
