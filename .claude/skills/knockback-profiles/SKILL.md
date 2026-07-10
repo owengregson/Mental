@@ -22,8 +22,9 @@ description: Use when changing the knockback engine, profile schema, presets, or
   extracted only when missing — owner edits are
   sacred, deleting regenerates pristine — with ONE exception: a file still
   matching a superseded bundled revision verbatim (`SupersededPresets`,
-  value-equality not bytes) is upgraded in place when research corrects a
-  preset. Any tuned value freezes the file forever.
+  byte-identity after newline normalization — since 2.4.9) is upgraded in
+  place when research corrects a preset. Any edit at all — a value, a
+  comment, whitespace — freezes the file forever.
 - Knockback is **GLOBAL** (since 2.1.0): resolution is by the VICTIM's
   per-world map (knockback.yml) → server default. There is NO per-player
   override — the override map, `/mental kb set <player>`, and the per-player

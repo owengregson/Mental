@@ -1,0 +1,75 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  badlion — Badlion's archived NoDebuff/PotPvP knockback
+#
+#  Archived values from Badlion's PotPvP ladder, cross-confirmed
+#  byte-identical in two independent archives (threeamnewacc/Server-Archive
+#  PotPvP.txt and sprytex/Knockback-Values badlions12 nodebuff, fetched and
+#  verified 2026-06-12). Published as a friction DIVISOR of 2.0 — Mental's
+#  friction is the SURVIVING FRACTION, so 2.0 ÷ becomes 0.5 here.
+#
+#  Original knobs:  friction 2.0 ÷ · horizontal 0.34 · vertical 0.34 ·
+#                   vertical-limit 0.4 · extra-h 0.48 · extra-v 0.085
+#
+#  Badlion's BuildUHC/RodPvP ladder ran a different set — friction 1.9 ÷
+#  (0.5263) · h 0.5 · v 0.34 · limit 0.34 · extra 0.6/0.125 — copy this
+#  file to run that ladder. Softest base of the archived practice servers;
+#  era players compared it to Kohi as "less knockback distance and air
+#  time", which is exactly the 0.34-vs-0.35/0.36 base on display.
+#
+#  Badlion ran a 1.7 BACK-END through its NoDebuff/PotPvP prime (the July
+#  2016 cross-versioning announcement reverted to "a 1.7 back-end"; in Feb
+#  2015 70–80% of its players refused 1.8) — so melee residuals persist
+#  and combos ride the ledger, like Kohi. Confidence: medium (forum
+#  snippets, the fork itself was never public).
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Badlion
+description: "Badlion's archived NoDebuff values — soft base 0.34, strong sprint differential, 1.7 ledger combos."
+
+knockback:
+  base:
+    horizontal: 0.34
+    vertical: 0.34
+  vertical-mode: add
+  extra:
+    horizontal: 0.48
+    vertical: 0.085
+  wtap-extra:
+    enabled: false
+    horizontal: 0.48
+    vertical: 0.085
+  friction:
+    x: 0.5
+    y: 0.5
+    z: 0.5
+  limits:
+    vertical: 0.4
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  # Badlion's NoDebuff prime ran a 1.7 back-end: the tracker wire, like
+  # legacy-1.7. Rod/projectile knocks rode the tracker on BOTH eras.
+  delivery:
+    melee: tracker
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    # 1.7 back-end: melee residuals persist — ledger combos compound.
+    combos: true
+    # The fork code carried 1.8's probabilistic resistance roll, but no item
+    # on its pool could ever trigger it — `none` preserves the on-server
+    # feel on modern item pools.
+    armor-resistance: none
+    shield-blocking-cancels: true

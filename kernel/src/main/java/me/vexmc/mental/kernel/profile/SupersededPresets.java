@@ -1,7 +1,11 @@
 package me.vexmc.mental.kernel.profile;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.Friction;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.Limits;
 import me.vexmc.mental.kernel.profile.KnockbackProfile.Push;
@@ -10,11 +14,19 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile.WtapExtra;
 
 /**
  * Every bundled-preset revision that later research corrected, exactly as it
- * shipped. A profile file on disk whose parsed values (and identity strings)
- * still match one of these was never tuned by the owner — it is the old
+ * shipped. A profile file on disk that is byte-identical (after newline
+ * normalization) to one of these was never tuned by the owner — it is the old
  * bundle verbatim, and {@code ConfigStore} upgrades it in place to the
- * corrected preset. A file that differs in any value is an owner edit and is
- * never touched.
+ * corrected preset ({@link #isSupersededBundleText}, the RAW-BYTE contract).
+ * A file that differs in ANYTHING — a value, a comment, whitespace — is an
+ * owner edit and is never touched.
+ *
+ * <p>Byte identity replaced value matching in 2.4.9: value matching could not
+ * distinguish an unedited old bundle from an owner edit that happened to land on
+ * old values, and the bundled files' own comments invite exactly such an edit
+ * ("Restore -3.9 to unfloor"). The value-based API ({@link #of},
+ * {@link #isSupersededVerbatim}) is retained additively for the kernel's era
+ * pins, but {@code ConfigStore} no longer calls it.</p>
  *
  * <p>The 2026-06-12 research round (docs/research/2026-06-12-archived-
  * server-values.md) replaced the community-remake mmc and lunar values with
@@ -409,5 +421,86 @@ public final class SupersededPresets {
             }
         }
         return false;
+    }
+
+    /**
+     * SHA-256 (lowercase hex) of every superseded bundled revision's exact
+     * historical text, newline-normalized (CRLF/CR → LF), keyed by preset. Since
+     * 2.4.9 {@code ConfigStore} matches the pristine upgrade on these RAW BYTES,
+     * not on parsed values (see the class javadoc). Storing hashes rather than the
+     * full texts keeps the kernel pure-JDK and small; the texts themselves are
+     * pinned verbatim as core test resources under {@code superseded-bundles/},
+     * with a test that recomputes every hash and asserts none collides with a
+     * current bundle (the self-upgrade-loop guard).
+     *
+     * <p>Pre-1.4.0 forms are hashed WITH the 1.4.0 {@code delivery} block already
+     * inserted, because {@code ConfigStore.ensureDeliverySection} patches the file
+     * before the upgrade check reads it (custom is excluded from that patch, so its
+     * 1.3.x form is hashed raw). {@code kohi@1.5.0}/{@code lunar@1.5.0} are the
+     * untagged 1.5.0-era dev shape, superseded by the archived-values calibration
+     * before v1.8.0 shipped — never released, so inert, but kept for completeness.</p>
+     */
+    private static final Map<String, Set<String>> BUNDLE_SHA256_BY_PRESET = Map.of(
+            "kohi", Set.of(
+                    "a4e64365023c076d5b5cb0a40153ff3cc2b9565619a2be45f0698da08fcbde64", // kohi@1.3.x (delivery-patched)
+                    "e39436b24955f86b87369b6a891a792802b51e09546917c355109343ebb69a82", // kohi@1.4.0
+                    "f0dda97b88cc965fa70deb3ada27dbd9e098e1b7eead8d336337de3688d810d9", // kohi@1.5.0 (dev-only, inert)
+                    "8a46f1d452f7f181bbdd6e6195aefe355dfac1e7afc5c0f6a95ea46f22e2271c"), // kohi@1.8.0 → 2.4.6
+            "mmc", Set.of(
+                    "dcdb742a16a898d75c99cd805e438cbd206f77ad670a371d4316883ceffe14c1", // mmc@1.3.x (delivery-patched)
+                    "3c6542457ab6f58c10363682c0479b6b0f66be58bf28df3376faa11984199085", // mmc@1.4.0 (== 1.5.0 bytes)
+                    "dc94241a6b7c776e7f00356b21417db00959dffdce8eed5473c8f7f494a2d4db"), // mmc@1.8.0 → 2.4.6
+            "lunar", Set.of(
+                    "3eb5a98f0cd4e4ef544d26805fce69f040b46d4de628af9dfe2f26af951eea8d", // lunar@1.3.x (delivery-patched)
+                    "c093c91694e4cbd6b6dcef1605c7d1ca0f574ed1c9dfaa0708bede55b805e3ce", // lunar@1.4.0
+                    "08c555910b3922e49f5a5572438b4c654761f5fb0c4a34600008f45f135dbb01", // lunar@1.5.0 (dev-only, inert)
+                    "77bfe61b057a1f382b99a06431c8f37c338c8b2f05a036562e43c2c1fc58e230"), // lunar@1.8.0 → 2.4.6
+            "minehq", Set.of(
+                    "b00795419682ae0a0399233c7405a0c71f00827e2c72af6ee2833ac4b3df07a3"), // minehq@1.8.0 → 2.4.6
+            "badlion", Set.of(
+                    "ed4f7249455388a17a1e615d724efb037da77cb9ebd50eaec6830a8f81708477"), // badlion@1.8.0 → 2.4.6
+            "signature", Set.of(
+                    "aebaf73472a5b66a79214bd516926a8cfea9ad67c37c2d24135a48b1f57d308e", // signature@2.2.0
+                    "f87480dc0754f3e28045e050ab5f857ac5afb64f583286edf67844a0d307217e", // signature@2.2.1 → 2.3.2
+                    "fd22b141dda57fa1c37e3ead86f147bd371aa48966be69004ce2294e81f1837f"), // signature@2.4.0
+            "legacy-1.7", Set.of(
+                    "06b2b21b83435366c8629bd053b68f4a70af6044a6c457cc79abd232b335e944", // legacy-1.7@1.3.x (delivery-patched)
+                    "133d912ebdc09e2def3ba0a2009b2b69f618f09e81398886f1350cd02b9b61df", // legacy-1.7@1.4.0
+                    "c5febe6f01d1b0811791e66d4131fffcc19172e7c86b0a294b3ab2ae1cc38ffe", // legacy-1.7@1.5.0 → 2.4.6
+                    "fb6f7d91d61a8db3820b0ded85beb563166ee11da4e6db665b188920f07bbe08"), // legacy-1.7@2.4.7
+            "legacy-1.8", Set.of(
+                    "d5210235b0e63987657e7656108087751a2583bbdbd64785b4ea24802e16c80b", // legacy-1.8@1.3.x (delivery-patched)
+                    "7e9aa22ef48e8ec1b50b74c2b31af38f1687c9bddc629327fcc21b86bcdf0ad7", // legacy-1.8@1.4.0
+                    "0d3b083c1292d8602b33ba80d1b808548bf3e3f0c76a1c473e14e5db454ee573", // legacy-1.8@1.5.0 → 2.4.6
+                    "e5c1ba56beaf74f10dcf4fd9abfed2c2376e05f9f7ffc6bc9ebc201224bf3787"), // legacy-1.8@2.4.7
+            "custom", Set.of(
+                    "7f367ca455f7126ff7203f25209ae29757c932b06f6bde329e6ecca0926828f3", // custom@1.3.x (raw — patcher excludes custom)
+                    "50fcd1dae0b1934566ac909d90971c915cb9bb9f06e335f2a60081f0794dc2f1", // custom@1.4.0
+                    "5df319ae3c706bb659e2b2c3c5c3b6e00837622bbf93dfb04b129bc708e0f7cb", // custom@1.5.0 → 2.2.2
+                    "fd3ab8a15f5e78b06def73ab5dcce1b2c5babb5b84e798bde50378c3f0716b56")); // custom@2.4.0 → 2.4.7
+
+    /** Whether {@code fileText} is byte-identical (newline-normalized) to a superseded bundled revision of {@code preset}. */
+    public static boolean isSupersededBundleText(String preset, String fileText) {
+        Set<String> hashes = BUNDLE_SHA256_BY_PRESET.get(preset);
+        if (hashes == null || fileText == null) {
+            return false;
+        }
+        String normalized = fileText.replace("\r\n", "\n").replace('\r', '\n');
+        return hashes.contains(sha256Hex(normalized));
+    }
+
+    private static String sha256Hex(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16))
+                   .append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
     }
 }

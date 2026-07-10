@@ -1,0 +1,57 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  legacy-1.8 — the 1.8.9 combat model
+#
+#  Identical math to legacy-1.7 (the formulas never changed between the
+#  eras) with 1.8.9 DELIVERY: the server reverts the victim's motion after
+#  every melee knock, so each hit lands flat and melee never feeds itself
+#  (modifiers.combos: false). Rod and projectile residuals still feed the
+#  next melee hit once — exactly the 1.8.9 behavior. Knockback resistance
+#  follows the era's probabilistic all-or-nothing code path — a deliberate
+#  difference from legacy-1.7's armor-resistance: none, which reproduces
+#  the 1.7 item pool (nothing a player wore resisted knockback there).
+#
+#  This preset is regenerated when the file is missing; your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Legacy 1.8
+description: "The 1.8.9 combat model: identical math, flat send-then-revert delivery."
+
+knockback:
+  base:
+    horizontal: 0.4
+    vertical: 0.4
+  vertical-mode: add
+  extra:
+    horizontal: 0.5
+    vertical: 0.1
+  wtap-extra:
+    enabled: false
+    horizontal: 0.5
+    vertical: 0.1
+  friction:
+    x: 0.5
+    y: 0.5
+    z: 0.5
+  limits:
+    vertical: 0.4
+    vertical-min: -3.9
+    horizontal: -1
+  air:
+    horizontal: 1.0
+    vertical: 1.0
+  add:
+    horizontal: 0.0
+    vertical: 0.0
+  range-reduction:
+    enabled: false
+    start-distance: 3.0
+    factor: 0.025
+    offset: 1.2
+    max-reduction: 0.12
+  delivery:
+    melee: immediate
+    projectile: tracker
+  modifiers:
+    sprint: 1.0
+    combos: false
+    armor-resistance: legacy
+    shield-blocking-cancels: true
