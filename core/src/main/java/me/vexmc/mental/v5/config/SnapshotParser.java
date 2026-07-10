@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.config;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -10,8 +11,10 @@ import me.vexmc.mental.v5.config.settings.AnticheatSettings;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
 import me.vexmc.mental.v5.config.settings.DebugSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
@@ -24,6 +27,7 @@ import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Material;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.MemoryConfiguration;
 
 /**
  * Parses the post-overlay YAML (config.yml + knockback.yml + hit-registration.yml
@@ -118,6 +122,9 @@ public final class SnapshotParser {
                     reader(main, "combo-hold", "config.yml", issues).sub("reach-handicap"));
             case POT_FILL -> parsePotFill(reader(main, "pot-fill", "config.yml", issues));
             case FAST_POTS -> parseFastPots(reader(main, "fast-pots", "config.yml", issues));
+            case HIT_FEEDBACK -> parseHitFeedback(reader(main, "hit-feedback", "config.yml", issues));
+            case DAMAGE_INDICATORS ->
+                    parseDamageIndicators(reader(main, "damage-indicators", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
         };
     }
@@ -348,6 +355,124 @@ public final class SnapshotParser {
                         FastPotsSettings.MIN_MAX_MULTIPLIER, FastPotsSettings.MAX_MAX_MULTIPLIER),
                 reader.numberClamped("lead-ticks", d.leadTicks(),
                         FastPotsSettings.MIN_LEAD, FastPotsSettings.MAX_LEAD));
+    }
+
+    private static HitFeedbackSettings parseHitFeedback(ConfigReader reader) {
+        HitFeedbackSettings d = HitFeedbackSettings.DEFAULTS;
+        HitFeedbackSettings.Preset preset =
+                reader.oneOf("preset", d.preset(), HitFeedbackSettings.Preset.class);
+        // The custom lists are parsed regardless of the preset (so a `custom` switch
+        // finds them ready); the record's sounds()/particles() pick the effective set.
+        return new HitFeedbackSettings(
+                preset,
+                parseSounds(reader, d.customSounds()),
+                parseParticles(reader, d.customParticles()));
+    }
+
+    /**
+     * The {@code sounds:} list — the config's first list-of-records shape. Each map
+     * entry is re-wrapped into its own {@link ConfigReader} (over a
+     * MemoryConfiguration-backed section) so every field read runs through the same
+     * warn-and-fallback contract the flat knobs use. A blank/absent name skips the
+     * entry loudly; the survivors are returned immutable.
+     */
+    private static List<HitFeedbackSettings.SoundSpec> parseSounds(
+            ConfigReader reader, List<HitFeedbackSettings.SoundSpec> fallback) {
+        ConfigurationSection section = reader.section();
+        if (section == null || !section.isSet("sounds")) {
+            return fallback;
+        }
+        List<HitFeedbackSettings.SoundSpec> sounds = new ArrayList<>();
+        List<Map<?, ?>> entries = section.getMapList("sounds");
+        for (int i = 0; i < entries.size(); i++) {
+            ConfigReader entry = listEntry(reader, "sounds", i, entries.get(i));
+            String name = entry.text("sound", "");
+            if (name.isBlank()) {
+                skipUnnamed(entry, "sound");
+                continue;
+            }
+            sounds.add(new HitFeedbackSettings.SoundSpec(
+                    name,
+                    (float) entry.numberClamped("volume", 1.0,
+                            HitFeedbackSettings.MIN_VOLUME, HitFeedbackSettings.MAX_VOLUME),
+                    (float) entry.numberClamped("pitch", 1.0,
+                            HitFeedbackSettings.MIN_PITCH, HitFeedbackSettings.MAX_PITCH)));
+        }
+        return List.copyOf(sounds);
+    }
+
+    /** The {@code particles:} list, re-wrapped per entry like {@link #parseSounds}. */
+    private static List<HitFeedbackSettings.ParticleSpec> parseParticles(
+            ConfigReader reader, List<HitFeedbackSettings.ParticleSpec> fallback) {
+        ConfigurationSection section = reader.section();
+        if (section == null || !section.isSet("particles")) {
+            return fallback;
+        }
+        List<HitFeedbackSettings.ParticleSpec> particles = new ArrayList<>();
+        List<Map<?, ?>> entries = section.getMapList("particles");
+        for (int i = 0; i < entries.size(); i++) {
+            ConfigReader entry = listEntry(reader, "particles", i, entries.get(i));
+            String name = entry.text("particle", "");
+            if (name.isBlank()) {
+                skipUnnamed(entry, "particle");
+                continue;
+            }
+            int countMin = Math.min(entry.intAtLeast("count-min", 1, 0), HitFeedbackSettings.MAX_COUNT);
+            int countMax = Math.min(entry.intAtLeast("count-max", countMin, countMin),
+                    HitFeedbackSettings.MAX_COUNT);
+            ConfigReader spread = entry.sub("spread");
+            particles.add(new HitFeedbackSettings.ParticleSpec(
+                    name,
+                    entry.text("block", ""),
+                    countMin,
+                    countMax,
+                    entry.oneOf("mode", HitFeedbackSettings.Mode.EMANATE, HitFeedbackSettings.Mode.class),
+                    (float) entry.numberClamped("speed", 0.15, 0.0, 2.0),
+                    spread.numberClamped("x", 0.2, 0.0, 4.0),
+                    spread.numberClamped("y", 0.3, 0.0, 4.0),
+                    spread.numberClamped("z", 0.2, 0.0, 4.0)));
+        }
+        return List.copyOf(particles);
+    }
+
+    /** Re-wrap one list-of-maps entry into a per-entry reader with its own warn prefix. */
+    private static ConfigReader listEntry(ConfigReader parent, String listKey, int index, Map<?, ?> map) {
+        ConfigurationSection entry = new MemoryConfiguration().createSection("entry", map);
+        return new ConfigReader(entry, parent.prefix() + "." + listKey + "[" + index + "]", parent.issues());
+    }
+
+    /**
+     * A list entry with no usable name is dropped. {@link ConfigReader#text} already
+     * warned if a name was present-but-blank, so this warns only for the absent case —
+     * every skipped entry is announced exactly once.
+     */
+    private static void skipUnnamed(ConfigReader entry, String nameKey) {
+        if (entry.section() == null || !entry.section().isSet(nameKey)) {
+            entry.issues().warn(entry.prefix() + "." + nameKey,
+                    "no " + nameKey + " name — entry skipped", "(skipped)");
+        }
+    }
+
+    private static DamageIndicatorsSettings parseDamageIndicators(ConfigReader reader) {
+        DamageIndicatorsSettings d = DamageIndicatorsSettings.DEFAULTS;
+        return new DamageIndicatorsSettings(
+                reader.intClamped("lifetime-ticks", d.lifetimeTicks(),
+                        DamageIndicatorsSettings.MIN_LIFETIME, DamageIndicatorsSettings.MAX_LIFETIME),
+                reader.numberClamped("ring-radius", d.ringRadius(), 0.0,
+                        DamageIndicatorsSettings.MAX_RADIUS),
+                reader.numberClamped("height-jitter", d.heightJitter(), 0.0,
+                        DamageIndicatorsSettings.MAX_JITTER),
+                reader.numberClamped("launch-vertical", d.launchVertical(), 0.0,
+                        DamageIndicatorsSettings.MAX_LAUNCH),
+                reader.numberClamped("launch-outward", d.launchOutward(), 0.0,
+                        DamageIndicatorsSettings.MAX_LAUNCH),
+                reader.numberClamped("gravity", d.gravity(), 0.0,
+                        DamageIndicatorsSettings.MAX_GRAVITY),
+                reader.numberClamped("drag", d.drag(),
+                        DamageIndicatorsSettings.MIN_DRAG, DamageIndicatorsSettings.MAX_DRAG),
+                reader.text("text", d.text()),
+                reader.text("crit-text", d.critText()),
+                reader.numberClamped("crit-threshold-hearts", d.critThresholdHearts(), 0.0, 100.0));
     }
 
     private static OffhandSettings parseOffhand(ConfigReader reader) {

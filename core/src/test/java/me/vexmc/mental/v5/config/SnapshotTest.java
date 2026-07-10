@@ -12,8 +12,10 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
@@ -78,6 +80,9 @@ class SnapshotTest {
         assertEquals(2.85, combo.staticTarget(), 0.0, "parse-empty combo static target is 2.85");
         assertEquals(PotFillSettings.DEFAULTS, settings(snapshot, Feature.POT_FILL));
         assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
+        // The FEEDBACK family: both cosmetic records default to their era-exact no-op.
+        assertEquals(HitFeedbackSettings.DEFAULTS, settings(snapshot, Feature.HIT_FEEDBACK));
+        assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -331,6 +336,100 @@ class SnapshotTest {
         assertEquals(FastPotsSettings.MIN_MAX_MULTIPLIER, clampedLow.maxSpeedMultiplier());
         assertEquals(FastPotsSettings.MIN_LEAD, clampedLow.leadTicks());
         assertEquals(3, low.issues().size(), () -> "issues: " + low.issues());
+    }
+
+    @Test
+    void hitFeedbackCustomListsReadFromTheConfig() throws Exception {
+        // preset: custom reads the sounds:/particles: lists — the config's first
+        // list-of-records shape, each entry re-wrapped into its own reader.
+        Snapshot snapshot = parse("""
+                hit-feedback:
+                  preset: custom
+                  sounds:
+                    - sound: entity.player.hurt
+                      volume: 0.9
+                      pitch: 1.2
+                    - sound: block.anvil.land
+                      volume: 0.5
+                      pitch: 0.6
+                  particles:
+                    - particle: crit
+                      count-min: 3
+                      count-max: 5
+                      mode: spread
+                      spread: {x: 0.2, y: 0.3, z: 0.2}
+                """, "", "", "").snapshot();
+        HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
+        assertEquals(HitFeedbackSettings.Preset.CUSTOM, s.preset());
+        assertEquals(2, s.sounds().size());
+        assertEquals("entity.player.hurt", s.sounds().get(0).sound());
+        assertEquals(0.9f, s.sounds().get(0).volume(), 1e-6);
+        assertEquals(1.2f, s.sounds().get(0).pitch(), 1e-6);
+        assertEquals(1, s.particles().size());
+        assertEquals(HitFeedbackSettings.Mode.SPREAD, s.particles().get(0).mode());
+        assertEquals(0.3, s.particles().get(0).spreadY(), 1e-9);
+    }
+
+    @Test
+    void hitFeedbackPresetsResolveTheirInCodeLists() throws Exception {
+        // A non-custom preset ignores the lists and resolves the in-code constants.
+        Snapshot snapshot = parse("""
+                hit-feedback:
+                  preset: signature
+                """, "", "", "").snapshot();
+        HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
+        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, s.sounds());
+        assertEquals(HitFeedbackSettings.SIGNATURE_PARTICLES, s.particles());
+    }
+
+    @Test
+    void hitFeedbackKnobsAreParseClampedToTheirBounds() throws Exception {
+        // A volume above the ceiling and a pitch below the floor each clamp to the
+        // nearest bound (per-entry numberClamped, one warn apiece).
+        Snapshot snapshot = parse("""
+                hit-feedback:
+                  preset: custom
+                  sounds:
+                    - sound: entity.player.hurt
+                      volume: 99
+                      pitch: 0.01
+                """, "", "", "").snapshot();
+        HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
+        assertEquals(HitFeedbackSettings.MAX_VOLUME, s.sounds().get(0).volume(), 1e-6);
+        assertEquals(HitFeedbackSettings.MIN_PITCH, s.sounds().get(0).pitch(), 1e-6);
+    }
+
+    @Test
+    void damageIndicatorKnobsReadAndClamp() throws Exception {
+        // lifetime-ticks above MAX_LIFETIME clamps down; the in-range knobs read
+        // verbatim, an absent crit-text keeps its default.
+        Snapshot snapshot = parse("""
+                damage-indicators:
+                  lifetime-ticks: 500
+                  ring-radius: 0.8
+                  text: "&e{HEALTH}"
+                  crit-threshold-hearts: 3.5
+                """, "", "", "").snapshot();
+        DamageIndicatorsSettings s = settings(snapshot, Feature.DAMAGE_INDICATORS);
+        assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, s.lifetimeTicks());
+        assertEquals(0.8, s.ringRadius(), 1e-9);
+        assertEquals("&e{HEALTH}", s.text());
+        assertEquals(3.5, s.critThresholdHearts(), 1e-9);
+        assertEquals(DamageIndicatorsSettings.DEFAULTS.critText(), s.critText());
+    }
+
+    @Test
+    void damageIndicatorLifetimeClampsHighWithAWarning() throws Exception {
+        // intClamped is the integer twin of numberClamped: a high value is pulled to
+        // MAX_LIFETIME with exactly one warn (intAtLeast would have silently kept it).
+        SnapshotParser.Result result = parse("""
+                damage-indicators:
+                  lifetime-ticks: 500
+                """, "", "", "");
+        DamageIndicatorsSettings s = settings(result.snapshot(), Feature.DAMAGE_INDICATORS);
+        assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, s.lifetimeTicks());
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("lifetime-ticks"), () -> result.issues().get(0));
     }
 
     @Test
