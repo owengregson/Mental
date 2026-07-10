@@ -534,4 +534,72 @@ class SprintWireTest {
         assertFalse(wire.verdictAt(new TickStamp(10)).sprinting(),
                 "the adopted server un-sprint stands — the re-arm window closed on adopt");
     }
+
+    /* ── the seed raises clientSprinting (mid-sprint plugin load/reload) ───── */
+
+    @Test
+    void seedFromASprintingServerFlagRaisesClientSprintingAndKeepsTheBonusAcrossAHit() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        // A plugin load/reload mid-play creates the wire for a player who is ALREADY
+        // sprinting. The first movement reconcile seeds the unseen wire from the live
+        // server flag, which — its own pre-wire START having set it through vanilla's
+        // handler — IS the client's last transmitted sprint state.
+        wire.reconcile(true, new TickStamp(0), 3); // unseen ⇒ seed
+        SprintVerdict seeded = wire.verdictAt(new TickStamp(0));
+        assertTrue(seeded.sprinting(), "seeded sprinting from the live server flag");
+        assertEquals(Boolean.FALSE, seeded.fresh(), "a seed is not fresh — no re-engage happened");
+        assertTrue(wire.clientSprinting(),
+                "the seed adopts the server flag as the client's last transmitted sprint state");
+
+        // A bonus hit clears the wire (the seq-guarded clear; no later wire write).
+        clock.tick = 1;
+        wire.onServerClear(seeded.wireSeq()); // seq not advanced ⇒ clears sprinting/armed, clearedAt = 1
+        assertFalse(wire.verdictAt(new TickStamp(1)).sprinting(), "the hit cleared the wire view");
+
+        // The +1-tick movement reconcile with the raw client flag surviving the seed:
+        // the mid-sprint-reload player keeps the bonus. WITHOUT the seed fix the seed
+        // carried the INITIAL false clientSprinting, so this re-arm would refuse.
+        wire.reconcile(true, new TickStamp(2), 3);
+        assertTrue(wire.verdictAt(new TickStamp(2)).sprinting(),
+                "the seed's raised clientSprinting lets the post-clear re-arm re-engage the bonus");
+    }
+
+    @Test
+    void seedFromANonSprintingServerFlagLeavesClientSprintingLowAndDoesNotReArm() {
+        Clock clock = new Clock();
+        clock.tick = 0;
+        SprintWire wire = new SprintWire(clock);
+
+        // The reloaded player was walking: a non-sprinting seed leaves the raw flag down.
+        wire.reconcile(false, new TickStamp(0), 3); // unseen ⇒ seed to not-sprinting
+        SprintVerdict seeded = wire.verdictAt(new TickStamp(0));
+        assertFalse(seeded.sprinting());
+        assertFalse(wire.clientSprinting(), "a non-sprinting seed leaves clientSprinting false");
+
+        // No clear window and no client sprint intent ⇒ later reconciles never synthesize
+        // a bonus. Byte-identical to the pre-fix behaviour.
+        wire.reconcile(false, new TickStamp(2), 3);
+        assertFalse(wire.verdictAt(new TickStamp(2)).sprinting(),
+                "no re-arm without a surviving client sprint intent");
+    }
+
+    @Test
+    void theAdoptBranchNeverTouchesClientSprinting() {
+        Clock clock = new Clock();
+        clock.tick = 4;
+        SprintWire wire = new SprintWire(clock);
+
+        wire.onSprintStart(); // seen=true, clientSprinting up, sprinting+armed, lastWrite = 4
+        assertTrue(wire.clientSprinting(), "a START raises the raw client flag");
+
+        // A persistent server un-sprint is ADOPTED into the wire's sprinting flag after
+        // the quiet window — but the raw client flag is packet-only, so the adopt (unlike
+        // the seed) must never write it. This is the existing packet-only invariant.
+        wire.reconcile(false, new TickStamp(8), 3); // disagree + age 4 ≥ 3 ⇒ adopt sprinting=false
+        assertFalse(wire.verdictAt(new TickStamp(8)).sprinting(), "the adopt took the server un-sprint");
+        assertTrue(wire.clientSprinting(), "the ADOPT branch never touches the raw client flag");
+    }
 }

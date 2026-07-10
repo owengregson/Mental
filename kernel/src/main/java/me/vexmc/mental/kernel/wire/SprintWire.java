@@ -53,7 +53,11 @@ import me.vexmc.mental.kernel.port.TickClock;
  * is a CAS over the whole {@link State}, giving each read a coherent, atomic view
  * (no torn mix), and each write happens-before the next read. The
  * {@link #clientSprinting} flag tracks the RAW client sprint packets ONLY — it is
- * never touched by {@link #onServerClear(TickStamp)} or {@link #reconcile}, so it
+ * never touched by {@link #onServerClear(TickStamp)}, and {@link #reconcile}
+ * writes it in ONE place: the {@code seen==false} SEED, which adopts the server
+ * flag as the client's last transmitted sprint state (a mid-play
+ * plugin-load/reload seeds an already-sprinting player faithfully; the ADOPT
+ * branch stays clientSprinting-blind). So it
  * survives the wire's own post-hit clear the way the era's client flag did.</p>
  *
  * <p><b>The universal blockhit contract</b> (era-accuracy; the owner's directive):
@@ -237,8 +241,10 @@ public final class SprintWire {
      * {@code quietTicks}, or when the wire has never been written (absent); AND
      * re-arm the bonus after a post-hit clear when the raw client flag survived
      * (the modern-client sprint latch fix). A fresh wire write inside the window is
-     * never overwritten by a stale-high server flag. Never writes
-     * {@link #clientSprinting} — that is packet-only.
+     * never overwritten by a stale-high server flag. The sole reconcile write to
+     * {@link #clientSprinting} — the {@code seen==false} SEED, which adopts the server flag as the
+     * client's last transmitted sprint state; every other reconcile path leaves it
+     * packet-only.
      *
      * <p>Three branches, in priority order:</p>
      * <ol>
@@ -251,8 +257,12 @@ public final class SprintWire {
      *       is preserved so a re-fire is idempotent (the next {@code sprinting}
      *       state fails the {@code !sprinting} guard) until the next hit's clear
      *       reopens the window.</li>
-     *   <li><b>Seed</b>: an unseen wire adopts the live flag immediately (not
-     *       fresh — no re-engage happened).</li>
+     *   <li><b>Seed</b>: an unseen wire adopts the live server flag into BOTH
+     *       {@code sprinting} AND the raw {@code clientSprinting} (the flag at seed
+     *       time IS the client's last transmitted state; its own pre-wire START set
+     *       it), so a mid-play plugin-load/reload of an already-sprinting player
+     *       keeps its post-hit re-arm and its blockhit gate. The seed is not
+     *       fresh — no re-engage happened.</li>
      *   <li><b>Adopt</b>: after {@code quietTicks} of wire silence the server's own
      *       flag wins a disagreement. {@code clearedAt} is reset — the server has
      *       authoritatively asserted its flag, closing any post-hit re-arm window
@@ -271,7 +281,17 @@ public final class SprintWire {
                         s.clearedAt(), now, s.seq() + 1);
             }
             if (!s.seen()) {
-                return new State(true, serverSprinting, false, s.clientSprinting(), s.blockReset(),
+                // Seed clientSprinting = serverSprinting: the server flag at seed time IS
+                // the client's last transmitted sprint state — the client's own pre-wire
+                // START set it through vanilla's packet handler (the only client-driven
+                // setter on 1.21.11, empirically verified). A mid-play plugin load/reload
+                // creates the wire for an ALREADY-sprinting player; without this the seed
+                // carried the INITIAL false, and the post-hit clear then found the raw flag
+                // low, so neither the post-clear re-arm nor the SwordBlockingUnit blockhit
+                // gate would fire until a genuine STOP/START edge — the player stuck on
+                // plain knockback despite genuinely sprinting. The ADOPT branch below stays
+                // clientSprinting-blind: it must never overwrite live client-action state.
+                return new State(true, serverSprinting, false, serverSprinting, s.blockReset(),
                         s.clearedAt(), now, s.seq() + 1);
             }
             if (s.sprinting() != serverSprinting && s.lastWrite().known() && now.known()
@@ -305,8 +325,10 @@ public final class SprintWire {
 
     /**
      * The RAW client sprint flag — set only by {@link #onSprintStart}/{@link
-     * #onSprintStop}, never by a server clear or reconcile. This is the only
-     * signal that survives the wire's own post-hit clear, so block-hit re-arming
+     * #onSprintStop}, never by a server clear, and by {@link #reconcile} in ONE
+     * place only: the {@code seen==false} seed adopts the server flag as the
+     * client's last transmitted state (the ADOPT branch never touches it). This is
+     * the only signal that survives the wire's own post-hit clear, so block-hit re-arming
      * ({@code SwordBlockingUnit}) gates on it to avoid a phantom bonus on a
      * stationary defensive block (era-accuracy contract), and the post-clear
      * re-arm reads it to tell a client that held sprint from one that un-sprinted.
