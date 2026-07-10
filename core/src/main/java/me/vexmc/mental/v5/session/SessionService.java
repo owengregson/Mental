@@ -591,6 +591,14 @@ public final class SessionService implements Listener, SessionAccess {
         PositionRing.Sample previous = positions.latest(id);
         double measuredVx = previous == null ? 0.0 : location.getX() - previous.x();
         double measuredVz = previous == null ? 0.0 : location.getZ() - previous.z();
+        // The victim's measured per-tick vertical velocity — the same ring-Δy
+        // machinery as measuredVx/Vz, but Y, carried so the two knockback capture
+        // seams (EntityStates.captureVictim, HitRegistrationUnit.preVictimState) can
+        // bound the ledger residual's runaway free-fall by the real hover (the
+        // measured-reality clamp; the 2.5.2 downward-hit-2 fix). NaN before the first
+        // sample — the "no fresh measurement" sentinel the clamp reads as a strict
+        // no-op, so a packetless first tick and every existing suite stay byte-identical.
+        double measuredVy = previous == null ? Double.NaN : location.getY() - previous.y();
         // The grounded-tick run is a combo/precision signal, so it advances on the
         // combat grounded truth (the packetless physical fallback) — NOT the raw
         // client flag above, which stays the delivery/era air-multiplier baseline.
@@ -610,7 +618,7 @@ public final class SessionService implements Listener, SessionAccess {
                 knockbackResistance, profile, Pings.of(player), kinematics,
                 moveSpeedAttr, session.comboAttackerId(),
                 measuredVx, measuredVz, location.getYaw(), player.getEyeHeight(), groundedTicks,
-                yawRate, kbEnchantLevel);
+                yawRate, kbEnchantLevel, measuredVy);
     }
 
     /**
