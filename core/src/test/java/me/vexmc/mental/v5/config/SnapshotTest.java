@@ -130,6 +130,7 @@ class SnapshotTest {
         assertFalse(death.lightning(), "vanilla death preset strikes no lightning");
         assertTrue(death.sounds().isEmpty(), "vanilla death preset plays nothing");
         assertTrue(death.particles().isEmpty(), "vanilla death preset pops nothing");
+        assertTrue(death.fireworkColors().isEmpty(), "vanilla death preset launches no firework");
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -518,10 +519,11 @@ class SnapshotTest {
 
     @Test
     void deathEffectsCustomKnobsReadFromTheConfig() throws Exception {
-        // preset: custom reads the lightning flag and the sounds:/particles:
-        // lists — the same list-of-records shape hit-feedback introduced. A
-        // dust particle carries its RRGGBB hex color in the block field (the
-        // runtime maps particle "dust" that way; there is no block state).
+        // preset: custom reads the lightning flag, the sounds:/particles:
+        // lists — the same list-of-records shape hit-feedback introduced — and
+        // the firework: block (colors: as RRGGBB hex, like the dust specs; a
+        // leading # is tolerated). A dust particle carries its hex color in
+        // the block field (the runtime maps particle "dust" that way).
         Snapshot snapshot = parseFiles(Map.of(
                 ConfigStore.DEATH_EFFECTS_FILE, """
                         death-effects:
@@ -538,6 +540,10 @@ class SnapshotTest {
                               count-max: 6
                               mode: spread
                               spread: {x: 0.4, y: 0.5, z: 0.4}
+                          firework:
+                            colors:
+                              - ff00aa
+                              - "#00ff55"
                         """)).snapshot();
         DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
         assertEquals(DeathEffectsSettings.Preset.CUSTOM, s.preset());
@@ -552,6 +558,40 @@ class SnapshotTest {
                 "the dust hex color rides the block field");
         assertEquals(HitFeedbackSettings.Mode.SPREAD, s.particles().get(0).mode());
         assertEquals(0.5, s.particles().get(0).spreadY(), 1e-9);
+        assertEquals(List.of(0xFF00AA, 0x00FF55), s.fireworkColors(),
+                "firework colors parse from hex, # prefix tolerated, config order kept");
+    }
+
+    @Test
+    void deathEffectsCustomWithoutAFireworkBlockLaunchesNone() throws Exception {
+        // Absent (or empty) firework: means NO firework under custom — the
+        // block is opt-in, so a pre-2.5.3 custom config keeps its exact feel.
+        Snapshot snapshot = parseFiles(Map.of(
+                ConfigStore.DEATH_EFFECTS_FILE, """
+                        death-effects:
+                          preset: custom
+                          lightning: true
+                        """)).snapshot();
+        DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
+        assertEquals(DeathEffectsSettings.Preset.CUSTOM, s.preset());
+        assertTrue(s.fireworkColors().isEmpty(), "no firework block, no firework");
+    }
+
+    @Test
+    void deathEffectsFireworkSkipsMalformedHexWithOneWarning() throws Exception {
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.DEATH_EFFECTS_FILE, """
+                        death-effects:
+                          preset: custom
+                          firework:
+                            colors:
+                              - ffaa00
+                              - not-a-color
+                        """));
+        DeathEffectsSettings s = settings(result.snapshot(), Feature.DEATH_EFFECTS);
+        assertEquals(List.of(0xFFAA00), s.fireworkColors(), "the valid color survives");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("not-a-color"), () -> result.issues().get(0));
     }
 
     @Test
@@ -569,14 +609,14 @@ class SnapshotTest {
         assertTrue(s.lightning(), "signature strikes lightning regardless of the custom flag");
         assertEquals(DeathEffectsSettings.SIGNATURE_SOUNDS, s.sounds());
         assertEquals(DeathEffectsSettings.SIGNATURE_PARTICLES, s.particles());
-        // The owner's tune, pinned by value: the glow-squid death call over a
-        // white/yellow/gold dust burst plus uncolored firework sparks.
+        // The owner's tune, pinned by value: the glow-squid death call over the
+        // REAL white/yellow/gold firework blast (2.5.3) — the colored-dust
+        // approximation is gone, so the particle list is empty by design.
         assertEquals("entity.glow_squid.death", s.sounds().get(0).sound());
-        assertEquals(4, s.particles().size());
-        assertEquals("ffffff", s.particles().get(0).block());
-        assertEquals("ffff55", s.particles().get(1).block());
-        assertEquals("ffaa00", s.particles().get(2).block());
-        assertEquals("firework", s.particles().get(3).particle());
+        assertTrue(s.particles().isEmpty(),
+                "the real colored blast replaced the whole dust+spark approximation");
+        assertEquals(List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00), s.fireworkColors(),
+                "white &f, yellow &e, gold &6 — the signature blast");
     }
 
     @Test

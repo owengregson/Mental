@@ -52,16 +52,21 @@ public final class DeathEffectsUnit implements FeatureUnit {
         DeathEffectsSettings settings = snapshot.settings(
                 (SettingsKey<DeathEffectsSettings>) Feature.DEATH_EFFECTS.settingsKey());
 
-        boolean inlineByName = PacketEvents.getAPI().getServerManager()
-                .getVersion().isNewerThanOrEquals(ServerVersion.V_1_19_3);
+        ServerVersion serverVersion = PacketEvents.getAPI().getServerManager().getVersion();
+        boolean inlineByName = serverVersion.isNewerThanOrEquals(ServerVersion.V_1_19_3);
         boolean modernBlockData = environment.isAtLeast(1, 13, 0);
         boolean lightningSupported = environment.isAtLeast(1, 19, 0);
         FeedbackSoundTable table = new FeedbackSoundTable(
                 environment.major(), environment.minor(), inlineByName);
 
         DeathLightning lightningTasks = new DeathLightning(scheduling);
+        // The blast rocket's item-data flavor (1.20.5+ component vs classic NBT)
+        // and its metadata-slot flavor (Optional<ItemStack> below 1.11) resolve
+        // HERE, once, off the PacketEvents server version — never on the death path.
+        DeathFirework firework = new DeathFirework(settings.fireworkColors(), serverVersion);
         scope.listen(new DeathEffectsListener(
-                settings, table, modernBlockData, lightningSupported, lightningTasks, trace, logger));
+                settings, table, modernBlockData, lightningSupported, lightningTasks, firework,
+                trace, logger));
         scope.task(() -> lightningTasks); // the registry closes with the scope, cancelling pending destroys
     }
 }

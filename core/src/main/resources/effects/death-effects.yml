@@ -8,12 +8,14 @@
 # ──────────────────────────────────────────────────────────────────────────
 
 # A cosmetic strike the moment a player dies, from ANY cause
-# (PlayerDeathEvent) — lightning, a sound, and a particle burst at the death
-# spot.
+# (PlayerDeathEvent) — lightning, a sound, a colored firework blast, and an
+# optional particle burst at the death spot.
 #
-# The lightning is a PACKET RENDER only, never a real entity: the bolt and its
-# flash are drawn client-side, so by construction there is no fire, no damage,
-# and no block interaction — nothing about the world changes.
+# Everything here is a PACKET RENDER only, never a real entity: the lightning
+# bolt and the firework rocket are drawn client-side (the rocket is spawned,
+# detonated, and destroyed in a single client frame), so by construction there
+# is no fire, no damage, no knockback, and no block interaction — nothing
+# about the world changes.
 #
 # ── The preset chooses the whole tune ──────────────────────────────────────
 # preset: vanilla   → a strict nothing (the default). Even with the module
@@ -22,55 +24,63 @@
 # preset: signature → Mental's own tune: the cosmetic lightning bolt, the
 #                     glow-squid death call (falls back to entity.squid.death
 #                     below 1.17, where no glow squid existed — printed once in
-#                     the boot report), and a white/yellow/gold burst. Vanilla's
-#                     firework particle is not colorable, so the burst is an
-#                     honest approximation: colored dust shaped like a firework
-#                     blast, plus uncolored firework sparks on top.
-# preset: custom    → reads the lightning flag and the sounds:/particles:
-#                     lists below verbatim.
+#                     the boot report), and a REAL white/yellow/gold firework
+#                     blast — the vanilla colored explosion, exactly as a
+#                     crafted burst rocket renders it.
+# preset: custom    → reads the lightning flag and the firework:/sounds:/
+#                     particles: knobs below verbatim.
 #
-# The knobs below are consulted ONLY under preset: custom; they are shown here
-# at the signature values as an editable template (so switching to custom
-# starts from the signature tune, not from silence). The list entries take the
-# same fields as hit-feedback's lists (sound/volume/pitch; particle/block/
-# count-min/count-max/mode/speed/spread — the full field reference is in
-# effects/hit-feedback.yml), with ONE twist:
+# ── The firework blast ──────────────────────────────────────────────────────
+# Vanilla's firework PARTICLE carries no color on the wire, so a colored blast
+# cannot be faked with particle packets alone (older Mental approximated it
+# with colored dust — that approximation is gone). Instead Mental does what
+# vanilla itself does: the blast colors live in the firework rocket's item
+# data, and the client renders the colored explosion when the rocket detonates
+# (entity status 17). The rocket here is packet-only — no server entity ever
+# exists, so it cannot damage, launch, or lift anything.
+#
+#   firework:
+#     colors:      the blast colors as RRGGBB hex strings, same format as the
+#                  dust specs' block field (a leading # is tolerated). The
+#                  client blends/picks among them per spark, in list order.
+#                  An EMPTY list (or omitting the block) launches no firework.
+#
+# One inherent side effect, documented honestly: the CLIENT self-plays the
+# firework blast pop when it renders the explosion — that sound is baked into
+# vanilla's firework rendering and cannot be suppressed from the server. Every
+# other sound stays owned by the sounds: list below.
+#
+# ── The other knobs (consulted ONLY under preset: custom) ──────────────────
+# They are shown here at the signature values as an editable template (so
+# switching to custom starts from the signature tune, not from silence). The
+# sounds:/particles: list entries take the same fields as hit-feedback's lists
+# (sound/volume/pitch; particle/block/count-min/count-max/mode/speed/spread —
+# the full field reference is in effects/hit-feedback.yml), with ONE twist:
 #   particle: dust  is the colorable burst particle — its RRGGBB hex color
 #                   rides the block field (block: ffaa00 = gold dust). For
 #                   every other particle, block keeps its usual meaning (the
 #                   block-state name for block-crack particles).
+# The signature tune no longer needs any particles (the real blast replaced
+# the dust approximation), so the template list ships empty — for example, to
+# layer gold dust on top of the blast:
+#   particles:
+#     - particle: dust
+#       block: ffaa00
+#       count-min: 8
+#       count-max: 12
+#       mode: spread
+#       speed: 0.0
+#       spread: {x: 0.5, y: 0.5, z: 0.5}
 death-effects:
   preset: vanilla
   lightning: false
+  firework:
+    colors:
+      - ffffff
+      - ffff55
+      - ffaa00
   sounds:
     - sound: entity.glow_squid.death
       volume: 1.0
       pitch: 0.95
-  particles:
-    - particle: dust
-      block: ffffff
-      count-min: 8
-      count-max: 12
-      mode: spread
-      speed: 0.0
-      spread: {x: 0.5, y: 0.5, z: 0.5}
-    - particle: dust
-      block: ffff55
-      count-min: 8
-      count-max: 12
-      mode: spread
-      speed: 0.0
-      spread: {x: 0.5, y: 0.5, z: 0.5}
-    - particle: dust
-      block: ffaa00
-      count-min: 8
-      count-max: 12
-      mode: spread
-      speed: 0.0
-      spread: {x: 0.5, y: 0.5, z: 0.5}
-    - particle: firework
-      count-min: 10
-      count-max: 14
-      mode: emanate
-      speed: 0.12
-      spread: {x: 0, y: 0, z: 0}
+  particles: []

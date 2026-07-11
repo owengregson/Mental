@@ -43,9 +43,14 @@ import org.bukkit.event.entity.PlayerDeathEvent;
  * <h2>Damage-free by construction</h2>
  * The strike is a single {@code SPAWN_ENTITY} packet carrying a
  * {@code LIGHTNING_BOLT} — a client-only render with NO server entity behind it,
- * so it lights, cracks, and vanishes without fire, damage, or block change. No
- * thunder sound is ever sent: audio is owned entirely by the configured sound
- * list, so an operator hears exactly what they configured and nothing more.
+ * so it lights, cracks, and vanishes without fire, damage, or block change. The
+ * colored blast is the same construction one entity over: a packet-only
+ * FIREWORK_ROCKET detonated by entity status 17 and destroyed in the same frame
+ * ({@link DeathFirework} — vanilla's own colored-blast mechanism, since the
+ * firework particle carries no color on the wire). No thunder sound is ever
+ * sent: server audio is owned entirely by the configured sound list — the one
+ * inherent exception is the firework blast pop, which the CLIENT self-plays
+ * when it renders the explosion, exactly as it does for a crafted rocket.
  *
  * <h2>The 1.19 lightning floor</h2>
  * On 1.19+ a lightning bolt spawns through the generic spawn-entity packet; below
@@ -76,6 +81,7 @@ public final class DeathEffectsListener implements Listener {
 
     private final PlayerManager playerManager;
     private final DeathLightning lightningTasks;
+    private final DeathFirework firework;
     private final FeedbackTrace trace;
 
     private final boolean lightning;
@@ -87,19 +93,23 @@ public final class DeathEffectsListener implements Listener {
     private final String particleSummary;
 
     private final AtomicBoolean noEntityIdWarned = new AtomicBoolean(false);
+    private final AtomicBoolean noFireworkIdWarned = new AtomicBoolean(false);
     private final Logger logger;
 
     public DeathEffectsListener(
             DeathEffectsSettings settings, FeedbackSoundTable table, boolean modernBlockData,
-            boolean lightningSupported, DeathLightning lightningTasks, FeedbackTrace trace, Logger logger) {
+            boolean lightningSupported, DeathLightning lightningTasks, DeathFirework firework,
+            FeedbackTrace trace, Logger logger) {
         this.playerManager = PacketEvents.getAPI().getPlayerManager();
         this.lightningTasks = lightningTasks;
+        this.firework = firework;
         this.trace = trace;
         this.logger = logger;
         this.lightning = settings.lightning() && lightningSupported;
         this.sounds = FeedbackEmit.resolveSounds(settings.sounds(), table, "death-effects", "death", logger);
         this.particles = resolveParticles(settings.particles(), modernBlockData, logger);
-        this.hasEffects = this.lightning || !this.sounds.isEmpty() || !this.particles.isEmpty();
+        this.hasEffects = this.lightning || !this.sounds.isEmpty()
+                || !this.particles.isEmpty() || firework.hasBlast();
         this.soundSummary = FeedbackEmit.summariseSounds(this.sounds);
         this.particleSummary = FeedbackEmit.summariseParticles(this.particles);
 
@@ -146,20 +156,23 @@ public final class DeathEffectsListener implements Listener {
             return;
         }
 
-        boolean struckLightning = emit(death, audience);
+        String detail = emit(death, audience);
         trace.record(new FeedbackTrace.Entry(
-                "death-effects", killerId, victimId, "EMITTED", detail(struckLightning)));
+                "death-effects", killerId, victimId, "EMITTED", detail));
     }
 
     /**
-     * Builds each packet ONCE and ships it to the whole audience with a single
-     * flush per viewer — one shared lightning entity id, one shared spawn, the
-     * resolved sound layers, and the burst. Returns whether the bolt actually
-     * shipped (a failed id generation degrades to sound+burst only). The send is
-     * wrapped catch-Throwable: a viewer mid-(re)configuration can throw inside
+     * Builds each shared packet ONCE and ships everything to the whole audience
+     * with a single flush per viewer — one shared lightning entity id, one
+     * shared spawn, the resolved sound layers, the burst, and the colored
+     * firework blast (its metadata is the one per-viewer build: the
+     * fireworks-item index bands on the client version). A failed id generation
+     * degrades that one piece and warns once — bolt and blast independently;
+     * death handling itself never fails. Returns the journaled detail. The send
+     * is wrapped catch-Throwable: a viewer mid-(re)configuration can throw inside
      * PacketEvents, and a missed cosmetic beats a surfaced pipeline exception.
      */
-    private boolean emit(Location death, List<Player> audience) {
+    private String emit(Location death, List<Player> audience) {
         Vector3d at = new Vector3d(death.getX(), death.getY(), death.getZ());
         List<PacketWrapper<?>> soundPackets = soundPacketsFor(at);
         Vector3d burstAt = new Vector3d(death.getX(), death.getY() + BURST_OFFSET, death.getZ());
@@ -180,6 +193,20 @@ public final class DeathEffectsListener implements Listener {
             }
         }
 
+        // The blast rides the same burst anchor the dust approximation used —
+        // one block above the feet, so the sphere pops off the body's chest.
+        int rocketId = -1;
+        if (firework.hasBlast()) {
+            try {
+                rocketId = SpigotReflectionUtil.generateEntityId();
+            } catch (IllegalStateException noId) {
+                if (noFireworkIdWarned.compareAndSet(false, true)) {
+                    logger.warning("death-effects: could not generate a firework entity id on this server"
+                            + " — the colored blast is skipped; the other effects still fire");
+                }
+            }
+        }
+
         try {
             for (Player viewer : audience) {
                 User user = playerManager.getUser(viewer);
@@ -195,6 +222,9 @@ public final class DeathEffectsListener implements Listener {
                 for (PacketWrapper<?> packet : particlePackets) {
                     user.writePacketSilently(packet);
                 }
+                if (rocketId != -1) {
+                    firework.send(user, rocketId, burstAt); // catches per viewer, no flush
+                }
                 user.flushPackets();
             }
         } catch (Throwable reconfiguring) {
@@ -205,9 +235,8 @@ public final class DeathEffectsListener implements Listener {
             int destroyId = boltId;
             List<Player> destroyAudience = new ArrayList<>(audience);
             lightningTasks.destroyAfter(LIGHTNING_LIFETIME_TICKS, () -> destroy(destroyId, destroyAudience));
-            return true;
         }
-        return false;
+        return detail(spawn != null, rocketId != -1);
     }
 
     /** Ships the belt-and-braces {@code destroy-entities} for the shared bolt id to the captured audience. */
@@ -236,10 +265,11 @@ public final class DeathEffectsListener implements Listener {
         return packets;
     }
 
-    private String detail(boolean struckLightning) {
+    private String detail(boolean struckLightning, boolean launchedFirework) {
         return "lightning=" + struckLightning
                 + " sounds=[" + soundSummary + "]"
-                + " particles=[" + particleSummary + "]";
+                + " particles=[" + particleSummary + "]"
+                + " firework=" + launchedFirework;
     }
 
     // ------------------------------------------------------------------------

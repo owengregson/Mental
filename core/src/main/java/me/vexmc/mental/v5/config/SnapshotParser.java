@@ -525,12 +525,59 @@ public final class SnapshotParser {
         DeathEffectsSettings d = DeathEffectsSettings.DEFAULTS;
         // Same contract as hit-feedback: the custom knobs are parsed regardless of
         // the preset (a `custom` switch finds them ready); the record's
-        // lightning()/sounds()/particles() pick the effective set per preset.
+        // lightning()/sounds()/particles()/fireworkColors() pick the effective
+        // set per preset.
         return new DeathEffectsSettings(
                 reader.oneOf("preset", d.preset(), DeathEffectsSettings.Preset.class),
                 reader.flag("lightning", d.customLightning()),
                 parseSounds(reader, "sounds", d.customSounds()),
-                parseParticles(reader, d.customParticles()));
+                parseParticles(reader, d.customParticles()),
+                parseFireworkColors(reader, d.customFireworkColors()));
+    }
+
+    /**
+     * The {@code firework:} block's {@code colors:} list — RRGGBB hex strings
+     * (a leading {@code #} is tolerated, same contract as the dust specs'
+     * {@code block} field), stored as RGB ints. An absent block or an empty
+     * list means no firework ships; a malformed entry warns once and is
+     * skipped, so one typo cannot silence the rest of the blast.
+     */
+    private static List<Integer> parseFireworkColors(ConfigReader reader, List<Integer> fallback) {
+        ConfigReader firework = reader.sub("firework");
+        if (firework.section() == null) {
+            return fallback;
+        }
+        List<Integer> colors = new ArrayList<>();
+        for (String hex : firework.stringList("colors", List.of())) {
+            Integer rgb = hexColor(hex);
+            if (rgb == null) {
+                firework.issues().warn(firework.prefix() + ".colors",
+                        "'" + hex + "' is not a RRGGBB hex color — skipped", "(skipped)");
+                continue;
+            }
+            colors.add(rgb);
+        }
+        return List.copyOf(colors);
+    }
+
+    /** A six-digit RRGGBB hex (optional {@code #}) as an RGB int, or null if malformed. */
+    private static Integer hexColor(String hex) {
+        if (hex == null) {
+            return null;
+        }
+        String normalized = hex.trim().toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("#")) {
+            normalized = normalized.substring(1);
+        }
+        if (normalized.length() != 6) {
+            return null;
+        }
+        for (int i = 0; i < 6; i++) {
+            if (Character.digit(normalized.charAt(i), 16) < 0) {
+                return null;
+            }
+        }
+        return Integer.parseInt(normalized, 16);
     }
 
     private static DamageIndicatorsSettings parseDamageIndicators(ConfigReader reader) {
