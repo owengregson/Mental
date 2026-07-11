@@ -49,6 +49,8 @@ public final class FeedbackSuite {
                         runDisabledWritesNoTrace(mental, tester, context)),
                 new TestCase("hit-feedback records its decision and the hit still lands", context ->
                         runHitFeedbackDecision(mental, tester, context)),
+                new TestCase("hit-feedback low-HP threshold is PERCENT of max health, not absolute hearts",
+                        context -> runLowHealthPercentSemantics(mental, tester, context)),
                 new TestCase("damage-indicators records UNSENDABLE for a clientless attacker", context ->
                         runIndicatorsUnsendable(mental, tester, context)),
                 new TestCase("damage-indicators disable is clean mid-flight", context ->
@@ -173,6 +175,117 @@ public final class FeedbackSuite {
             toggleModule(context, "hit-feedback", false);
             context.expect(!moduleActive(mental, "hit-feedback"),
                     "hit-feedback module failed to disable");
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  2b. hit-feedback: the low-HP ceiling is PERCENT of max, not hearts  */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The F2 semantics pin: the low-HP layer fires below a PERCENT of the
+     * victim's OWN maximum health, not a fixed number of hearts. Staged on a
+     * {@code setMaxHealth(40.0)} throwaway window (fresh fake, removed in
+     * {@code finally}) so the two readings diverge and the test can tell them
+     * apart:
+     * <ul>
+     *   <li>post-hit 10.0 hp = 25% of the 40 max — below the 35% ceiling
+     *       (40 × 0.35 = 14.0) → {@code EMITTED+LOW_HP}. Crucially 10.0 hp is
+     *       ABOVE the ~7-heart figure an absolute reading of the threshold would
+     *       use, so an hearts-not-percent regression reads plain EMITTED here
+     *       and this case catches it.</li>
+     *   <li>post-hit 16.0 hp = 40% of the 40 max — above the 14.0 ceiling →
+     *       plain {@code EMITTED}.</li>
+     * </ul>
+     * The attacker's 7.0 rides pinned attributes (armAttacker); each hit stages
+     * {@code setMaxHealth + setHealth + setNoDamageTicks(0) + attack} in ONE
+     * sync hop so nothing drifts between. Only hit-feedback is enabled — leaving
+     * damage-indicators off keeps the between-hit {@code setHealth} raise from
+     * ever being sampled as a heal.
+     */
+    private static void runLowHealthPercentSemantics(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        FeedbackTrace trace = mental.feedbackTrace();
+
+        try {
+            setEffectsPreset(context, "signature");
+            toggleModule(context, "hit-feedback", true);
+            context.expect(moduleActive(mental, "hit-feedback"),
+                    "hit-feedback module failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 3, -2));
+                victim.spawn(Arena.offset(centre, 3, 2));
+            });
+            context.awaitTicks(5);
+            context.expect(context.sync(() -> armAttacker(attacker)),
+                    "attack-damage/attack-speed attributes unresolved — cannot stage the 7.0 hit");
+
+            // The 40-max window separates percent-of-max from absolute-hearts.
+            boolean staged = context.sync(() -> setMaxHealth(victim, 40.0));
+            if (!staged) {
+                context.skip("max-health attribute absent on this server — cannot stage a 40-max "
+                        + "window to separate percent-of-max from absolute-hearts");
+                return;
+            }
+
+            // Sub-case A — LOW_HP fires: post-hit 17.0 − 7.0 = 10.0 hp = 25% of 40,
+            // below the 35% (14.0) ceiling.
+            trace.clear();
+            captors.reset();
+            context.syncRun(() -> {
+                setMaxHealth(victim, 40.0);
+                victim.player().setHealth(17.0);
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+            });
+            context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40,
+                    "the 25%-of-max low-HP hit to land");
+            List<FeedbackTrace.Entry> lowEntries = entriesFor(trace, "hit-feedback");
+            context.expect(lowEntries.size() == 1,
+                    "expected exactly one hit-feedback decision for the low-HP hit, got "
+                            + lowEntries.size() + " (trace=" + trace.entries() + ")");
+            context.expect("EMITTED+LOW_HP".equals(lowEntries.get(0).decision()),
+                    "post-hit 10.0 (25% of a 40-max) is below the 35% (14.0) ceiling — must layer "
+                            + "low-HP; got '" + lowEntries.get(0).decision() + "' ("
+                            + lowEntries.get(0).detail() + "). A regression reading the threshold as "
+                            + "absolute hearts (~7) would wrongly read plain EMITTED at 10.0 hp.");
+
+            // Meter recharge (attack-speed 40 fills within a tick) before the next hit.
+            context.awaitTicks(4);
+
+            // Sub-case B — plain EMITTED: post-hit 23.0 − 7.0 = 16.0 hp = 40% of 40,
+            // above the 35% (14.0) ceiling.
+            trace.clear();
+            captors.reset();
+            context.syncRun(() -> {
+                setMaxHealth(victim, 40.0);
+                victim.player().setHealth(23.0);
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+            });
+            context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40,
+                    "the 40%-of-max plain hit to land");
+            List<FeedbackTrace.Entry> plainEntries = entriesFor(trace, "hit-feedback");
+            context.expect(plainEntries.size() == 1,
+                    "expected exactly one hit-feedback decision for the plain hit, got "
+                            + plainEntries.size() + " (trace=" + trace.entries() + ")");
+            context.expect("EMITTED".equals(plainEntries.get(0).decision()),
+                    "post-hit 16.0 (40% of a 40-max) is above the 35% (14.0) ceiling — must NOT "
+                            + "layer low-HP; got '" + plainEntries.get(0).decision() + "' ("
+                            + plainEntries.get(0).detail() + ")");
+        } finally {
+            toggleModule(context, "hit-feedback", false);
+            setEffectsPreset(context, "signature");
             context.syncRun(() -> {
                 attacker.remove();
                 victim.remove();
@@ -358,10 +471,13 @@ public final class FeedbackSuite {
      * modifiers apply through the living-entity equipment tick, which legacy
      * servers do not reliably run for it before the staged hit (1.9.4 landed
      * fist-tier damage off a held iron sword and the low-HP window never
-     * opened). With the attribute pinned, 9.0 hp lands post-hit at 2.0 — and
-     * anywhere in [2.0, 7.6] under any residual charge — inside (0, 8.0):
-     * below the default 4-heart threshold, above death; 1.0 hp dies to any
-     * charge (min 1.4). The preset overlay is written BEFORE the enables so
+     * opened). With the full-meter 7.0 pinned, 9.0 hp lands post-hit at 2.0 —
+     * inside (0, 7.0): below the signature low-HP ceiling (the F2 percent
+     * threshold, 35% of the 20-max fake = 7.0 hp, NOT the retired 4-heart
+     * absolute), above death; 1.0 hp dies to any charge (min 1.4). The
+     * per-hit ceiling scales with the victim's own max — pinned separately in
+     * {@code runLowHealthPercentSemantics} on a 40-max window. The preset
+     * overlay is written BEFORE the enables so
      * the assemble reads it directly — the reconciler's settings-change bounce
      * would also catch a later write, but staging first keeps the case
      * single-transition.</p>
@@ -380,9 +496,9 @@ public final class FeedbackSuite {
             // signature preset carries BOTH the death strike and hit-feedback's
             // non-empty low-HP layer, so the contrast pin observes the layer
             // actually firing — the label is gated on a non-empty effective
-            // layer, and the vanilla preset would read plain EMITTED at any
-            // health. Every pinned decision below is identical to the 2.5.2
-            // per-module staging this replaced.
+            // layer, and the DEFAULTS' empty low-HP layer would read plain
+            // EMITTED at any health. Every pinned decision below is identical to
+            // the 2.5.2 per-module staging this replaced.
             setEffectsPreset(context, "signature");
             toggleModule(context, "death-effects", true);
             toggleModule(context, "hit-feedback", true);
@@ -401,9 +517,10 @@ public final class FeedbackSuite {
                     "attack-damage/attack-speed attributes unresolved — cannot stage"
                             + " deterministic damage for the health windows");
 
-            // The contrast hit: non-killing, post-hit below the 4-heart
-            // threshold — the low-HP layer MUST fire here. setHealth and the
-            // attack share one sync hop so regen cannot tick in between.
+            // The contrast hit: non-killing, post-hit below the 35%-of-max
+            // low-HP ceiling — 9.0 − 7.0 = 2.0 hp, under the 7.0 ceiling (35% of
+            // the 20-max fake) — so the low-HP layer MUST fire here. setHealth
+            // and the attack share one sync hop so regen cannot tick in between.
             trace.clear();
             captors.reset();
             context.syncRun(() -> {
@@ -476,9 +593,10 @@ public final class FeedbackSuite {
         } finally {
             toggleModule(context, "hit-feedback", false);
             toggleModule(context, "death-effects", false);
-            // The parse default IS vanilla, so writing it back restores the
-            // pre-test effective config even though the overlay key persists.
-            setEffectsPreset(context, "vanilla");
+            // "signature" IS the default selected preset (EffectsPreset.DEFAULT_NAME —
+            // the retired "vanilla" preset no longer exists), so writing it back
+            // restores the pre-test selection even though the overlay key persists.
+            setEffectsPreset(context, "signature");
             context.syncRun(() -> {
                 attacker.remove();
                 victim.remove();
@@ -513,6 +631,28 @@ public final class FeedbackSuite {
         }
         attackDamage.setBaseValue(7.0);
         attackSpeed.setBaseValue(40.0);
+        return true;
+    }
+
+    /**
+     * Widens the victim's maximum-health window through the max-health ATTRIBUTE
+     * (stable 1.9.4→26.x — {@link Attributes#maxHealth()} resolves the
+     * MAX_HEALTH / GENERIC_MAX_HEALTH enum either way), so the F2 low-HP ceiling
+     * — a PERCENT of THIS victim's own max — scales with it. Returns false when
+     * the attribute is absent, so the caller can skip rather than stage a false
+     * window. The fake is a throwaway removed in {@code finally}, so no reset is
+     * needed.
+     */
+    private static boolean setMaxHealth(FakePlayer victim, double max) {
+        Attribute attribute = Attributes.maxHealth();
+        if (attribute == null) {
+            return false;
+        }
+        AttributeInstance instance = victim.player().getAttribute(attribute);
+        if (instance == null) {
+            return false;
+        }
+        instance.setBaseValue(max);
         return true;
     }
 
