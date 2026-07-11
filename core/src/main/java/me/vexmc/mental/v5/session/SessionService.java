@@ -73,6 +73,19 @@ import org.bukkit.potion.PotionEffect;
  */
 public final class SessionService implements Listener, SessionAccess {
 
+    /**
+     * A per-tick victim health-delta observer (F4 heal indicators). Installed by the
+     * {@code DamageIndicatorsUnit} when heal indicators are configured (heal-text
+     * non-blank) and cleared on its scope close, so a module-off (or heal-text-blank)
+     * server never installs one — zero-touch. The session tick hands it
+     * {@code (previousHealth, currentHealth)} once per tick, AFTER the view is built;
+     * {@code previousHealth} is {@link Double#NaN} on the victim's first sampled tick
+     * (its contract is to ignore that, and any non-positive delta).
+     */
+    public interface HealSampler {
+        void sample(UUID victimId, double previousHealth, double currentHealth, TickStamp now);
+    }
+
     /** Per-victim journal ring depth — kept in step with the plugin's constant. */
     private static final int JOURNAL_CAPACITY = 16;
 
@@ -128,6 +141,15 @@ public final class SessionService implements Listener, SessionAccess {
      */
     private final AtomicInteger comboKeepers = new AtomicInteger();
 
+    /**
+     * The heal-indicator sampler slot (F4), installed by {@code DamageIndicatorsUnit}
+     * when heal indicators are configured and cleared on its scope close. Volatile —
+     * the reconciler thread installs/clears it while region threads read it per tick.
+     * Null ⇒ no heal observation; the always-on {@code lastHealth} swap in the tick is
+     * observation-only regardless, so a null sampler is genuine zero-touch.
+     */
+    private volatile HealSampler healSampler;
+
     public SessionService(
             Scheduling scheduling, TickClock clock, ViewBuilder viewBuilder,
             VelocityValve valve, Supplier<Snapshot> snapshot,
@@ -169,6 +191,16 @@ public final class SessionService implements Listener, SessionAccess {
     /** Another subsystem's per-player teardown, run on quit/retire (rim domains, latency, …). */
     public void addForgetHook(Consumer<UUID> hook) {
         forgetHooks.add(hook);
+    }
+
+    /** Installs the F4 heal sampler (damage-indicators assemble with heal-text set). */
+    public void setHealSampler(HealSampler sampler) {
+        this.healSampler = sampler;
+    }
+
+    /** Clears the heal sampler (damage-indicators scope close) — heal observation stops; zero-touch restored. */
+    public void clearHealSampler() {
+        this.healSampler = null;
     }
 
     /**
@@ -399,6 +431,12 @@ public final class SessionService implements Listener, SessionAccess {
             // the current tick; the stale published view keeps its own freshness gate.
             steps.run(id, "decayFallback", () -> session.decayOnly(clock.current()));
         }
+        // The F4 heal observation (D2, victim region thread), AFTER the view build.
+        // The lastHealth swap is ALWAYS run — observation-only by type, so it holds
+        // zero-touch — while the sampler is invoked only when heal indicators are on.
+        // Isolated like every other throw-capable step so a heal fold can never starve
+        // ledger decay above it.
+        steps.run(id, "sampleHeal", () -> sampleHeal(player, session, id));
         // One owning-thread position sample per tick — the fast path's reach
         // rewind source and its off-region-safe pre-send position source (the
         // netty thread reads frozen samples, never the live entity).
@@ -406,6 +444,28 @@ public final class SessionService implements Listener, SessionAccess {
             Location location = player.getLocation();
             positions.record(id, location.getX(), location.getY(), location.getZ(), System.nanoTime());
         });
+    }
+
+    /**
+     * The F4 heal observation (D2, victim region thread). Reads the live health once
+     * per tick and swaps it against the session's remembered {@code lastHealth} —
+     * ALWAYS, whether or not a sampler is installed, so the tracking is observation-only
+     * by type (the session writes nothing back to the game and zero-touch holds); when a
+     * heal sampler is present (heal indicators on), it hands the sampler the
+     * {@code (previous, current)} pair to detect and attribute the heal. {@code previous}
+     * is {@link Double#NaN} on the victim's first sampled tick (join / first-ever tick),
+     * which the sampler's contract ignores. The tick is {@code clock.current()} — the
+     * same stamp the freshly-built view carries ({@code view.at()}), so the heal fold's
+     * pacing and the damage listener's attribution stamps share one tick base.
+     */
+    private void sampleHeal(Player player, CombatSession session, UUID id) {
+        double current = player.getHealth();
+        double previous = session.lastHealth();
+        session.lastHealth(current);
+        HealSampler sampler = healSampler;
+        if (sampler != null) {
+            sampler.sample(id, previous, current, clock.current());
+        }
     }
 
     /**

@@ -50,9 +50,12 @@ description: Yours to edit freely — starts as a copy of the signature tune.
 #             inert under emanate, so the signature burst carries zeros.
 #
 # The low-health extra layer: played ON TOP of the sounds above when the
-# victim's health AFTER this hit drops below low-health-threshold-hearts (in
-# HEARTS; 2 health = 1 heart). It is SUPPRESSED on the killing hit —
-# death-effects owns that moment. An empty list means no extra layer.
+# victim's health AFTER this hit drops below low-health-threshold-percent
+# PERCENT of the victim's own maximum health (not absolute hearts — it scales
+# with a scaled-max-health victim; on a 20-max player 35 means below 7 health
+# = 3.5 hearts). This layer is ALSO played to the victim, so the player under
+# pressure hears it too. It is SUPPRESSED on the killing hit — death-effects
+# owns that moment. An empty list means no extra layer.
 hit-feedback:
   sounds:
     - sound: block.lodestone.break
@@ -72,7 +75,7 @@ hit-feedback:
       mode: emanate
       speed: 0.15
       spread: {x: 0.0, y: 0.0, z: 0.0}
-  low-health-threshold-hearts: 4.0
+  low-health-threshold-percent: 35
   low-health-sounds:
     - sound: entity.glow_squid.hurt
       volume: 0.9
@@ -91,6 +94,12 @@ hit-feedback:
 #                     codes are translated. The crit variant is used on an
 #                     era-crit posture OR damage at/above crit-threshold-hearts
 #                     (also in HEARTS).
+#   heal-text         the HEALING-indicator template, shown to the LAST player
+#                     who hit the healed player within the last 10s (any heal
+#                     source — pots, regen, golden apples, a plugin's setHealth).
+#                     {HEALTH} is the healed amount in HEARTS; heals aggregate to
+#                     at most one stand per 10 ticks. An EMPTY string disables
+#                     healing indicators entirely (nothing is even sampled).
 #   lifetime-ticks    hard despawn age in ticks. Clamped to [1, 200].
 #   ring-radius       how far off the chest, in blocks, the number spawns on
 #                     the front-half ring. Clamped to [0, 4].
@@ -112,6 +121,7 @@ damage-indicators:
   text: "&f-{HEALTH} &c❤&r"
   crit-text: "&c&l** -{HEALTH} ❤ **"
   crit-threshold-hearts: 5.0
+  heal-text: "&a+{HEALTH} &c❤&r"
 
 # ── death-effects ───────────────────────────────────────────────────────────
 # What plays the moment a player dies, from ANY cause (PlayerDeathEvent).

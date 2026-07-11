@@ -31,7 +31,6 @@ public final class EffectsPresetMenu extends Menu {
 
     /** Themed icon per shipped preset; unknown (user) presets fall back to paper. */
     private static final Map<String, String> PRESET_ICONS = Map.of(
-            "vanilla", "NOTE_BLOCK",
             "signature", "NETHER_STAR",
             "custom", "WRITABLE_BOOK");
 
@@ -115,7 +114,7 @@ public final class EffectsPresetMenu extends Menu {
                 ? "none" : String.valueOf(hit.particles().size())));
         icon.lore(kv("Low-HP layer", hit.lowHealthSounds().isEmpty()
                 ? "none"
-                : "below " + round(hit.lowHealthThresholdHearts()) + " hearts"));
+                : "below " + round(hit.lowHealthThresholdPercent()) + "% of max health"));
         icon.lore(kv("Indicator", preset.damageIndicators().text()));
         DeathEffectsSettings death = preset.deathEffects();
         boolean deathNothing = !death.lightning() && death.sounds().isEmpty()

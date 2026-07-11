@@ -5,11 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
 import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.Mode;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.ParticleSpec;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.SoundSpec;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import org.bukkit.configuration.Configuration;
@@ -17,16 +21,46 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Combat Effects preset library — the knockback-profile model mirrored
- * (2.5.3): one preset = one {@code effects/presets/<name>.yml} file carrying
- * all three module sections, selected by {@code effects.yml}'s
- * {@code effects.preset}. Pins: {@code parse(empty)} equals every DEFAULTS
- * record (the era-exact no-op), each bundled preset file parses EXACTLY to its
- * in-code {@link EffectsPreset} constant (a regenerated preset can never
- * drift — the {@code ProfileParserTest} precedent), and selection resolves
- * overlay ?? file ?? default with a loud vanilla fallback on a bad name.
+ * The Combat Effects preset library — the knockback-profile model mirrored and
+ * completed (2.5.5): one preset = one {@code effects/presets/<name>.yml} file
+ * carrying all three module sections, selected by {@code effects.yml}'s
+ * {@code effects.preset}, with the bundled YAML as the tune's source of truth
+ * (there are no in-code preset value constants anymore). The drift pins now
+ * live HERE as test-local expected records: the bundled signature.yml must
+ * still parse to {@link #SIGNATURE_HIT}/{@link #SIGNATURE_INDICATORS}/{@link
+ * #SIGNATURE_DEATH}, custom.yml must parse value-identical to it, and
+ * {@code parse(empty)} must equal every DEFAULTS record (the era-exact no-op).
+ * Selection resolves overlay ?? file ?? default with a loud SIGNATURE fallback
+ * on a bad name.
  */
 class EffectsPresetParserTest {
+
+    /* ------------------- test-local drift pins (the signature tune) ------------------- */
+
+    /** The signature hit-feedback tune — the layered chord, redstone burst, glow-squid low-HP chirp, 35%. */
+    private static final HitFeedbackSettings SIGNATURE_HIT = new HitFeedbackSettings(
+            List.of(
+                    new SoundSpec("block.lodestone.break", 1.0f, 1.0f),
+                    new SoundSpec("entity.generic.hurt", 0.85f, 0.75f),
+                    new SoundSpec("entity.breeze.deflect", 0.75f, 1.15f)),
+            List.of(new ParticleSpec("block", "redstone_block", 6, 8, Mode.EMANATE, 0.15f, 0, 0, 0)),
+            List.of(new SoundSpec("entity.glow_squid.hurt", 0.9f, 1.2f)),
+            35.0);
+
+    /** The signature indicator tune — the shipped feel plus the green healing number. */
+    private static final DamageIndicatorsSettings SIGNATURE_INDICATORS = new DamageIndicatorsSettings(
+            40, 0.6, 0.3, 0.25, 0.06, 0.05, 0.98,
+            "&f-{HEALTH} &c❤&r",
+            "&c&l** -{HEALTH} ❤ **",
+            5.0,
+            "&a+{HEALTH} &c❤&r");
+
+    /** The signature death strike — the cosmetic bolt, glow-squid death call, white/yellow/gold blast. */
+    private static final DeathEffectsSettings SIGNATURE_DEATH = new DeathEffectsSettings(
+            true,
+            List.of(new SoundSpec("entity.glow_squid.death", 1.0f, 0.95f)),
+            List.of(),
+            List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00));
 
     private static YamlConfiguration resource(String stem) {
         String classpath = ConfigStore.EFFECTS_PRESETS_DIR + "/" + stem + ".yml";
@@ -66,58 +100,53 @@ class EffectsPresetParserTest {
 
     @Test
     void defaultsAreTheVanillaTune() {
-        // The era-exact no-op: DEFAULTS is exactly what the vanilla preset ships —
+        // The era-exact no-op: DEFAULTS is exactly the audibly-vanilla tune —
         // the era hurt sound (with the era pitch jitter applied at emit time), no
-        // particles, no low-HP layer, the shipped indicator feel, and a strict
-        // death-effects nothing.
-        assertEquals(EffectsPreset.VANILLA.hitFeedback(), HitFeedbackSettings.DEFAULTS);
-        assertEquals(EffectsPreset.VANILLA.damageIndicators(), DamageIndicatorsSettings.DEFAULTS);
-        assertEquals(EffectsPreset.VANILLA.deathEffects(), DeathEffectsSettings.DEFAULTS);
+        // particles, no low-HP layer, the shipped indicator feel with NO healing
+        // indicator, and a strict death-effects nothing. There is no "vanilla"
+        // preset anymore; the vanilla feel is "leave the modules off".
         assertEquals(HitFeedbackSettings.VANILLA_SOUNDS, HitFeedbackSettings.DEFAULTS.sounds());
         assertTrue(HitFeedbackSettings.DEFAULTS.vanillaTune(),
                 "the default sound set carries the era pitch jitter");
+        assertTrue(HitFeedbackSettings.DEFAULTS.particles().isEmpty(), "vanilla pops no particles");
+        assertTrue(HitFeedbackSettings.DEFAULTS.lowHealthSounds().isEmpty(), "vanilla layers nothing");
+        assertEquals(35.0, HitFeedbackSettings.DEFAULTS.lowHealthThresholdPercent(), 0.0,
+                "the default low-health threshold is 35% of max health (inert while the layer is empty)");
+        assertEquals("", DamageIndicatorsSettings.DEFAULTS.healText(),
+                "no healing indicator by default — the era-exact no-op");
         assertTrue(DeathEffectsSettings.DEFAULTS.fireworkColors().isEmpty(),
                 "vanilla death effects launch nothing");
     }
 
-    /* ----------------------- bundled files parse to the constants ----------------------- */
+    /* ----------------------- bundled files parse to the drift pins ----------------------- */
 
     @Test
-    void everyBundledPresetFileParsesExactlyToItsConstant() {
-        for (Map.Entry<String, EffectsPreset> entry : EffectsPreset.BUNDLED.entrySet()) {
-            String stem = entry.getKey();
-            ConfigIssues issues = new ConfigIssues();
-            EffectsPreset parsed = EffectsPresetParser.parse(stem, resource(stem), issues);
-            assertEquals(entry.getValue(), parsed,
-                    () -> "bundled effects/presets/" + stem + ".yml must parse to its constant");
-            assertTrue(issues.all().isEmpty(),
-                    () -> stem + " parsed with issues: " + issues.all());
-        }
+    void signatureFileParsesToTheExpectedRecords() {
+        // The signature.yml resource is the tune's source of truth; it must parse
+        // to the test-local pins exactly (percent 35 + the heal-text), so a
+        // regenerated file can never drift silently.
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset signature = EffectsPresetParser.parse("signature", resource("signature"), issues);
+        assertEquals(SIGNATURE_HIT, signature.hitFeedback(), "signature hit-feedback drift");
+        assertEquals(SIGNATURE_INDICATORS, signature.damageIndicators(), "signature indicators drift");
+        assertEquals(SIGNATURE_DEATH, signature.deathEffects(), "signature death-effects drift");
+        assertEquals(35.0, signature.hitFeedback().lowHealthThresholdPercent(), 0.0,
+                "signature fires the low-health layer below 35% of max health");
+        assertEquals("&a+{HEALTH} &c❤&r", signature.damageIndicators().healText(),
+                "signature shows the green healing indicator");
+        assertTrue(issues.all().isEmpty(), () -> "signature parsed with issues: " + issues.all());
     }
 
     @Test
-    void customIsAByteWiseCopyOfSignatureValues() {
+    void customFileParsesValueIdenticalToSignature() {
         // The owner's editable preset starts at signature's VALUES (the directive):
-        // identical settings records, its own name/description.
-        assertEquals(EffectsPreset.SIGNATURE.hitFeedback(), EffectsPreset.CUSTOM.hitFeedback());
-        assertEquals(EffectsPreset.SIGNATURE.damageIndicators(), EffectsPreset.CUSTOM.damageIndicators());
-        assertEquals(EffectsPreset.SIGNATURE.deathEffects(), EffectsPreset.CUSTOM.deathEffects());
-    }
-
-    @Test
-    void signatureCarriesTheFullOwnedTune() {
-        EffectsPreset signature = EffectsPreset.SIGNATURE;
-        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, signature.hitFeedback().sounds());
-        assertEquals(HitFeedbackSettings.SIGNATURE_PARTICLES, signature.hitFeedback().particles());
-        assertEquals(HitFeedbackSettings.SIGNATURE_LOW_HEALTH_SOUNDS,
-                signature.hitFeedback().lowHealthSounds());
-        assertTrue(signature.deathEffects().lightning(), "signature strikes the cosmetic bolt");
-        assertEquals(DeathEffectsSettings.SIGNATURE_SOUNDS, signature.deathEffects().sounds());
-        assertEquals(DeathEffectsSettings.SIGNATURE_FIREWORK_COLORS,
-                signature.deathEffects().fireworkColors(),
-                "white &f, yellow &e, gold &6 — the signature blast");
-        assertTrue(signature.deathEffects().particles().isEmpty(),
-                "the real colored blast replaced the dust approximation");
+        // identical settings records, only its own name/description differ.
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset custom = EffectsPresetParser.parse("custom", resource("custom"), issues);
+        assertEquals(SIGNATURE_HIT, custom.hitFeedback(), "custom hit-feedback must copy signature");
+        assertEquals(SIGNATURE_INDICATORS, custom.damageIndicators(), "custom indicators must copy signature");
+        assertEquals(SIGNATURE_DEATH, custom.deathEffects(), "custom death-effects must copy signature");
+        assertTrue(issues.all().isEmpty(), () -> "custom parsed with issues: " + issues.all());
     }
 
     /* ------------------------- selection (overlay ?? file ?? default) ------------------------- */
@@ -136,9 +165,11 @@ class EffectsPresetParserTest {
     }
 
     @Test
-    void noSelectionResolvesToVanilla() throws Exception {
-        SnapshotParser.Result result = parseSelection(null, bundledPresetSources());
-        assertEquals("vanilla", result.snapshot().selectedEffectsPreset());
+    void noSelectionResolvesToSignature() throws Exception {
+        // No effects.yml selection at all → the default is signature, and with no
+        // preset files loaded the in-code FALLBACK stands in (DEFAULTS) — clean.
+        SnapshotParser.Result result = parseSelection(null, Map.of());
+        assertEquals("signature", result.snapshot().selectedEffectsPreset());
         assertEquals(HitFeedbackSettings.DEFAULTS,
                 settings(result.snapshot(), Feature.HIT_FEEDBACK));
         assertEquals(DeathEffectsSettings.DEFAULTS,
@@ -152,39 +183,52 @@ class EffectsPresetParserTest {
                 "effects:\n  preset: signature\n", bundledPresetSources());
         Snapshot snapshot = result.snapshot();
         assertEquals("signature", snapshot.selectedEffectsPreset());
-        assertEquals(EffectsPreset.SIGNATURE.hitFeedback(),
-                settings(snapshot, Feature.HIT_FEEDBACK));
-        assertEquals(EffectsPreset.SIGNATURE.damageIndicators(),
-                settings(snapshot, Feature.DAMAGE_INDICATORS));
-        assertEquals(EffectsPreset.SIGNATURE.deathEffects(),
-                settings(snapshot, Feature.DEATH_EFFECTS));
+        assertEquals(SIGNATURE_HIT, settings(snapshot, Feature.HIT_FEEDBACK));
+        assertEquals(SIGNATURE_INDICATORS, settings(snapshot, Feature.DAMAGE_INDICATORS));
+        assertEquals(SIGNATURE_DEATH, settings(snapshot, Feature.DEATH_EFFECTS));
         assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
     }
 
     @Test
-    void unknownSelectionWarnsOnceAndVanillaStandsIn() throws Exception {
+    void unknownSelectionWarnsOnceAndSignatureStandsIn() throws Exception {
         SnapshotParser.Result result = parseSelection(
                 "effects:\n  preset: sinature\n", bundledPresetSources());
-        assertEquals("vanilla", result.snapshot().selectedEffectsPreset(),
-                "a bad name must fall back to the era-exact no-op");
-        assertEquals(HitFeedbackSettings.DEFAULTS,
-                settings(result.snapshot(), Feature.HIT_FEEDBACK));
+        assertEquals("signature", result.snapshot().selectedEffectsPreset(),
+                "a bad name must fall back to the signature default");
+        assertEquals(SIGNATURE_HIT, settings(result.snapshot(), Feature.HIT_FEEDBACK));
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
         assertTrue(result.issues().get(0).contains("sinature"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("signature preset stands in"),
+                () -> result.issues().get(0));
     }
 
     @Test
-    void aMissingVanillaFileStillResolvesTheInCodeVanilla() throws Exception {
+    void aRetiredVanillaSelectionFallsBackToSignatureLoudly() throws Exception {
+        // The vanilla.yml file left the bundle in 2.5.5. A lingering
+        // `preset: vanilla` that the 4→5 migration did not flip lands on the
+        // unknown-name fallback: signature stands in, loudly.
+        SnapshotParser.Result result = parseSelection(
+                "effects:\n  preset: vanilla\n", bundledPresetSources());
+        assertEquals("signature", result.snapshot().selectedEffectsPreset());
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("vanilla"), () -> result.issues().get(0));
+    }
+
+    @Test
+    void aMissingSignatureFileStillResolvesTheInCodeFallback() throws Exception {
         // No preset files loaded at all (a torn install): the selection falls back
-        // to the in-code vanilla constant — never a crash, never silence about it.
+        // to the in-code signature FALLBACK — never a crash, never silence about it.
+        // (In production ConfigStore serves the JAR resource before this point; the
+        // FALLBACK is the last-ditch value for a truly empty source set.)
         SnapshotParser.Result result = parseSelection(
                 "effects:\n  preset: signature\n", Map.of());
-        assertEquals("vanilla", result.snapshot().selectedEffectsPreset());
+        assertEquals("signature", result.snapshot().selectedEffectsPreset());
         assertEquals(HitFeedbackSettings.DEFAULTS,
                 settings(result.snapshot(), Feature.HIT_FEEDBACK));
         assertEquals(DeathEffectsSettings.DEFAULTS,
                 settings(result.snapshot(), Feature.DEATH_EFFECTS));
-        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().isEmpty(),
+                () -> "the default name is never an unknown-name warning: " + result.issues());
     }
 
     @Test
@@ -199,9 +243,10 @@ class EffectsPresetParserTest {
                     - sound: block.anvil.land
                       volume: 0.5
                       pitch: 0.6
-                  low-health-threshold-hearts: 6.0
+                  low-health-threshold-percent: 60
                 damage-indicators:
                   ring-radius: 1.2
+                  heal-text: "&a+{HEALTH}"
                 death-effects:
                   lightning: true
                   firework:
@@ -216,13 +261,69 @@ class EffectsPresetParserTest {
         HitFeedbackSettings feedback = settings(snapshot, Feature.HIT_FEEDBACK);
         assertEquals(1, feedback.sounds().size());
         assertEquals("block.anvil.land", feedback.sounds().get(0).sound());
-        assertEquals(6.0, feedback.lowHealthThresholdHearts(), 0.0);
+        assertEquals(60.0, feedback.lowHealthThresholdPercent(), 0.0);
         DamageIndicatorsSettings indicators = settings(snapshot, Feature.DAMAGE_INDICATORS);
         assertEquals(1.2, indicators.ringRadius(), 1e-9);
+        assertEquals("&a+{HEALTH}", indicators.healText());
         DeathEffectsSettings death = settings(snapshot, Feature.DEATH_EFFECTS);
         assertTrue(death.lightning());
-        assertEquals(java.util.List.of(0xFF00AA), death.fireworkColors());
+        assertEquals(List.of(0xFF00AA), death.fireworkColors());
         assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
+    }
+
+    /* --------------------------- the percent threshold (F2) --------------------------- */
+
+    @Test
+    void percentThresholdClampsToRangeWithAWarning() throws Exception {
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                hit-feedback:
+                  low-health-threshold-percent: 140
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("clamped", file, issues);
+        assertEquals(100.0, parsed.hitFeedback().lowHealthThresholdPercent(), 0.0,
+                "percent clamps to [0, 100]");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("low-health-threshold-percent"),
+                () -> issues.all().get(0));
+    }
+
+    @Test
+    void legacyHeartsKeyWarnsOnceAndConvertsToPercent() throws Exception {
+        // The 2.5.2 low-health-threshold-hearts is retired; a lingering key (with
+        // no percent key) is honoured with one warn and converted hearts × 10 —
+        // never silently dropped (mandate B10).
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                hit-feedback:
+                  low-health-threshold-hearts: 6.0
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("legacy", file, issues);
+        assertEquals(60.0, parsed.hitFeedback().lowHealthThresholdPercent(), 0.0,
+                "6 hearts of a 20-max player = 60% of max health");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("low-health-threshold-hearts"),
+                () -> issues.all().get(0));
+    }
+
+    @Test
+    void bothThresholdKeysPercentWinsWithANotice() throws Exception {
+        // Both present ⇒ the explicit percent wins and the retired hearts key is
+        // noted once — never a silent double-read.
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                hit-feedback:
+                  low-health-threshold-percent: 20
+                  low-health-threshold-hearts: 6.0
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("both", file, issues);
+        assertEquals(20.0, parsed.hitFeedback().lowHealthThresholdPercent(), 0.0,
+                "the explicit percent wins over the retired hearts key");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("percent wins"), () -> issues.all().get(0));
     }
 
     /* --------------------------- knob-level warn-and-fallback --------------------------- */
@@ -292,9 +393,9 @@ class EffectsPresetParserTest {
         assertEquals("entity.lightning_bolt.thunder", death.sounds().get(0).sound());
         assertEquals("ff00aa", death.particles().get(0).block(),
                 "the dust hex color rides the block field");
-        assertEquals(HitFeedbackSettings.Mode.SPREAD, death.particles().get(0).mode());
+        assertEquals(Mode.SPREAD, death.particles().get(0).mode());
         assertEquals(0.5, death.particles().get(0).spreadY(), 1e-9);
-        assertEquals(java.util.List.of(0xFF00AA, 0x00FF55), death.fireworkColors(),
+        assertEquals(List.of(0xFF00AA, 0x00FF55), death.fireworkColors(),
                 "firework colors parse from hex, # prefix tolerated, config order kept");
         assertTrue(issues.all().isEmpty(), () -> "issues: " + issues.all());
     }
@@ -323,7 +424,7 @@ class EffectsPresetParserTest {
                 """);
         ConfigIssues issues = new ConfigIssues();
         EffectsPreset parsed = EffectsPresetParser.parse("typo", file, issues);
-        assertEquals(java.util.List.of(0xFFAA00), parsed.deathEffects().fireworkColors(),
+        assertEquals(List.of(0xFFAA00), parsed.deathEffects().fireworkColors(),
                 "the valid color survives");
         assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
         assertTrue(issues.all().get(0).contains("not-a-color"), () -> issues.all().get(0));
@@ -342,10 +443,18 @@ class EffectsPresetParserTest {
                 death-effects:
                   preset: signature
                 """);
+        // Select a distinct DEFAULTS-valued preset (an empty file) so the assertion
+        // proves the retired config.yml section did NOT steer the tune — with
+        // signature as the default now, an unselected parse would already be the
+        // signature tune and could not tell the two apart.
+        YamlConfiguration effects = new YamlConfiguration();
+        effects.loadFromString("effects:\n  preset: muted\n");
+        Map<String, Configuration> presets = new TreeMap<>(bundledPresetSources());
+        presets.put("muted", new YamlConfiguration());
         SnapshotParser.Result result = SnapshotParser.parse(new ConfigStore.Sources(
                 main, new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
                 new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
-                new YamlConfiguration(), bundledPresetSources(), Map.of()));
+                effects, presets, Map.of()));
         assertEquals(HitFeedbackSettings.DEFAULTS,
                 settings(result.snapshot(), Feature.HIT_FEEDBACK),
                 "the retired section must not steer the parsed settings");

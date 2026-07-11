@@ -77,11 +77,13 @@ class ReconcilerTest {
     }
 
     /**
-     * A snapshot with a Combat Effects selection (2.5.3: the FEEDBACK settings
-     * come from the selected preset file, so a settings CHANGE is staged by
-     * switching presets). "signature" resolves an in-memory preset whose
-     * hit-feedback sounds differ from the vanilla defaults; "vanilla" is the
-     * absent-file fallback — the in-code defaults.
+     * A snapshot with a Combat Effects selection (the FEEDBACK settings come from
+     * the selected preset file, so a settings CHANGE is staged by switching
+     * presets). {@code "signature"} resolves an in-memory preset whose
+     * hit-feedback sounds differ from the defaults; {@code "muted"} resolves an
+     * empty preset — the DEFAULTS tune (audibly vanilla). Both are real entries
+     * in the source map, so neither trips the unknown-name fallback and each
+     * resolves distinctly (the vanilla-preset name retired in 2.5.5).
      */
     private static Snapshot snapshot(String modulesYaml, String selectedPreset) throws Exception {
         YamlConfiguration main = new YamlConfiguration();
@@ -94,11 +96,12 @@ class ReconcilerTest {
                   sounds:
                     - sound: block.anvil.land
                 """);
+        YamlConfiguration muted = new YamlConfiguration(); // empty → the DEFAULTS tune
         YamlConfiguration empty = new YamlConfiguration();
         return SnapshotParser.parse(new ConfigStore.Sources(
                 main, empty, empty, empty,
                 new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
-                effects, Map.of("signature", signature), Map.of())).snapshot();
+                effects, Map.of("signature", signature, "muted", muted), Map.of())).snapshot();
     }
 
     /* --------------------------------- tests --------------------------------- */
@@ -227,7 +230,7 @@ class ReconcilerTest {
 
         String enabled = "modules:\n  hit-feedback: true\n";
 
-        reconciler.converge(snapshot(enabled, "vanilla"));
+        reconciler.converge(snapshot(enabled, "muted"));
         assertEquals(1, unit.assembleCount, "enabled once");
 
         reconciler.converge(snapshot(enabled, "signature"));
@@ -248,7 +251,7 @@ class ReconcilerTest {
         RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
         reconciler.register(unit);
 
-        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "vanilla"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "muted"));
         reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "signature"));
 
         assertEquals(1, unit.assembleCount, "no opt-in → no bounce");
@@ -264,7 +267,7 @@ class ReconcilerTest {
         unit.rebuildOnSettingsChange = true;
         reconciler.register(unit);
 
-        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "vanilla"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "muted"));
         reconciler.converge(snapshot("modules:\n  hit-feedback: false\n", "signature"));
 
         assertEquals(1, unit.assembleCount, "disable wins — no re-assemble");

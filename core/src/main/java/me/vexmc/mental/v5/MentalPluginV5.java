@@ -717,7 +717,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // PacketEvents User — a relogged player's stale driver must be dropped on
         // quit or the fresh connection would keep addressing the dead one.
         DamageIndicatorsUnit damageIndicators =
-                new DamageIndicatorsUnit(scheduling, clock, feedbackTrace, getLogger());
+                new DamageIndicatorsUnit(sessions, scheduling, clock, feedbackTrace, getLogger());
         sessions.addForgetHook(damageIndicators::forget);
         reconciler.register(damageIndicators);
 

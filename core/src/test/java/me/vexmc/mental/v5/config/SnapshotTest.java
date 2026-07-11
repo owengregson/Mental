@@ -115,14 +115,16 @@ class SnapshotTest {
         assertEquals(PotFillSettings.DEFAULTS, settings(snapshot, Feature.POT_FILL));
         assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
         // The FEEDBACK family reads the selected Combat Effects preset; with no
-        // effects.yml and no preset files the selection is vanilla and the
-        // in-code vanilla constant stands in — the settings DEFAULTS exactly.
-        assertEquals("vanilla", snapshot.selectedEffectsPreset());
+        // effects.yml and no preset files the selection is signature and the
+        // in-code FALLBACK stands in — the settings DEFAULTS (the era-exact
+        // no-op) exactly.
+        assertEquals("signature", snapshot.selectedEffectsPreset());
         assertEquals(HitFeedbackSettings.DEFAULTS, settings(snapshot, Feature.HIT_FEEDBACK));
-        // The low-health extra layer defaults to no layer / a 4-heart post-hit ceiling.
+        // The low-health extra layer defaults to no layer / a 35%-of-max ceiling.
         HitFeedbackSettings feedback = settings(snapshot, Feature.HIT_FEEDBACK);
-        assertTrue(feedback.lowHealthSounds().isEmpty(), "no low-health layer by default (vanilla)");
-        assertEquals(4.0, feedback.lowHealthThresholdHearts(), 0.0, "default low-health threshold is 4 hearts");
+        assertTrue(feedback.lowHealthSounds().isEmpty(), "no low-health layer by default (vanilla feel)");
+        assertEquals(35.0, feedback.lowHealthThresholdPercent(), 0.0,
+                "default low-health threshold is 35% of max health");
         assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
         assertEquals(DeathEffectsSettings.DEFAULTS, settings(snapshot, Feature.DEATH_EFFECTS));
         // The vanilla death tune is a strict nothing — no lightning, no sounds,
@@ -506,15 +508,16 @@ class SnapshotTest {
     }
 
     @Test
-    void theBundledEffectsSelectionParsesCleanAtTheVanillaDefault() throws Exception {
-        // The fresh-install pin for the 2.5.3 preset library: the bundled
-        // effects.yml selects vanilla with zero issues, and the FEEDBACK
-        // settings are the parse-empty era-exact no-ops.
+    void theBundledEffectsSelectionParsesCleanAtTheSignatureDefault() throws Exception {
+        // The fresh-install pin for the Combat Effects preset library: the bundled
+        // effects.yml selects signature with zero issues, and with no preset files
+        // loaded here the in-code FALLBACK stands in — the parse-empty era-exact
+        // no-ops (the modules default OFF, so this is what a fresh server carries).
         SnapshotParser.Result result = parseFiles(Map.of(
                 ConfigStore.EFFECTS_FILE, bundled(ConfigStore.EFFECTS_FILE)));
         assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
         Snapshot snapshot = result.snapshot();
-        assertEquals("vanilla", snapshot.selectedEffectsPreset());
+        assertEquals("signature", snapshot.selectedEffectsPreset());
         assertEquals(HitFeedbackSettings.DEFAULTS, settings(snapshot, Feature.HIT_FEEDBACK));
         assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
         assertEquals(DeathEffectsSettings.DEFAULTS, settings(snapshot, Feature.DEATH_EFFECTS));

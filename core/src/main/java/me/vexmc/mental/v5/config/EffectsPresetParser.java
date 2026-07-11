@@ -32,12 +32,14 @@ public final class EffectsPresetParser {
 
         /**
          * The preset the three FEEDBACK settings records come from: the
-         * selected entry, or the in-code vanilla constant when even the
-         * vanilla file is missing (a torn install parses to the era-exact
-         * no-op, never a crash).
+         * selected entry, or the in-code {@link EffectsPreset#FALLBACK} (a
+         * DEFAULTS-valued signature stand-in) when even the signature file is
+         * missing — a torn install parses to the era-exact no-op, never a
+         * crash. Production always resolves a parsed file here (or, for
+         * signature, the JAR resource {@code ConfigStore} serves in its place).
          */
         public EffectsPreset effective() {
-            return byName.getOrDefault(selected, EffectsPreset.VANILLA);
+            return byName.getOrDefault(selected, EffectsPreset.FALLBACK);
         }
     }
 
@@ -45,10 +47,14 @@ public final class EffectsPresetParser {
 
     /**
      * Parses every preset source and resolves the selection. An unknown
-     * selected name earns one loud issue and the vanilla preset stands in —
-     * never a silent change of tune; the selection itself defaults to vanilla
+     * selected name earns one loud issue and the signature preset stands in —
+     * never a silent change of tune; the selection itself defaults to signature
      * (effective = overlay ?? file ?? default, the overlay having been applied
-     * onto the {@code effects.yml} root before this runs).
+     * onto the {@code effects.yml} root before this runs). Since 2.5.5 the
+     * retired {@code vanilla} name resolves through exactly this path: the
+     * bundled vanilla.yml is gone, so a lingering {@code preset: vanilla} (that
+     * the 4 → 5 migration did not already flip) lands here and signature stands
+     * in loudly.
      */
     public static Library parseSection(
             ConfigReader selection, Map<String, Configuration> presetSources, ConfigIssues issues) {
@@ -60,7 +66,7 @@ public final class EffectsPresetParser {
                 .trim().toLowerCase(Locale.ROOT);
         if (!byName.containsKey(selected) && !EffectsPreset.DEFAULT_NAME.equals(selected)) {
             issues.add("effects.yml: preset '" + selected + "' matches no file in "
-                    + ConfigStore.EFFECTS_PRESETS_DIR + "/ — the vanilla preset stands in");
+                    + ConfigStore.EFFECTS_PRESETS_DIR + "/ — the signature preset stands in");
             selected = EffectsPreset.DEFAULT_NAME;
         }
         return new Library(selected, byName);
@@ -94,7 +100,42 @@ public final class EffectsPresetParser {
                 parseSounds(reader, "sounds", d.sounds()),
                 parseParticles(reader, d.particles()),
                 parseSounds(reader, "low-health-sounds", d.lowHealthSounds()),
-                reader.numberClamped("low-health-threshold-hearts", d.lowHealthThresholdHearts(), 0.0, 100.0));
+                parseLowHealthThresholdPercent(reader, d.lowHealthThresholdPercent()));
+    }
+
+    /**
+     * The low-health threshold as a PERCENT of the victim's max health. The
+     * 2.5.2 schema stored an absolute {@code low-health-threshold-hearts};
+     * 2.5.5 replaced it with {@code low-health-threshold-percent} so the ceiling
+     * scales with a scaled-max-health victim. A lingering hearts key (with no
+     * percent key) is honoured with one warn and converted — hearts of a 20-max
+     * player as percent = {@code hearts × 10} — never silently dropped (mandate
+     * B10: loud, once); when BOTH keys are present the explicit percent wins and
+     * the retired hearts key is noted. This mirrors the SnapshotParser
+     * retired-key precedents ({@code latency-compensation.ping-offset-ms},
+     * {@code combo-hold.hit-cap}).
+     */
+    private static double parseLowHealthThresholdPercent(ConfigReader reader, double fallback) {
+        ConfigurationSection section = reader.section();
+        boolean hasPercent = section != null && section.isSet("low-health-threshold-percent");
+        boolean hasHearts = section != null && section.isSet("low-health-threshold-hearts");
+        if (hasPercent) {
+            if (hasHearts) {
+                reader.issues().add(reader.prefix() + ": both low-health-threshold-percent and the retired"
+                        + " low-health-threshold-hearts are set — percent wins; delete the hearts line");
+            }
+            return reader.numberClamped("low-health-threshold-percent", fallback, 0.0, 100.0);
+        }
+        if (hasHearts) {
+            double hearts = reader.numberClamped("low-health-threshold-hearts", fallback / 10.0, 0.0, 100.0);
+            double percent = Math.max(0.0, Math.min(100.0, hearts * 10.0));
+            reader.issues().warn(reader.prefix() + ".low-health-threshold-hearts",
+                    "retired in 2.5.5 for low-health-threshold-percent (percent of max health);"
+                            + " converted " + hearts + " hearts",
+                    "low-health-threshold-percent: " + percent);
+            return percent;
+        }
+        return fallback;
     }
 
     static DamageIndicatorsSettings parseDamageIndicators(ConfigReader reader) {
@@ -116,7 +157,8 @@ public final class EffectsPresetParser {
                         DamageIndicatorsSettings.MIN_DRAG, DamageIndicatorsSettings.MAX_DRAG),
                 reader.text("text", d.text()),
                 reader.text("crit-text", d.critText()),
-                reader.numberClamped("crit-threshold-hearts", d.critThresholdHearts(), 0.0, 100.0));
+                reader.numberClamped("crit-threshold-hearts", d.critThresholdHearts(), 0.0, 100.0),
+                reader.text("heal-text", d.healText()));
     }
 
     static DeathEffectsSettings parseDeathEffects(ConfigReader reader) {

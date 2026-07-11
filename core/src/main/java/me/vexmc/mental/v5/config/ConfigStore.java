@@ -3,6 +3,7 @@ package me.vexmc.mental.v5.config;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -91,9 +92,15 @@ public final class ConfigStore {
             POTS_FILE, List.of("pot-fill", "fast-pots"),
             LOADOUT_FILE, List.of("disable-offhand", "disable-crafting"));
 
-    /** The bundled Combat Effects presets; regenerated individually when missing. */
+    /**
+     * The bundled Combat Effects presets; regenerated individually when
+     * missing. {@code vanilla} left the bundle in 2.5.5 (the vanilla feel is
+     * "disable the modules"): its pristine copy is retired by the 4 → 5
+     * migration and it is never re-extracted, though a user vanilla.yml left on
+     * disk stays selectable through directory discovery.
+     */
     public static final List<String> BUNDLED_EFFECTS_PRESETS =
-            List.of("vanilla", "signature", "custom");
+            List.of("signature", "custom");
 
     /** The formula-category folder for a legacy-formula profile. */
     public static final String LEGACY_FOLDER = "legacy";
@@ -430,27 +437,59 @@ public final class ConfigStore {
      * listing; any file an owner drops in becomes selectable by its stem. An
      * unparseable preset is reported and served empty, which parses to the
      * vanilla-valued defaults — the loud fallback the selection warns about.
+     *
+     * <p>The {@code signature} tune is the default preset, so it must survive a
+     * torn install: when its disk file is missing or parsed to nothing (deleted,
+     * empty, or unreadable), the JAR RESOURCE text stands in with a loud line —
+     * the signature stem is always resolvable even if the directory lost it.
+     * Every OTHER stem stays purely directory-driven, so a surviving user
+     * {@code vanilla.yml} remains selectable.</p>
      */
     private Map<String, Configuration> loadEffectsPresets() {
         Map<String, Configuration> presets = new TreeMap<>();
         Path presetsDir = dataDir.resolve(EFFECTS_PRESETS_DIR);
-        if (!Files.isDirectory(presetsDir)) {
-            return presets;
+        if (Files.isDirectory(presetsDir)) {
+            try (var stream = Files.list(presetsDir)) {
+                stream.filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString()
+                                .toLowerCase(Locale.ROOT).endsWith(".yml"))
+                        .sorted()
+                        .forEach(path -> {
+                            String fileName = path.getFileName().toString();
+                            String stem = fileName.substring(0, fileName.length() - 4);
+                            presets.put(stem, loadYaml(path, EFFECTS_PRESETS_DIR + "/" + fileName));
+                        });
+            } catch (IOException failure) {
+                log.accept("Could not list " + presetsDir + ": " + failure);
+            }
         }
-        try (var stream = Files.list(presetsDir)) {
-            stream.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString()
-                            .toLowerCase(Locale.ROOT).endsWith(".yml"))
-                    .sorted()
-                    .forEach(path -> {
-                        String fileName = path.getFileName().toString();
-                        String stem = fileName.substring(0, fileName.length() - 4);
-                        presets.put(stem, loadYaml(path, EFFECTS_PRESETS_DIR + "/" + fileName));
-                    });
-        } catch (IOException failure) {
-            log.accept("Could not list " + presetsDir + ": " + failure);
+        Configuration onDisk = presets.get("signature");
+        if (onDisk == null || onDisk.getKeys(false).isEmpty()) {
+            Configuration resource = loadResourceYaml(EFFECTS_PRESETS_DIR + "/signature.yml");
+            if (resource != null) {
+                presets.put("signature", resource);
+                log.accept("effects/presets/signature.yml is missing or unreadable on disk"
+                        + " — serving the bundled signature tune from the jar");
+            }
         }
         return presets;
+    }
+
+    /** The bundled YAML text of {@code resource} parsed into a configuration root, or null. */
+    private Configuration loadResourceYaml(String resource) {
+        String text = readResource(resource);
+        if (text == null) {
+            log.accept("Bundled resource " + resource + " is missing from the jar");
+            return null;
+        }
+        YamlConfiguration yaml = new YamlConfiguration();
+        try {
+            yaml.load(new StringReader(text));
+        } catch (IOException | InvalidConfigurationException failure) {
+            log.accept("Bundled resource " + resource + " could not be parsed: " + failure.getMessage());
+            return null;
+        }
+        return yaml;
     }
 
     /* ------------------------------------------------------------------ */
