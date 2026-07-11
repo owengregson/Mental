@@ -189,21 +189,26 @@ vanilla even if the wire missed it — era-sound: a STOP is a latch-closing
 gesture; it does not arm). Graceful degradation for unknown
 proxy/translation environments.
 
-### 1.7 The always-on block-hit door (one credit)
+### 1.7 The always-on block-hit door (one hit per reset)
 
-A thin always-on listener set in the knockback core — the born-cancelled
-`RIGHT_CLICK_AIR` interact, the victim-aimed interact-entity, and the
-`RELEASE_USE_ITEM` packet — feeds `ledger.onBlockReset()` under the existing
-eligibility gate (raw client sprint, or key-intent corroboration where
-PLAYER_INPUT exists). Semantics (owner-directed, supersedes 2.5.1's
-fresh-chain-while-held): **one credit per block-hit reset** — the next melee
-while the block key is held ships the fresh sprint knock and consumes the
-credit; the next block-hit requires a fresh reset. Releasing the block
-without hitting keeps the ordinary STOP→START path in charge (the release
-re-engage crosses as a genuine START for latched/held sprint keys).
-`SwordBlockingUnit` keeps its damage rules but routes its re-arm through this
-same door — no double doors. Zero-touch holds: the door changes nothing
-unless a sprint hit already consumed an engagement.
+A thin always-on listener (`BlockResetTap`, knockback core) on the
+born-cancelled `RIGHT_CLICK_AIR` interact and the victim-aimed
+interact-entity feeds `onBlockSprintReset()` under the existing eligibility
+gate (raw client sprint, or key-intent corroboration where PLAYER_INPUT
+exists); the `RELEASE_USE_ITEM` lane rides the rim as trail evidence. The
+item gate: shields always (the only blocking gesture a default config has);
+SWORD_BLOCKING contributes its decorated-sword test while enabled.
+
+Semantics (owner-directed, supersedes 2.5.1's fresh-chain-while-held —
+refined during implementation, 2026-07-11): the block re-arm is **exactly a
+START-shaped gesture**, so the ordinary one-engagement spend already scopes
+the grant to ONE hit per reset — no override flag exists to chain. An
+UNSPENT re-arm survives the block release (era-exact: the era client's
+release re-engage is what re-armed the bonus, so a block-tap earns the same
+single fresh hit a w-tap does); a STOP still drops the wire view (no phantom
+bonus while standing). `SwordBlockingUnit` keeps its damage rules — no
+double doors. Zero-touch holds: the door changes nothing unless a sprint hit
+already consumed an engagement, and a non-blockable item never reaches it.
 
 ### 1.8 Observability
 
