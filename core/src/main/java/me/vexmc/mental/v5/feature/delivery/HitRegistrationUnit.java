@@ -702,6 +702,30 @@ public final class HitRegistrationUnit implements FeatureUnit {
         return prior == null ? "boundary-adopted" : prior + "+boundary-adopted";
     }
 
+    /**
+     * Whether the LIVE victim will reject this committed hit outright inside a
+     * FOREIGN-re-armed immunity window (2.6.0, SE-compat) — the band strictly
+     * ABOVE {@link #adoptBoundary}'s one-tick self-race sliver. A third-party
+     * bare {@code damage()} (a StarEnchants proc, lightning, a DoT tick) landing
+     * in the freeze→apply gap re-arms {@code noDamageTicks} past
+     * {@code max/2 + 1} and stamps its own {@code lastHurt}; a same-or-weaker
+     * melee then makes {@code victim.damage} return false with NO event — no
+     * EDBEE, no cosmetics, while the pre-sent knock already reached the client.
+     * Adoption stays REFUSED there by design (the pile-on DPS-bypass analysis in
+     * {@link #adoptBoundary} stands — never clamp a foreign window); this
+     * predicate only lets the caller RECONCILE the phantom: withdraw the desk
+     * pending, ship the corrective velocity, and journal the rejection. The
+     * UPGRADE branch ({@code amount > lastDamage}) is excluded — vanilla accepts
+     * it as a delta hit and EDBEE fires normally. Pure so the band is unit-pinned.
+     */
+    static boolean foreignWindowReject(
+            boolean committedKnock, int noDamageTicks, int maxNoDamageTicks,
+            double amount, double lastDamage) {
+        return committedKnock
+                && noDamageTicks > maxNoDamageTicks / 2 + 1
+                && amount <= lastDamage;
+    }
+
     private SprintVerdict sprintVerdict(UUID attackerId) {
         if (wtapConsultWire.get()) {
             // NON-creating peek: a packetless attacker has no wire, so it falls
@@ -903,6 +927,18 @@ public final class HitRegistrationUnit implements FeatureUnit {
                     victim.getMaximumNoDamageTicks(), amount, victim.getLastDamage())) {
                 victim.setNoDamageTicks(victim.getMaximumNoDamageTicks() / 2);
                 tx.presend(boundaryAdopted(tx.presend())); // F9 journal discriminator
+            } else if (foreignWindowReject(committedKnock(tx.state()), victim.getNoDamageTicks(),
+                    victim.getMaximumNoDamageTicks(), amount, victim.getLastDamage())) {
+                // A foreign re-arm (an SE proc's bare damage() in the freeze→apply
+                // sliver) guarantees vanilla rejects this committed hit with NO
+                // event. Adoption stays refused (never clamp a foreign window —
+                // the pile-on analysis above), but the phantom is reconciled:
+                // withdraw the pending so nothing redelivers, correct the client
+                // back to its true velocity, and journal the rejection (2.6.0).
+                retract(victimUuid, tx);
+                CorrectiveVelocity.ship(victim);
+                tx.presend(tx.presend() == null
+                        ? "foreign-window-reject" : tx.presend() + "+foreign-window-reject");
             }
             victim.damage(amount, attacker);
         } finally {

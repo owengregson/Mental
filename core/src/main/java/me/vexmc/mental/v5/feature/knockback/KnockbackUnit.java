@@ -31,6 +31,7 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.CompensationQuery;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.InputLedger;
+import me.vexmc.mental.v5.feature.delivery.CorrectiveVelocity;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
@@ -376,7 +377,15 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         applyAttackerObligations(attacker, sprinting, tx.context().sprint());
     }
 
-    /** A protection plugin cancelling the melee hit withdraws the queued knock. */
+    /**
+     * A plugin cancelling the melee hit (a protection region, a StarEnchants
+     * dodge/immune proc at HIGH) withdraws the queued knock — and since 2.6.0,
+     * when the fast path had ALREADY committed a knock to the victim's client
+     * (PRE_SENT burst / PINNED vector) before the cancel could be known, it also
+     * corrects the client back to its true server velocity and journals the
+     * cancellation. The cosmetic silence of a cancelled hit is CORRECT (nothing
+     * landed); the knock-without-sound desync was the incoherence.
+     */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onMeleeCancelled(EntityDamageByEntityEvent event) {
         if (!event.isCancelled()
@@ -391,6 +400,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         HitTransaction tx = session.currentEventTransaction();
         if (tx != null && !(tx.context().source() instanceof HitSource.RodPull)) {
             session.desk().withdraw(tx.context().id());
+            boolean committed = tx.state() == HitTransaction.State.PRE_SENT
+                    || tx.state() == HitTransaction.State.PINNED;
+            if (committed) {
+                CorrectiveVelocity.ship(victim);
+                tx.presend(tx.presend() == null
+                        ? "cancelled-by-plugin" : tx.presend() + "+cancelled-by-plugin");
+            }
         }
     }
 

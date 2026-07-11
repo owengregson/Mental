@@ -108,6 +108,36 @@ class BoundaryAdoptionTest {
     }
 
     @Test
+    void foreignWindowRejectIsTheBandAboveTheSliver() {
+        // The 2.6.0 SE-compat reconcile band: a committed hit meeting a FOREIGN
+        // re-arm (live counter strictly above max/2 + 1) with a same-or-weaker
+        // amount is a GUARANTEED vanilla rejection with no event — reconcile the
+        // phantom (withdraw + corrective velocity + journal), never clamp.
+        assertTrue(HitRegistrationUnit.foreignWindowReject(true, 12, 20, 6.0, 6.0));
+        assertTrue(HitRegistrationUnit.foreignWindowReject(true, 19, 20, 4.0, 6.0));
+        assertTrue(HitRegistrationUnit.foreignWindowReject(true, 20, 20, 6.0, 6.0));
+        // Inside the sliver (11) the ADOPTION owns the hit — the bands are disjoint.
+        assertFalse(HitRegistrationUnit.foreignWindowReject(true, 11, 20, 6.0, 6.0));
+        assertFalse(HitRegistrationUnit.foreignWindowReject(true, 10, 20, 6.0, 6.0));
+        // The upgrade branch fires its own delta EDBEE — nothing to reconcile.
+        assertFalse(HitRegistrationUnit.foreignWindowReject(true, 15, 20, 8.0, 6.0));
+        // An uncommitted hit shipped no knock — era silence stays silence.
+        assertFalse(HitRegistrationUnit.foreignWindowReject(false, 15, 20, 6.0, 6.0));
+    }
+
+    @Test
+    void adoptionAndForeignRejectNeverBothFire() {
+        // Every committed same-or-weaker rejection band cell belongs to exactly one
+        // handler: the sliver adopts, the foreign band reconciles, the accepted
+        // region (<= max/2) needs neither.
+        for (int nd = 0; nd <= 20; nd++) {
+            boolean adopt = HitRegistrationUnit.adoptBoundary(true, nd, 20, 6.0, 6.0);
+            boolean reject = HitRegistrationUnit.foreignWindowReject(true, nd, 20, 6.0, 6.0);
+            assertFalse(adopt && reject, "both fired at noDamageTicks=" + nd);
+        }
+    }
+
+    @Test
     void exactBoundaryDoesNotAdopt() {
         // noDamageTicks == max/2 (10 for max=20): vanilla's gate is strict `>`, so it
         // ACCEPTS at exactly the boundary — nothing to adopt, no clamp.

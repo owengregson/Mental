@@ -141,9 +141,17 @@ public final class HitFeedbackListener implements Listener {
             return;
         }
         double finalDamage = event.getFinalDamage();
-        if (finalDamage <= 0.0) {
-            return;
+        if (finalDamage < 0.0) {
+            return; // insanity guard only — a ZERO-damage melee is a CONNECTED hit (2.6.0)
         }
+        // A non-cancelled 0-final-damage melee (a StarEnchants Blacksmith proc
+        // zeroing the fold, a plugin's setDamage(0)) still connected: vanilla
+        // still flinches/knocks it (snowball semantics), so the custom voice
+        // plays and — critically — the mark below arms, eating the vanilla
+        // broadcast. The old finalDamage<=0 early-return skipped BOTH: the
+        // player heard the raw vanilla hurt sound exactly where the custom one
+        // should be (the 2.6.0 SE-compat incoherence). The damage INDICATOR
+        // keeps its own 0-guard — no "0" stands; only the voice is coherent.
 
         Location loc = victim.getLocation();
         long now = clock.current().value();
