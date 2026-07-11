@@ -1,0 +1,36 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — Combat Effects selection
+#
+#  The Combat Effects TUNE lives in effects/presets/<name>.yml — one file
+#  per preset, carrying all three module sections (hit-feedback,
+#  damage-indicators, death-effects) with the full documentation. Presets
+#  are regenerated when missing; your edits stay. This file only decides
+#  WHICH preset applies; the module on/off switches live in config.yml
+#  under modules: (a disabled module changes nothing the game does or
+#  shows, whatever the preset says).
+# ──────────────────────────────────────────────────────────────────────────
+
+effects:
+  # The Combat Effects preset applied server-wide. Must match a file name in
+  # effects/presets/ (without .yml). Shipped presets:
+  #   vanilla     audibly vanilla (the default): the era hurt sound on hits
+  #               (with the era pitch jitter), no particles, the shipped
+  #               damage-indicator feel, and NO death effects. With the
+  #               modules enabled this preset reproduces what vanilla did
+  #               anyway — the toggle owns zero-touch, the preset owns the
+  #               tune.
+  #   signature   Mental's own tune: the lodestone-break + generic-hurt +
+  #               breeze-deflect hit chord over a redstone-block burst, a
+  #               glow-squid low-health chirp, the shipped indicator feel,
+  #               and the full death strike — the cosmetic lightning bolt,
+  #               the glow-squid death call, and the REAL white/yellow/gold
+  #               firework blast.
+  #   custom      yours — starts as a copy of signature's values; edit it
+  #               freely (or drop more .yml files in effects/presets/ and
+  #               name one of them here).
+  #
+  # An unknown name (or an unparseable preset file) is reported loudly on
+  # every reload and the vanilla preset stands in — never a silent change.
+  # The in-game GUI selects the preset through the machine overlay
+  # (state/overrides.yml), which wins over this file without rewriting it.
+  preset: vanilla

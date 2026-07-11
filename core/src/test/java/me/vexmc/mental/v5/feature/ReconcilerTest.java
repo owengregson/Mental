@@ -46,6 +46,7 @@ class ReconcilerTest {
         final Feature feature;
         int registrations;
         boolean throwOnAssemble;
+        boolean rebuildOnSettingsChange;
         int assembleCount;
 
         RecordingUnit(Feature feature, int registrations) {
@@ -54,6 +55,8 @@ class ReconcilerTest {
         }
 
         @Override public Feature descriptor() { return feature; }
+
+        @Override public boolean rebuildOnSettingsChange() { return rebuildOnSettingsChange; }
 
         @Override public void assemble(Scope scope, Snapshot snapshot) {
             assembleCount++;
@@ -71,6 +74,31 @@ class ReconcilerTest {
         main.loadFromString(modulesYaml);
         YamlConfiguration empty = new YamlConfiguration();
         return SnapshotParser.parse(ConfigStore.Sources.of(main, empty, empty, empty, Map.of())).snapshot();
+    }
+
+    /**
+     * A snapshot with a Combat Effects selection (2.5.3: the FEEDBACK settings
+     * come from the selected preset file, so a settings CHANGE is staged by
+     * switching presets). "signature" resolves an in-memory preset whose
+     * hit-feedback sounds differ from the vanilla defaults; "vanilla" is the
+     * absent-file fallback — the in-code defaults.
+     */
+    private static Snapshot snapshot(String modulesYaml, String selectedPreset) throws Exception {
+        YamlConfiguration main = new YamlConfiguration();
+        main.loadFromString(modulesYaml);
+        YamlConfiguration effects = new YamlConfiguration();
+        effects.loadFromString("effects:\n  preset: " + selectedPreset + "\n");
+        YamlConfiguration signature = new YamlConfiguration();
+        signature.loadFromString("""
+                hit-feedback:
+                  sounds:
+                    - sound: block.anvil.land
+                """);
+        YamlConfiguration empty = new YamlConfiguration();
+        return SnapshotParser.parse(new ConfigStore.Sources(
+                main, empty, empty, empty,
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                effects, Map.of("signature", signature), Map.of())).snapshot();
     }
 
     /* --------------------------------- tests --------------------------------- */
@@ -178,6 +206,70 @@ class ReconcilerTest {
         assertFalse(reconciler.active(Feature.KNOCKBACK));
         assertFalse(reconciler.active(Feature.FISHING_KNOCKBACK));
         assertFalse(reconciler.active(Feature.ROD_VELOCITY));
+    }
+
+    /* --------------- settings-change re-assembly (the 2.5.2 report) --------------- */
+
+    /**
+     * The FEEDBACK units bake resolved settings into their assembled listeners,
+     * so a reload that changes those settings must bounce the unit — otherwise a
+     * preset edit on an already-enabled module silently never lands (the 2.5.2
+     * "signature preset plays nothing" report: hit-feedback stayed audibly
+     * vanilla and death-effects stayed a strict nothing until a restart).
+     */
+    @Test
+    void aSettingsChangeReassemblesAnOptedInUnitExactlyOnce() throws Exception {
+        RecordingRegistrar registrar = new RecordingRegistrar();
+        Reconciler reconciler = new Reconciler(registrar, message -> {});
+        RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
+        unit.rebuildOnSettingsChange = true;
+        reconciler.register(unit);
+
+        String enabled = "modules:\n  hit-feedback: true\n";
+
+        reconciler.converge(snapshot(enabled, "vanilla"));
+        assertEquals(1, unit.assembleCount, "enabled once");
+
+        reconciler.converge(snapshot(enabled, "signature"));
+        assertEquals(2, unit.assembleCount, "changed settings bounce the unit");
+        assertEquals(1, registrar.closeCounts.get("HIT_FEEDBACK-0"), "the old scope closed exactly once");
+        assertTrue(reconciler.active(Feature.HIT_FEEDBACK), "the unit is re-assembled, not left off");
+
+        reconciler.converge(snapshot(enabled, "signature"));
+        assertEquals(2, unit.assembleCount,
+                "an identical re-parse never bounces — settings records compare by value");
+    }
+
+    /** A unit that reads the live snapshot (the default) is never bounced by a settings change. */
+    @Test
+    void aSettingsChangeLeavesADefaultUnitUntouched() throws Exception {
+        RecordingRegistrar registrar = new RecordingRegistrar();
+        Reconciler reconciler = new Reconciler(registrar, message -> {});
+        RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
+        reconciler.register(unit);
+
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "vanilla"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "signature"));
+
+        assertEquals(1, unit.assembleCount, "no opt-in → no bounce");
+        assertTrue(reconciler.active(Feature.HIT_FEEDBACK));
+    }
+
+    /** The bounce path still honours the toggle: disabled in the same snapshot just closes. */
+    @Test
+    void aDisableInTheSameSnapshotAsASettingsChangeJustCloses() throws Exception {
+        RecordingRegistrar registrar = new RecordingRegistrar();
+        Reconciler reconciler = new Reconciler(registrar, message -> {});
+        RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
+        unit.rebuildOnSettingsChange = true;
+        reconciler.register(unit);
+
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "vanilla"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: false\n", "signature"));
+
+        assertEquals(1, unit.assembleCount, "disable wins — no re-assemble");
+        assertFalse(reconciler.active(Feature.HIT_FEEDBACK));
+        assertEquals(1, registrar.closeCounts.get("HIT_FEEDBACK-0"));
     }
 
     @Test

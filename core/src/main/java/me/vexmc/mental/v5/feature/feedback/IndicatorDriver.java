@@ -53,6 +53,7 @@ final class IndicatorDriver {
     private final Player attacker;
     private final User user;
     private final IndicatorBallistics.Params params;
+    private final IndicatorMergeBook merges = new IndicatorMergeBook();
 
     private final List<Live> live = new ArrayList<>(); // guarded by this
     private TaskHandle task; // guarded by this
@@ -63,6 +64,14 @@ final class IndicatorDriver {
         this.attacker = attacker;
         this.user = user;
         this.params = params;
+    }
+
+    /**
+     * This attacker's same-tick aggregation slot — it lives and dies with the
+     * driver, so forget/close bound its memory exactly as they bound the stands.
+     */
+    IndicatorMergeBook merges() {
+        return merges;
     }
 
     /** Adopts one just-spawned indicator and lazily arms the 1-tick drive task. */
@@ -80,6 +89,22 @@ final class IndicatorDriver {
                 task = scheduling.repeatOn(attacker, 1L, 1L, this::tick, this::retire);
             }
         }
+    }
+
+    /**
+     * Swaps a merged indicator: the old stand's {@code Live} is dropped WITHOUT
+     * a driver-side destroy — the listener already shipped that destroy in the
+     * same bundle as the replacement's spawn, so the client never renders a
+     * frame with zero (or two) indicators — and the replacement is adopted
+     * through {@link #add}, inheriting its closed-scope and re-arm handling.
+     * If the old stand already landed or expired, the drop is a no-op and the
+     * bundled destroy for its id is harmlessly stale on the client.
+     */
+    void replace(int oldEntityId, int newEntityId, IndicatorBallistics.State launch, double groundY, int lifetimeTicks) {
+        synchronized (this) {
+            live.removeIf(indicator -> indicator.entityId == oldEntityId);
+        }
+        add(newEntityId, launch, groundY, lifetimeTicks);
     }
 
     private void tick() {

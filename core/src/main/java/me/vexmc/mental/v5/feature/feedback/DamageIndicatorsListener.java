@@ -6,6 +6,7 @@ import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBundle;
 import io.github.retrooper.packetevents.util.SpigotReflectionUtil;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 import me.vexmc.mental.kernel.fx.IndicatorBallistics;
 import me.vexmc.mental.kernel.fx.IndicatorPlacement;
+import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
@@ -47,6 +49,21 @@ import org.bukkit.event.entity.EntityDamageEvent;
  * The crit template fires on the era crit posture ({@link DamageShaper}'s
  * falling-attacker read) OR on damage at/above the configured heart threshold —
  * a big hit reads as a crit even when the posture missed it.
+ *
+ * <h2>Same-tick aggregation (the plugin-bonus fold)</h2>
+ * Enchantment plugins deal their bonus as a SECOND {@code victim.damage(bonus,
+ * attacker)} inside the first hit's aftermath — a second EDBEE for the same
+ * (attacker, victim) pair in the same tick, a multiplicity vanilla's
+ * no-damage-ticks never produce on their own. Each such event is folded into
+ * the tick's remembered spawn through the attacker's {@link IndicatorMergeBook}:
+ * the just-spawned stand is destroyed and a replacement carrying the SUMMED
+ * damage ships in the same bundle, at the same ring position and ballistic
+ * phase, against the same frozen ground plane (zero fresh world reads). The
+ * fold accepts the two common shapes — a second {@code ENTITY_ATTACK} (the
+ * {@code damage(amount, attacker)} API) and a {@code CUSTOM} carrying a Player
+ * damager (the modern {@code DamageSource} API) — but a {@code CUSTOM} event
+ * with no same-pair-same-tick spawn to fold into is ignored outright, so
+ * plugin-authored ambient damage never invents a phantom indicator.
  */
 public final class DamageIndicatorsListener implements Listener {
 
@@ -59,6 +76,7 @@ public final class DamageIndicatorsListener implements Listener {
     private final DamageIndicatorsSettings settings;
     private final ConcurrentHashMap<UUID, IndicatorDriver> drivers;
     private final Scheduling scheduling;
+    private final TickClock clock;
     private final PlayerManager playerManager;
     private final FeedbackTrace trace;
     private final Logger logger;
@@ -72,11 +90,12 @@ public final class DamageIndicatorsListener implements Listener {
 
     public DamageIndicatorsListener(
             DamageIndicatorsSettings settings, ConcurrentHashMap<UUID, IndicatorDriver> drivers,
-            Scheduling scheduling, boolean modernSpawn, boolean bundleSupported,
+            Scheduling scheduling, TickClock clock, boolean modernSpawn, boolean bundleSupported,
             FeedbackTrace trace, Logger logger) {
         this.settings = settings;
         this.drivers = drivers;
         this.scheduling = scheduling;
+        this.clock = clock;
         this.playerManager = PacketEvents.getAPI().getPlayerManager();
         this.trace = trace;
         this.logger = logger;
@@ -88,13 +107,17 @@ public final class DamageIndicatorsListener implements Listener {
     }
 
     /**
-     * Spawns one indicator for this hit: variant, text, ring placement, frozen
+     * Spawns one indicator for this hit — variant, text, ring placement, frozen
      * ground plane, a client-only entity id, the spawn+metadata ship, and the
      * hand-off to the attacker's driver — journaling the decision throughout.
+     * A same-pair-same-tick event (an enchantment plugin's bonus damage) folds
+     * into the tick's remembered stand through {@link #respawnMerged} instead
+     * of spawning a second one.
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onHit(EntityDamageByEntityEvent event) {
-        if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) {
+        boolean melee = event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK;
+        if (!melee && event.getCause() != EntityDamageEvent.DamageCause.CUSTOM) {
             return;
         }
         if (!(event.getEntity() instanceof Player victim)) {
@@ -110,14 +133,41 @@ public final class DamageIndicatorsListener implements Listener {
 
         User user = playerManager.getUser(attacker);
         if (user == null) {
-            // Synthetic / disconnecting attacker, in-process bot — no client to draw on.
-            trace.record(new FeedbackTrace.Entry(
-                    "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
-                    "UNSENDABLE", "attacker has no PacketEvents user"));
+            if (melee) {
+                // Synthetic / disconnecting attacker, in-process bot — no client to draw on.
+                trace.record(new FeedbackTrace.Entry(
+                        "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
+                        "UNSENDABLE", "attacker has no PacketEvents user"));
+            }
             return;
         }
 
+        // The merge target rides the attacker's driver. A melee hit creates the
+        // driver on demand (it is about to adopt a stand either way); a CUSTOM
+        // event only ever FOLDS into an existing same-tick spawn, so a missing
+        // driver means there is nothing to fold — never a phantom indicator for
+        // plugin-authored damage that isn't a melee bonus.
+        IndicatorDriver driver = melee
+                ? drivers.computeIfAbsent(
+                        attacker.getUniqueId(), id -> new IndicatorDriver(scheduling, attacker, user, params))
+                : drivers.get(attacker.getUniqueId());
+        if (driver == null) {
+            return;
+        }
+
+        long tick = clock.current().value();
         boolean crit = DamageShaper.isLegacyCritical(attacker) || finalDamage >= critThresholdDamage;
+
+        IndicatorMergeBook.Merged merged = driver.merges().merge(
+                victim.getUniqueId(), tick, finalDamage, crit, critThresholdDamage);
+        if (merged != null) {
+            respawnMerged(attacker, victim, user, driver, merged, tick, finalDamage);
+            return;
+        }
+        if (!melee) {
+            return; // a CUSTOM event with no same-pair-same-tick spawn — not a hit of its own
+        }
+
         String rendered = IndicatorText.render(crit ? settings.critText() : settings.text(), finalDamage);
         Component name = LegacyComponentSerializer.legacyAmpersand().deserialize(rendered);
 
@@ -150,14 +200,65 @@ public final class DamageIndicatorsListener implements Listener {
                 entityId, UUID.randomUUID(), spawn, name, user.getClientVersion(), modernSpawn);
         ship(user, packets);
 
-        IndicatorDriver driver = drivers.computeIfAbsent(
-                attacker.getUniqueId(), id -> new IndicatorDriver(scheduling, attacker, user, params));
         driver.add(entityId, IndicatorBallistics.launch(spawn, params), groundY, settings.lifetimeTicks());
+        driver.merges().remember(victim.getUniqueId(), tick, entityId, finalDamage, crit, spawn, groundY);
 
         trace.record(new FeedbackTrace.Entry(
                 "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
                 crit ? "CRIT" : "NORMAL",
                 "y=" + spawn.y() + " ttl=" + settings.lifetimeTicks() + " dmg=" + finalDamage));
+    }
+
+    /**
+     * Ships the fold: the remembered stand's destroy and the replacement's
+     * spawn+metadata ride ONE bundle/flush, so the attacker's client never
+     * renders a frame with zero — or two — indicators for this hit. The
+     * replacement reuses the first spawn's frozen geometry (ring position,
+     * launch bearing, ground plane), so the merge path performs ZERO world
+     * reads; only the presentation changes: the summed damage rendered through
+     * the OR-ed crit's template. Should the entity id ever be unavailable, the
+     * original stand simply stays — an under-reporting indicator beats a
+     * vanished one.
+     */
+    private void respawnMerged(
+            Player attacker, Player victim, User user, IndicatorDriver driver,
+            IndicatorMergeBook.Merged merged, long tick, double eventDamage) {
+        int entityId;
+        try {
+            entityId = SpigotReflectionUtil.generateEntityId();
+        } catch (IllegalStateException noId) {
+            if (noEntityIdWarned.compareAndSet(false, true)) {
+                logger.warning("damage-indicators: could not generate a client-only entity id"
+                        + " on this server — indicators are skipped");
+            }
+            trace.record(new FeedbackTrace.Entry(
+                    "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
+                    "ID_UNAVAILABLE", "generateEntityId() failed"));
+            return;
+        }
+
+        String rendered = IndicatorText.render(
+                merged.crit() ? settings.critText() : settings.text(), merged.totalDamage());
+        Component name = LegacyComponentSerializer.legacyAmpersand().deserialize(rendered);
+
+        List<PacketWrapper<?>> packets = new ArrayList<>(3);
+        packets.add(IndicatorStandPackets.destroy(merged.priorEntityId()));
+        packets.addAll(IndicatorStandPackets.spawn(
+                entityId, UUID.randomUUID(), merged.spawn(), name, user.getClientVersion(), modernSpawn));
+        ship(user, packets);
+
+        driver.replace(
+                merged.priorEntityId(), entityId,
+                IndicatorBallistics.launch(merged.spawn(), params), merged.groundY(), settings.lifetimeTicks());
+        driver.merges().remember(
+                victim.getUniqueId(), tick, entityId,
+                merged.totalDamage(), merged.crit(), merged.spawn(), merged.groundY());
+
+        trace.record(new FeedbackTrace.Entry(
+                "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
+                merged.crit() ? "CRIT" : "NORMAL",
+                "y=" + merged.spawn().y() + " ttl=" + settings.lifetimeTicks()
+                        + " dmg=" + eventDamage + " merged total=" + merged.totalDamage()));
     }
 
     /**

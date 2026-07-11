@@ -1,0 +1,128 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — Combat Effects preset: vanilla
+#
+#  Audibly vanilla. With the modules enabled, this preset reproduces what
+#  vanilla did anyway: the era hurt sound on hits (era pitch jitter and
+#  all), no particles, the shipped damage-indicator feel, and a strict
+#  death-effects nothing. It is the shipped default and the fallback when
+#  a selected preset cannot be resolved.
+#
+#  One preset = one complete Combat Effects tune: this file carries all
+#  three module sections. Which preset applies is chosen in effects.yml
+#  (effects.preset); the module on/off switches live in config.yml under
+#  modules:. This file is yours to edit — it is extracted once and never
+#  overwritten; deleting it regenerates the pristine bundle.
+# ──────────────────────────────────────────────────────────────────────────
+
+display-name: Vanilla
+description: Audibly vanilla — the era hurt sound, the shipped indicator feel, no death effects.
+
+# ── hit-feedback ────────────────────────────────────────────────────────────
+# Replaces the vanilla melee hurt-sound broadcast with the sounds below and
+# pops particle bursts at the victim's mid-chest.
+#
+# Scope matches vanilla EXACTLY: the sounds and particles reach every nearby
+# player EXCEPT the victim. The victim's own client derives its hurt sound
+# from the damage event and keeps doing so — that is server-unreachable
+# without breaking the victim's own flinch, so it is deliberately left alone.
+#
+# Per sounds:/low-health-sounds: entry:
+#   sound     a resource location ("entity.player.hurt") or Bukkit-style name.
+#             A blank/missing name skips that entry with one reload warning.
+#             A sound that does not exist on an older server resolves to an
+#             era-appropriate fallback, printed once in the boot report.
+#   volume    loudness, clamped to [0.0, 4.0].
+#   pitch     playback pitch, clamped to [0.5, 2.0]. When the sound list is
+#             exactly the vanilla hurt sound at 1.0/1.0 (this preset), the
+#             era pitch jitter is applied at emit time instead — byte-true
+#             to what vanilla broadcast.
+#
+# Per particles: entry:
+#   particle  a PacketEvents particle-type name. 'block' takes a block: state;
+#             'dust' takes its RRGGBB hex color in the block field.
+#   block     the block-state name for block particles (hex color for dust).
+#   count-min } the burst count is picked in [count-min, count-max]; both are
+#   count-max } clamped to [0, 64] and count-max is never below count-min.
+#   mode      emanate → burst outward from the chest at 'speed';
+#             spread  → scatter the count with per-axis Gaussian spread.
+#   speed     the emanate outward speed (ignored by spread), clamped to [0, 2].
+#   spread    per-axis Gaussian sigma for spread mode (x/y/z), each in [0, 4].
+#
+# The low-health extra layer: an OPTIONAL sound played ON TOP of the sounds
+# above when the victim's health AFTER this hit drops below
+# low-health-threshold-hearts (in HEARTS; 2 health = 1 heart). It is
+# SUPPRESSED on the killing hit — death-effects owns that moment. An empty
+# list means no extra layer (this preset: vanilla never layered anything).
+hit-feedback:
+  sounds:
+    - sound: entity.player.hurt
+      volume: 1.0
+      pitch: 1.0
+  particles: []
+  low-health-threshold-hearts: 4.0
+  low-health-sounds: []
+
+# ── damage-indicators ───────────────────────────────────────────────────────
+# Pops a floating damage number off the victim, drawn ONLY on the attacker's
+# screen (a client-only packet armour stand — no real entity exists and no
+# bystander sees it). It spawns on a front-half ring around the victim's
+# chest and falls under a light ballistic model, despawning the instant it
+# reaches its spawn ground plane or at lifetime-ticks, whichever comes first.
+# These are the shipped defaults — vanilla has no indicators of its own, so
+# the module toggle decides everything and this preset keeps the stock feel.
+#
+#   text / crit-text  the label templates. {HEALTH} is the final damage in
+#                     HEARTS (one decimal, a trailing .0 stripped); '&' colour
+#                     codes are translated. The crit variant is used on an
+#                     era-crit posture OR damage at/above crit-threshold-hearts
+#                     (also in HEARTS).
+#   lifetime-ticks    hard despawn age in ticks. Clamped to [1, 200].
+#   ring-radius       how far off the chest, in blocks, the number spawns on
+#                     the front-half ring. Clamped to [0, 4].
+#   height-jitter     random vertical spawn offset, in blocks, so stacked hits
+#                     do not overlap. Clamped to [0, 2].
+#   launch-vertical   initial upward speed, blocks/tick. Clamped to [0, 2].
+#   launch-outward    initial away-from-victim speed, blocks/tick. [0, 2].
+#   gravity           downward pull each tick, blocks/tick². Clamped [0, 0.5].
+#   drag              per-tick velocity retention (1.0 = frictionless).
+#                     Clamped to [0.5, 1.0].
+damage-indicators:
+  lifetime-ticks: 40
+  ring-radius: 0.6
+  height-jitter: 0.3
+  launch-vertical: 0.25
+  launch-outward: 0.06
+  gravity: 0.05
+  drag: 0.98
+  text: "&f-{HEALTH} &c❤&r"
+  crit-text: "&c&l** -{HEALTH} ❤ **"
+  crit-threshold-hearts: 5.0
+
+# ── death-effects ───────────────────────────────────────────────────────────
+# What plays the moment a player dies, from ANY cause (PlayerDeathEvent).
+# Everything here is a PACKET RENDER only, never a real entity: the lightning
+# bolt and the firework rocket are drawn client-side, so by construction
+# there is no fire, no damage, no knockback, and no block interaction.
+#
+#   lightning   a cosmetic packet lightning bolt at the death spot.
+#   firework:
+#     colors:   the blast colors as RRGGBB hex strings (a leading # is
+#               tolerated). Vanilla's firework PARTICLE carries no color on
+#               the wire, so Mental does what vanilla itself does: the colors
+#               ride a packet-only rocket's item data and the client renders
+#               the colored explosion when it detonates (entity status 17).
+#               An EMPTY list launches no firework at all. One inherent side
+#               effect, documented honestly: the CLIENT self-plays the blast
+#               pop when it renders the explosion — that sound is baked into
+#               vanilla's firework rendering.
+#   sounds: / particles:  the same entry fields as hit-feedback's lists.
+#
+# The vanilla preset is a strict nothing: even with the module enabled this
+# section changes nothing — the toggle owns zero-touch, the preset owns the
+# tune.
+death-effects:
+  lightning: false
+  firework:
+    colors: []
+  sounds: []
+  particles: []

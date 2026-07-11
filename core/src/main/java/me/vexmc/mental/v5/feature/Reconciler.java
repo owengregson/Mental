@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -21,6 +22,14 @@ import me.vexmc.mental.v5.config.Snapshot;
  * throwing close during disable/teardown is logged and the scope still drops.
  * Open scopes are tracked in enable order so {@link #closeAll} unwinds in
  * reverse.</p>
+ *
+ * <p>One carve-out from "leaves the rest untouched": a unit that declares
+ * {@link FeatureUnit#rebuildOnSettingsChange()} bakes its settings into the
+ * assembled state, so when a converge brings a snapshot whose settings record
+ * for that feature no longer equals the one it assembled with, the reconciler
+ * bounces it — close, then re-assemble against the new snapshot. Settings are
+ * immutable records, so value equality is exact; an identical re-parse never
+ * bounces (converge stays idempotent).</p>
  */
 public final class Reconciler {
 
@@ -29,6 +38,7 @@ public final class Reconciler {
     private final Set<Feature> platformDisabled;
     private final Map<Feature, FeatureUnit> units = new EnumMap<>(Feature.class);
     private final Map<Feature, Scope> open = new java.util.LinkedHashMap<>();
+    private final Map<Feature, Object> assembledSettings = new EnumMap<>(Feature.class);
 
     public Reconciler(Registrar registrar, Consumer<String> log) {
         this(registrar, log, Set.of());
@@ -59,14 +69,22 @@ public final class Reconciler {
     public void converge(Snapshot snapshot) {
         for (Map.Entry<Feature, FeatureUnit> entry : units.entrySet()) {
             Feature feature = entry.getKey();
+            FeatureUnit unit = entry.getValue();
             boolean desired = snapshot.enabled(feature) && !platformDisabled.contains(feature);
             boolean active = open.containsKey(feature);
             if (desired && !active) {
-                enable(entry.getValue(), snapshot);
+                enable(unit, snapshot);
             } else if (!desired && active) {
                 disable(feature);
+            } else if (desired && unit.rebuildOnSettingsChange()
+                    && !Objects.equals(assembledSettings.get(feature), snapshot.settings(feature.settingsKey()))) {
+                // The unit bakes settings at assemble and this snapshot changed
+                // them — bounce it so the reload actually lands (see FeatureUnit).
+                log.accept(feature.yamlKey() + " settings changed — re-assembled");
+                disable(feature);
+                enable(unit, snapshot);
             }
-            // desired && active, or !desired && !active: nothing to do (idempotent).
+            // Otherwise (same settings, or !desired && !active): nothing to do (idempotent).
         }
     }
 
@@ -76,6 +94,9 @@ public final class Reconciler {
         try {
             unit.assemble(scope, snapshot);
             open.put(feature, scope);
+            if (unit.rebuildOnSettingsChange()) {
+                assembledSettings.put(feature, snapshot.settings(feature.settingsKey()));
+            }
         } catch (Exception failure) {
             // Unwind the partial scope; the unit stays OFF. Isolate a close throw too.
             try {
@@ -89,6 +110,7 @@ public final class Reconciler {
 
     private void disable(Feature feature) {
         Scope scope = open.remove(feature);
+        assembledSettings.remove(feature);
         if (scope == null) {
             return;
         }

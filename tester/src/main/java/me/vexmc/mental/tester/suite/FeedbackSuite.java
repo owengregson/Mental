@@ -361,9 +361,10 @@ public final class FeedbackSuite {
      * opened). With the attribute pinned, 9.0 hp lands post-hit at 2.0 — and
      * anywhere in [2.0, 7.6] under any residual charge — inside (0, 8.0):
      * below the default 4-heart threshold, above death; 1.0 hp dies to any
-     * charge (min 1.4). The preset overlay is written BEFORE the enable: the
-     * reconciler assembles settings only on the disabled→enabled transition,
-     * so a preset landing after the toggle would never be read.</p>
+     * charge (min 1.4). The preset overlay is written BEFORE the enables so
+     * the assemble reads it directly — the reconciler's settings-change bounce
+     * would also catch a later write, but staging first keeps the case
+     * single-transition.</p>
      */
     private static void runDeathEffectsSignature(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -374,13 +375,15 @@ public final class FeedbackSuite {
         FeedbackTrace trace = mental.feedbackTrace();
 
         try {
-            // Presets first (see the javadoc), then the two enables. Hit-feedback
-            // runs SIGNATURE too: its low-HP layer is non-empty there, so the
-            // contrast pin observes the layer actually firing — the label is
-            // gated on a non-empty effective layer, and the vanilla preset would
-            // read plain EMITTED at any health.
-            setPreset(context, "death-effects", "signature");
-            setPreset(context, "hit-feedback", "signature");
+            // The preset first (see the javadoc), then the two enables. Since the
+            // 2.5.3 preset library, ONE selection key stages the whole tune: the
+            // signature preset carries BOTH the death strike and hit-feedback's
+            // non-empty low-HP layer, so the contrast pin observes the layer
+            // actually firing — the label is gated on a non-empty effective
+            // layer, and the vanilla preset would read plain EMITTED at any
+            // health. Every pinned decision below is identical to the 2.5.2
+            // per-module staging this replaced.
+            setEffectsPreset(context, "signature");
             toggleModule(context, "death-effects", true);
             toggleModule(context, "hit-feedback", true);
             context.expect(moduleActive(mental, "death-effects"),
@@ -474,9 +477,8 @@ public final class FeedbackSuite {
             toggleModule(context, "hit-feedback", false);
             toggleModule(context, "death-effects", false);
             // The parse default IS vanilla, so writing it back restores the
-            // pre-test effective config even though the overlay keys persist.
-            setPreset(context, "death-effects", "vanilla");
-            setPreset(context, "hit-feedback", "vanilla");
+            // pre-test effective config even though the overlay key persists.
+            setEffectsPreset(context, "vanilla");
             context.syncRun(() -> {
                 attacker.remove();
                 victim.remove();
@@ -526,13 +528,15 @@ public final class FeedbackSuite {
     }
 
     /**
-     * Writes one module's {@code <module>.preset} machine-overlay key and reloads
-     * — the same overlay-wins path the GUI uses; the human YAML is never touched.
+     * Writes the ONE Combat Effects selection key ({@code effects.preset} — the
+     * 2.5.3 preset library replaced the per-module {@code <module>.preset}
+     * enums) into the machine overlay and reloads — the same overlay-wins path
+     * the GUI's preset picker uses; the human YAML is never touched.
      */
-    private static void setPreset(TestContext context, String module, String preset) throws Exception {
+    private static void setEffectsPreset(TestContext context, String preset) throws Exception {
         context.syncRun(() -> {
             MentalPluginV5 plugin = (MentalPluginV5) Bukkit.getPluginManager().getPlugin("Mental");
-            plugin.overlaySet(module + ".preset", preset);
+            plugin.overlaySet("effects.preset", preset);
             plugin.management().reload();
         });
         context.awaitTicks(1);

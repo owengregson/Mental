@@ -49,6 +49,10 @@ class ConfigStoreTest {
                 .resolve(ConfigStore.bundledFolder(name)).resolve(name + ".yml");
     }
 
+    private Path effectsPreset(String name) {
+        return dataFolder.resolve(ConfigStore.EFFECTS_PRESETS_DIR).resolve(name + ".yml");
+    }
+
     /** A UTF-8 test-classpath resource (the archived revisions and the current bundles). */
     private String resource(String classpath) {
         try (InputStream stream = getClass().getClassLoader().getResourceAsStream(classpath)) {
@@ -79,12 +83,15 @@ class ConfigStoreTest {
         for (String file : List.of(ConfigStore.MAIN_FILE, ConfigStore.KNOCKBACK_FILE,
                 ConfigStore.HIT_REG_FILE, ConfigStore.LATENCY_FILE,
                 ConfigStore.COMBO_FILE, ConfigStore.POTS_FILE, ConfigStore.LOADOUT_FILE,
-                ConfigStore.HIT_FEEDBACK_FILE, ConfigStore.DAMAGE_INDICATORS_FILE,
-                ConfigStore.DEATH_EFFECTS_FILE)) {
+                ConfigStore.EFFECTS_FILE)) {
             assertTrue(Files.isRegularFile(dataFolder.resolve(file)), file + " not extracted");
         }
         for (String preset : ConfigStore.BUNDLED_PROFILES) {
             assertTrue(Files.isRegularFile(profile(preset)), preset + " preset not extracted");
+        }
+        for (String preset : ConfigStore.BUNDLED_EFFECTS_PRESETS) {
+            assertTrue(Files.isRegularFile(effectsPreset(preset)),
+                    "effects preset " + preset + " not extracted");
         }
 
         // An owner edit survives; a deleted preset regenerates.
@@ -343,20 +350,20 @@ class ConfigStoreTest {
         // missing — owner edits are sacred, deleting regenerates pristine.
         ConfigStore store = store();
         store.ensureDefaultFiles();
-        Path hitFeedback = dataFolder.resolve(ConfigStore.HIT_FEEDBACK_FILE);
+        Path pots = dataFolder.resolve(ConfigStore.POTS_FILE);
 
-        Files.writeString(hitFeedback, "hit-feedback:\n  preset: signature\n", StandardCharsets.UTF_8);
-        Files.delete(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE));
+        Files.writeString(pots, "pot-fill:\n  cost-per-potion: 5.0\n", StandardCharsets.UTF_8);
+        Files.delete(dataFolder.resolve(ConfigStore.LOADOUT_FILE));
 
         store.ensureDefaultFiles();
 
-        assertEquals("hit-feedback:\n  preset: signature\n",
-                Files.readString(hitFeedback, StandardCharsets.UTF_8),
+        assertEquals("pot-fill:\n  cost-per-potion: 5.0\n",
+                Files.readString(pots, StandardCharsets.UTF_8),
                 "an owner-edited split file must never be overwritten");
-        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE)),
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.LOADOUT_FILE)),
                 "a deleted split file must regenerate pristine");
-        assertEquals(resource(ConfigStore.DEATH_EFFECTS_FILE),
-                Files.readString(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE), StandardCharsets.UTF_8),
+        assertEquals(resource(ConfigStore.LOADOUT_FILE),
+                Files.readString(dataFolder.resolve(ConfigStore.LOADOUT_FILE), StandardCharsets.UTF_8),
                 "the regenerated split file is the bundle byte-for-byte");
     }
 
@@ -367,11 +374,9 @@ class ConfigStoreTest {
         // old-location section — the parser honours config.yml and says so).
         // Deleting the section releases the extraction on the next pass.
         Files.writeString(dataFolder.resolve(ConfigStore.MAIN_FILE), """
-                config-version: 3
+                config-version: 4
                 modules:
-                  hit-feedback: true
-                hit-feedback:
-                  preset: signature
+                  combo-hold: true
                 combo-hold:
                   gain: 0.9
                 """, StandardCharsets.UTF_8);
@@ -379,26 +384,97 @@ class ConfigStoreTest {
 
         store.ensureDefaultFiles();
 
-        assertFalse(Files.exists(dataFolder.resolve(ConfigStore.HIT_FEEDBACK_FILE)),
-                "effects/hit-feedback.yml must not extract while config.yml carries hit-feedback");
         assertFalse(Files.exists(dataFolder.resolve(ConfigStore.COMBO_FILE)),
                 "combo.yml must not extract while config.yml carries combo-hold");
         // Sections that did NOT stay behind extract normally.
         assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.POTS_FILE)));
         assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.LOADOUT_FILE)));
-        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.DAMAGE_INDICATORS_FILE)));
-        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE)));
 
-        // The owner moves on: the sections leave config.yml, the bundles extract.
+        // The owner moves on: the section leaves config.yml, the bundle extracts.
         Files.writeString(dataFolder.resolve(ConfigStore.MAIN_FILE), """
-                config-version: 3
+                config-version: 4
                 modules:
-                  hit-feedback: true
+                  combo-hold: true
                 """, StandardCharsets.UTF_8);
         store.ensureDefaultFiles();
-        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.HIT_FEEDBACK_FILE)),
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.COMBO_FILE)),
                 "deleting the old-location section releases the split extraction");
-        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.COMBO_FILE)));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  The Combat Effects preset library (2.5.3)                          */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void effectsPresetOwnerEditsSurviveAndDeletedPresetsRegenerate() throws Exception {
+        // The preset library rides the exact profiles contract: extracted only
+        // when missing, owner edits sacred, deleting regenerates pristine.
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+
+        Files.writeString(effectsPreset("custom"), "display-name: Mine\n", StandardCharsets.UTF_8);
+        Files.delete(effectsPreset("signature"));
+
+        store.ensureDefaultFiles();
+
+        assertEquals("display-name: Mine\n",
+                Files.readString(effectsPreset("custom"), StandardCharsets.UTF_8),
+                "an owner-edited effects preset must never be overwritten");
+        assertTrue(Files.isRegularFile(effectsPreset("signature")),
+                "a deleted effects preset must regenerate");
+        assertEquals(resource(ConfigStore.EFFECTS_PRESETS_DIR + "/signature.yml"),
+                Files.readString(effectsPreset("signature"), StandardCharsets.UTF_8),
+                "the regenerated preset is the bundle byte-for-byte");
+    }
+
+    @Test
+    void effectsExtractionIsSuppressedWhileTheLegacyEffectsLayoutAwaitsMigration() throws Exception {
+        // A 2.5.2 tree (version < 4 with the old per-module files): effects.yml
+        // and custom.yml must NOT extract — the 3→4 migration owns creating both
+        // (custom.yml's first extraction IS the import of the old effective
+        // values, and effects.yml must come up with custom selected). vanilla
+        // and signature are new-library files the migration never touches, so
+        // they extract normally.
+        Files.writeString(dataFolder.resolve(ConfigStore.MAIN_FILE),
+                "config-version: 3\n", StandardCharsets.UTF_8);
+        Path oldHitFeedback = dataFolder.resolve("effects/hit-feedback.yml");
+        Files.createDirectories(oldHitFeedback.getParent());
+        Files.writeString(oldHitFeedback, "hit-feedback:\n  preset: signature\n", StandardCharsets.UTF_8);
+        ConfigStore store = store();
+
+        store.ensureDefaultFiles();
+
+        assertFalse(Files.exists(dataFolder.resolve(ConfigStore.EFFECTS_FILE)),
+                "effects.yml must not extract while the 2.5.2 layout awaits migration");
+        assertFalse(Files.exists(effectsPreset("custom")),
+                "custom.yml must not extract — the migration's import is its first extraction");
+        assertTrue(Files.isRegularFile(effectsPreset("vanilla")));
+        assertTrue(Files.isRegularFile(effectsPreset("signature")));
+
+        // Post-migration (stamped 4, old file moved away): both extract.
+        Files.writeString(dataFolder.resolve(ConfigStore.MAIN_FILE),
+                "config-version: 4\n", StandardCharsets.UTF_8);
+        Files.delete(oldHitFeedback);
+        store.ensureDefaultFiles();
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.EFFECTS_FILE)),
+                "the migration stamp releases the effects.yml extraction");
+        assertTrue(Files.isRegularFile(effectsPreset("custom")));
+    }
+
+    @Test
+    void loadSourcesServesTheEffectsSelectionAndEveryPresetByStem() throws Exception {
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+        // A hand-added preset joins the library by dropping a file in.
+        Files.writeString(effectsPreset("mine"), "display-name: Mine\n", StandardCharsets.UTF_8);
+
+        ConfigStore.Sources sources = store.loadSources();
+
+        assertEquals("vanilla", sources.effects().getString("effects.preset"),
+                "the shipped selection is vanilla");
+        assertEquals(ConfigStore.BUNDLED_EFFECTS_PRESETS.size() + 1, sources.effectsPresets().size());
+        assertNotNull(sources.effectsPresets().get("mine"));
+        assertNotNull(sources.effectsPresets().get("signature"));
     }
 
     @Test

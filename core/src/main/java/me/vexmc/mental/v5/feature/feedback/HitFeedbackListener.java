@@ -21,7 +21,6 @@ import java.util.logging.Logger;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.ParticleSpec;
-import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.Preset;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -73,7 +72,7 @@ public final class HitFeedbackListener implements Listener {
     private final FeedbackTrace trace;
     private final PlayerManager playerManager;
 
-    private final boolean vanillaPreset;
+    private final boolean vanillaTune;
     private final double lowHealthCeiling; // post-hit health (in half-hearts) below which the extra layer fires
     private final double audienceRadius;
 
@@ -92,7 +91,12 @@ public final class HitFeedbackListener implements Listener {
         this.clock = clock;
         this.trace = trace;
         this.playerManager = PacketEvents.getAPI().getPlayerManager();
-        this.vanillaPreset = settings.preset() == Preset.VANILLA;
+        // The era jitter is value-derived since the 2.5.3 preset library killed
+        // the per-module preset enum: a sound set that IS the vanilla broadcast
+        // (exactly entity.player.hurt at 1.0/1.0 — the vanilla preset, or any
+        // preset reproducing its values) keeps vanilla's per-broadcast pitch
+        // jitter instead of a robotic flat 1.0.
+        this.vanillaTune = settings.vanillaTune();
         this.lowHealthCeiling = settings.lowHealthThresholdHearts() * 2.0;
         this.normalSounds = FeedbackEmit.resolveSounds(settings.sounds(), table, "hit-feedback", "hit", logger);
         this.lowHealthSounds =
@@ -220,7 +224,7 @@ public final class HitFeedbackListener implements Listener {
     private List<PacketWrapper<?>> soundPacketsFor(List<FeedbackEmit.ResolvedSound> sounds, Vector3d position) {
         List<PacketWrapper<?>> packets = new ArrayList<>(sounds.size());
         for (FeedbackEmit.ResolvedSound sound : sounds) {
-            float pitch = vanillaPreset ? vanillaJitter() : sound.pitch();
+            float pitch = vanillaTune ? vanillaJitter() : sound.pitch();
             packets.add(new WrapperPlayServerSoundEffect(
                     sound.sound(), SoundCategory.PLAYER, position, sound.volume(), pitch));
         }
