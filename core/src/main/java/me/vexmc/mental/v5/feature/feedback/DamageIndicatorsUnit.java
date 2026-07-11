@@ -15,6 +15,10 @@ import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.session.SessionService;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
 
 /**
  * Assembles {@code damage-indicators}: the EDBEE MONITOR spawner
@@ -103,6 +107,9 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
 
         scope.listen(new DamageIndicatorsListener(
                 settings, map, scheduling, clock, modernSpawn, bundleSupported, trace, logger, healIndicators));
+        if (healIndicators != null) {
+            scope.listen(new HealDeathBoundary(healIndicators));
+        }
         scope.task(() -> (AutoCloseable) () -> {
             // Scope close clears the heal sampler (restoring zero-touch), then tears
             // every stand down and cancels every drive task.
@@ -113,6 +120,21 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
             map.values().forEach(IndicatorDriver::close);
             map.clear();
         });
+    }
+
+    /**
+     * The heal consumer's death boundary ({@link HealIndicators#onDeath}): the
+     * in-band respawn guard only fires when a session tick OBSERVES the corpse,
+     * but instant/1-tick auto-respawn (the practice-server norm) completes
+     * between samples — the next sample would read pre-death health → full
+     * respawn health as a giant heal and draw a phantom indicator on the
+     * KILLER's client. Scope-owned, so a disabled module listens to nothing.
+     */
+    private record HealDeathBoundary(HealIndicators heal) implements Listener {
+        @EventHandler(priority = EventPriority.MONITOR)
+        public void onDeath(PlayerDeathEvent event) {
+            heal.onDeath(event.getEntity().getUniqueId());
+        }
     }
 
     /**

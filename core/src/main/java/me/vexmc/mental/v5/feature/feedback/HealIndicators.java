@@ -96,9 +96,31 @@ final class HealIndicators implements SessionService.HealSampler {
     /**
      * Stamps the last hit against {@code victim} — identity only, so a clientless
      * attacker (no PacketEvents user) is still recorded as the healer for a later heal.
+     * A self-hit (a plugin's CUSTOM self-damage, a reflect path with damager ==
+     * victim) never stamps: it is not an attribution target, and letting it
+     * OVERWRITE an earlier real attacker's stamp would silently swallow that
+     * attacker's heal indicator at ship time.
      */
     void recordHit(UUID victim, UUID attacker, long tick) {
+        if (victim.equals(attacker)) {
+            return;
+        }
         lastHits.put(victim, new LastHit(attacker, tick));
+    }
+
+    /**
+     * The death boundary. The in-band respawn guard in {@link #sample} only fires
+     * when a session tick OBSERVES the corpse ({@code previousHealth <= 0}) — but
+     * the plugin's core audience runs instant/1-tick auto-respawn, where death and
+     * respawn complete BETWEEN samples: the next sample reads (pre-death health →
+     * full respawn health) as a giant "heal" and would draw a phantom indicator on
+     * the KILLER's client on every kill. Clearing the fold and the attribution at
+     * the death EVENT closes that hole: the respawn delta then ships nowhere (no
+     * fresh stamp), and post-respawn regen is ambient until real combat re-stamps.
+     */
+    void onDeath(UUID victim) {
+        folds.remove(victim);
+        lastHits.remove(victim);
     }
 
     @Override
