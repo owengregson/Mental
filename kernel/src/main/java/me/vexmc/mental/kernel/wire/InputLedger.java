@@ -515,6 +515,15 @@ public final class InputLedger {
      * or protocol drift starving the tap while the server still tracks sprint).
      * Sticky until the first real START proves the feed alive. The journal's
      * {@code note=starved}.
+     *
+     * <p>Read it as a PERSISTENCE signal, not a one-note verdict: a mid-play
+     * plugin load/reload that seeds an already-sprinting held-W player presents
+     * the SAME observable shape (seeded true, no START ever — the seed is
+     * server-flag adoption, not wire evidence), so that player's first combo
+     * reads starved transiently until their next genuine re-gesture clears it.
+     * Suppressing the seed case would blind the alarm outright — a genuinely
+     * dead feed rides the identical seed — so the discriminator is time: a
+     * reload note dies at the first w-tap; a dead feed never stops noting.</p>
      */
     public boolean starved() {
         return state.get().starvedConsume();
