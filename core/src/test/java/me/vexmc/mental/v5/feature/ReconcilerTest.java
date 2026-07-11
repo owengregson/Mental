@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -69,7 +70,7 @@ class ReconcilerTest {
         YamlConfiguration main = new YamlConfiguration();
         main.loadFromString(modulesYaml);
         YamlConfiguration empty = new YamlConfiguration();
-        return SnapshotParser.parse(main, empty, empty, empty, Map.of()).snapshot();
+        return SnapshotParser.parse(ConfigStore.Sources.of(main, empty, empty, empty, Map.of())).snapshot();
     }
 
     /* --------------------------------- tests --------------------------------- */

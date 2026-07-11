@@ -1,0 +1,47 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — damage indicators (Combat Effects)
+#
+#  Settings only: the on/off switch lives in config.yml under modules:
+#  (modules.damage-indicators — default OFF; a disabled module changes
+#  nothing the game does or shows). This file is yours to edit — it is
+#  extracted once and never overwritten; deleting it regenerates the
+#  pristine bundle.
+# ──────────────────────────────────────────────────────────────────────────
+
+# Pops a floating damage number off the victim, drawn ONLY on the attacker's
+# screen (a client-only packet armour stand — no real entity exists and no
+# bystander sees it). It spawns on a front-half ring around the victim's chest
+# and falls under a light ballistic model, despawning the instant it reaches
+# its spawn ground plane or at lifetime-ticks, whichever comes first.
+#
+# ── The labels ──────────────────────────────────────────────────────────────
+# text / crit-text: the label templates. {HEALTH} is the final damage in HEARTS
+#                   (2 damage = 1 heart; one decimal, a trailing .0 stripped).
+#                   '&' colour codes are translated. The crit variant is used when
+#                   the hit was an era-crit posture OR the damage is at or above
+#                   crit-threshold-hearts (also in HEARTS).
+#
+# ── The ballistics (all optional; the defaults are the shipped feel) ────────
+#   lifetime-ticks   hard despawn age in ticks. Clamped to [1, 200]. Default 40.
+#   ring-radius      how far off the chest, in blocks, the number spawns on the
+#                    front-half ring. Clamped to [0, 4]. Default 0.6.
+#   height-jitter    random vertical spawn offset, in blocks, so stacked hits do
+#                    not overlap. Clamped to [0, 2]. Default 0.3.
+#   launch-vertical  initial upward speed, blocks/tick. Clamped to [0, 2]. 0.25.
+#   launch-outward   initial outward (away-from-victim) speed, blocks/tick.
+#                    Clamped to [0, 2]. Default 0.06.
+#   gravity          downward pull each tick, blocks/tick². Clamped to [0, 0.5].
+#                    Default 0.05.
+#   drag             per-tick velocity retention (1.0 = frictionless). Clamped to
+#                    [0.5, 1.0]. Default 0.98.
+damage-indicators:
+  lifetime-ticks: 40
+  ring-radius: 0.6
+  height-jitter: 0.3
+  launch-vertical: 0.25
+  launch-outward: 0.06
+  gravity: 0.05
+  drag: 0.98
+  text: "&f-{HEALTH} &c❤&r"
+  crit-text: "&c&l** -{HEALTH} ❤ **"
+  crit-threshold-hearts: 5.0

@@ -77,7 +77,10 @@ class ConfigStoreTest {
         store.ensureDefaultFiles();
 
         for (String file : List.of(ConfigStore.MAIN_FILE, ConfigStore.KNOCKBACK_FILE,
-                ConfigStore.HIT_REG_FILE, ConfigStore.LATENCY_FILE)) {
+                ConfigStore.HIT_REG_FILE, ConfigStore.LATENCY_FILE,
+                ConfigStore.COMBO_FILE, ConfigStore.POTS_FILE, ConfigStore.LOADOUT_FILE,
+                ConfigStore.HIT_FEEDBACK_FILE, ConfigStore.DAMAGE_INDICATORS_FILE,
+                ConfigStore.DEATH_EFFECTS_FILE)) {
             assertTrue(Files.isRegularFile(dataFolder.resolve(file)), file + " not extracted");
         }
         for (String preset : ConfigStore.BUNDLED_PROFILES) {
@@ -332,6 +335,70 @@ class ConfigStoreTest {
                 "an owner who removed the speed-scaling block must keep their file byte-identical");
         assertFalse(loggedUpgrade("signature.yml"),
                 () -> "an owner edit must never be reported as upgraded, logged: " + logged);
+    }
+
+    @Test
+    void splitFileOwnerEditsSurviveAndADeletedSplitFileRegenerates() throws Exception {
+        // The 2.5.2 split files carry the profiles contract: extracted only when
+        // missing — owner edits are sacred, deleting regenerates pristine.
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+        Path hitFeedback = dataFolder.resolve(ConfigStore.HIT_FEEDBACK_FILE);
+
+        Files.writeString(hitFeedback, "hit-feedback:\n  preset: signature\n", StandardCharsets.UTF_8);
+        Files.delete(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE));
+
+        store.ensureDefaultFiles();
+
+        assertEquals("hit-feedback:\n  preset: signature\n",
+                Files.readString(hitFeedback, StandardCharsets.UTF_8),
+                "an owner-edited split file must never be overwritten");
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE)),
+                "a deleted split file must regenerate pristine");
+        assertEquals(resource(ConfigStore.DEATH_EFFECTS_FILE),
+                Files.readString(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE), StandardCharsets.UTF_8),
+                "the regenerated split file is the bundle byte-for-byte");
+    }
+
+    @Test
+    void splitFileExtractionIsSuppressedWhileConfigYmlCarriesTheOldSection() throws Exception {
+        // An upgraded install whose config.yml still carries a moved section: the
+        // pristine split bundle must NOT extract (it would shadow the tuned
+        // old-location section — the parser honours config.yml and says so).
+        // Deleting the section releases the extraction on the next pass.
+        Files.writeString(dataFolder.resolve(ConfigStore.MAIN_FILE), """
+                config-version: 3
+                modules:
+                  hit-feedback: true
+                hit-feedback:
+                  preset: signature
+                combo-hold:
+                  gain: 0.9
+                """, StandardCharsets.UTF_8);
+        ConfigStore store = store();
+
+        store.ensureDefaultFiles();
+
+        assertFalse(Files.exists(dataFolder.resolve(ConfigStore.HIT_FEEDBACK_FILE)),
+                "effects/hit-feedback.yml must not extract while config.yml carries hit-feedback");
+        assertFalse(Files.exists(dataFolder.resolve(ConfigStore.COMBO_FILE)),
+                "combo.yml must not extract while config.yml carries combo-hold");
+        // Sections that did NOT stay behind extract normally.
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.POTS_FILE)));
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.LOADOUT_FILE)));
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.DAMAGE_INDICATORS_FILE)));
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.DEATH_EFFECTS_FILE)));
+
+        // The owner moves on: the sections leave config.yml, the bundles extract.
+        Files.writeString(dataFolder.resolve(ConfigStore.MAIN_FILE), """
+                config-version: 3
+                modules:
+                  hit-feedback: true
+                """, StandardCharsets.UTF_8);
+        store.ensureDefaultFiles();
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.HIT_FEEDBACK_FILE)),
+                "deleting the old-location section releases the split extraction");
+        assertTrue(Files.isRegularFile(dataFolder.resolve(ConfigStore.COMBO_FILE)));
     }
 
     @Test

@@ -13,6 +13,7 @@ import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.profile.KnockbackDelivery;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.profile.PaceScaling;
+import me.vexmc.mental.kernel.profile.Presets;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
 import org.junit.jupiter.api.Test;
@@ -689,5 +690,55 @@ class KnockbackEngineTest {
                 return value;
             }
         };
+    }
+
+    /**
+     * The downward hit-2 root fix (2026-07-10-downward-kb-and-stacking-diagnoses.md,
+     * report 1). With the measured-reality clamp feeding the era-real hover vy
+     * (−0.35 = measured −0.2 minus the 0.15 margin) instead of the ledger's runaway
+     * free-fall, a PLAIN airborne hit-2 (held-W: no sprint extra since the 2.5.1
+     * engagement contract) ships an era-POSITIVE vertical and the 0.0 floor stops
+     * being load-bearing. ADD vertical = vy·friction.y + base.vertical, plain, no
+     * air multiplier (air 1.0) and under the 0.4 cap:
+     * <ul>
+     *   <li>legacy-1.7: −0.35·0.5 + 0.4 = 0.225</li>
+     *   <li>kohi:       −0.35·0.5 + 0.35 = 0.175</li>
+     * </ul>
+     */
+    @Test
+    void clampedAirborneHitTwoShipsEraPositiveVertical() {
+        KnockbackVector legacy = computed(
+                attacker(0, 0, 0.0f, false, 0), airborneVictim(3, 4, 0, -0.35, 0),
+                KnockbackProfile.LEGACY_17, null);
+        assertEquals(0.225, legacy.y(), EPSILON);
+
+        KnockbackVector kohi = computed(
+                attacker(0, 0, 0.0f, false, 0), airborneVictim(3, 4, 0, -0.35, 0),
+                Presets.KOHI, null);
+        assertEquals(0.175, kohi.y(), EPSILON);
+    }
+
+    /**
+     * WHY the clamp matters: the SAME plain airborne hit-2 with the UNCLAMPED
+     * runaway ledger vy (−1.5, the measured juggle worst case) computes a genuine
+     * negative that the 0.0 vertical floor pins to exactly 0.0 — a zero-lift stamp
+     * on a still-falling victim, perceptually the vanilla "downward" the owner
+     * reported. The clamp raises the input so this floor never engages.
+     * <ul>
+     *   <li>legacy-1.7: −1.5·0.5 + 0.4 = −0.35 → floor 0.0</li>
+     *   <li>kohi:       −1.5·0.5 + 0.35 = −0.40 → floor 0.0</li>
+     * </ul>
+     */
+    @Test
+    void unclampedRunawayVyFloorsToZeroLift() {
+        KnockbackVector legacy = computed(
+                attacker(0, 0, 0.0f, false, 0), airborneVictim(3, 4, 0, -1.5, 0),
+                KnockbackProfile.LEGACY_17, null);
+        assertEquals(0.0, legacy.y(), EPSILON);
+
+        KnockbackVector kohi = computed(
+                attacker(0, 0, 0.0f, false, 0), airborneVictim(3, 4, 0, -1.5, 0),
+                Presets.KOHI, null);
+        assertEquals(0.0, kohi.y(), EPSILON);
     }
 }

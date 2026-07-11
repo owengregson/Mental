@@ -113,6 +113,35 @@ public record ConfigReader(ConfigurationSection section, String prefix, ConfigIs
         return value;
     }
 
+    /**
+     * A whole number CLAMPED to {@code [minimum, maximum]} — the integer twin of
+     * {@link #numberClamped}. An out-of-range value is not dropped to the fallback
+     * but pulled to the nearest bound (the caller asked for a clamp, so the nearest
+     * legal value is the honest result) with one warn. A wrong-typed value still
+     * falls back with a warn, and an absent key returns the (in-range) fallback
+     * silently — {@link #intAtLeast} only ever clamps LOW (to the fallback), so a
+     * capped knob needs this to clamp HIGH too.
+     */
+    public int intClamped(String key, int fallback, int minimum, int maximum) {
+        if (section == null || !section.isSet(key)) {
+            return fallback;
+        }
+        if (!section.isInt(key)) {
+            issues.warn(path(key), "expected a whole number, found '" + section.get(key) + "'", fallback);
+            return fallback;
+        }
+        int value = section.getInt(key);
+        if (value < minimum) {
+            issues.warn(path(key), "must be at least " + minimum + " — clamped from " + value, minimum);
+            return minimum;
+        }
+        if (value > maximum) {
+            issues.warn(path(key), "must be at most " + maximum + " — clamped from " + value, maximum);
+            return maximum;
+        }
+        return value;
+    }
+
     public String text(String key, String fallback) {
         if (section == null || !section.isSet(key)) {
             return fallback;

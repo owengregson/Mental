@@ -3,8 +3,11 @@ package me.vexmc.mental.v5.feature;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
+import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
 import me.vexmc.mental.v5.config.settings.OffhandSettings;
@@ -323,7 +326,39 @@ public enum Feature {
                     Facets.none("velocity is re-aimed server-side; the client sees a normal throw"),
                     Facets.none("no damage contribution"),
                     Facets.none("no damage contribution")),
-            new SettingsKey<>("fast-pots", FastPotsSettings.class));
+            new SettingsKey<>("fast-pots", FastPotsSettings.class)),
+
+    /* ------------------------------- FEEDBACK ------------------------------- */
+
+    HIT_FEEDBACK("hit-feedback", Family.FEEDBACK, "Hit Effects",
+            "Replace the vanilla hit sound with your own layered sounds and particles.",
+            "NOTE_BLOCK", false,
+            new Facets(
+                    Facets.none("cosmetic only, no gameplay state"),
+                    Facets.handled(),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("hit-feedback", HitFeedbackSettings.class)),
+
+    DAMAGE_INDICATORS("damage-indicators", Family.FEEDBACK, "Damage Indicators",
+            "Pop a damage number off the victim on the attacker's screen.",
+            "ARMOR_STAND", false,
+            new Facets(
+                    Facets.none("cosmetic only, no gameplay state"),
+                    Facets.handled(),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("damage-indicators", DamageIndicatorsSettings.class)),
+
+    DEATH_EFFECTS("death-effects", Family.FEEDBACK, "Death Effects",
+            "A cosmetic strike on player death — lightning, sound, and a burst.",
+            "FIREWORK_ROCKET", false,
+            new Facets(
+                    Facets.none("cosmetic only, no gameplay state"),
+                    Facets.handled(),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("death-effects", DeathEffectsSettings.class));
 
     private final String yamlKey;
     private final Family family;

@@ -22,10 +22,43 @@ public record PlayerView(UUID id, int entityId, TickStamp at,
                          UUID comboAttackerId,
                          double measuredVx, double measuredVz, float yaw,
                          double eyeHeight, int groundedTicks,
-                         double yawRateDegPerTick, int kbEnchantLevel) {
+                         double yawRateDegPerTick, int kbEnchantLevel,
+                         double measuredVy) {
 
     /** The standing eye height above feet — the pocket-servo precision default (ReachValidator.EYE_HEIGHT). */
     private static final double DEFAULT_EYE_HEIGHT = 1.62;
+
+    /**
+     * The pre-measured-vy arity (2.5.2 downward-hit-2 fix): every field through the
+     * enchant freeze, with NO measured vertical velocity — {@code measuredVy}
+     * defaults to {@link Double#NaN}, the "no fresh measurement" sentinel the
+     * measured-reality clamp reads as a strict no-op ({@link
+     * me.vexmc.mental.kernel.math.MeasuredReality#clampVy}). The published field is
+     * the victim's per-tick position Δy, frozen at the SAME publish as the ledger
+     * residual and the measuredVx/Vz drift signal, so the capture seams bound the
+     * ledger's runaway free-fall by the real hover. A view built without it (every
+     * pre-fix construction and every test) leaves the clamp inert — byte-identical.
+     * See {@code docs/superpowers/research/2026-07-10-downward-kb-and-stacking-diagnoses.md}.
+     */
+    public PlayerView(UUID id, int entityId, TickStamp at,
+                      Decay.Motion motion, boolean grounded, double slipperiness,
+                      double gravity, double jumpImpulse, int jumpBoostAmplifier,
+                      boolean sprinting, boolean creative, boolean pvpAllowed,
+                      int noDamageTicks, int maxNoDamageTicks,
+                      double knockbackResistance,
+                      KnockbackProfile profile, int pingMillis,
+                      KinematicState kinematics, double moveSpeedAttr,
+                      UUID comboAttackerId,
+                      double measuredVx, double measuredVz, float yaw,
+                      double eyeHeight, int groundedTicks,
+                      double yawRateDegPerTick, int kbEnchantLevel) {
+        this(id, entityId, at, motion, grounded, slipperiness, gravity, jumpImpulse,
+                jumpBoostAmplifier, sprinting, creative, pvpAllowed, noDamageTicks,
+                maxNoDamageTicks, knockbackResistance, profile,
+                pingMillis, kinematics, moveSpeedAttr, comboAttackerId,
+                measuredVx, measuredVz, yaw, eyeHeight, groundedTicks, yawRateDegPerTick,
+                kbEnchantLevel, Double.NaN);
+    }
 
     /**
      * The pre-enchant-freeze arity: the attacker's held Knockback level defaults

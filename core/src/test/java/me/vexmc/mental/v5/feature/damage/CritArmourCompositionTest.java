@@ -6,6 +6,7 @@ import java.lang.reflect.Proxy;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.UUID;
+import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
 import me.vexmc.mental.v5.session.SessionService;
@@ -108,7 +109,7 @@ class CritArmourCompositionTest {
         // A bare SessionService: sessionFor answers null, so the per-hit gate reads
         // every staged event as a vanilla-landing melee (the audit scenario).
         return new CritFallbackUnit(() -> snapshot,
-                new SessionService(null, null, null, null, null, null, null, null, null));
+                new SessionService(null, null, null, null, null, null, null, null, null, null));
     }
 
     private static Snapshot parse(String main, String hitReg) throws Exception {
@@ -116,8 +117,8 @@ class CritArmourCompositionTest {
         mainYaml.loadFromString(main);
         YamlConfiguration hitRegYaml = new YamlConfiguration();
         hitRegYaml.loadFromString(hitReg);
-        return SnapshotParser.parse(
-                mainYaml, new YamlConfiguration(), hitRegYaml, new YamlConfiguration(), Map.of())
+        return SnapshotParser.parse(ConfigStore.Sources.of(
+                mainYaml, new YamlConfiguration(), hitRegYaml, new YamlConfiguration(), Map.of()))
                 .snapshot();
     }
 

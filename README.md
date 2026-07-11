@@ -96,10 +96,14 @@ Split by concern under `plugins/Mental/`, every option explained in its file:
 
 | File | What lives there |
 | --- | --- |
-| `config.yml` | The control panel: module switches, anticheat policy, debug. |
+| `config.yml` | The control panel: module switches, anticheat policy, metrics, debug. |
 | `knockback.yml` | Which profile applies where (default + per-world), plus rod, fishing and projectile mechanics. |
 | `hit-registration.yml` | The async hit pipeline, its fast path, and reach validation. |
 | `latency-compensation.yml` | Ping-aware knockback correction. |
+| `combo.yml` | The Combo Solver family — the combo-hold pocket servo and the combo reach handicap. |
+| `pots.yml` | The POTS family — `/potfill` and steep-throw fast pots. |
+| `loadout.yml` | Off-hand and crafting restrictions. |
+| `effects/*.yml` | One Combat Effects module per file — hit feedback, damage indicators, death effects. Regenerate when deleted; your edits stay. |
 | `profiles/*.yml` | One knockback feel per file. Presets regenerate when deleted; your edits stay. |
 
 ```yaml

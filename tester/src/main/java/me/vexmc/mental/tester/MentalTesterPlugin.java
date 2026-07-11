@@ -12,6 +12,7 @@ import me.vexmc.mental.tester.suite.ComboSuite;
 import me.vexmc.mental.tester.suite.CosmeticSmokeSuite;
 import me.vexmc.mental.tester.suite.DamageRulesSuite;
 import me.vexmc.mental.tester.suite.EraParitySuite;
+import me.vexmc.mental.tester.suite.FeedbackSuite;
 import me.vexmc.mental.tester.suite.FishingSuite;
 import me.vexmc.mental.tester.suite.FoliaCombatSmoke;
 import me.vexmc.mental.tester.suite.HitboxSuite;
@@ -35,8 +36,8 @@ import org.bukkit.plugin.java.JavaPlugin;
  *
  * <p>On a plain server the active list is
  * {@code Boot, Knockback, Profile, Fishing, Projectile, EraParity, DamageRules,
- * Blocking, ConsumableRules, CosmeticSmoke, Hitbox, InventoryRules, Pots,
- * Command, Combo, Reload, ZeroTouch}.</p>
+ * Blocking, ConsumableRules, CosmeticSmoke, Feedback, Hitbox, InventoryRules,
+ * Pots, Command, Combo, Reload, ZeroTouch}.</p>
  */
 public final class MentalTesterPlugin extends JavaPlugin {
 
@@ -91,6 +92,7 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(BlockingSuite.tests(mental, this));
                 suite.addAll(ConsumableRulesSuite.tests(mental, this));
                 suite.addAll(CosmeticSmokeSuite.tests(mental, this));
+                suite.addAll(FeedbackSuite.tests(mental, this));
                 suite.addAll(HitboxSuite.tests(mental, this));
                 suite.addAll(InventoryRulesSuite.tests(mental, this));
                 suite.addAll(PotsSuite.tests(mental, this));

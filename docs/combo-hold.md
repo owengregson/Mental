@@ -1,6 +1,6 @@
 # Combo hold — the pocket servo
 
-**Module:** `combo-hold` (in `config.yml` → `modules`). **Default OFF.** Strictly
+**Module:** `combo-hold` (in `config.yml` → `modules`; knobs in `combo.yml`). **Default OFF.** Strictly
 server-opt-in — no bundled config pre-enables it. Works under whichever knockback
 profile is active.
 
@@ -89,9 +89,11 @@ any of — the gap expiring; the victim landing a melee hit of their own
 so brief ground-skims survive); separation past `blowout-blocks`; or either party
 leaving. A hit from a different attacker restarts the chain on them.
 
-## Knobs (`config.yml` → `combo-hold`)
+## Knobs (`combo.yml` → `combo-hold`)
 
-All optional; an absent section uses the defaults shown.
+All optional; an absent section uses the defaults shown. (Before 2.5.2 this
+section lived in `config.yml` — an upgraded install's old-location section is
+still honoured, with one reload notice asking you to move it.)
 
 | Key | Default | What |
 | --- | --- | --- |
@@ -135,8 +137,8 @@ nested `combo-hold.reach-handicap.enabled: true` / `.reach-scale` keeps working 
 one release: the parser honours it (module treated as enabled, the nested scale
 carried over) and prints one loud reload notice naming both the old and new keys.
 Move the toggle to `modules.combo-reach-handicap` and the scale to a top-level
-`combo-reach-handicap.reach-scale` block. An explicit `modules.combo-reach-handicap`
-key always wins over the legacy nested one.
+`combo-reach-handicap.reach-scale` block (in `combo.yml` since 2.5.2). An explicit
+`modules.combo-reach-handicap` key always wins over the legacy nested one.
 
 **Server-side enforcement needs `reach-validation`.** The client-synced attribute
 shrink covers honest clients (their own raycast shortens). Against an
