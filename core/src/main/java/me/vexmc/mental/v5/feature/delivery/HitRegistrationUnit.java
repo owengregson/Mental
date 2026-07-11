@@ -644,17 +644,25 @@ public final class HitRegistrationUnit implements FeatureUnit {
      *       PRE_SENT wire burst, or a PINNED velocity-event vector). An uncommitted
      *       (REGISTERED) hit shipped no knock, so an era window-rejection there is
      *       era-correct silence and must stay silent — never clamp it.</li>
-     *   <li>{@code noDamageTicks > maxNoDamageTicks / 2} — the LIVE victim is inside
-     *       the immunity window and vanilla would reject. This is exactly the race
-     *       sliver the fast path opens: the pre-send fires off the FROZEN boundary
-     *       view whose {@code damageImmune()} carries the 1.6.0 {@code +1} staleness
-     *       allowance ({@code noDamageTicks > max/2 + 1}), so a hit the pre-send
-     *       judged deliverable can find the live counter still one tick inside
-     *       {@code > max/2} when the region task lands (the damage task beating the
-     *       victim's per-tick counter decrement, or a view stale under load). The
-     *       perturbation this clamp applies is {@code <=} that sliver's own width. At
-     *       exactly {@code == max/2} vanilla's gate is strict {@code >} and ACCEPTS,
-     *       so there is nothing to adopt — no clamp.</li>
+     *   <li>{@code max/2 < noDamageTicks <= max/2 + 1} — the LIVE victim is inside
+     *       the immunity window (vanilla would reject) AND within ONE tick of the
+     *       boundary. The lower bound is vanilla's own gate: at exactly
+     *       {@code == max/2} the strict {@code >} ACCEPTS, so there is nothing to
+     *       adopt. The upper bound binds the adoption to exactly the race sliver the
+     *       fast path opens: the pre-send fires off the FROZEN boundary view whose
+     *       {@code damageImmune()} carries the 1.6.0 {@code +1} staleness allowance
+     *       ({@code noDamageTicks > max/2 + 1}), and absent a foreign re-arm the live
+     *       counter at apply time can only be {@code <=} that frozen read — so the
+     *       self-race lands at exactly {@code max/2 + 1} (the damage task beating the
+     *       victim's per-tick counter decrement) and the clamp's perturbation is ONE
+     *       tick by construction. A live counter ABOVE {@code max/2 + 1} can only
+     *       mean a DIFFERENT accepted hit re-armed the window between this hit's
+     *       commit and its apply (a pile-on interleaving: a co-attacker's paced-out
+     *       hit landing fresh in the 1-2-tick gap) — adopting there would land full
+     *       damage deep inside a window the era legitimately awarded to the other
+     *       hit, a shared-window DPS bypass. Those keep vanilla's rejection; the
+     *       already-shipped knock stands as a rare bounded phantom rather than an
+     *       era damage distortion.</li>
      *   <li>{@code amount <= lastDamage} — a same-strength (or weaker) re-hit, which
      *       vanilla's window rejects outright. The UPGRADE branch
      *       ({@code amount > lastDamage}) is DELIBERATELY excluded: vanilla ACCEPTS
@@ -677,6 +685,7 @@ public final class HitRegistrationUnit implements FeatureUnit {
             double amount, double lastDamage) {
         return committedKnock
                 && noDamageTicks > maxNoDamageTicks / 2
+                && noDamageTicks <= maxNoDamageTicks / 2 + 1
                 && amount <= lastDamage;
     }
 

@@ -59,17 +59,33 @@ class BoundaryAdoptionTest {
     /* ---------------------------- adoptBoundary: the decision ---------------------------- */
 
     @Test
-    void committedInsideWindowWithEqualAmountAdopts() {
-        // Standard max=20 → boundary max/2=10. noDamageTicks 15 > 10 (inside the
-        // window), amount 6.0 <= lastDamage 6.0 (a same-strength re-hit vanilla would
-        // reject) → adopt: land the boundary-fresh hit the pre-send committed.
-        assertTrue(HitRegistrationUnit.adoptBoundary(true, 15, 20, 6.0, 6.0));
+    void committedSliverWithEqualAmountAdopts() {
+        // Standard max=20 → boundary max/2=10, sliver = 11 (max/2 + 1) EXACTLY: the
+        // self-race — the pre-send admitted the hit off the frozen +1-allowance view
+        // and the damage task beat the victim's per-tick decrement. amount 6.0 <=
+        // lastDamage 6.0 (a same-strength re-hit vanilla would reject) → adopt: land
+        // the boundary-fresh hit the pre-send committed.
+        assertTrue(HitRegistrationUnit.adoptBoundary(true, 11, 20, 6.0, 6.0));
     }
 
     @Test
-    void committedInsideWindowWithLesserAmountAdopts() {
+    void committedSliverWithLesserAmountAdopts() {
         // amount 4.0 <= lastDamage 6.0 (a weaker re-hit vanilla would reject) → adopt.
-        assertTrue(HitRegistrationUnit.adoptBoundary(true, 15, 20, 4.0, 6.0));
+        assertTrue(HitRegistrationUnit.adoptBoundary(true, 11, 20, 4.0, 6.0));
+    }
+
+    @Test
+    void foreignReArmedWindowNeverAdopts() {
+        // Live counter ABOVE max/2 + 1 can only mean a DIFFERENT accepted hit
+        // re-armed the window between this hit's commit and its apply (the pile-on
+        // interleaving: a co-attacker's paced-out hit landing fresh in the 1-2-tick
+        // gap). Adopting there would land full damage deep inside a window the era
+        // legitimately awarded to the other hit — a shared-window DPS bypass. Vanilla's
+        // rejection stands, from one tick past the sliver up to a fully re-armed 20.
+        assertFalse(HitRegistrationUnit.adoptBoundary(true, 12, 20, 6.0, 6.0));
+        assertFalse(HitRegistrationUnit.adoptBoundary(true, 15, 20, 4.0, 6.0));
+        assertFalse(HitRegistrationUnit.adoptBoundary(true, 19, 20, 6.0, 6.0));
+        assertFalse(HitRegistrationUnit.adoptBoundary(true, 20, 20, 6.0, 6.0));
     }
 
     @Test
@@ -77,18 +93,18 @@ class BoundaryAdoptionTest {
         // amount 8.0 > lastDamage 6.0: vanilla ACCEPTS this as a delta hit and
         // subtracts only 8.0 − 6.0 = 2.0. Clamping the immunity here would make
         // victim.damage(8.0) deal the FULL 8.0 — over-damaging by the difference.
-        // The upgrade branch must NEVER clamp, even deep inside the window.
-        assertFalse(HitRegistrationUnit.adoptBoundary(true, 19, 20, 8.0, 6.0));
+        // The upgrade branch must NEVER clamp — pinned INSIDE the sliver (11), where
+        // every other adoption condition holds, so the veto alone is what fails it.
+        assertFalse(HitRegistrationUnit.adoptBoundary(true, 11, 20, 8.0, 6.0));
     }
 
     @Test
     void uncommittedNeverAdopts() {
         // No knock was shipped (REGISTERED at region time). An era window-rejection
-        // here is era-correct silence and must stay silent — regardless of window or
-        // amount, including a would-be same-strength re-hit that otherwise qualifies.
-        assertFalse(HitRegistrationUnit.adoptBoundary(false, 15, 20, 4.0, 6.0));
-        assertFalse(HitRegistrationUnit.adoptBoundary(false, 15, 20, 6.0, 6.0));
-        assertFalse(HitRegistrationUnit.adoptBoundary(false, 19, 20, 8.0, 6.0));
+        // here is era-correct silence and must stay silent — pinned INSIDE the sliver
+        // (11) where every other condition holds, so the commitment gate alone fails it.
+        assertFalse(HitRegistrationUnit.adoptBoundary(false, 11, 20, 4.0, 6.0));
+        assertFalse(HitRegistrationUnit.adoptBoundary(false, 11, 20, 6.0, 6.0));
     }
 
     @Test
@@ -108,11 +124,13 @@ class BoundaryAdoptionTest {
 
     @Test
     void oddMaxUsesIntegerTruncatedBoundary() {
-        // max=21 → integer max/2 = 10 (truncated, NOT rounded to 11). So the first
-        // in-window tick is 11 (11 > 10), and 10 is exactly at/below the boundary.
-        // A rounded boundary of 11 would flip both of these — this pins truncation.
+        // max=21 → integer max/2 = 10 (truncated, NOT rounded to 11). So the sliver
+        // is exactly 11 (10 < 11 <= 10+1); 10 sits at vanilla's own accept boundary
+        // and 12 is already a foreign re-arm. A rounded boundary of 11 would flip
+        // these — this pins truncation.
         assertTrue(HitRegistrationUnit.adoptBoundary(true, 11, 21, 6.0, 6.0));
         assertFalse(HitRegistrationUnit.adoptBoundary(true, 10, 21, 6.0, 6.0));
+        assertFalse(HitRegistrationUnit.adoptBoundary(true, 12, 21, 6.0, 6.0));
     }
 
     /* ---------------------------- boundaryAdopted: the F9 stamp ---------------------------- */

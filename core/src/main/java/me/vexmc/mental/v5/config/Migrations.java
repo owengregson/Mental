@@ -343,8 +343,9 @@ public final class Migrations {
      * v3 backup, import into {@code effects/presets/custom.yml} when it is
      * missing, and create {@code effects.yml} with {@code custom} selected —
      * one loud line per action. Selection follows the import: when the import
-     * is skipped (an owner custom.yml already exists — sacred), vanilla stays
-     * selected, because selecting unknown custom values could change the
+     * is skipped (an owner custom.yml already exists — sacred), the template's
+     * signature default stays selected (since 2.5.5 retired the vanilla
+     * preset), because selecting unknown custom values could change the
      * server's sound silently.
      */
     private void migrateV3toV4() {
