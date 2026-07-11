@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import java.io.IOException;
@@ -296,7 +297,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The per-hit delivery journal capture (F9): formats one greppable line per
         // journaled hit into the JOURNAL debug channel — zero cost until the channel
         // is on. The desk stays the sole journal writer; this only reads each entry.
-        JournalCapture journalCapture = new JournalCapture(debug.scoped(DebugCategory.JOURNAL), this::snapshot);
+        JournalCapture journalCapture = new JournalCapture(debug.scoped(DebugCategory.JOURNAL), this::snapshot, domains);
         this.sessions = new SessionService(
                 scheduling, clock, viewBuilder, valve, this::snapshot, positions, domains,
                 comboEvents, journalCapture, getLogger());
@@ -328,6 +329,13 @@ public final class MentalPluginV5 extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(probeRim);
         getLogger().info("latency probe transport: " + probeTransport + " (rim="
                 + probeRim.getClass().getSimpleName() + ")");
+        // The input-ledger lanes active on this tier (spec §1.8): ENTITY_ACTION,
+        // use-item and window lanes exist across the whole range; the PLAYER_INPUT
+        // evidence lane is a 1.21.2+ wire fact (absent below — era-correct fallback).
+        boolean playerInputLane = PacketEvents.getAPI().getServerManager().getVersion()
+                .isNewerThanOrEquals(ServerVersion.V_1_21_2);
+        getLogger().info("input lanes: entity-action, use-item, window"
+                + (playerInputLane ? ", player-input" : "") );
 
         // The delivery routers (spec §3.4–§3.6): the desk's sole PlayerVelocityEvent
         // writer, the damage-pass router, and the capability-gated knockback-event
