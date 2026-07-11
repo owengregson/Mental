@@ -85,6 +85,17 @@ public final class CombatSession {
     private int yawDeltaCount;
     private int yawDeltaNext;
 
+    /**
+     * The victim's health as of the previous session tick's live read (F4 heal
+     * detection). {@link Double#NaN} until the first sampled tick, then swapped every
+     * tick against the fresh {@code getHealth()} so the heal sampler sees the per-tick
+     * delta — the one detector that catches every heal source (setHealth, event heals,
+     * and cancelled non-heals correctly, since only applied health counts). Purely
+     * observed: the session NEVER writes this back to the game (it stays observation-
+     * only by type, so always-on tracking holds zero-touch). Owning thread only.
+     */
+    private double lastHealth = Double.NaN;
+
     /** The pre-F9 arity: no journal observer (delegates to {@link JournalObserver#NONE}). Tests construct it. */
     public CombatSession(double gravity, int entityId, TickClock clock, int journalCapacity) {
         this(gravity, entityId, clock, journalCapacity, JournalObserver.NONE);
@@ -179,6 +190,18 @@ public final class CombatSession {
     public int advanceGroundedTicks(boolean grounded) {
         groundedTicks = grounded ? groundedTicks + 1 : 0;
         return groundedTicks;
+    }
+
+    /* ------------------------------ heal detection ------------------------------ */
+
+    /** The health recorded at the previous tick, or {@link Double#NaN} before the first — owning thread only. */
+    public double lastHealth() {
+        return lastHealth;
+    }
+
+    /** Records this tick's live health for the next tick's delta (F4) — owning thread only. */
+    public void lastHealth(double health) {
+        this.lastHealth = health;
     }
 
     /**

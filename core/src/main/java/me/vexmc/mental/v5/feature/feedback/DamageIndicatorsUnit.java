@@ -5,6 +5,7 @@ import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
+import me.vexmc.mental.kernel.fx.IndicatorBallistics;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -13,6 +14,7 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.SettingsKey;
+import me.vexmc.mental.v5.session.SessionService;
 
 /**
  * Assembles {@code damage-indicators}: the EDBEE MONITOR spawner
@@ -31,9 +33,16 @@ import me.vexmc.mental.v5.feature.SettingsKey;
  * path): an attacker who leaves gets their driver — its stale entity and
  * PacketEvents user references included — closed and dropped, so a relog builds
  * a fresh driver against the fresh connection.</p>
+ *
+ * <p>The HEALING indicator (F4) rides the same scope: when {@code heal-text} is
+ * non-blank the unit builds a {@link HealIndicators} and installs it as the
+ * {@link SessionService.HealSampler}, torn down (sampler cleared) on scope close —
+ * so a blank template (the DEFAULTS) installs NO sampler and the whole heal
+ * machinery stays dormant (zero-touch, era-exact no-op).</p>
  */
 public final class DamageIndicatorsUnit implements FeatureUnit {
 
+    private final SessionService sessions;
     private final Scheduling scheduling;
     private final TickClock clock;
     private final FeedbackTrace trace;
@@ -42,7 +51,12 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
     /** The CURRENT assembly's per-attacker drivers; empty whenever the feature is off. */
     private volatile ConcurrentHashMap<UUID, IndicatorDriver> drivers;
 
-    public DamageIndicatorsUnit(Scheduling scheduling, TickClock clock, FeedbackTrace trace, Logger logger) {
+    /** The CURRENT assembly's heal consumer, or null when off / heal-text blank (mirrors {@link #drivers}). */
+    private volatile HealIndicators heal;
+
+    public DamageIndicatorsUnit(
+            SessionService sessions, Scheduling scheduling, TickClock clock, FeedbackTrace trace, Logger logger) {
+        this.sessions = sessions;
         this.scheduling = scheduling;
         this.clock = clock;
         this.trace = trace;
@@ -72,24 +86,51 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
 
         ConcurrentHashMap<UUID, IndicatorDriver> map = new ConcurrentHashMap<>();
         this.drivers = map;
+
+        // The healing indicator is built ONLY when a heal-text template is set — a
+        // blank template (the DEFAULTS) installs no sampler at all, so heal detection
+        // and its per-victim maps never come into existence (the era-exact no-op).
+        HealIndicators healIndicators = null;
+        if (settings.healText() != null && !settings.healText().isBlank()) {
+            IndicatorBallistics.Params params = new IndicatorBallistics.Params(
+                    settings.launchVertical(), settings.launchOutward(), settings.gravity(), settings.drag());
+            healIndicators = new HealIndicators(
+                    map, settings, scheduling, params, trace, logger, modernSpawn, bundleSupported);
+            sessions.setHealSampler(healIndicators);
+        }
+        this.heal = healIndicators;
+        HealIndicators installed = healIndicators; // effectively final for the teardown lambda
+
         scope.listen(new DamageIndicatorsListener(
-                settings, map, scheduling, clock, modernSpawn, bundleSupported, trace, logger));
+                settings, map, scheduling, clock, modernSpawn, bundleSupported, trace, logger, healIndicators));
         scope.task(() -> (AutoCloseable) () -> {
-            // Scope close tears every stand down and cancels every drive task.
+            // Scope close clears the heal sampler (restoring zero-touch), then tears
+            // every stand down and cancels every drive task.
+            if (installed != null) {
+                sessions.clearHealSampler();
+            }
+            this.heal = null;
             map.values().forEach(IndicatorDriver::close);
             map.clear();
         });
     }
 
-    /** Session forget (quit): closes that attacker's driver — stands destroyed, task cancelled. */
+    /**
+     * Session forget (quit): closes that attacker's driver — stands destroyed, task
+     * cancelled — and drops the player from the heal consumer's attribution/fold maps
+     * (both as a heal victim and as any victim's stamped attacker).
+     */
     public void forget(UUID player) {
         ConcurrentHashMap<UUID, IndicatorDriver> map = drivers;
-        if (map == null) {
-            return;
+        if (map != null) {
+            IndicatorDriver driver = map.remove(player);
+            if (driver != null) {
+                driver.close();
+            }
         }
-        IndicatorDriver driver = map.remove(player);
-        if (driver != null) {
-            driver.close();
+        HealIndicators healIndicators = heal;
+        if (healIndicators != null) {
+            healIndicators.forget(player);
         }
     }
 }

@@ -37,13 +37,27 @@ import org.bukkit.event.entity.EntityDamageEvent;
  * the Bukkit half of {@code hit-feedback}; the {@link HurtSoundSuppressor} is the
  * netty half.
  *
- * <h2>The two-audience model</h2>
- * The listener plays to vanilla's <em>exact</em> hurt-sound audience — nearby
- * players in the victim's world, EXCLUDING the victim — because that is precisely
- * who the vanilla broadcast (the one the suppressor eats) would have reached, and
- * the victim never hears its own hurt sound in vanilla. Particles, however, go to
- * everyone nearby INCLUDING the victim: the victim should see the burst that
- * lands on them. Two overlapping audiences, one loop, one flush per viewer.
+ * <h2>The audience model</h2>
+ * Three overlapping sinks share one loop and one flush per viewer, split by who
+ * vanilla would have reached:
+ * <ul>
+ *   <li>The <b>normal hit sounds</b> play to vanilla's <em>exact</em> hurt-sound
+ *       audience — nearby players in the victim's world, EXCLUDING the victim —
+ *       because that is precisely who the vanilla broadcast (the one the suppressor
+ *       eats) would have reached, and the victim never hears its own hurt sound in
+ *       vanilla.</li>
+ *   <li>The <b>low-health layer</b> is a Mental-only cue, not a vanilla broadcast,
+ *       so it is NOT bound by the victim-exclusion contract: it plays to everyone
+ *       nearby INCLUDING the victim, so the person actually in danger hears their
+ *       own heartbeat. It ships only on a non-killing hit that drops the victim
+ *       below the percent threshold (death-effects owns the killing moment) and
+ *       only when a layer is configured.</li>
+ *   <li><b>Particles</b> go to everyone nearby INCLUDING the victim: the victim
+ *       should see the burst that lands on them.</li>
+ * </ul>
+ * Because the victim IS an audience of the low-health layer, a low-health hit
+ * whose only nearby player is the victim still reads {@code EMITTED+LOW_HP} — the
+ * module DID emit (to the victim), it just had no normal-sound audience.
  *
  * <h2>Why the mark</h2>
  * Before it plays anything, the listener ARMS a {@link HurtSoundMarks} mark keyed
@@ -140,8 +154,9 @@ public final class HitFeedbackListener implements Listener {
         double radiusSquared = audienceRadius * audienceRadius;
         World world = victim.getWorld();
         UUID victimId = victim.getUniqueId();
-        List<Player> nearby = new ArrayList<>(); // particle audience (victim INCLUDED)
-        boolean anySoundViewer = false;
+        List<Player> nearby = new ArrayList<>(); // particle + low-health audience (victim INCLUDED)
+        boolean anySoundViewer = false; // any NON-victim nearby — the normal-sound audience
+        boolean victimNearby = false;   // the victim itself in range — the low-health-layer audience
         for (Player candidate : Bukkit.getOnlinePlayers()) {
             if (!world.equals(candidate.getWorld())) {
                 continue;
@@ -150,7 +165,9 @@ public final class HitFeedbackListener implements Listener {
                 continue;
             }
             nearby.add(candidate);
-            if (!candidate.getUniqueId().equals(victimId)) {
+            if (candidate.getUniqueId().equals(victimId)) {
+                victimNearby = true;
+            } else {
                 anySoundViewer = true;
             }
         }
@@ -175,16 +192,23 @@ public final class HitFeedbackListener implements Listener {
             emit(loc, nearby, victimId, lowHealth);
         }
 
-        String decision = anySoundViewer ? (lowHealth ? "EMITTED+LOW_HP" : "EMITTED") : "NO_VIEWERS";
+        // The victim is an audience of the low-health layer, so a low-health hit
+        // whose only nearby player is the victim still EMITTED (the layer shipped to
+        // the victim). Otherwise a normal-sound audience decides EMITTED vs NO_VIEWERS,
+        // and the layer marks LOW_HP when it fired.
+        String decision = lowHealth && victimNearby
+                ? "EMITTED+LOW_HP"
+                : (anySoundViewer ? (lowHealth ? "EMITTED+LOW_HP" : "EMITTED") : "NO_VIEWERS");
         trace.record(new FeedbackTrace.Entry(
                 "hit-feedback", attacker.getUniqueId(), victimId, decision, detail(decision, lowHealth)));
     }
 
     /**
-     * Builds each per-hit packet ONCE and ships it — sounds to the non-victim
-     * viewers, particles to all, a single flush per viewer. Vanilla computes the
-     * pitch jitter and particle counts once server-side and ships identical bytes
-     * to every listener, so a single set of wrappers is reused across viewers.
+     * Builds each per-hit packet ONCE and ships it — normal sounds to the non-victim
+     * viewers, the low-health layer AND particles to everyone nearby (the victim
+     * included), a single flush per viewer. Vanilla computes the pitch jitter and
+     * particle counts once server-side and ships identical bytes to every listener,
+     * so a single set of wrappers is reused across viewers.
      *
      * <p>The writes are SILENT ({@code writePacketSilently}, the {@code BurstSender}
      * seam): they enter the pipeline at Mental's own encoder, skipping Mental's own
@@ -200,10 +224,12 @@ public final class HitFeedbackListener implements Listener {
      */
     private void emit(Location loc, List<Player> nearby, UUID victimId, boolean lowHealth) {
         Vector3d soundPosition = new Vector3d(loc.getX(), loc.getY(), loc.getZ());
-        List<PacketWrapper<?>> soundPackets = soundPacketsFor(normalSounds, soundPosition);
-        if (lowHealth) {
-            soundPackets.addAll(soundPacketsFor(lowHealthSounds, soundPosition));
-        }
+        // The three sinks stay SEPARATE: normal sounds are victim-excluded (the
+        // vanilla-audience contract), while the low-health layer ships to the victim
+        // too (its own list, not appended to the normal set). Built once, reused.
+        List<PacketWrapper<?>> normalSoundPackets = soundPacketsFor(normalSounds, soundPosition);
+        List<PacketWrapper<?>> lowHealthPackets =
+                lowHealth ? soundPacketsFor(lowHealthSounds, soundPosition) : List.of();
         Vector3d chest = new Vector3d(loc.getX(), loc.getY() + CHEST_OFFSET, loc.getZ());
         List<PacketWrapper<?>> particlePackets = FeedbackEmit.particlePackets(particles, chest);
 
@@ -214,9 +240,12 @@ public final class HitFeedbackListener implements Listener {
                     continue; // synthetic / disconnecting player, in-process bot — skip this viewer
                 }
                 if (!viewer.getUniqueId().equals(victimId)) {
-                    for (PacketWrapper<?> packet : soundPackets) {
+                    for (PacketWrapper<?> packet : normalSoundPackets) {
                         user.writePacketSilently(packet);
                     }
+                }
+                for (PacketWrapper<?> packet : lowHealthPackets) {
+                    user.writePacketSilently(packet); // victim included — the danger cue is theirs
                 }
                 for (PacketWrapper<?> packet : particlePackets) {
                     user.writePacketSilently(packet);
