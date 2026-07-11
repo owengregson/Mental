@@ -1,0 +1,4 @@
+# An already-migrated v4 config.yml: nothing to do.
+config-version: 4
+modules:
+  knockback: true

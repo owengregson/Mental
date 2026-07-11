@@ -25,6 +25,8 @@ public final class Snapshot {
     private final String defaultProfile;
     private final Map<String, String> perWorld;
     private final Map<String, KnockbackProfile> profiles;
+    private final String selectedEffectsPreset;
+    private final Map<String, EffectsPreset> effectsPresets;
     private final AnticheatSettings anticheat;
     private final DebugSettings debug;
     private final boolean metricsEnabled;
@@ -35,6 +37,8 @@ public final class Snapshot {
         this.defaultProfile = builder.defaultProfile;
         this.perWorld = Map.copyOf(builder.perWorld);
         this.profiles = Map.copyOf(builder.profiles);
+        this.selectedEffectsPreset = builder.selectedEffectsPreset;
+        this.effectsPresets = Map.copyOf(builder.effectsPresets);
         this.anticheat = builder.anticheat;
         this.debug = builder.debug;
         this.metricsEnabled = builder.metricsEnabled;
@@ -87,6 +91,31 @@ public final class Snapshot {
         return profiles.get(name);
     }
 
+    /**
+     * The selected Combat Effects preset name (the {@code effects.preset}
+     * selection, already fallen back to vanilla if the configured name matched
+     * no file). The three FEEDBACK settings records in this snapshot came from
+     * exactly this preset.
+     */
+    public String selectedEffectsPreset() {
+        return selectedEffectsPreset;
+    }
+
+    /** Every loaded Combat Effects preset name — the GUI picker's list. */
+    public java.util.Set<String> effectsPresetNames() {
+        return effectsPresets.keySet();
+    }
+
+    /** Whether an effects preset by {@code name} is loaded (the selection guard). */
+    public boolean hasEffectsPreset(String name) {
+        return effectsPresets.containsKey(name);
+    }
+
+    /** The loaded effects preset by {@code name}, or {@code null} — the GUI's value-preview read. */
+    public EffectsPreset effectsPreset(String name) {
+        return effectsPresets.get(name);
+    }
+
     public AnticheatSettings anticheat() {
         return anticheat;
     }
@@ -108,6 +137,9 @@ public final class Snapshot {
         private Map<String, String> perWorld = Map.of();
         private Map<String, KnockbackProfile> profiles =
                 Map.of(KnockbackProfile.LEGACY_17.name(), KnockbackProfile.LEGACY_17);
+        private String selectedEffectsPreset = EffectsPreset.DEFAULT_NAME;
+        private Map<String, EffectsPreset> effectsPresets =
+                Map.of(EffectsPreset.VANILLA.name(), EffectsPreset.VANILLA);
         private AnticheatSettings anticheat = AnticheatSettings.DEFAULTS;
         private DebugSettings debug = DebugSettings.DEFAULTS;
         private boolean metricsEnabled = true;
@@ -126,6 +158,12 @@ public final class Snapshot {
             this.defaultProfile = resolved.defaultProfile();
             this.perWorld = resolved.perWorld();
             this.profiles = resolved.byName();
+            return this;
+        }
+
+        Builder effects(EffectsPresetParser.Library resolved) {
+            this.selectedEffectsPreset = resolved.selected();
+            this.effectsPresets = resolved.byName();
             return this;
         }
 

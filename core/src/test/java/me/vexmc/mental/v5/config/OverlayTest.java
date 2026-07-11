@@ -59,24 +59,29 @@ class OverlayTest {
 
     @Test
     void overlayKeysOnMovedSectionsRouteToTheSplitRoots() throws Exception {
-        // The 2.5.2 split: an override whose first path segment is a moved section
-        // must land on the split root the parser actually reads, so
-        // effective = overlay ?? file ?? default keeps holding for those keys.
+        // The 2.5.2 split (and the 2.5.3 effects selection): an override whose
+        // first path segment is a moved section must land on the root the
+        // parser actually reads, so effective = overlay ?? file ?? default
+        // keeps holding for those keys.
         ConfigStore store = store();
         store.ensureDefaultFiles();
         Overlay overlay = new Overlay(store.overridesFile());
-        overlay.set("hit-feedback.preset", "signature");
+        overlay.set("effects.preset", "signature");
         overlay.set("combo-hold.gain", 0.5);
 
         ConfigStore.Sources sources = store.loadSources();
         overlay.apply(sources);
 
-        assertEquals("signature", sources.hitFeedback().getString("hit-feedback.preset"),
-                "the hit-feedback override rides the effects/hit-feedback.yml root");
+        assertEquals("signature", sources.effects().getString("effects.preset"),
+                "the effects-preset override rides the effects.yml root");
         assertEquals(0.5, sources.combo().getDouble("combo-hold.gain"),
                 "the combo-hold override rides the combo.yml root");
         SnapshotParser.Result result = SnapshotParser.parse(sources);
         assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+        // The overlaid selection steers the parsed snapshot: the signature
+        // preset's tune is what the FEEDBACK settings carry.
+        assertEquals("signature", result.snapshot().selectedEffectsPreset(),
+                "the overlay wins over the vanilla selection in effects.yml");
     }
 
     @Test

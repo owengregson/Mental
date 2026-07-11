@@ -56,9 +56,8 @@ class SnapshotTest {
                 yaml(files.getOrDefault(ConfigStore.COMBO_FILE, "")),
                 yaml(files.getOrDefault(ConfigStore.POTS_FILE, "")),
                 yaml(files.getOrDefault(ConfigStore.LOADOUT_FILE, "")),
-                yaml(files.getOrDefault(ConfigStore.HIT_FEEDBACK_FILE, "")),
-                yaml(files.getOrDefault(ConfigStore.DAMAGE_INDICATORS_FILE, "")),
-                yaml(files.getOrDefault(ConfigStore.DEATH_EFFECTS_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.EFFECTS_FILE, "")),
+                Map.of(),
                 Map.of());
     }
 
@@ -115,22 +114,25 @@ class SnapshotTest {
         assertEquals(2.85, combo.staticTarget(), 0.0, "parse-empty combo static target is 2.85");
         assertEquals(PotFillSettings.DEFAULTS, settings(snapshot, Feature.POT_FILL));
         assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
-        // The FEEDBACK family: both cosmetic records default to their era-exact no-op.
+        // The FEEDBACK family reads the selected Combat Effects preset; with no
+        // effects.yml and no preset files the selection is vanilla and the
+        // in-code vanilla constant stands in — the settings DEFAULTS exactly.
+        assertEquals("vanilla", snapshot.selectedEffectsPreset());
         assertEquals(HitFeedbackSettings.DEFAULTS, settings(snapshot, Feature.HIT_FEEDBACK));
         // The low-health extra layer defaults to no layer / a 4-heart post-hit ceiling.
         HitFeedbackSettings feedback = settings(snapshot, Feature.HIT_FEEDBACK);
-        assertTrue(feedback.lowHealthSounds().isEmpty(), "no low-health layer by default (VANILLA)");
+        assertTrue(feedback.lowHealthSounds().isEmpty(), "no low-health layer by default (vanilla)");
         assertEquals(4.0, feedback.lowHealthThresholdHearts(), 0.0, "default low-health threshold is 4 hearts");
         assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
         assertEquals(DeathEffectsSettings.DEFAULTS, settings(snapshot, Feature.DEATH_EFFECTS));
-        // The VANILLA death preset is a strict nothing — no lightning, no sounds,
+        // The vanilla death tune is a strict nothing — no lightning, no sounds,
         // no particles (the module toggle owns zero-touch; enabled-but-vanilla is
         // a no-op by construction).
         DeathEffectsSettings death = settings(snapshot, Feature.DEATH_EFFECTS);
-        assertFalse(death.lightning(), "vanilla death preset strikes no lightning");
-        assertTrue(death.sounds().isEmpty(), "vanilla death preset plays nothing");
-        assertTrue(death.particles().isEmpty(), "vanilla death preset pops nothing");
-        assertTrue(death.fireworkColors().isEmpty(), "vanilla death preset launches no firework");
+        assertFalse(death.lightning(), "vanilla death tune strikes no lightning");
+        assertTrue(death.sounds().isEmpty(), "vanilla death tune plays nothing");
+        assertTrue(death.particles().isEmpty(), "vanilla death tune pops nothing");
+        assertTrue(death.fireworkColors().isEmpty(), "vanilla death tune launches no firework");
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -406,220 +408,6 @@ class SnapshotTest {
     }
 
     @Test
-    void hitFeedbackCustomListsReadFromTheConfig() throws Exception {
-        // preset: custom reads the sounds:/particles: lists — the config's first
-        // list-of-records shape, each entry re-wrapped into its own reader.
-        Snapshot snapshot = parseFiles(Map.of(
-                ConfigStore.HIT_FEEDBACK_FILE, """
-                        hit-feedback:
-                          preset: custom
-                          sounds:
-                            - sound: entity.player.hurt
-                              volume: 0.9
-                              pitch: 1.2
-                            - sound: block.anvil.land
-                              volume: 0.5
-                              pitch: 0.6
-                          particles:
-                            - particle: crit
-                              count-min: 3
-                              count-max: 5
-                              mode: spread
-                              spread: {x: 0.2, y: 0.3, z: 0.2}
-                          low-health-threshold-hearts: 5.0
-                          low-health-sounds:
-                            - sound: entity.glow_squid.hurt
-                              volume: 0.9
-                              pitch: 1.2
-                        """)).snapshot();
-        HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
-        assertEquals(HitFeedbackSettings.Preset.CUSTOM, s.preset());
-        assertEquals(2, s.sounds().size());
-        assertEquals("entity.player.hurt", s.sounds().get(0).sound());
-        assertEquals(0.9f, s.sounds().get(0).volume(), 1e-6);
-        assertEquals(1.2f, s.sounds().get(0).pitch(), 1e-6);
-        assertEquals(1, s.particles().size());
-        assertEquals(HitFeedbackSettings.Mode.SPREAD, s.particles().get(0).mode());
-        assertEquals(0.3, s.particles().get(0).spreadY(), 1e-9);
-        // The low-health extra layer reads its own list and threshold under custom.
-        assertEquals(5.0, s.lowHealthThresholdHearts(), 1e-9);
-        assertEquals(1, s.lowHealthSounds().size());
-        assertEquals("entity.glow_squid.hurt", s.lowHealthSounds().get(0).sound());
-        assertEquals(0.9f, s.lowHealthSounds().get(0).volume(), 1e-6);
-        assertEquals(1.2f, s.lowHealthSounds().get(0).pitch(), 1e-6);
-    }
-
-    @Test
-    void hitFeedbackPresetsResolveTheirInCodeLists() throws Exception {
-        // A non-custom preset ignores the lists and resolves the in-code constants.
-        Snapshot snapshot = parseFiles(Map.of(
-                ConfigStore.HIT_FEEDBACK_FILE, """
-                        hit-feedback:
-                          preset: signature
-                        """)).snapshot();
-        HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
-        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, s.sounds());
-        assertEquals(HitFeedbackSettings.SIGNATURE_PARTICLES, s.particles());
-        // The signature preset also carries its own low-health extra sound layer.
-        assertEquals(HitFeedbackSettings.SIGNATURE_LOW_HEALTH_SOUNDS, s.lowHealthSounds());
-    }
-
-    @Test
-    void hitFeedbackKnobsAreParseClampedToTheirBounds() throws Exception {
-        // A volume above the ceiling and a pitch below the floor each clamp to the
-        // nearest bound (per-entry numberClamped, one warn apiece).
-        Snapshot snapshot = parseFiles(Map.of(
-                ConfigStore.HIT_FEEDBACK_FILE, """
-                        hit-feedback:
-                          preset: custom
-                          sounds:
-                            - sound: entity.player.hurt
-                              volume: 99
-                              pitch: 0.01
-                        """)).snapshot();
-        HitFeedbackSettings s = settings(snapshot, Feature.HIT_FEEDBACK);
-        assertEquals(HitFeedbackSettings.MAX_VOLUME, s.sounds().get(0).volume(), 1e-6);
-        assertEquals(HitFeedbackSettings.MIN_PITCH, s.sounds().get(0).pitch(), 1e-6);
-    }
-
-    @Test
-    void damageIndicatorKnobsReadAndClamp() throws Exception {
-        // lifetime-ticks above MAX_LIFETIME clamps down; the in-range knobs read
-        // verbatim, an absent crit-text keeps its default.
-        Snapshot snapshot = parseFiles(Map.of(
-                ConfigStore.DAMAGE_INDICATORS_FILE, """
-                        damage-indicators:
-                          lifetime-ticks: 500
-                          ring-radius: 0.8
-                          text: "&e{HEALTH}"
-                          crit-threshold-hearts: 3.5
-                        """)).snapshot();
-        DamageIndicatorsSettings s = settings(snapshot, Feature.DAMAGE_INDICATORS);
-        assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, s.lifetimeTicks());
-        assertEquals(0.8, s.ringRadius(), 1e-9);
-        assertEquals("&e{HEALTH}", s.text());
-        assertEquals(3.5, s.critThresholdHearts(), 1e-9);
-        assertEquals(DamageIndicatorsSettings.DEFAULTS.critText(), s.critText());
-    }
-
-    @Test
-    void damageIndicatorLifetimeClampsHighWithAWarning() throws Exception {
-        // intClamped is the integer twin of numberClamped: a high value is pulled to
-        // MAX_LIFETIME with exactly one warn (intAtLeast would have silently kept it).
-        SnapshotParser.Result result = parseFiles(Map.of(
-                ConfigStore.DAMAGE_INDICATORS_FILE, """
-                        damage-indicators:
-                          lifetime-ticks: 500
-                        """));
-        DamageIndicatorsSettings s = settings(result.snapshot(), Feature.DAMAGE_INDICATORS);
-        assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, s.lifetimeTicks());
-        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
-        assertTrue(result.issues().get(0).contains("lifetime-ticks"), () -> result.issues().get(0));
-    }
-
-    @Test
-    void deathEffectsCustomKnobsReadFromTheConfig() throws Exception {
-        // preset: custom reads the lightning flag, the sounds:/particles:
-        // lists — the same list-of-records shape hit-feedback introduced — and
-        // the firework: block (colors: as RRGGBB hex, like the dust specs; a
-        // leading # is tolerated). A dust particle carries its hex color in
-        // the block field (the runtime maps particle "dust" that way).
-        Snapshot snapshot = parseFiles(Map.of(
-                ConfigStore.DEATH_EFFECTS_FILE, """
-                        death-effects:
-                          preset: custom
-                          lightning: true
-                          sounds:
-                            - sound: entity.lightning_bolt.thunder
-                              volume: 0.8
-                              pitch: 1.4
-                          particles:
-                            - particle: dust
-                              block: ff00aa
-                              count-min: 4
-                              count-max: 6
-                              mode: spread
-                              spread: {x: 0.4, y: 0.5, z: 0.4}
-                          firework:
-                            colors:
-                              - ff00aa
-                              - "#00ff55"
-                        """)).snapshot();
-        DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
-        assertEquals(DeathEffectsSettings.Preset.CUSTOM, s.preset());
-        assertTrue(s.lightning(), "custom preset honours the lightning flag");
-        assertEquals(1, s.sounds().size());
-        assertEquals("entity.lightning_bolt.thunder", s.sounds().get(0).sound());
-        assertEquals(0.8f, s.sounds().get(0).volume(), 1e-6);
-        assertEquals(1.4f, s.sounds().get(0).pitch(), 1e-6);
-        assertEquals(1, s.particles().size());
-        assertEquals("dust", s.particles().get(0).particle());
-        assertEquals("ff00aa", s.particles().get(0).block(),
-                "the dust hex color rides the block field");
-        assertEquals(HitFeedbackSettings.Mode.SPREAD, s.particles().get(0).mode());
-        assertEquals(0.5, s.particles().get(0).spreadY(), 1e-9);
-        assertEquals(List.of(0xFF00AA, 0x00FF55), s.fireworkColors(),
-                "firework colors parse from hex, # prefix tolerated, config order kept");
-    }
-
-    @Test
-    void deathEffectsCustomWithoutAFireworkBlockLaunchesNone() throws Exception {
-        // Absent (or empty) firework: means NO firework under custom — the
-        // block is opt-in, so a pre-2.5.3 custom config keeps its exact feel.
-        Snapshot snapshot = parseFiles(Map.of(
-                ConfigStore.DEATH_EFFECTS_FILE, """
-                        death-effects:
-                          preset: custom
-                          lightning: true
-                        """)).snapshot();
-        DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
-        assertEquals(DeathEffectsSettings.Preset.CUSTOM, s.preset());
-        assertTrue(s.fireworkColors().isEmpty(), "no firework block, no firework");
-    }
-
-    @Test
-    void deathEffectsFireworkSkipsMalformedHexWithOneWarning() throws Exception {
-        SnapshotParser.Result result = parseFiles(Map.of(
-                ConfigStore.DEATH_EFFECTS_FILE, """
-                        death-effects:
-                          preset: custom
-                          firework:
-                            colors:
-                              - ffaa00
-                              - not-a-color
-                        """));
-        DeathEffectsSettings s = settings(result.snapshot(), Feature.DEATH_EFFECTS);
-        assertEquals(List.of(0xFFAA00), s.fireworkColors(), "the valid color survives");
-        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
-        assertTrue(result.issues().get(0).contains("not-a-color"), () -> result.issues().get(0));
-    }
-
-    @Test
-    void deathEffectsPresetsDispatchTheirInCodeSets() throws Exception {
-        // A named preset resolves the in-code constants and ignores the custom
-        // knobs entirely — signature strikes its cosmetic lightning even with
-        // the custom flag written false alongside it.
-        Snapshot snapshot = parseFiles(Map.of(
-                ConfigStore.DEATH_EFFECTS_FILE, """
-                        death-effects:
-                          preset: signature
-                          lightning: false
-                        """)).snapshot();
-        DeathEffectsSettings s = settings(snapshot, Feature.DEATH_EFFECTS);
-        assertTrue(s.lightning(), "signature strikes lightning regardless of the custom flag");
-        assertEquals(DeathEffectsSettings.SIGNATURE_SOUNDS, s.sounds());
-        assertEquals(DeathEffectsSettings.SIGNATURE_PARTICLES, s.particles());
-        // The owner's tune, pinned by value: the glow-squid death call over the
-        // REAL white/yellow/gold firework blast (2.5.3) — the colored-dust
-        // approximation is gone, so the particle list is empty by design.
-        assertEquals("entity.glow_squid.death", s.sounds().get(0).sound());
-        assertTrue(s.particles().isEmpty(),
-                "the real colored blast replaced the whole dust+spark approximation");
-        assertEquals(List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00), s.fireworkColors(),
-                "white &f, yellow &e, gold &6 — the signature blast");
-    }
-
-    @Test
     void probeStrategyIsStoredRawSoTheParserStaysVersionBlind() throws Exception {
         // The parser no longer resolves the transport — that is version-aware and happens
         // at the boot seam (ProbeStrategy.resolveEffective, pinned in ProbeStrategyTest).
@@ -700,16 +488,11 @@ class SnapshotTest {
     void bundledSplitFilesParseCleanAndKeepEveryEffectiveDefault() throws Exception {
         // The fresh-install pin: every 2.5.2 split file, exactly as the jar ships
         // it, parses with ZERO issues, and the EFFECTIVE settings are the same
-        // era-exact no-ops parse(empty) yields. (The effects templates carry live
-        // editable lists, so record equality is asserted on the effective
-        // per-preset views, not the raw custom lists.)
+        // era-exact no-ops parse(empty) yields.
         SnapshotParser.Result result = parseFiles(Map.of(
                 ConfigStore.COMBO_FILE, bundled(ConfigStore.COMBO_FILE),
                 ConfigStore.POTS_FILE, bundled(ConfigStore.POTS_FILE),
-                ConfigStore.LOADOUT_FILE, bundled(ConfigStore.LOADOUT_FILE),
-                ConfigStore.HIT_FEEDBACK_FILE, bundled(ConfigStore.HIT_FEEDBACK_FILE),
-                ConfigStore.DAMAGE_INDICATORS_FILE, bundled(ConfigStore.DAMAGE_INDICATORS_FILE),
-                ConfigStore.DEATH_EFFECTS_FILE, bundled(ConfigStore.DEATH_EFFECTS_FILE)));
+                ConfigStore.LOADOUT_FILE, bundled(ConfigStore.LOADOUT_FILE)));
         assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
         Snapshot snapshot = result.snapshot();
 
@@ -720,23 +503,21 @@ class SnapshotTest {
         assertEquals(FastPotsSettings.DEFAULTS, settings(snapshot, Feature.FAST_POTS));
         assertEquals(OffhandSettings.DEFAULTS, settings(snapshot, Feature.OFFHAND));
         assertEquals(CraftingSettings.DEFAULTS, settings(snapshot, Feature.CRAFTING));
-        assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
+    }
 
-        // The effects templates: the preset picks the same effective sets the
-        // parse-empty defaults resolve.
-        HitFeedbackSettings feedback = settings(snapshot, Feature.HIT_FEEDBACK);
-        HitFeedbackSettings feedbackDefaults = HitFeedbackSettings.DEFAULTS;
-        assertEquals(feedbackDefaults.preset(), feedback.preset());
-        assertEquals(feedbackDefaults.sounds(), feedback.sounds());
-        assertEquals(feedbackDefaults.particles(), feedback.particles());
-        assertEquals(feedbackDefaults.lowHealthSounds(), feedback.lowHealthSounds());
-        assertEquals(feedbackDefaults.lowHealthThresholdHearts(), feedback.lowHealthThresholdHearts());
-        DeathEffectsSettings death = settings(snapshot, Feature.DEATH_EFFECTS);
-        DeathEffectsSettings deathDefaults = DeathEffectsSettings.DEFAULTS;
-        assertEquals(deathDefaults.preset(), death.preset());
-        assertEquals(deathDefaults.lightning(), death.lightning());
-        assertEquals(deathDefaults.sounds(), death.sounds());
-        assertEquals(deathDefaults.particles(), death.particles());
+    @Test
+    void theBundledEffectsSelectionParsesCleanAtTheVanillaDefault() throws Exception {
+        // The fresh-install pin for the 2.5.3 preset library: the bundled
+        // effects.yml selects vanilla with zero issues, and the FEEDBACK
+        // settings are the parse-empty era-exact no-ops.
+        SnapshotParser.Result result = parseFiles(Map.of(
+                ConfigStore.EFFECTS_FILE, bundled(ConfigStore.EFFECTS_FILE)));
+        assertTrue(result.issues().isEmpty(), () -> "unexpected issues: " + result.issues());
+        Snapshot snapshot = result.snapshot();
+        assertEquals("vanilla", snapshot.selectedEffectsPreset());
+        assertEquals(HitFeedbackSettings.DEFAULTS, settings(snapshot, Feature.HIT_FEEDBACK));
+        assertEquals(DamageIndicatorsSettings.DEFAULTS, settings(snapshot, Feature.DAMAGE_INDICATORS));
+        assertEquals(DeathEffectsSettings.DEFAULTS, settings(snapshot, Feature.DEATH_EFFECTS));
     }
 
     @Test
@@ -750,8 +531,7 @@ class SnapshotTest {
             SnapshotParser.Result fromSplit = parseFiles(Map.of(file, body));
             SnapshotParser.Result fromMain = parseFiles(Map.of(ConfigStore.MAIN_FILE, body));
             for (Feature feature : List.of(Feature.COMBO_HOLD, Feature.COMBO_REACH_HANDICAP,
-                    Feature.POT_FILL, Feature.FAST_POTS, Feature.OFFHAND, Feature.CRAFTING,
-                    Feature.HIT_FEEDBACK, Feature.DAMAGE_INDICATORS, Feature.DEATH_EFFECTS)) {
+                    Feature.POT_FILL, Feature.FAST_POTS, Feature.OFFHAND, Feature.CRAFTING)) {
                 assertEquals((Object) settings(fromSplit.snapshot(), feature),
                         settings(fromMain.snapshot(), feature),
                         () -> file + " parity for " + feature);
@@ -784,17 +564,17 @@ class SnapshotTest {
         // one issue line names the section, both files, and the way out.
         SnapshotParser.Result result = parseFiles(Map.of(
                 ConfigStore.MAIN_FILE, """
-                        hit-feedback:
-                          preset: signature
-                          low-health-threshold-hearts: 6.0
+                        pot-fill:
+                          permission: "server.vip.pots"
+                          cost-per-potion: 5.0
                         """));
-        HitFeedbackSettings feedback = settings(result.snapshot(), Feature.HIT_FEEDBACK);
-        assertEquals(HitFeedbackSettings.Preset.SIGNATURE, feedback.preset(),
+        PotFillSettings potFill = settings(result.snapshot(), Feature.POT_FILL);
+        assertEquals("server.vip.pots", potFill.permission(),
                 "the old-location tune applies verbatim");
-        assertEquals(6.0, feedback.lowHealthThresholdHearts(), 0.0);
+        assertEquals(5.0, potFill.costPerPotion(), 0.0);
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
-        assertTrue(result.issues().get(0).contains("hit-feedback"), () -> result.issues().get(0));
-        assertTrue(result.issues().get(0).contains("moved to " + ConfigStore.HIT_FEEDBACK_FILE),
+        assertTrue(result.issues().get(0).contains("pot-fill"), () -> result.issues().get(0));
+        assertTrue(result.issues().get(0).contains("moved to " + ConfigStore.POTS_FILE),
                 () -> result.issues().get(0));
         assertTrue(result.issues().get(0).contains("honoured"), () -> result.issues().get(0));
     }
@@ -838,18 +618,18 @@ class SnapshotTest {
         // config.yml section is named loudly — never dropped in silence.
         SnapshotParser.Result result = parseFiles(Map.of(
                 ConfigStore.MAIN_FILE, """
-                        damage-indicators:
-                          ring-radius: 1.0
+                        pot-fill:
+                          cost-per-potion: 9.0
                         """,
-                ConfigStore.DAMAGE_INDICATORS_FILE, """
-                        damage-indicators:
-                          ring-radius: 0.8
+                ConfigStore.POTS_FILE, """
+                        pot-fill:
+                          cost-per-potion: 5.0
                         """));
-        DamageIndicatorsSettings indicators = settings(result.snapshot(), Feature.DAMAGE_INDICATORS);
-        assertEquals(0.8, indicators.ringRadius(), 1e-9, "the split file wins");
+        PotFillSettings potFill = settings(result.snapshot(), Feature.POT_FILL);
+        assertEquals(5.0, potFill.costPerPotion(), 1e-9, "the split file wins");
         assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
         assertTrue(result.issues().get(0).contains("ignored"), () -> result.issues().get(0));
-        assertTrue(result.issues().get(0).contains(ConfigStore.DAMAGE_INDICATORS_FILE),
+        assertTrue(result.issues().get(0).contains(ConfigStore.POTS_FILE),
                 () -> result.issues().get(0));
     }
 }

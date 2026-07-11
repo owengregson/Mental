@@ -76,6 +76,31 @@ class ReconcilerTest {
         return SnapshotParser.parse(ConfigStore.Sources.of(main, empty, empty, empty, Map.of())).snapshot();
     }
 
+    /**
+     * A snapshot with a Combat Effects selection (2.5.3: the FEEDBACK settings
+     * come from the selected preset file, so a settings CHANGE is staged by
+     * switching presets). "signature" resolves an in-memory preset whose
+     * hit-feedback sounds differ from the vanilla defaults; "vanilla" is the
+     * absent-file fallback — the in-code defaults.
+     */
+    private static Snapshot snapshot(String modulesYaml, String selectedPreset) throws Exception {
+        YamlConfiguration main = new YamlConfiguration();
+        main.loadFromString(modulesYaml);
+        YamlConfiguration effects = new YamlConfiguration();
+        effects.loadFromString("effects:\n  preset: " + selectedPreset + "\n");
+        YamlConfiguration signature = new YamlConfiguration();
+        signature.loadFromString("""
+                hit-feedback:
+                  sounds:
+                    - sound: block.anvil.land
+                """);
+        YamlConfiguration empty = new YamlConfiguration();
+        return SnapshotParser.parse(new ConfigStore.Sources(
+                main, empty, empty, empty,
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                effects, Map.of("signature", signature), Map.of())).snapshot();
+    }
+
     /* --------------------------------- tests --------------------------------- */
 
     @Test
@@ -200,18 +225,17 @@ class ReconcilerTest {
         unit.rebuildOnSettingsChange = true;
         reconciler.register(unit);
 
-        String vanilla = "modules:\n  hit-feedback: true\nhit-feedback:\n  preset: vanilla\n";
-        String signature = "modules:\n  hit-feedback: true\nhit-feedback:\n  preset: signature\n";
+        String enabled = "modules:\n  hit-feedback: true\n";
 
-        reconciler.converge(snapshot(vanilla));
+        reconciler.converge(snapshot(enabled, "vanilla"));
         assertEquals(1, unit.assembleCount, "enabled once");
 
-        reconciler.converge(snapshot(signature));
+        reconciler.converge(snapshot(enabled, "signature"));
         assertEquals(2, unit.assembleCount, "changed settings bounce the unit");
         assertEquals(1, registrar.closeCounts.get("HIT_FEEDBACK-0"), "the old scope closed exactly once");
         assertTrue(reconciler.active(Feature.HIT_FEEDBACK), "the unit is re-assembled, not left off");
 
-        reconciler.converge(snapshot(signature));
+        reconciler.converge(snapshot(enabled, "signature"));
         assertEquals(2, unit.assembleCount,
                 "an identical re-parse never bounces — settings records compare by value");
     }
@@ -224,8 +248,8 @@ class ReconcilerTest {
         RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
         reconciler.register(unit);
 
-        reconciler.converge(snapshot("modules:\n  hit-feedback: true\nhit-feedback:\n  preset: vanilla\n"));
-        reconciler.converge(snapshot("modules:\n  hit-feedback: true\nhit-feedback:\n  preset: signature\n"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "vanilla"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "signature"));
 
         assertEquals(1, unit.assembleCount, "no opt-in → no bounce");
         assertTrue(reconciler.active(Feature.HIT_FEEDBACK));
@@ -240,8 +264,8 @@ class ReconcilerTest {
         unit.rebuildOnSettingsChange = true;
         reconciler.register(unit);
 
-        reconciler.converge(snapshot("modules:\n  hit-feedback: true\nhit-feedback:\n  preset: vanilla\n"));
-        reconciler.converge(snapshot("modules:\n  hit-feedback: false\nhit-feedback:\n  preset: signature\n"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\n", "vanilla"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: false\n", "signature"));
 
         assertEquals(1, unit.assembleCount, "disable wins — no re-assemble");
         assertFalse(reconciler.active(Feature.HIT_FEEDBACK));

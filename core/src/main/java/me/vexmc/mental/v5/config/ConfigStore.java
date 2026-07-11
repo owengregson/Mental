@@ -46,12 +46,35 @@ public final class ConfigStore {
     public static final String POTS_FILE = "pots.yml";
     public static final String LOADOUT_FILE = "loadout.yml";
     public static final String EFFECTS_DIR = "effects";
-    public static final String HIT_FEEDBACK_FILE = EFFECTS_DIR + "/hit-feedback.yml";
-    public static final String DAMAGE_INDICATORS_FILE = EFFECTS_DIR + "/damage-indicators.yml";
-    public static final String DEATH_EFFECTS_FILE = EFFECTS_DIR + "/death-effects.yml";
+    /** The Combat Effects selection file — {@code knockback.yml}'s role for the FEEDBACK family. */
+    public static final String EFFECTS_FILE = "effects.yml";
+    /** One Combat Effects preset per file, the profiles/ model mirrored. */
+    public static final String EFFECTS_PRESETS_DIR = EFFECTS_DIR + "/presets";
     public static final String PROFILES_DIR = "profiles";
     public static final String STATE_DIR = "state";
     public static final String OVERRIDES_FILE = "overrides.yml";
+
+    /**
+     * The 2.5.2 per-module effects files, retired by the 2.5.3 preset library.
+     * {@link Migrations} imports their resolved effective values into
+     * {@code effects/presets/custom.yml} and backs them up; nothing loads them
+     * anymore.
+     */
+    public static final String LEGACY_HIT_FEEDBACK_FILE = EFFECTS_DIR + "/hit-feedback.yml";
+    public static final String LEGACY_DAMAGE_INDICATORS_FILE = EFFECTS_DIR + "/damage-indicators.yml";
+    public static final String LEGACY_DEATH_EFFECTS_FILE = EFFECTS_DIR + "/death-effects.yml";
+    public static final List<String> LEGACY_EFFECTS_FILES = List.of(
+            LEGACY_HIT_FEEDBACK_FILE, LEGACY_DAMAGE_INDICATORS_FILE, LEGACY_DEATH_EFFECTS_FILE);
+
+    /**
+     * The config.yml section names the FEEDBACK family once parsed from (both
+     * the pre-2.5.2 old-location shape and the 2.5.2 split files' sections).
+     * Retired with the preset library: {@code SnapshotParser} names a lingering
+     * section loudly (never honours, never silent) and {@code Migrations}
+     * resolves them during the 3 → 4 import.
+     */
+    public static final List<String> RETIRED_EFFECTS_SECTIONS =
+            List.of("hit-feedback", "damage-indicators", "death-effects");
 
     /**
      * The 2.5.2 per-concern splits: each file's top-level sections used to live
@@ -60,15 +83,17 @@ public final class ConfigStore {
      * extraction while config.yml still carries one of its sections (a pristine
      * bundle must never shadow a tuned old-location section), and
      * {@code SnapshotParser} honours the old location with one loud line per
-     * parse. Insertion order is the extraction order.
+     * parse. The three 2.5.2 effects files left this map with the 2.5.3 preset
+     * library — their sections are {@link #RETIRED_EFFECTS_SECTIONS} now.
      */
     public static final Map<String, List<String>> SPLIT_FILE_SECTIONS = Map.of(
             COMBO_FILE, List.of("combo-hold", "combo-reach-handicap"),
             POTS_FILE, List.of("pot-fill", "fast-pots"),
-            LOADOUT_FILE, List.of("disable-offhand", "disable-crafting"),
-            HIT_FEEDBACK_FILE, List.of("hit-feedback"),
-            DAMAGE_INDICATORS_FILE, List.of("damage-indicators"),
-            DEATH_EFFECTS_FILE, List.of("death-effects"));
+            LOADOUT_FILE, List.of("disable-offhand", "disable-crafting"));
+
+    /** The bundled Combat Effects presets; regenerated individually when missing. */
+    public static final List<String> BUNDLED_EFFECTS_PRESETS =
+            List.of("vanilla", "signature", "custom");
 
     /** The formula-category folder for a legacy-formula profile. */
     public static final String LEGACY_FOLDER = "legacy";
@@ -108,15 +133,16 @@ public final class ConfigStore {
             Configuration combo,
             Configuration pots,
             Configuration loadout,
-            Configuration hitFeedback,
-            Configuration damageIndicators,
-            Configuration deathEffects,
+            Configuration effects,
+            Map<String, Configuration> effectsPresets,
             Map<String, Configuration> profiles) {
 
         /**
-         * The pre-2.5.2 four-root shape with every split file empty — the parser
-         * then resolves each split section to its config.yml fallback (or the
-         * defaults). Test seam; production always loads the full set.
+         * The pre-2.5.2 four-root shape with every split file empty and no
+         * Combat Effects sources — the parser then resolves each split section
+         * to its config.yml fallback (or the defaults) and the effects
+         * selection to the in-code vanilla preset. Test seam; production
+         * always loads the full set.
          */
         public static Sources of(
                 Configuration main,
@@ -126,7 +152,7 @@ public final class ConfigStore {
                 Map<String, Configuration> profiles) {
             return new Sources(main, knockback, hitReg, latency,
                     new MemoryConfiguration(), new MemoryConfiguration(), new MemoryConfiguration(),
-                    new MemoryConfiguration(), new MemoryConfiguration(), new MemoryConfiguration(),
+                    new MemoryConfiguration(), Map.of(),
                     profiles);
         }
     }
@@ -172,6 +198,7 @@ public final class ConfigStore {
                 extractIfMissing(split.getKey(), dataDir.resolve(split.getKey()));
             }
         }
+        ensureEffectsPresetLibrary(mainOnDisk);
         Path profilesDir = dataDir.resolve(PROFILES_DIR);
         if (!Files.isDirectory(profilesDir) && !mkdirs(profilesDir)) {
             log.accept("Could not create " + profilesDir + " — profiles unavailable");
@@ -191,6 +218,79 @@ public final class ConfigStore {
             extractIfMissing(PROFILES_DIR + "/" + folder + "/" + preset + ".yml", file);
             ensureDeliverySection(preset, file);
             upgradeSupersededPreset(preset, file);
+        }
+    }
+
+    /**
+     * The Combat Effects preset library (2.5.3): {@code effects.yml} plus one
+     * file per bundled preset under {@code effects/presets/}, each on the
+     * extracted-only-when-missing contract, with the SupersededPresets-style
+     * pristine upgrade for {@code vanilla}/{@code signature} (never
+     * {@code custom} — it is the owner's preset by definition). One guard: a
+     * 2.5.2 tree that still awaits the 3 → 4 migration (config-version below 4
+     * with the old per-module files or config.yml sections present) must not
+     * see {@code effects.yml} or {@code custom.yml} extracted — the migration
+     * owns creating both ({@code custom.yml}'s first extraction IS the import
+     * of the old effective values, and {@code effects.yml} must come up with
+     * custom selected). The suppression is silent; the migration prints the
+     * loud lines (mandate B10: loud, once).
+     */
+    private void ensureEffectsPresetLibrary(Configuration mainOnDisk) {
+        boolean awaitingEffectsMigration = mainOnDisk.getInt("config-version", 0) < 4
+                && (LEGACY_EFFECTS_FILES.stream()
+                        .anyMatch(file -> Files.isRegularFile(dataDir.resolve(file)))
+                || RETIRED_EFFECTS_SECTIONS.stream()
+                        .anyMatch(section -> mainOnDisk.getConfigurationSection(section) != null));
+        if (!awaitingEffectsMigration) {
+            extractIfMissing(EFFECTS_FILE, dataDir.resolve(EFFECTS_FILE));
+        }
+        for (String preset : BUNDLED_EFFECTS_PRESETS) {
+            boolean custom = "custom".equals(preset);
+            if (custom && awaitingEffectsMigration) {
+                continue;
+            }
+            Path file = dataDir.resolve(EFFECTS_PRESETS_DIR).resolve(preset + ".yml");
+            extractIfMissing(EFFECTS_PRESETS_DIR + "/" + preset + ".yml", file);
+            if (!custom) {
+                upgradeSupersededEffectsPreset(preset, file);
+            }
+        }
+    }
+
+    /**
+     * The effects twin of {@link #upgradeSupersededPreset}: a bundled effects
+     * preset whose RAW BYTES still match a superseded shipped revision is
+     * upgraded in place; any owner edit freezes the file forever. The archive
+     * ({@link SupersededEffectsPresets}) is empty until a research round
+     * corrects a bundled tune.
+     */
+    private void upgradeSupersededEffectsPreset(String preset, Path file) {
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
+        String onDisk;
+        try {
+            onDisk = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException failure) {
+            log.accept("Could not read " + EFFECTS_PRESETS_DIR + "/" + preset + ".yml: " + failure);
+            return;
+        }
+        if (!SupersededEffectsPresets.isSupersededBundleText(preset, onDisk)) {
+            return;
+        }
+        String resource = EFFECTS_PRESETS_DIR + "/" + preset + ".yml";
+        String current = readResource(resource);
+        if (current == null) {
+            log.accept("Bundled resource " + resource + " is missing from the jar");
+            return;
+        }
+        try {
+            Files.writeString(file, current, StandardCharsets.UTF_8);
+            log.accept(resource + " is a superseded bundled revision,"
+                    + " byte-identical and unedited — upgraded to the corrected bundle"
+                    + " (delete the file to regenerate anytime)");
+        } catch (IOException failure) {
+            log.accept("Could not upgrade " + resource + ": " + failure);
         }
     }
 
@@ -319,10 +419,38 @@ public final class ConfigStore {
                 loadYaml(dataDir.resolve(COMBO_FILE), COMBO_FILE),
                 loadYaml(dataDir.resolve(POTS_FILE), POTS_FILE),
                 loadYaml(dataDir.resolve(LOADOUT_FILE), LOADOUT_FILE),
-                loadYaml(dataDir.resolve(HIT_FEEDBACK_FILE), HIT_FEEDBACK_FILE),
-                loadYaml(dataDir.resolve(DAMAGE_INDICATORS_FILE), DAMAGE_INDICATORS_FILE),
-                loadYaml(dataDir.resolve(DEATH_EFFECTS_FILE), DEATH_EFFECTS_FILE),
+                loadYaml(dataDir.resolve(EFFECTS_FILE), EFFECTS_FILE),
+                loadEffectsPresets(),
                 profiles);
+    }
+
+    /**
+     * Every {@code effects/presets/*.yml} keyed by stem — a flat directory (no
+     * category folders, unlike profiles/), so discovery is a plain sorted
+     * listing; any file an owner drops in becomes selectable by its stem. An
+     * unparseable preset is reported and served empty, which parses to the
+     * vanilla-valued defaults — the loud fallback the selection warns about.
+     */
+    private Map<String, Configuration> loadEffectsPresets() {
+        Map<String, Configuration> presets = new TreeMap<>();
+        Path presetsDir = dataDir.resolve(EFFECTS_PRESETS_DIR);
+        if (!Files.isDirectory(presetsDir)) {
+            return presets;
+        }
+        try (var stream = Files.list(presetsDir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString()
+                            .toLowerCase(Locale.ROOT).endsWith(".yml"))
+                    .sorted()
+                    .forEach(path -> {
+                        String fileName = path.getFileName().toString();
+                        String stem = fileName.substring(0, fileName.length() - 4);
+                        presets.put(stem, loadYaml(path, EFFECTS_PRESETS_DIR + "/" + fileName));
+                    });
+        } catch (IOException failure) {
+            log.accept("Could not list " + presetsDir + ": " + failure);
+        }
+        return presets;
     }
 
     /* ------------------------------------------------------------------ */

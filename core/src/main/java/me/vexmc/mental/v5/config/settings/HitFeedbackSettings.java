@@ -7,28 +7,29 @@ import java.util.List;
  * melee hurt-sound broadcast (each with its own volume/pitch), which particle
  * bursts pop at the victim's mid-chest, and an optional low-health EXTRA sound
  * layer played on top of the normal sounds when the victim's post-hit health
- * drops below {@code lowHealthThresholdHearts} (in HEARTS). The {@code preset}
- * selects an in-code set (VANILLA — audibly vanilla, the parse default;
- * SIGNATURE — Mental's own layered tune) or CUSTOM, which reads the
- * {@code sounds:} / {@code particles:} / {@code low-health-sounds:} lists from
- * the section. Presets are code constants, not files — the knockback profile
- * machinery is deliberately not reused (spec: rejected alternatives).
+ * drops below {@code lowHealthThresholdHearts} (in HEARTS). Since 2.5.3 the
+ * values parse from the selected Combat Effects preset file's
+ * {@code hit-feedback:} section ({@code effects/presets/<name>.yml} — the
+ * knockback-profile model mirrored); the old per-module {@code preset:} enum
+ * knob is gone, so the record carries only effective values. The
+ * {@code SIGNATURE_*}/{@code VANILLA_SOUNDS} constants remain as the pin
+ * values the bundled preset files must parse to exactly.
  *
- * @param customLowHealthSounds the low-health extra layer under CUSTOM (empty for
- *        no extra layer); the runtime task plays it on top of the normal sounds
- *        when post-hit health falls below the threshold, and suppresses it on the
+ * @param sounds the replacement broadcast (empty replaces the vanilla sound
+ *        with silence — the suppressor still eats the vanilla broadcast)
+ * @param particles the mid-chest bursts (empty for none)
+ * @param lowHealthSounds the low-health extra layer (empty for no extra
+ *        layer); the runtime plays it on top of the normal sounds when
+ *        post-hit health falls below the threshold, and suppresses it on the
  *        killing hit
- * @param lowHealthThresholdHearts the post-hit health ceiling, in HEARTS, below
- *        which the extra layer fires (2 health = 1 heart)
+ * @param lowHealthThresholdHearts the post-hit health ceiling, in HEARTS,
+ *        below which the extra layer fires (2 health = 1 heart)
  */
 public record HitFeedbackSettings(
-        Preset preset,
-        List<SoundSpec> customSounds,
-        List<ParticleSpec> customParticles,
-        List<SoundSpec> customLowHealthSounds,
+        List<SoundSpec> sounds,
+        List<ParticleSpec> particles,
+        List<SoundSpec> lowHealthSounds,
         double lowHealthThresholdHearts) {
-
-    public enum Preset { VANILLA, SIGNATURE, CUSTOM }
 
     /** One replacement sound: a resource-location name plus its volume/pitch. */
     public record SoundSpec(String sound, float volume, float pitch) {}
@@ -51,7 +52,7 @@ public record HitFeedbackSettings(
     public static final float MAX_PITCH = 2.0f;
     public static final int MAX_COUNT = 64;
 
-    /** The signature preset's sound layers (spec: the owner's 2.5.2 ask). */
+    /** The signature preset's sound layers (spec: the owner's 2.5.2 ask) — a bundled-file pin. */
     public static final List<SoundSpec> SIGNATURE_SOUNDS = List.of(
             new SoundSpec("block.lodestone.break", 1.0f, 1.0f),
             new SoundSpec("entity.generic.hurt", 0.85f, 0.75f),
@@ -73,37 +74,23 @@ public record HitFeedbackSettings(
     public static final List<SoundSpec> VANILLA_SOUNDS =
             List.of(new SoundSpec("entity.player.hurt", 1.0f, 1.0f));
 
+    /**
+     * {@code parse(empty) == DEFAULTS} is the vanilla tune: the era hurt sound,
+     * no particles, no low-health layer — with the module enabled this is
+     * byte-true to what vanilla broadcast anyway (the era-exact no-op).
+     */
     public static final HitFeedbackSettings DEFAULTS =
-            new HitFeedbackSettings(Preset.VANILLA, List.of(), List.of(), List.of(), 4.0);
-
-    /** The effective sound list for the selected preset. */
-    public List<SoundSpec> sounds() {
-        return switch (preset) {
-            case VANILLA -> VANILLA_SOUNDS;
-            case SIGNATURE -> SIGNATURE_SOUNDS;
-            case CUSTOM -> customSounds;
-        };
-    }
-
-    /** The effective particle list for the selected preset. */
-    public List<ParticleSpec> particles() {
-        return switch (preset) {
-            case VANILLA -> List.of();
-            case SIGNATURE -> SIGNATURE_PARTICLES;
-            case CUSTOM -> customParticles;
-        };
-    }
+            new HitFeedbackSettings(VANILLA_SOUNDS, List.of(), List.of(), 4.0);
 
     /**
-     * The effective low-health extra sound layer for the selected preset (empty
-     * for no extra layer). VANILLA never layers; SIGNATURE plays the glow-squid
-     * chirp; CUSTOM plays the configured {@code low-health-sounds:} list.
+     * Whether the effective sound set IS the vanilla broadcast — exactly the
+     * era hurt sound at 1.0/1.0. The emit path then applies vanilla's own
+     * per-broadcast pitch jitter instead of the configured flat pitch, so the
+     * vanilla preset (and any preset that reproduces its values) stays
+     * byte-true to the era sound; the old enum's {@code VANILLA} check reduced
+     * to this same value test.
      */
-    public List<SoundSpec> lowHealthSounds() {
-        return switch (preset) {
-            case VANILLA -> List.of();
-            case SIGNATURE -> SIGNATURE_LOW_HEALTH_SOUNDS;
-            case CUSTOM -> customLowHealthSounds;
-        };
+    public boolean vanillaTune() {
+        return VANILLA_SOUNDS.equals(sounds);
     }
 }

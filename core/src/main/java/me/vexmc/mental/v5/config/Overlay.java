@@ -64,9 +64,12 @@ public final class Overlay {
             case "combo-hold", "combo-reach-handicap" -> sources.combo();
             case "pot-fill", "fast-pots" -> sources.pots();
             case "disable-offhand", "disable-crafting" -> sources.loadout();
-            case "hit-feedback" -> sources.hitFeedback();
-            case "damage-indicators" -> sources.damageIndicators();
-            case "death-effects" -> sources.deathEffects();
+            // The 2.5.3 Combat Effects selection: effects.preset (the GUI's
+            // preset picker and the tester's staging key) rides the effects.yml
+            // root the parser reads the selection from. The three retired
+            // per-module prefixes are scrubbed from the overlay at boot with a
+            // loud line each, so nothing routes them anymore.
+            case "effects" -> sources.effects();
             default -> sources.main(); // modules, anticheat, metrics, debug
         };
     }

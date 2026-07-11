@@ -6,22 +6,24 @@ import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.SoundSpec;
 
 /**
  * The {@code death-effects} module's tunables: what plays at the moment a
- * player dies (any cause — PlayerDeathEvent). The VANILLA preset is a strict
- * nothing (enabled-but-vanilla is a no-op; the toggle owns zero-touch);
- * SIGNATURE is the owner's tune — a cosmetic packet lightning bolt (never a
- * real entity: no fire, no damage, no block interaction by construction),
- * the glow-squid death sound, and the REAL white/yellow/gold colored firework
- * blast (a packet-only rocket detonated by entity status 17 — vanilla's own
- * mechanism, since the firework particle itself carries no color on the wire).
+ * player dies (any cause — PlayerDeathEvent). Since 2.5.3 the values parse
+ * from the selected Combat Effects preset file's {@code death-effects:}
+ * section ({@code effects/presets/<name>.yml}); the old per-module
+ * {@code preset:} enum knob is gone, so the record carries only effective
+ * values. DEFAULTS is the vanilla tune — a strict nothing (enabled-but-vanilla
+ * is a no-op; the toggle owns zero-touch). The {@code SIGNATURE_*} constants
+ * remain as the pin values the bundled signature/custom preset files must
+ * parse to exactly: a cosmetic packet lightning bolt (never a real entity: no
+ * fire, no damage, no block interaction by construction), the glow-squid death
+ * sound, and the REAL white/yellow/gold colored firework blast (a packet-only
+ * rocket detonated by entity status 17 — vanilla's own mechanism, since the
+ * firework particle itself carries no color on the wire).
  */
 public record DeathEffectsSettings(
-        Preset preset,
-        boolean customLightning,
-        List<SoundSpec> customSounds,
-        List<ParticleSpec> customParticles,
-        List<Integer> customFireworkColors) {
-
-    public enum Preset { VANILLA, SIGNATURE, CUSTOM }
+        boolean lightning,
+        List<SoundSpec> sounds,
+        List<ParticleSpec> particles,
+        List<Integer> fireworkColors) {
 
     public static final List<SoundSpec> SIGNATURE_SOUNDS =
             List.of(new SoundSpec("entity.glow_squid.death", 1.0f, 0.95f));
@@ -44,39 +46,7 @@ public record DeathEffectsSettings(
     public static final List<Integer> SIGNATURE_FIREWORK_COLORS =
             List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00);
 
+    /** The vanilla tune: a strict nothing — {@code parse(empty)}'s era-exact no-op. */
     public static final DeathEffectsSettings DEFAULTS =
-            new DeathEffectsSettings(Preset.VANILLA, false, List.of(), List.of(), List.of());
-
-    public boolean lightning() {
-        return switch (preset) {
-            case VANILLA -> false;
-            case SIGNATURE -> true;
-            case CUSTOM -> customLightning;
-        };
-    }
-
-    public List<SoundSpec> sounds() {
-        return switch (preset) {
-            case VANILLA -> List.of();
-            case SIGNATURE -> SIGNATURE_SOUNDS;
-            case CUSTOM -> customSounds;
-        };
-    }
-
-    public List<ParticleSpec> particles() {
-        return switch (preset) {
-            case VANILLA -> List.of();
-            case SIGNATURE -> SIGNATURE_PARTICLES;
-            case CUSTOM -> customParticles;
-        };
-    }
-
-    /** The effective blast colors; empty means no firework ships at all. */
-    public List<Integer> fireworkColors() {
-        return switch (preset) {
-            case VANILLA -> List.of();
-            case SIGNATURE -> SIGNATURE_FIREWORK_COLORS;
-            case CUSTOM -> customFireworkColors;
-        };
-    }
+            new DeathEffectsSettings(false, List.of(), List.of(), List.of());
 }
