@@ -24,6 +24,23 @@
  *                        mid-tick — the fastest tap a client can wire. The era
  *                        queue applied them in order (hit 2 ships the sprint
  *                        stamp); a tick-frozen sprint read ships hit 2 plain
+ *   double-sprint-fastwtap-attackfirst  the fast tap with the click BEFORE the
+ *                        re-arm: STOP, ATTACK, START in one flush. The hit is
+ *                        thrown while sprint is still broken; the START trails
+ *                        it in the same tick and must NOT retro-grant the stamp
+ *                        (era same-tick ATTACK-first is plain — bytecode-pinned).
+ *                        MUST run with CLIENT_SPRINT_DROP=0 (see Env)
+ *   double-sprint-stap   sprint hit 1; the second re-arm via an S-tap — the
+ *                        backward key breaks the sprint (STOP + backward bit),
+ *                        then S clears and W re-holds (START) before hit 2
+ *   blockhit-one-credit  attacker block-hits: sprint hit 1, then raise a
+ *                        blockable item (grants ONE sprint-reset credit) — hit 2
+ *                        fresh (credit), hit 3 plain (credit spent), release +
+ *                        re-raise + hit 4 fresh again. SETUP_CMDS must arm the
+ *                        attacker with a blockable item; run CLIENT_SPRINT_DROP=0
+ *   gui-reset            sprint hit 1, then a GUI cycle (all-false input +
+ *                        close_window, then re-press forward+sprint) re-arms the
+ *                        sprint as a STOP→START pair for a fresh hit 2
  *   chain-plain          HITS plain hits every gapTicks, attacker chasing —
  *                        the combo-vertical probe: each hit's wire vy is the
  *                        era machine's verdict on the victim's state then
@@ -43,7 +60,10 @@
  *                        SETUP_CMDS) counter-clicks the attacker between hits —
  *                        the attacker-side server 0.6 self-multiply probe
  * Env: SETUP_CMDS="cmd;;cmd" rcon'd after staging ({atk}/{vic} = bot names,
- * {gy} = ground Y as int); RCON_PORT/RCON_PASS (default lab).
+ * {gy} = ground Y as int); RCON_PORT/RCON_PASS (default lab);
+ * CLIENT_SPRINT_DROP=0 disables the attacker's post-attack sprint-STOP mirror
+ * (see bot.attack) — REQUIRED by the attackfirst and blockhit scenarios, whose
+ * flushes must contain exactly the actions they stage.
  * The victim reports TOUCHDOWN points (first ground contact after a knock)
  * and the SETTLE point, both as distances from its staged start, plus the
  * apex height of every knock flight (the "how floaty" number).
@@ -286,6 +306,39 @@ function mkBot(username, opts = {}) {
     } else {
       client.write('use_item', {
         hand: 0, sequence: ++bot._seq, rotation: { x: bot.yaw, y: bot.pitch },
+      });
+    }
+  };
+  // Drive the modern movement-input lane (PLAYER_INPUT, >=1.21.2) with named
+  // booleans — the same 7-bit packet setSprint holds forward+sprint with, but
+  // callable with any subset (s-tap's backward bit, the GUI all-false snapshot).
+  // Absent below 1.21.2, so a no-op there: the ledger's evidence lane is off and
+  // verdicts ride entity_action alone (the era-correct fallback). Movement bits
+  // only — this never touches bot.sprinting (that tracks the entity_action flag
+  // the attack() auto-STOP mirror keys off).
+  bot.inputBits = (flags = {}) => {
+    if (!MODERN) return;
+    client.write('player_input', {
+      inputs: {
+        forward: !!flags.forward, backward: !!flags.backward,
+        left: !!flags.left, right: !!flags.right,
+        jump: !!flags.jump, shift: !!flags.shift, sprint: !!flags.sprint,
+      },
+    });
+  };
+  // "Stop using the held item" — lowers a raised sword-block/shield. The digging
+  // packet (block_dig) carries status 5 (RELEASE_USE_ITEM) on every era; the
+  // server reads only the status, so location/face are sentinels. Modern adds
+  // the block-change sequence field. Feeds the ledger's always-on
+  // RELEASE_USE_ITEM lane, which drops any held block-hit credit.
+  bot.releaseUseItem = () => {
+    if (MODERN) {
+      client.write('block_dig', {
+        status: 5, location: { x: 0, y: 0, z: 0 }, face: 0, sequence: ++bot._seq,
+      });
+    } else {
+      client.write('block_dig', {
+        status: 5, location: { x: 0, y: 0, z: 0 }, face: 0,
       });
     }
   };
@@ -691,6 +744,70 @@ async function main() {
     attacker.attack(targetId);
     log(`# hit on blocking victim at tick ${victim.tick}`);
     await sleepTicks(30);
+  } else if (SCENARIO === 'blockhit-one-credit') {
+    // The always-on block-hit reset door, ONE credit per raise: a sprinting
+    // attacker who right-clicks a blockable item (shield / decorated sword)
+    // earns a single sprint-reset credit — the next melee ships the fresh
+    // sprint knock and spends it; a second melee while still blocking is plain;
+    // releasing and re-raising earns a fresh credit. The door's eligibility gate
+    // is clientSprinting (or recent sprint-with-key), so this MUST run with
+    // CLIENT_SPRINT_DROP=0 to keep the raw client sprint latched across the
+    // sequence. SETUP_CMDS must arm the attacker with a blockable item in the
+    // main hand (a shield, or a decorated sword with SWORD_BLOCKING enabled).
+    attacker.holdSlot(0);
+    await sleepTicks(2);
+    attacker.setSprint(true);
+    await sleepTicks(2);
+    for (let i = 0; i < 4; i++) { attacker.pos.z += 0.28; await sleepTicks(1); }
+    attacker.attack(targetId);
+    log(`# blockhit hit 1 (sprint engagement) at victim tick ${victim.tick} -- expect fresh`);
+    for (let t = 0; t < GAP; t++) { chase(0.5); await sleepTicks(1); }
+    attacker.useItem();                        // raise the block -> grant 1 credit
+    log(`# blockhit block raised (useItem) at victim tick ${victim.tick}`);
+    await sleepTicks(2);
+    attacker.attack(targetId);
+    log(`# blockhit hit 2 (block credit) at victim tick ${victim.tick} -- expect fresh`);
+    for (let t = 0; t < GAP; t++) { chase(0.5); await sleepTicks(1); }
+    attacker.attack(targetId);                 // credit already spent -> plain
+    log(`# blockhit hit 3 (credit spent) at victim tick ${victim.tick} -- expect plain`);
+    for (let t = 0; t < GAP; t++) { chase(0.5); await sleepTicks(1); }
+    attacker.releaseUseItem();                 // drop the block -> drop any credit
+    log(`# blockhit block released at victim tick ${victim.tick}`);
+    await sleepTicks(2);
+    attacker.useItem();                        // re-raise -> a fresh credit
+    log(`# blockhit block re-raised (useItem) at victim tick ${victim.tick}`);
+    await sleepTicks(2);
+    attacker.attack(targetId);
+    log(`# blockhit hit 4 (re-credit) at victim tick ${victim.tick} -- expect fresh`);
+    await sleepTicks(45);
+  } else if (SCENARIO === 'gui-reset') {
+    // The GUI reset cycle: opening a container stops the client streaming
+    // movement (all input bits drop) and drops the sprint (a STOP crosses);
+    // closing it re-engages forward+sprint (a START crosses) — a full
+    // STOP->START pair, era-pinned to re-arm the sprint knock (spec §0). GUI
+    // *open* has no serverbound packet; its remote signature is the all-false
+    // input snapshot plus the STOP that accompanies it. close_window (windowId
+    // 0, the player inventory) is the cycle's one serverbound marker.
+    attacker.holdSlot(0);
+    await sleepTicks(2);
+    attacker.setSprint(true);
+    await sleepTicks(2);
+    for (let i = 0; i < 4; i++) { attacker.pos.z += 0.28; await sleepTicks(1); }
+    attacker.attack(targetId);
+    log(`# gui-reset hit 1 (sprint engagement) at victim tick ${victim.tick} -- expect fresh`);
+    for (let t = 0; t < GAP; t++) { chase(0.5); await sleepTicks(1); }
+    attacker.inputBits({});                    // GUI open: all input bits drop
+    attacker.setSprint(false);                 // sprint drops while open -> STOP
+    attacker.client.write('close_window', { windowId: 0 });
+    log(`# gui-reset GUI cycle (all-false input + close_window) at victim tick ${victim.tick}`);
+    await sleepTicks(4);
+    attacker.inputBits({ forward: true, sprint: true }); // re-press forward+sprint
+    attacker.setSprint(true);                  // re-engage -> START
+    log(`# gui-reset re-engaged (forward+sprint) at victim tick ${victim.tick}`);
+    for (let t = 0; t < 4; t++) { chase(0.5); await sleepTicks(1); }
+    attacker.attack(targetId);
+    log(`# gui-reset hit 2 (post-GUI reset) at victim tick ${victim.tick} -- expect fresh`);
+    await sleepTicks(45);
   } else if (SCENARIO === 'double-counter') {
     // double-plain, but the victim counter-clicks the attacker between the
     // hits holding a KB sword (kbLevels > 0): the era server multiplies the
@@ -718,6 +835,8 @@ async function main() {
     const sprintFirst = SCENARIO !== 'double-plain';
     const wtap = SCENARIO === 'double-sprint-wtap';
     const fastWtap = SCENARIO === 'double-sprint-fastwtap';
+    const attackFirst = SCENARIO === 'double-sprint-fastwtap-attackfirst';
+    const stap = SCENARIO === 'double-sprint-stap';
     if (sprintFirst) {
       attacker.setSprint(true);
       await sleepTicks(2);
@@ -733,6 +852,22 @@ async function main() {
         attacker.setSprint(false);
         attacker.setSprint(true);
       }
+      // The s-tap rides the same mid-chase timing, expressed through the
+      // movement-input lane: the backward key breaks a forward sprint (you
+      // cannot sprint backward), so STOP crosses with the backward bit as
+      // the input evidence; three ticks later S clears, W re-holds, and
+      // START crosses — a full STOP->START pair whose remote signature (the
+      // backward-bit snapshot) distinguishes it from a w-tap.
+      if (stap && t === GAP - 7) {
+        attacker.setSprint(false);               // sprint breaks -> STOP crosses
+        attacker.inputBits({ backward: true });  // S held (the backward bit)
+        log(`# s-tap: backward held, sprint broken at victim tick ${victim.tick}`);
+      }
+      if (stap && t === GAP - 4) {
+        attacker.inputBits({ forward: true, sprint: true }); // S clears, W re-holds
+        attacker.setSprint(true);                // sprint re-armed -> START crosses
+        log(`# s-tap: backward cleared, sprint re-armed at victim tick ${victim.tick}`);
+      }
       chase(0.5);
       await sleepTicks(1);
     }
@@ -745,8 +880,24 @@ async function main() {
       attacker.setSprint(true);
       log(`# fast w-tap wired in hit 2's flush at victim tick ${victim.tick}`);
     }
+    if (attackFirst) {
+      // Fast-wtap's flush with the click BEFORE the re-arm: STOP, ATTACK, START
+      // in one flush. The STOP de-arms the wire; the shared attack below fires
+      // while sprint is broken (era-plain); the START trails it in the same tick
+      // and must NOT retro-grant the sprint stamp (bytecode-pinned same-tick
+      // ATTACK-first). MUST run with CLIENT_SPRINT_DROP=0 so the attacker's own
+      // auto-STOP mirror (fired after every sprint hit) never stamps an extra
+      // stop_sprinting into the trail — the flush the verdict reads is exactly
+      // STOP, ATTACK, START.
+      attacker.setSprint(false);               // STOP
+      log(`# attack-first: sprint broken (STOP) before hit 2 at victim tick ${victim.tick}`);
+    }
     attacker.attack(targetId);
     log(`# hit 2 thrown at victim tick ${victim.tick}, dist=${Math.hypot(victim.pos.x - attacker.pos.x, victim.pos.z - attacker.pos.z).toFixed(2)}`);
+    if (attackFirst) {
+      attacker.setSprint(true);                // START trails the ATTACK
+      log(`# attack-first: START trailed hit 2 in the same tick at victim tick ${victim.tick}`);
+    }
     await sleepTicks(45);
   } else if (SCENARIO === 'chain-plain') {
     // The combo-vertical probe: plain hits isolate the base vertical (no
