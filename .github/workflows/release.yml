@@ -326,7 +326,12 @@ jobs:
           echo "── release-notes.md ──"
           cat release-notes.md
 
-      - name: Tag and publish the release
+      # Create as a DRAFT first: with immutable releases enabled, GitHub
+      # freezes a release the moment it is published, so the asset upload
+      # that follows creation is rejected on a non-draft release (the
+      # v2.5.3-beta failure). A draft accepts the jar, and the publish
+      # step below flips it live with the asset already attached.
+      - name: Tag the release as a draft with the jar attached
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.detect.outputs.tag }}
@@ -335,5 +340,16 @@ jobs:
           body_path: release-notes.md
           files: ${{ steps.jar.outputs.path }}
           fail_on_unmatched_files: true
+          draft: true
           prerelease: ${{ needs.detect.outputs.prerelease == 'true' }}
-          make_latest: ${{ needs.detect.outputs.prerelease == 'true' && 'false' || 'true' }}
+
+      - name: Publish the draft (immutability locks in WITH the asset)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.detect.outputs.tag }}
+        run: |
+          if [ "${{ needs.detect.outputs.prerelease }}" = "true" ]; then
+            gh release edit "$TAG" --draft=false
+          else
+            gh release edit "$TAG" --draft=false --latest
+          fi
