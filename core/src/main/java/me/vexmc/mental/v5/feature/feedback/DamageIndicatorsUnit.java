@@ -51,6 +51,12 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
         return Feature.DAMAGE_INDICATORS;
     }
 
+    /** Templates/ballistics resolve into the listener at assemble — a settings reload must re-assemble. */
+    @Override
+    public boolean rebuildOnSettingsChange() {
+        return true;
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public void assemble(Scope scope, Snapshot snapshot) {

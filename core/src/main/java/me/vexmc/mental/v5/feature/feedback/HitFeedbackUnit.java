@@ -46,6 +46,12 @@ public final class HitFeedbackUnit implements FeatureUnit {
         return Feature.HIT_FEEDBACK;
     }
 
+    /** Sounds/particles resolve into the listener at assemble — a settings reload must re-assemble. */
+    @Override
+    public boolean rebuildOnSettingsChange() {
+        return true;
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public void assemble(Scope scope, Snapshot snapshot) {

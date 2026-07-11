@@ -46,6 +46,12 @@ public final class DeathEffectsUnit implements FeatureUnit {
         return Feature.DEATH_EFFECTS;
     }
 
+    /** Sounds/particles/blast resolve into the listener at assemble — a settings reload must re-assemble. */
+    @Override
+    public boolean rebuildOnSettingsChange() {
+        return true;
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public void assemble(Scope scope, Snapshot snapshot) {

@@ -46,6 +46,7 @@ class ReconcilerTest {
         final Feature feature;
         int registrations;
         boolean throwOnAssemble;
+        boolean rebuildOnSettingsChange;
         int assembleCount;
 
         RecordingUnit(Feature feature, int registrations) {
@@ -54,6 +55,8 @@ class ReconcilerTest {
         }
 
         @Override public Feature descriptor() { return feature; }
+
+        @Override public boolean rebuildOnSettingsChange() { return rebuildOnSettingsChange; }
 
         @Override public void assemble(Scope scope, Snapshot snapshot) {
             assembleCount++;
@@ -178,6 +181,71 @@ class ReconcilerTest {
         assertFalse(reconciler.active(Feature.KNOCKBACK));
         assertFalse(reconciler.active(Feature.FISHING_KNOCKBACK));
         assertFalse(reconciler.active(Feature.ROD_VELOCITY));
+    }
+
+    /* --------------- settings-change re-assembly (the 2.5.2 report) --------------- */
+
+    /**
+     * The FEEDBACK units bake resolved settings into their assembled listeners,
+     * so a reload that changes those settings must bounce the unit — otherwise a
+     * preset edit on an already-enabled module silently never lands (the 2.5.2
+     * "signature preset plays nothing" report: hit-feedback stayed audibly
+     * vanilla and death-effects stayed a strict nothing until a restart).
+     */
+    @Test
+    void aSettingsChangeReassemblesAnOptedInUnitExactlyOnce() throws Exception {
+        RecordingRegistrar registrar = new RecordingRegistrar();
+        Reconciler reconciler = new Reconciler(registrar, message -> {});
+        RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
+        unit.rebuildOnSettingsChange = true;
+        reconciler.register(unit);
+
+        String vanilla = "modules:\n  hit-feedback: true\nhit-feedback:\n  preset: vanilla\n";
+        String signature = "modules:\n  hit-feedback: true\nhit-feedback:\n  preset: signature\n";
+
+        reconciler.converge(snapshot(vanilla));
+        assertEquals(1, unit.assembleCount, "enabled once");
+
+        reconciler.converge(snapshot(signature));
+        assertEquals(2, unit.assembleCount, "changed settings bounce the unit");
+        assertEquals(1, registrar.closeCounts.get("HIT_FEEDBACK-0"), "the old scope closed exactly once");
+        assertTrue(reconciler.active(Feature.HIT_FEEDBACK), "the unit is re-assembled, not left off");
+
+        reconciler.converge(snapshot(signature));
+        assertEquals(2, unit.assembleCount,
+                "an identical re-parse never bounces — settings records compare by value");
+    }
+
+    /** A unit that reads the live snapshot (the default) is never bounced by a settings change. */
+    @Test
+    void aSettingsChangeLeavesADefaultUnitUntouched() throws Exception {
+        RecordingRegistrar registrar = new RecordingRegistrar();
+        Reconciler reconciler = new Reconciler(registrar, message -> {});
+        RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
+        reconciler.register(unit);
+
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\nhit-feedback:\n  preset: vanilla\n"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\nhit-feedback:\n  preset: signature\n"));
+
+        assertEquals(1, unit.assembleCount, "no opt-in → no bounce");
+        assertTrue(reconciler.active(Feature.HIT_FEEDBACK));
+    }
+
+    /** The bounce path still honours the toggle: disabled in the same snapshot just closes. */
+    @Test
+    void aDisableInTheSameSnapshotAsASettingsChangeJustCloses() throws Exception {
+        RecordingRegistrar registrar = new RecordingRegistrar();
+        Reconciler reconciler = new Reconciler(registrar, message -> {});
+        RecordingUnit unit = new RecordingUnit(Feature.HIT_FEEDBACK, 1);
+        unit.rebuildOnSettingsChange = true;
+        reconciler.register(unit);
+
+        reconciler.converge(snapshot("modules:\n  hit-feedback: true\nhit-feedback:\n  preset: vanilla\n"));
+        reconciler.converge(snapshot("modules:\n  hit-feedback: false\nhit-feedback:\n  preset: signature\n"));
+
+        assertEquals(1, unit.assembleCount, "disable wins — no re-assemble");
+        assertFalse(reconciler.active(Feature.HIT_FEEDBACK));
+        assertEquals(1, registrar.closeCounts.get("HIT_FEEDBACK-0"));
     }
 
     @Test
