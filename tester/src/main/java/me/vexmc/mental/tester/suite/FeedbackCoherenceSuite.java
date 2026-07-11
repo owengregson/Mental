@@ -287,11 +287,22 @@ public final class FeedbackCoherenceSuite {
             context.awaitUntil(() -> probe.accepted().size() >= 1, 40,
                     "the fresh 7.0 opening hit to land");
 
-            // Raise attack-damage to 10.0 and swing AGAIN inside the window (no clear).
+            // Raise attack-damage to 10.0 and swing AGAIN inside the window. The
+            // window is RE-STAMPED in the swing's own sync run: the legacy tier
+            // (≤1.10.x lineage) double-ticks noDamageTicks (the 2.5.5 finding), so
+            // the ~4–6 wall ticks of staging hops here can decay a 20-tick window
+            // to the max/2 boundary and flip vanilla's branch from delta-upgrade
+            // to fresh-accept (full 10.0 — the CI flake this stamp killed). The
+            // case pins the UPGRADE MECHANICS, not window-decay timing, so the
+            // in-window state is staged deterministically on every tier.
             context.awaitTicks(2);
             boolean raised = context.sync(() -> setAttackDamage(attacker, UPGRADE_DAMAGE));
             context.expect(raised, "attack-damage attribute unresolved — cannot stage the upgrade");
-            context.syncRun(() -> attacker.attack(victim.player()));
+            context.syncRun(() -> {
+                victim.player().setNoDamageTicks(victim.player().getMaximumNoDamageTicks());
+                victim.player().setLastDamage(HIT_DAMAGE);
+                attacker.attack(victim.player());
+            });
             context.awaitUntil(() -> probe.accepted().size() >= 2, 40,
                     () -> "the in-window upgrade hit to fire a second EDBEE (accepted="
                             + probe.accepted().size() + ")");
