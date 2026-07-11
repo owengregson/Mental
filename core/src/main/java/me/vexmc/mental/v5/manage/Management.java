@@ -62,6 +62,28 @@ public final class Management {
     }
 
     /**
+     * Sets the server-wide Combat Effects preset (the {@code effects.preset}
+     * overlay key) and reloads — the GUI preset picker's write-back, the exact
+     * {@link #setGlobalProfile} shape for the FEEDBACK family. The reconciler's
+     * settings-change bounce re-assembles the three effects units live, so the
+     * new tune plays on the very next hit. Returns false — changing nothing —
+     * when no preset by that name is loaded; returns true with no write and no
+     * reload when it is already the selected preset.
+     */
+    public boolean setEffectsPreset(@NotNull String presetName) {
+        String name = presetName.trim().toLowerCase(Locale.ROOT);
+        if (!plugin.snapshot().hasEffectsPreset(name)) {
+            return false;
+        }
+        if (plugin.snapshot().selectedEffectsPreset().equals(name)) {
+            return true; // already the selected preset — no write, no reload.
+        }
+        plugin.overlaySet("effects.preset", name);
+        plugin.reloadAll();
+        return true;
+    }
+
+    /**
      * Runtime module toggle: writes the feature's {@code modules.*} overlay key
      * and reconverges. Infrastructure features (no yaml toggle) are ignored.
      * Returns the reload's warn-and-fallback issues.

@@ -230,8 +230,14 @@ public final class MentalPluginV5 extends JavaPlugin {
                 new Migrations(dataDir, this::getResource, message -> getLogger().info(message)).migrate();
         if (!migration.stepsApplied().isEmpty()) {
             getLogger().info("config migrated " + migration.fromVersion() + " -> " + migration.toVersion());
+            // The 3 -> 4 effects migration suppresses the effects.yml/custom.yml
+            // extraction while it is pending (the import IS custom's first
+            // extraction); with the stamp advanced, a second pass fills whatever
+            // the migration itself did not create (a fresh vanilla/signature).
+            configStore.ensureDefaultFiles();
         }
         this.overlay = new Overlay(configStore.overridesFile());
+        scrubRetiredEffectsOverlayKeys();
         this.snapshot = parseSnapshot();
 
         // The verbose debug seam (DebugLog): zero-cost when off — a sink fires
@@ -469,6 +475,29 @@ public final class MentalPluginV5 extends JavaPlugin {
             DebugCategory.byKey(key).ifPresent(active::add);
         }
         debug.activateAll(active);
+    }
+
+    /**
+     * Drops machine-overlay keys whose first path segment is a retired 2.5.2
+     * effects section ({@code hit-feedback.*} / {@code damage-indicators.*} /
+     * {@code death-effects.*} — the tester's old preset staging keys, or a
+     * hand-written override). Nothing routes them since the 2.5.3 preset
+     * library ({@code effects.preset} is the one selection key), and left in
+     * place they would materialise a phantom retired section on the config.yml
+     * root and trip its loud parse notice forever. Removal is permanent (the
+     * overlay persists), so the line prints once — boot-only, before the first
+     * parse (mandate B10).
+     */
+    private void scrubRetiredEffectsOverlayKeys() {
+        for (String key : List.copyOf(overlay.overrides().keySet())) {
+            int dot = key.indexOf('.');
+            String head = dot >= 0 ? key.substring(0, dot) : key;
+            if (ConfigStore.RETIRED_EFFECTS_SECTIONS.contains(head)) {
+                overlay.remove(key);
+                getLogger().info("overlay key '" + key + "' was retired in 2.5.3 — removed"
+                        + " (Combat Effects presets are selected by the effects.preset key)");
+            }
+        }
     }
 
     /** The current immutable config snapshot — read through a reference the reload swaps. */

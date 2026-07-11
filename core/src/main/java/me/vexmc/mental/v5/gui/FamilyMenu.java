@@ -20,18 +20,21 @@ import org.jetbrains.annotations.NotNull;
  * <p>The {@link Family#KNOCKBACK} section additionally carries a nav tile to the
  * "Melee Knockback Formula" chooser ({@link KnockbackFormulaMenu}) — the era
  * formula, then a preset — which is where the server-wide profile is actually
- * selected. The feature toggles keep their home here (the KNOCKBACK family must
+ * selected. The {@link Family#FEEDBACK} section carries the same shape of nav
+ * tile to the Combat Effects preset picker ({@link EffectsPresetMenu}) — one
+ * preset for the whole cosmetic tune, the knockback model mirrored. The
+ * feature toggles keep their home here in both cases (the family screens must
  * stay reachable).</p>
  */
 public final class FamilyMenu extends Menu {
 
-    /** The knockback screen's feature-toggle row (row 1). */
+    /** A preset-carrying family screen's feature-toggle row (row 1). */
     private static final int TOGGLE_ROW_BASE = 9;
 
     /** A plain family screen's centred toggle row (row 2). */
     private static final int PLAIN_ROW_BASE = 18;
 
-    /** The knockback screen's nav tile to the formula chooser (row 2, centred). */
+    /** A preset-carrying family screen's nav tile to its chooser (row 2, centred). */
     private static final int FORMULA_SLOT = 22;
 
     private final Family family;
@@ -48,9 +51,10 @@ public final class FamilyMenu extends Menu {
 
     @Override
     protected int rows() {
-        // The knockback screen carries the formula nav tile and its back at slot 49,
-        // so it needs the full six rows; every other family is a compact toggle screen.
-        return family == Family.KNOCKBACK ? 6 : 4;
+        // The knockback and effects screens carry a preset nav tile and their back
+        // at slot 49, so they need the full six rows; every other family is a
+        // compact toggle screen.
+        return family == Family.KNOCKBACK || family == Family.FEEDBACK ? 6 : 4;
     }
 
     @Override
@@ -65,6 +69,12 @@ public final class FamilyMenu extends Menu {
             set(FORMULA_SLOT, Buttons.nav("PISTON", "Melee Knockback Formula",
                     "Choose the era formula, then a preset."),
                     click -> navigate(viewer, new KnockbackFormulaMenu(ctx)));
+            set(49, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
+        } else if (family == Family.FEEDBACK) {
+            drawToggles(viewer, entries, TOGGLE_ROW_BASE);
+            set(FORMULA_SLOT, Buttons.nav("JUKEBOX", "Combat Effects Preset",
+                    "Pick the preset — one tune for hits, indicators and deaths."),
+                    click -> navigate(viewer, new EffectsPresetMenu(ctx)));
             set(49, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
         } else {
             drawToggles(viewer, entries, PLAIN_ROW_BASE);
