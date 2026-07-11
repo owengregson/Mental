@@ -19,6 +19,17 @@ final class HealFold {
     static final int WINDOW_TICKS = 10;
 
     /**
+     * No indicator under one heart (2.0 health points — the owner's directive:
+     * sub-heart heals are noise, not information). Sub-threshold sums are NOT
+     * consumed — {@link #poll} leaves them accumulating, so a regen trickle that
+     * crosses a heart still ships exactly once, carrying the summed amount.
+     * Strict {@code <}: a full one-heart heal shows (the display rounds 2.0 pts
+     * to "1"). A sum that never crosses before death is dropped by the existing
+     * {@link #reset} boundary, exactly as an unshipped heal should be.
+     */
+    static final double MIN_SHIP_HEALTH = 2.0;
+
+    /**
      * The "never shipped" sentinel: the very first heal ships immediately (a pot
      * burst is not held). A real prior ship stamps an int-range server tick, so the
      * elapsed compare below never overflows for a genuine window; only this sentinel
@@ -39,8 +50,8 @@ final class HealFold {
      * (lastShipTick still {@link Long#MIN_VALUE}) ships immediately.
      */
     synchronized double poll(long nowTick) {
-        if (sum <= 0.0) {
-            return 0.0;
+        if (sum < MIN_SHIP_HEALTH) {
+            return 0.0; // sub-heart: hold and keep accumulating — never consumed here
         }
         boolean windowElapsed = lastShipTick == Long.MIN_VALUE || nowTick - lastShipTick >= WINDOW_TICKS;
         if (!windowElapsed) {

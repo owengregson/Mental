@@ -90,6 +90,8 @@ public final class FeedbackCoherenceSuite {
                         context -> runHealAttribution(mental, tester, context)),
                 new TestCase("heal-indicator: a combined heal folds into exactly one paced decision",
                         context -> runHealFoldPacing(mental, tester, context)),
+                new TestCase("heal-indicator: sub-heart heals hold silently until the sum crosses one heart",
+                        context -> runSubHeartHoldsThenShips(mental, tester, context)),
                 new TestCase("heal-indicator: an unattributed heal is silent (no ambient-regen spam)",
                         context -> runUnattributedHealSilent(mental, tester, context)),
                 new TestCase("heal-indicator ZERO-TOUCH: module off, a stamp+heal writes no trace",
@@ -413,6 +415,82 @@ public final class FeedbackCoherenceSuite {
             context.note("heal attributed victim→attacker; HEAL_UNSENDABLE carries no hearts by design "
                     + "(the plan puts the amount only on the sendable HEAL) — the +4.0 fold is unit-pinned "
                     + "in HealFoldTest");
+        } finally {
+            toggleModule(context, "damage-indicators", false);
+            setEffectsPreset(context, "signature");
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            probe.unregister();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  4a². the one-heart floor: sub-heart heals hold, never spam          */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The 2.6.0 one-heart floor, staged live on the StarEnchants-shaped setHealth
+     * path: a single half-heart heal (+1.0 pt) in fresh combat attribution writes
+     * NO heal decision — even well past the fold's pacing window, proving the
+     * FLOOR (not the window) is what held it — and a second +1.0 in a later
+     * sampler tick crosses {@code MIN_SHIP_HEALTH} and ships EXACTLY ONE decision
+     * carrying the accumulated sum (the un-consumed hold; the arithmetic is
+     * unit-pinned in HealFoldTest, this pins the live wiring end-to-end).
+     */
+    private static void runSubHeartHoldsThenShips(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        CoherenceProbe probe = CoherenceProbe.register(tester, () -> mental.clock().current().value());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        FeedbackTrace trace = mental.feedbackTrace();
+
+        try {
+            setEffectsPreset(context, "signature");
+            toggleModule(context, "damage-indicators", true);
+            context.expect(moduleActive(mental, "damage-indicators"), "damage-indicators failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            context.expect(context.sync(() -> armAttacker(attacker)),
+                    "attack-damage/attack-speed attributes unresolved — cannot stamp the attribution hit");
+
+            probe.watch(victim.uuid()); // freezes ambient regen so it can't top up the fold
+
+            // Stamp attribution with one real melee (nd cleared for determinism).
+            context.syncRun(() -> {
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+            });
+            context.awaitUntil(() -> !probe.accepted().isEmpty(), 40,
+                    "the attribution melee to land (stamping the last-hit)");
+
+            // Let the sampler's lastHealth catch the post-hit value, then trickle
+            // HALF a heart in one hop. The trace is cleared first so the hit's own
+            // UNSENDABLE cannot masquerade as a heal decision.
+            context.awaitTicks(3);
+            double preHeal = context.sync(() -> victim.player().getHealth());
+            trace.clear();
+            context.syncRun(() -> victim.player().setHealth(preHeal + 1.0));
+
+            // Well past the 10-tick fold window: the FLOOR is what holds it.
+            context.awaitTicks(15);
+            context.expect(countDecision(trace, "damage-indicators", "HEAL_UNSENDABLE") == 0,
+                    "a sub-heart heal must write NO heal decision (trace=" + trace.entries() + ")");
+
+            // The second half-heart crosses the floor: exactly one decision ships,
+            // carrying the accumulated (not the incremental) amount by construction.
+            context.syncRun(() -> victim.player().setHealth(preHeal + 2.0));
+            context.awaitUntil(() -> countDecision(trace, "damage-indicators", "HEAL_UNSENDABLE") >= 1, 40,
+                    () -> "the crossing heal to ship one decision (trace=" + trace.entries() + ")");
+            context.expect(countDecision(trace, "damage-indicators", "HEAL_UNSENDABLE") == 1,
+                    "exactly one decision for the accumulated heal, got trace=" + trace.entries());
+            context.note("half-heart held silently past the window; the crossing trickle shipped once");
         } finally {
             toggleModule(context, "damage-indicators", false);
             setEffectsPreset(context, "signature");
