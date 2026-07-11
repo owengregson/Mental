@@ -4,28 +4,28 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.wire.GroundFsm;
+import me.vexmc.mental.kernel.wire.InputLedger;
 import me.vexmc.mental.kernel.wire.ResetModelWire;
-import me.vexmc.mental.kernel.wire.SprintWire;
 
 /**
- * The D1 connection domain (spec §2): per-player {@link SprintWire} +
+ * The D1 connection domain (spec §2): per-player {@link InputLedger} +
  * {@link GroundFsm}, keyed by UUID, each owned by that connection's netty read
  * thread. The map is concurrent because domains are created/forgotten across
  * threads.
  *
  * <p>The {@link GroundFsm} is single-writer by ownership — only its connection
- * thread mutates it. The {@link SprintWire} is the ONE exception: besides its
- * connection thread (packet START/STOP, {@code onBlockReleased}, reconcile,
- * verdict reads) it is written by two other sanctioned writers — {@code
- * KnockbackUnit} on the VICTIM's region thread (the post-hit {@code onServerClear})
- * and {@code SwordBlockingUnit} on the ATTACKER's region thread (the block-hit
- * re-arm {@code onBlockSprintReset} + {@code clientSprinting} read; its own
- * RELEASE_USE_ITEM {@code onBlockReleased} runs on the ATTACKER's netty thread,
- * i.e. the connection thread above). That is licensed because {@code SprintWire}
- * holds its whole state in one immutable snapshot swapped by CAS ({@code
- * AtomicReference}), so every cross-thread read sees a coherent atomic value and
- * each write happens-before the next read — no torn mix, no lost update. Do not add
- * a further writer without preserving that atomicity.</p>
+ * thread mutates it. The {@link InputLedger} is the ONE exception: besides its
+ * connection thread (packet START/STOP, key input, {@code onBlockReleased},
+ * reconcile, verdict reads) it is written by two other sanctioned writers —
+ * {@code KnockbackUnit} on the VICTIM's region thread (the post-hit
+ * {@code onServerClear}) and the always-on {@code BlockResetTap} on the
+ * ATTACKER's region thread (the block-hit re-arm {@code onBlockSprintReset} +
+ * {@code clientSprinting} read). That is licensed because {@code InputLedger}
+ * holds its whole derived state in one immutable snapshot swapped by CAS
+ * ({@code AtomicReference}) — every cross-thread read sees a coherent atomic
+ * value and each write happens-before the next read — and its diagnostic ring
+ * has its own tiny monitor. Do not add a further writer without preserving that
+ * atomicity.</p>
  *
  * <p>Domains are created lazily on the first Play packet a connection sends (the
  * UUID is stable only post-login, and the rim is Play-only anyway) and forgotten
@@ -36,7 +36,7 @@ public final class ConnectionDomains {
     /** One connection's arrival-order sprint + movement FSM, plus its last-seen yaw. */
     public static final class Domain {
 
-        private final SprintWire sprint;
+        private final InputLedger sprint;
         private final GroundFsm ground;
         private final ResetModelWire resetModel;
         // Volatile: written by this connection's own netty thread (the rim yaw tap)
@@ -49,12 +49,12 @@ public final class ConnectionDomains {
         private volatile float lastYaw;
 
         Domain(TickClock clock) {
-            this.sprint = new SprintWire(clock);
+            this.sprint = new InputLedger(clock);
             this.ground = new GroundFsm(clock);
             this.resetModel = new ResetModelWire(clock);
         }
 
-        public SprintWire sprint() {
+        public InputLedger sprint() {
             return sprint;
         }
 

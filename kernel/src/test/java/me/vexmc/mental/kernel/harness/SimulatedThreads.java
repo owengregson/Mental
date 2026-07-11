@@ -22,7 +22,7 @@ import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.GroundFsm;
-import me.vexmc.mental.kernel.wire.SprintWire;
+import me.vexmc.mental.kernel.wire.InputLedger;
 
 /**
  * A deterministic interleaving harness for the delivery core (spec §12.2). It
@@ -32,7 +32,7 @@ import me.vexmc.mental.kernel.wire.SprintWire;
  * JOURNAL only (B7).
  *
  * <p>It owns a settable {@link TickClock}, per-player inboxes, one
- * {@link GroundFsm}/{@link SprintWire} per connection, and one
+ * {@link GroundFsm}/{@link InputLedger} per connection, and one
  * {@link MotionLedger}/{@link DeliveryDesk}/published {@link PlayerView} per
  * session. {@link #sessionTick} is the canonical step: drain inbox → ledger.tick
  * → publish view → desk.sweep. The view is published AFTER the decay, so a hit
@@ -66,14 +66,14 @@ final class SimulatedThreads {
         publish(attacker);
     }
 
-    /** One player's two domains: connection (GroundFsm/SprintWire) + session (ledger/desk/view). */
+    /** One player's two domains: connection (GroundFsm/InputLedger) + session (ledger/desk/view). */
     static final class Session {
         final int entityId;
         final UUID id = UUID.randomUUID();
         final MotionLedger ledger = new MotionLedger(GRAVITY);
         final DeliveryDesk desk;
         final GroundFsm groundFsm;
-        final SprintWire sprintWire;
+        final InputLedger inputLedger;
         final ArrayDeque<LedgerEvent> inbox = new ArrayDeque<>();
         PlayerView published;
         double distanceToGround;
@@ -82,7 +82,7 @@ final class SimulatedThreads {
             this.entityId = entityId;
             this.desk = new DeliveryDesk(entityId, clock, journalCapacity);
             this.groundFsm = new GroundFsm(clock);
-            this.sprintWire = new SprintWire(clock);
+            this.inputLedger = new InputLedger(clock);
         }
     }
 

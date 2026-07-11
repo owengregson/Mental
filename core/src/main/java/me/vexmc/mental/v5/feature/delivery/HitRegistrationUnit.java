@@ -709,6 +709,10 @@ public final class HitRegistrationUnit implements FeatureUnit {
             // domain here and poisoning its own ledger feed (the 2.4.4 bug).
             ConnectionDomains.Domain domain = domains.peek(attackerId);
             if (domain != null) {
+                // Ring the ATTACK before the peek: the trail then reads in true
+                // arrival order (…gestures…, ATTACK, CONSUME) and the journal's
+                // start-trailed note can anchor on it.
+                domain.sprint().onAttack();
                 return domain.sprint().verdictAt(clock.current());
             }
         }

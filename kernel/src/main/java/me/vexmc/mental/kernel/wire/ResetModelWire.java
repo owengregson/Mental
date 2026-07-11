@@ -12,11 +12,11 @@ import me.vexmc.mental.kernel.port.TickClock;
  * pocket servo can price the attacker's close from where they ACTUALLY are in their
  * w-tap / blockhit cycle instead of a flat rate.
  *
- * <p>Fed by the rim from the same arrival-order packets {@code SprintWire} reads
+ * <p>Fed by the rim from the same arrival-order packets {@code InputLedger} reads
  * (ENTITY_ACTION sprint START/STOP) plus the sword-block signal. It holds the
- * {@link TickClock} and stamps each write itself (the {@code SprintWire} idiom), so
+ * {@link TickClock} and stamps each write itself (the {@code InputLedger} idiom), so
  * a caller needs no tick. State is one immutable snapshot swapped by CAS (the
- * codebase idiom, the {@code SprintWire} licensing rule): the read on the victim's
+ * codebase idiom, the {@code InputLedger} licensing rule): the read on the victim's
  * region thread and the writes on the attacker's netty thread stay coherent.
  * {@link ResetModel#UNKNOWN} until a first signal, so a packetless or silent
  * attacker leaves the servo on its measured-ring / attribute fallback.</p>

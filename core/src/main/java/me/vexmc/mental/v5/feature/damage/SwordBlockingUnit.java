@@ -1,21 +1,13 @@
 package me.vexmc.mental.v5.feature.damage;
 
-import com.github.retrooper.packetevents.event.PacketListenerAbstract;
-import com.github.retrooper.packetevents.event.PacketListenerPriority;
-import com.github.retrooper.packetevents.event.PacketReceiveEvent;
-import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.protocol.player.DiggingAction;
-import com.github.retrooper.packetevents.protocol.player.User;
-import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging;
-import java.util.UUID;
 import java.util.function.Supplier;
 import me.vexmc.mental.kernel.math.SwordBlockReduction;
-import me.vexmc.mental.kernel.wire.SprintWire;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.knockback.BlockResetTap;
 import me.vexmc.mental.v5.platform.SwordBlockAdapter;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import org.bukkit.entity.Player;
@@ -57,30 +49,29 @@ import org.jetbrains.annotations.NotNull;
  * value so the half damage lands instead of vanilla's zero (audit C1) — the
  * matching knock exemption lives in the {@code KnockbackUnit}.
  *
- * <p>The one server-side reconstruction the era needs (era-accuracy skill): the
- * block-hit sprint reset. Starting a block dropped the attacker's sprint in
- * 1.7/1.8 and the re-engage re-earned the sprint knockback bonus; modern clients
- * keep the sprint flag through an item-use block, so that STOP/START never
- * crosses the wire. {@link #resetSprintForBlock} re-arms the wire freshness on
- * the right-click, gated on the RAW client sprint flag (the {@link SprintWire}'s
- * view — never the server flag), so a stationary defensive block gains no phantom
- * bonus, and never touching sprint particles (client-authoritative). The
- * triggering right-click is the born-cancelled {@code RIGHT_CLICK_AIR} interact
- * (the listener is {@code ignoreCancelled=false}, self-filtering on
- * {@code useItemInHand() != DENY}) or the victim-aimed
- * {@link PlayerInteractEntityEvent} — either reaches the re-arm.</p>
+ * <p>The block-hit sprint reset (the one server-side reconstruction era-accuracy
+ * mandates) is NOT here since 2.6.0: it is knockback semantics and lives
+ * always-on in the {@code BlockResetTap} (knockback family) with the release
+ * lane in the rim's RELEASE_USE_ITEM tap — a default config's shield block
+ * re-arms without this feature. This unit only CONTRIBUTES its decorated-sword
+ * test to that door's item gate while enabled ({@link #assemble}), so the
+ * restored 1.7 sword block keeps re-arming exactly as before, and stops
+ * contributing on close (the door's shield base stays).</p>
  */
 public final class SwordBlockingUnit implements FeatureUnit, Listener {
 
     private final ConnectionDomains domains;
     private final EphemeralDecoration decoration;
     private final Supplier<Snapshot> snapshot;
+    private final BlockResetTap blockDoor;
 
     public SwordBlockingUnit(
-            ConnectionDomains domains, EphemeralDecoration decoration, Supplier<Snapshot> snapshot) {
+            ConnectionDomains domains, EphemeralDecoration decoration, Supplier<Snapshot> snapshot,
+            BlockResetTap blockDoor) {
         this.domains = domains;
         this.decoration = decoration;
         this.snapshot = snapshot;
+        this.blockDoor = blockDoor;
     }
 
     @Override
@@ -91,12 +82,14 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
         scope.listen(this);
-        // The block-release boundary of the universal blockhit contract: a netty
-        // observation of the client's RELEASE_USE_ITEM drops the held-block sprint
-        // reset (feature-scoped — nothing observes RELEASE while sword-blocking is
-        // off, so zero-touch holds). The engage side (onBlockSprintReset) rides the
-        // Bukkit interact on the region thread; both write the one CAS-atomic wire.
-        scope.packets(new BlockReleaseListener());
+        // Contribute the decorated-sword test to the always-on block door while
+        // this feature is enabled: the door's base gate (shields) knows nothing
+        // about restored 1.7 sword blocks. Retracted on close — the door itself
+        // stays registered for the plugin's lifetime.
+        scope.task(() -> {
+            blockDoor.featureGate(item -> SwordBlockAdapter.isSword(item.getType()));
+            return () -> blockDoor.featureGate(null);
+        });
         // Eager component application on enable (a plain sword must already carry
         // the block component or the client swallows the first air right-click),
         // and guaranteed teardown of every decoration on disable (B12).
@@ -104,48 +97,6 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
             decoration.enableAll();
             return decoration::disableAll;
         });
-    }
-
-    /**
-     * Drops the held-block sprint reset ({@link SprintWire#onBlockReleased}) when
-     * the attacker releases the block button — the client's RELEASE_USE_ITEM,
-     * observed on that connection's own netty thread (D1). Netty-safe: identity is
-     * the PacketEvents {@link User}'s UUID and the domain is reached through the
-     * NON-creating {@link ConnectionDomains#peek} (never {@code domainFor} — a
-     * packetless player must not be materialised by a read, the 2.4.4
-     * domain-poisoning trap), touching no live entity. Packet types are compared by
-     * REFERENCE against the {@code Play.Client} constant (this listener fires for
-     * every connection state, so a pre-Play packet must never be downcast).
-     */
-    private final class BlockReleaseListener extends PacketListenerAbstract {
-
-        BlockReleaseListener() {
-            super(PacketListenerPriority.MONITOR);
-        }
-
-        @Override
-        public void onPacketReceive(PacketReceiveEvent event) {
-            try {
-                if (event.getPacketType() != PacketType.Play.Client.PLAYER_DIGGING) {
-                    return;
-                }
-                if (new WrapperPlayClientPlayerDigging(event).getAction() != DiggingAction.RELEASE_USE_ITEM) {
-                    return;
-                }
-                User user = event.getUser();
-                UUID id = user == null ? null : user.getUUID();
-                if (id == null) {
-                    return;
-                }
-                ConnectionDomains.Domain domain = domains.peek(id);
-                if (domain != null) {
-                    domain.sprint().onBlockReleased();
-                    domain.resetModel().onBlockRelease();
-                }
-            } catch (Throwable ignored) {
-                // An observation listener must never break the inbound pipeline.
-            }
-        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -176,13 +127,17 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
         beginBlock(event.getPlayer());
     }
 
-    /** The shared sword-in-hand gate + sprint re-arm/decoration engage for both interact fires. */
+    /**
+     * The shared sword-in-hand gate + decoration engage for both interact fires.
+     * The sprint re-arm is NOT here (2.6.0): the always-on {@code BlockResetTap}
+     * hears the same interacts and re-arms through the door's item gate, which
+     * this feature's decorated-sword contribution widens while enabled.
+     */
     private void beginBlock(@NotNull Player player) {
         ItemStack mainHand = player.getInventory().getItemInMainHand();
         if (!SwordBlockAdapter.isSword(mainHand.getType())) {
             return;
         }
-        resetSprintForBlock(player);
         decoration.begin(player);
     }
 
@@ -353,48 +308,6 @@ public final class SwordBlockingUnit implements FeatureUnit, Listener {
     /* ------------------------------------------------------------------ */
     /*  Helpers                                                            */
     /* ------------------------------------------------------------------ */
-
-    /**
-     * Re-arms the sprint knockback bonus a 1.7/1.8 sword block earned, gated on
-     * {@link SprintWire#blockReArmEligible()} — the RAW client sprint flag (the only
-     * signal that survives the wire's own post-hit clear), OR, for a 1.21.2+ client
-     * whose genuine blocked-tick STOP lowered that flag, the held PLAYER_INPUT sprint
-     * KEY with a recent sprint (the corroborator; a stationary defensive ctrl-holder
-     * is excluded by the recency window). A packetless player has no wire, so the
-     * reset never fires for it. Re-syncs the server flag so the snapshot read sees it
-     * when {@code wtap-registration} is off; touches no sprint particles
-     * (client-authoritative).
-     */
-    private void resetSprintForBlock(@NotNull Player player) {
-        UUID id = player.getUniqueId();
-        if (!domains.has(id)) {
-            return; // no live connection wire (a synthetic/packetless player)
-        }
-        ConnectionDomains.Domain domain = domains.domainFor(id);
-        SprintWire wire = domain.sprint();
-        if (!wire.blockReArmEligible()) {
-            // Gate on the RAW client sprint flag, widened by the SWORD_BLOCKING-scoped
-            // keyIntent corroborator (blockReArmEligible). The raw flag is the only
-            // signal that survives the wire's own post-hit clear (onServerClear); a real
-            // sprinter mid-combo whose flag that clear drops still keeps re-arming, and a
-            // 1.21.2+ block-hitter whose full-charge/blocked hit crossed a genuine STOP
-            // keeps it via the held sprint KEY + recent-sprint window. A stationary
-            // defensive block earns no bonus (UNKNOWN keyIntent or a stale sprint).
-            return;
-        }
-        // Re-arm freshness AND raise the sticky held-block reset (the owner's
-        // universal blockhit contract): while this SAME block engagement is held,
-        // every hit — the second and later ones of a held-block combo included —
-        // ships the FRESH sprint knock, where the prior hit's post-hit onServerClear
-        // would otherwise have dropped the freshness it spent. The reset ends when
-        // the block button releases (the RELEASE_USE_ITEM listener below) or a
-        // STOP_SPRINTING lowers the raw client flag.
-        wire.onBlockSprintReset();
-        domain.resetModel().onBlockRaise(); // a blockhit re-engage — a dynamic-chase reset point (defers the chase to the measured-ring)
-        if (!player.isSprinting()) {
-            player.setSprinting(true);
-        }
-    }
 
     private static boolean isSwapOffhandClick(@NotNull InventoryClickEvent event) {
         return event.getClick() == ClickType.SWAP_OFFHAND;

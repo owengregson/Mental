@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
  * The S2 blockhit-re-arm interact gates (the modern-client sprint latch fix). These
  * pin the decision that lets a BORN-CANCELLED {@code RIGHT_CLICK_AIR} reach the
  * sprint re-arm, refuses a DENY-use interaction, and admits the victim-aimed entity
- * interact. The re-arm MECHANICS ({@code SprintWire.onBlockSprintReset} and its
- * held-block combo behaviour) are pinned in {@code SprintWireTest}; here we pin only
+ * interact. The re-arm MECHANICS ({@code InputLedger.onBlockSprintReset} and its
+ * held-block combo behaviour) are pinned in {@code InputLedgerSprintTest}; here we pin only
  * the event filtering that used to silently drop every air right-click.
  */
 class SwordBlockingInteractTest {

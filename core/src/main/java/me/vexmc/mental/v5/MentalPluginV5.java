@@ -90,6 +90,7 @@ import me.vexmc.mental.v5.platform.PlatformProfile;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
+import me.vexmc.mental.v5.feature.knockback.BlockResetTap;
 import me.vexmc.mental.v5.feature.knockback.FishingKnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.KnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.LatencyCompensationUnit;
@@ -162,6 +163,7 @@ public final class MentalPluginV5 extends JavaPlugin {
     private ViewBuilder viewBuilder;
     private SessionService sessions;
     private ConnectionDomains domains;
+    private BlockResetTap blockResetTap;
     /** The combo-hold reach handicap (design §1) and the transition dispatcher that drives it. */
     private ComboReachHandicap comboReachHandicap;
     private ComboEvents comboEvents;
@@ -332,6 +334,12 @@ public final class MentalPluginV5 extends JavaPlugin {
         // mirror. Always-on infra, inert while nothing submits to a desk (all of 4A1).
         getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve, clock, comboEvents), this);
         getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock, hitIds), this);
+        // The always-on block-hit sprint-reset door (2.6.0 — knockback semantics,
+        // not a damage rule; the era reconstruction a default config must have).
+        // SWORD_BLOCKING widens its item gate with the decorated-sword test while
+        // enabled; the base gate (shields) works with every feature off.
+        this.blockResetTap = new BlockResetTap(domains);
+        getServer().getPluginManager().registerEvents(blockResetTap, this);
         if (capabilities.knockbackEvent()) {
             new MirrorListener(sessions).register(this);
         }
@@ -697,7 +705,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new CritFallbackUnit(this::snapshot, sessions));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
-        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration, this::snapshot));
+        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration, this::snapshot, blockResetTap));
 
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);

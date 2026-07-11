@@ -8,7 +8,7 @@ import me.vexmc.mental.v5.feature.Scope;
 
 /**
  * In-order sprint reads for the fast path (the retired {@code WtapRegistrationModule}
- * on the v5 seams). The connection {@code SprintWire} is always maintained by the
+ * on the v5 seams). The connection {@code InputLedger} is always maintained by the
  * packet tap; this feature only gates whether the fast path <em>consults</em> it.
  * When on (the default), registration reads the attacker's START/STOP packets
  * replayed in arrival order — so a w-tap registers however fast the tap, and an
