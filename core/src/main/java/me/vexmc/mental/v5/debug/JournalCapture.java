@@ -157,8 +157,15 @@ public final class JournalCapture implements JournalObserver {
      * The verdict's explanatory note: {@code starved} (a consume happened on a
      * ledger that never saw a START — the dead-feed alarm) outranks
      * {@code start-trailed} (a SPRINT_START arrived AFTER this hit's ATTACK inside
-     * the same tick — the era ATTACK-first arrival order shipping the tap's own
-     * click plain; the START arms the NEXT hit), else {@code -}. Pure for the pin.
+     * the same CLIENT tick — the era ATTACK-first arrival order shipping the tap's
+     * own click plain; the START arms the NEXT hit), else {@code -}.
+     *
+     * <p>The anchor is the last ATTACK event at or before the entry's tick, and
+     * the START is compared against THAT ATTACK's own tick — never against the
+     * entry's: the journal entry stamps the DELIVERY tick, one after the parse
+     * tick the ledger stamped into the ATTACK event, so an {@code at}-equality
+     * anchor made the note structurally unreachable (found live by the 2.6.0
+     * wire suite: every real line renders {@code ATTACK-1}). Pure for the pin.</p>
      */
     static String noteToken(List<InputEvent> trail, TickStamp at, boolean starved) {
         if (starved) {
@@ -168,7 +175,7 @@ public final class JournalCapture implements JournalObserver {
         for (int i = trail.size() - 1; i >= 0; i--) {
             InputEvent event = trail.get(i);
             if (event.kind() == InputEvent.Kind.ATTACK
-                    && event.tick().known() && at.known() && event.tick().value() == at.value()) {
+                    && (!at.known() || !event.tick().known() || event.tick().value() <= at.value())) {
                 lastAttack = i;
                 break;
             }
@@ -176,10 +183,12 @@ public final class JournalCapture implements JournalObserver {
         if (lastAttack < 0) {
             return "-";
         }
+        TickStamp attackTick = trail.get(lastAttack).tick();
         for (int i = lastAttack + 1; i < trail.size(); i++) {
             InputEvent event = trail.get(i);
             if (event.kind() == InputEvent.Kind.SPRINT_START
-                    && event.tick().known() && at.known() && event.tick().value() == at.value()) {
+                    && event.tick().known() && attackTick.known()
+                    && event.tick().value() == attackTick.value()) {
                 return "start-trailed";
             }
         }

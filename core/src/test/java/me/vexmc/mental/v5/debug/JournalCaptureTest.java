@@ -155,26 +155,37 @@ class JournalCaptureTest {
 
     @Test
     void noteTokenNamesTheStartTrailedCaseAndStarvedOutranksIt() {
-        // The era ATTACK-first arrival order: a START after this hit's ATTACK in
-        // the same tick names the plain-tap case.
+        // The exact live shape the 2.6.0 wire suite measured (attackfirst, hit 2):
+        // the entry stamps the DELIVERY tick (parse+1), so the trail renders
+        // ATTACK-1 — the anchor must ride the ATTACK's OWN tick, never at-equality
+        // (the original at==tick anchor made this note structurally unreachable).
         List<InputEvent> startTrailed = List.of(
                 new InputEvent(InputEvent.Kind.SPRINT_STOP, 1, new TickStamp(5), 0),
                 new InputEvent(InputEvent.Kind.ATTACK, 2, new TickStamp(5), 0),
                 new InputEvent(InputEvent.Kind.SPRINT_START, 3, new TickStamp(5), 0));
         assertEquals("start-trailed",
-                JournalCapture.noteToken(startTrailed, new TickStamp(5), false));
+                JournalCapture.noteToken(startTrailed, new TickStamp(6), false));
         assertEquals("starved",
-                JournalCapture.noteToken(startTrailed, new TickStamp(5), true));
+                JournalCapture.noteToken(startTrailed, new TickStamp(6), true));
         // A START before the ATTACK (the fresh tap) is NOT the trailed case.
         List<InputEvent> startFirst = List.of(
                 new InputEvent(InputEvent.Kind.SPRINT_START, 1, new TickStamp(5), 0),
                 new InputEvent(InputEvent.Kind.ATTACK, 2, new TickStamp(5), 0));
-        assertEquals("-", JournalCapture.noteToken(startFirst, new TickStamp(5), false));
-        // A START trailing a DIFFERENT tick's attack says nothing about this hit.
-        List<InputEvent> otherTick = List.of(
+        assertEquals("-", JournalCapture.noteToken(startFirst, new TickStamp(6), false));
+        // A START on a LATER tick than the attack is an ordinary re-engage, not a
+        // same-tick trailer.
+        List<InputEvent> laterStart = List.of(
                 new InputEvent(InputEvent.Kind.ATTACK, 1, new TickStamp(4), 0),
                 new InputEvent(InputEvent.Kind.SPRINT_START, 2, new TickStamp(5), 0));
-        assertEquals("-", JournalCapture.noteToken(otherTick, new TickStamp(5), false));
+        assertEquals("-", JournalCapture.noteToken(laterStart, new TickStamp(5), false));
+        // An ATTACK newer than the entry (the NEXT hit already ringed at spam
+        // cadence) is not this entry's anchor — the <= at bound skips it.
+        List<InputEvent> nextHitRinged = List.of(
+                new InputEvent(InputEvent.Kind.ATTACK, 1, new TickStamp(5), 0),
+                new InputEvent(InputEvent.Kind.SPRINT_START, 2, new TickStamp(5), 0),
+                new InputEvent(InputEvent.Kind.ATTACK, 3, new TickStamp(7), 0));
+        assertEquals("start-trailed",
+                JournalCapture.noteToken(nextHitRinged, new TickStamp(6), false));
     }
 
     @Test
