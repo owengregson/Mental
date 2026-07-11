@@ -5,6 +5,7 @@ import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
+import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
@@ -34,14 +35,16 @@ import me.vexmc.mental.v5.feature.SettingsKey;
 public final class DamageIndicatorsUnit implements FeatureUnit {
 
     private final Scheduling scheduling;
+    private final TickClock clock;
     private final FeedbackTrace trace;
     private final Logger logger;
 
     /** The CURRENT assembly's per-attacker drivers; empty whenever the feature is off. */
     private volatile ConcurrentHashMap<UUID, IndicatorDriver> drivers;
 
-    public DamageIndicatorsUnit(Scheduling scheduling, FeedbackTrace trace, Logger logger) {
+    public DamageIndicatorsUnit(Scheduling scheduling, TickClock clock, FeedbackTrace trace, Logger logger) {
         this.scheduling = scheduling;
+        this.clock = clock;
         this.trace = trace;
         this.logger = logger;
     }
@@ -70,7 +73,7 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
         ConcurrentHashMap<UUID, IndicatorDriver> map = new ConcurrentHashMap<>();
         this.drivers = map;
         scope.listen(new DamageIndicatorsListener(
-                settings, map, scheduling, modernSpawn, bundleSupported, trace, logger));
+                settings, map, scheduling, clock, modernSpawn, bundleSupported, trace, logger));
         scope.task(() -> (AutoCloseable) () -> {
             // Scope close tears every stand down and cancels every drive task.
             map.values().forEach(IndicatorDriver::close);
