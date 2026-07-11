@@ -312,21 +312,26 @@ modules:
   fast-pots: false
   # FEEDBACK family — the Combat Effects modules, cosmetic presentation only.
   # All three default OFF (zero-touch: a disabled module changes nothing the
-  # game does or shows). Each is tuned in its own file under effects/.
+  # game does or shows). The TUNE the three share is one preset file under
+  # effects/presets/, chosen in effects.yml (effects.preset) — the default is
+  # 'signature'. There is no "vanilla" preset: leave these modules OFF for the
+  # audibly-vanilla feel.
   #
-  # hit-feedback: replaces the vanilla melee hurt-sound broadcast with your own
-  # configured sounds and pops particles at the victim's chest. Its scope matches
-  # vanilla exactly — every nearby player EXCEPT the victim, who keeps their own
-  # client-derived hurt sound. Tuned in effects/hit-feedback.yml. Default OFF.
+  # hit-feedback: replaces the vanilla melee hurt-sound broadcast with the
+  # selected preset's sounds and pops particles at the victim's chest. Its scope
+  # matches vanilla exactly — every nearby player EXCEPT the victim, who keeps
+  # their own client-derived hurt sound. Tuned in the selected effects/presets/
+  # file. Default OFF.
   hit-feedback: false
   # damage-indicators: pops a floating damage number off the victim, on the
-  # ATTACKER's screen only (a client-only packet armour stand). Tuned in
-  # effects/damage-indicators.yml. Default OFF.
+  # ATTACKER's screen only (a client-only packet armour stand), plus an optional
+  # healing number to the last attacker. Tuned in the selected effects/presets/
+  # file. Default OFF.
   damage-indicators: false
   # death-effects: a cosmetic strike the moment a player dies, from ANY cause
-  # (PlayerDeathEvent) — optional packet-rendered lightning, sounds, and a
-  # particle burst at the death spot. Tuned in effects/death-effects.yml.
-  # Default OFF.
+  # (PlayerDeathEvent) — optional packet-rendered lightning, sounds, a colored
+  # firework blast, and particles at the death spot. Tuned in the selected
+  # effects/presets/ file. Default OFF.
   death-effects: false
 
 # Coexistence with movement-prediction anticheats.

@@ -36,8 +36,24 @@ class MigrationsTest {
     private final Function<String, InputStream> resources = name ->
             getClass().getClassLoader().getResourceAsStream(name);
 
+    /* The 2.5.2 signature effective values the 3 → 4 import must reproduce (the
+     * deleted SIGNATURE_* constants, pinned test-locally now). */
+    private static final List<HitFeedbackSettings.SoundSpec> SIGNATURE_HIT_SOUNDS = List.of(
+            new HitFeedbackSettings.SoundSpec("block.lodestone.break", 1.0f, 1.0f),
+            new HitFeedbackSettings.SoundSpec("entity.generic.hurt", 0.85f, 0.75f),
+            new HitFeedbackSettings.SoundSpec("entity.breeze.deflect", 0.75f, 1.15f));
+    private static final List<HitFeedbackSettings.SoundSpec> SIGNATURE_LOW_HEALTH_SOUNDS =
+            List.of(new HitFeedbackSettings.SoundSpec("entity.glow_squid.hurt", 0.9f, 1.2f));
+    private static final List<Integer> SIGNATURE_FIREWORK_COLORS = List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00);
+
     private Migrations migrations() {
         return new Migrations(dataFolder, resources, logged::add);
+    }
+
+    private String pristineVanilla() throws Exception {
+        try (InputStream in = resources.apply("v5/migration/pristine-vanilla.yml")) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private void installFixture(String tree) throws Exception {
@@ -58,17 +74,17 @@ class MigrationsTest {
         Migrations.Result result = migrations().migrate();
 
         assertEquals(1, result.fromVersion());
-        assertEquals(4, result.toVersion());
-        assertEquals(List.of(2, 3, 4), result.stepsApplied());
+        assertEquals(5, result.toVersion());
+        assertEquals(List.of(2, 3, 4, 5), result.stepsApplied());
 
-        // Both step backups exist; the version is now stamped 4.
+        // Both step backups exist; the version is now stamped 5.
         assertTrue(Files.isRegularFile(dataFolder.resolve("config-backup-v1/config.yml")));
         assertTrue(Files.isRegularFile(dataFolder.resolve("config-backup-v2/config.yml")));
         assertTrue(Files.isRegularFile(dataFolder.resolve("state/overrides.yml")));
 
         YamlConfiguration main = load("config.yml");
         assertFalse(Migrations.isLegacyLayout(main), "migrated config.yml still legacy-shaped");
-        assertEquals(4, main.getInt("config-version"));
+        assertEquals(5, main.getInt("config-version"));
         assertFalse(main.getBoolean("modules.latency-compensation", true), "disabled toggle carried");
         assertTrue(main.getBoolean("modules.hit-registration", false), "enabled toggle kept from template");
         assertEquals("force-safe", main.getString("anticheat.mode"));
@@ -125,16 +141,16 @@ class MigrationsTest {
 
         Migrations.Result first = migrations().migrate();
         assertEquals(2, first.fromVersion());
-        assertEquals(4, first.toVersion());
-        assertEquals(List.of(3, 4), first.stepsApplied());
+        assertEquals(5, first.toVersion());
+        assertEquals(List.of(3, 4, 5), first.stepsApplied());
         assertTrue(Files.isRegularFile(dataFolder.resolve("config-backup-v2/config.yml")));
         assertTrue(Files.isRegularFile(dataFolder.resolve("state/overrides.yml")));
-        assertEquals(4, load("config.yml").getInt("config-version"));
+        assertEquals(5, load("config.yml").getInt("config-version"));
 
-        // Idempotent: a second run reads version 4 and does nothing.
+        // Idempotent: a second run reads version 5 and does nothing.
         byte[] afterFirst = Files.readAllBytes(dataFolder.resolve("config.yml"));
         Migrations.Result second = migrations().migrate();
-        assertEquals(4, second.fromVersion());
+        assertEquals(5, second.fromVersion());
         assertTrue(second.stepsApplied().isEmpty());
         assertEquals(-1, java.util.Arrays.mismatch(afterFirst,
                 Files.readAllBytes(dataFolder.resolve("config.yml"))), "config.yml unchanged on re-run");
@@ -144,16 +160,20 @@ class MigrationsTest {
     void freshTreeAndAlreadyMigratedTreeAreNoOps() throws Exception {
         // No config.yml on disk → nothing to migrate.
         Migrations.Result fresh = migrations().migrate();
-        assertEquals(4, fresh.fromVersion());
+        assertEquals(5, fresh.fromVersion());
         assertTrue(fresh.stepsApplied().isEmpty());
         assertFalse(Files.exists(dataFolder.resolve("config-backup-v1")));
         assertFalse(Files.exists(dataFolder.resolve("config-backup-v2")));
 
-        // An already-v4 tree is untouched.
-        installFixture("v4");
+        // An already-v5 tree is untouched.
+        Files.writeString(dataFolder.resolve("config.yml"), """
+                config-version: 5
+                modules:
+                  hit-feedback: false
+                """, StandardCharsets.UTF_8);
         byte[] before = Files.readAllBytes(dataFolder.resolve("config.yml"));
         Migrations.Result already = migrations().migrate();
-        assertEquals(4, already.fromVersion());
+        assertEquals(5, already.fromVersion());
         assertTrue(already.stepsApplied().isEmpty());
         assertEquals(-1, java.util.Arrays.mismatch(before,
                 Files.readAllBytes(dataFolder.resolve("config.yml"))));
@@ -166,7 +186,7 @@ class MigrationsTest {
         byte[] afterFirst = Files.readAllBytes(dataFolder.resolve("config.yml"));
 
         Migrations.Result second = migrations().migrate();
-        assertEquals(4, second.fromVersion());
+        assertEquals(5, second.fromVersion());
         assertTrue(second.stepsApplied().isEmpty());
         assertEquals(-1, java.util.Arrays.mismatch(afterFirst,
                 Files.readAllBytes(dataFolder.resolve("config.yml"))));
@@ -220,9 +240,9 @@ class MigrationsTest {
         Migrations.Result result = migrations().migrate();
 
         assertEquals(3, result.fromVersion());
-        assertEquals(4, result.toVersion());
-        assertEquals(List.of(4), result.stepsApplied());
-        assertEquals(4, load("config.yml").getInt("config-version"));
+        assertEquals(5, result.toVersion());
+        assertEquals(List.of(4, 5), result.stepsApplied());
+        assertEquals(5, load("config.yml").getInt("config-version"));
 
         // The old files moved into the v3 backup — the live effects/ dir keeps
         // only the new preset library.
@@ -235,12 +255,14 @@ class MigrationsTest {
 
         // The import carries the RESOLVED effective values.
         EffectsPreset custom = importedCustom();
-        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, custom.hitFeedback().sounds());
-        assertEquals(HitFeedbackSettings.SIGNATURE_LOW_HEALTH_SOUNDS, custom.hitFeedback().lowHealthSounds());
+        assertEquals(SIGNATURE_HIT_SOUNDS, custom.hitFeedback().sounds());
+        assertEquals(SIGNATURE_LOW_HEALTH_SOUNDS, custom.hitFeedback().lowHealthSounds());
+        assertEquals(40.0, custom.hitFeedback().lowHealthThresholdPercent(), 0.0,
+                "the 2.5.2 4-heart threshold imports as 40% of max health");
         assertEquals(0.9, custom.damageIndicators().ringRadius(), 1e-9,
                 "the tuned indicator knob imports verbatim");
         assertTrue(custom.deathEffects().lightning(), "the signature death strike imports");
-        assertEquals(DeathEffectsSettings.SIGNATURE_FIREWORK_COLORS, custom.deathEffects().fireworkColors());
+        assertEquals(SIGNATURE_FIREWORK_COLORS, custom.deathEffects().fireworkColors());
 
         // custom is selected in the freshly created effects.yml, comments intact.
         YamlConfiguration effects = load(ConfigStore.EFFECTS_FILE);
@@ -277,7 +299,8 @@ class MigrationsTest {
         assertEquals(1, custom.hitFeedback().sounds().size());
         assertEquals("block.anvil.land", custom.hitFeedback().sounds().get(0).sound());
         assertEquals(0.5f, custom.hitFeedback().sounds().get(0).volume(), 1e-6);
-        assertEquals(6.0, custom.hitFeedback().lowHealthThresholdHearts(), 0.0);
+        assertEquals(60.0, custom.hitFeedback().lowHealthThresholdPercent(), 0.0,
+                "the 2.5.2 6-heart threshold imports as 60% of max health");
         // Absent old files resolve to their vanilla no-op: a strict death nothing.
         assertEquals(DeathEffectsSettings.DEFAULTS, custom.deathEffects());
         assertEquals("custom", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"));
@@ -295,7 +318,12 @@ class MigrationsTest {
         migrations().migrate();
 
         EffectsPreset custom = importedCustom();
-        assertEquals(HitFeedbackSettings.DEFAULTS, custom.hitFeedback());
+        // The 2.5.2 vanilla tune imports faithfully: the era sounds, no particles,
+        // no layer, and its 4-heart threshold as 40% (the 2.5.2 default, converted
+        // at write time — never silently reset to the new 35% default).
+        assertEquals(new HitFeedbackSettings(
+                        HitFeedbackSettings.VANILLA_SOUNDS, List.of(), List.of(), 40.0),
+                custom.hitFeedback());
         assertEquals(DeathEffectsSettings.DEFAULTS, custom.deathEffects());
         assertEquals("custom", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"));
     }
@@ -315,9 +343,9 @@ class MigrationsTest {
 
         Migrations.Result result = migrations().migrate();
 
-        assertEquals(List.of(4), result.stepsApplied());
+        assertEquals(List.of(4, 5), result.stepsApplied());
         EffectsPreset custom = importedCustom();
-        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, custom.hitFeedback().sounds());
+        assertEquals(SIGNATURE_HIT_SOUNDS, custom.hitFeedback().sounds());
         assertEquals("custom", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"));
         assertTrue(logged.stream().anyMatch(line ->
                         line.contains("config.yml") && line.contains("hit-feedback")),
@@ -325,11 +353,13 @@ class MigrationsTest {
     }
 
     @Test
-    void importIsSuppressedWhenCustomAlreadyExistsAndVanillaStaysSelected() throws Exception {
+    void importIsSuppressedWhenCustomAlreadyExistsAndTheChainSettlesOnSignature() throws Exception {
         // The import IS custom.yml's extraction — an already-present custom.yml is
-        // an owner file and must never be overwritten; without an import the
-        // selection stays vanilla (selecting unknown custom values could change
-        // the sound silently) and the skip is reported loudly.
+        // an owner file and must never be overwritten; without an import the 3→4
+        // step leaves the default signature selection (selecting unknown custom
+        // values could change the sound silently) and reports the skip loudly.
+        // The 4→5 step finds nothing to flip, so the chain settles on signature
+        // (the owner re-selects custom if they want it — the file is preserved).
         installV3Config();
         writeOldEffectsFile("hit-feedback.yml", "hit-feedback:\n  preset: signature\n");
         Path custom = dataFolder.resolve(ConfigStore.EFFECTS_PRESETS_DIR).resolve("custom.yml");
@@ -340,8 +370,8 @@ class MigrationsTest {
 
         assertEquals("display-name: Mine\n", Files.readString(custom, StandardCharsets.UTF_8),
                 "an existing custom.yml is sacred — never overwritten by the import");
-        assertEquals("vanilla", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"),
-                "no import → no custom selection");
+        assertEquals("signature", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"),
+                "3→4 keeps vanilla, then 4→5 flips the retired vanilla to signature");
         assertTrue(Files.isRegularFile(
                         dataFolder.resolve("config-backup-v3/effects/hit-feedback.yml")),
                 "the old file is still backed up out of the way");
@@ -365,23 +395,22 @@ class MigrationsTest {
         Migrations.Result result = migrations().migrate(); // then the chain
         store.ensureDefaultFiles();                       // post-migration fill
 
-        assertEquals(List.of(4), result.stepsApplied());
+        assertEquals(List.of(4, 5), result.stepsApplied());
         SnapshotParser.Result parsed = SnapshotParser.parse(store.loadSources());
         assertEquals("custom", parsed.snapshot().selectedEffectsPreset(),
-                "the imported custom preset must be selected");
+                "the imported custom preset must be selected (4→5 never flips a custom selection)");
         me.vexmc.mental.v5.config.settings.HitFeedbackSettings feedback =
                 (me.vexmc.mental.v5.config.settings.HitFeedbackSettings)
                         parsed.snapshot().settings(
                                 me.vexmc.mental.v5.feature.Feature.HIT_FEEDBACK.settingsKey());
-        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, feedback.sounds(),
+        assertEquals(SIGNATURE_HIT_SOUNDS, feedback.sounds(),
                 "the server must sound exactly as it did on 2.5.2");
         DeathEffectsSettings death =
                 (DeathEffectsSettings) parsed.snapshot().settings(
                         me.vexmc.mental.v5.feature.Feature.DEATH_EFFECTS.settingsKey());
         assertTrue(death.lightning(), "the signature death strike survives the upgrade");
         assertTrue(parsed.issues().isEmpty(), () -> "issues: " + parsed.issues());
-        // The whole library is present for the GUI.
-        assertTrue(parsed.snapshot().hasEffectsPreset("vanilla"));
+        // The whole library is present for the GUI (vanilla retired in 2.5.5).
         assertTrue(parsed.snapshot().hasEffectsPreset("signature"));
         assertTrue(parsed.snapshot().hasEffectsPreset("custom"));
     }
@@ -394,8 +423,8 @@ class MigrationsTest {
 
         Migrations.Result result = migrations().migrate();
 
-        assertEquals(List.of(4), result.stepsApplied());
-        assertEquals(4, load("config.yml").getInt("config-version"));
+        assertEquals(List.of(4, 5), result.stepsApplied());
+        assertEquals(5, load("config.yml").getInt("config-version"));
         assertFalse(Files.exists(dataFolder.resolve("config-backup-v3/effects")));
         assertFalse(Files.exists(dataFolder.resolve(ConfigStore.EFFECTS_PRESETS_DIR).resolve("custom.yml")));
         assertFalse(Files.exists(dataFolder.resolve(ConfigStore.EFFECTS_FILE)));
@@ -415,6 +444,98 @@ class MigrationsTest {
 
         migrations().migrate();
         EffectsPreset custom = importedCustom();
-        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, custom.hitFeedback().sounds());
+        assertEquals(SIGNATURE_HIT_SOUNDS, custom.hitFeedback().sounds());
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  4 → 5 : the vanilla-preset retirement                              */
+    /* ------------------------------------------------------------------ */
+
+    private void installV4Tree(String effectsPreset) throws Exception {
+        Files.writeString(dataFolder.resolve("config.yml"),
+                "config-version: 4\nmodules:\n  hit-feedback: false\n", StandardCharsets.UTF_8);
+        Files.writeString(dataFolder.resolve(ConfigStore.EFFECTS_FILE),
+                "effects:\n  preset: " + effectsPreset + "\n", StandardCharsets.UTF_8);
+    }
+
+    private Path vanillaPreset() {
+        return dataFolder.resolve(ConfigStore.EFFECTS_PRESETS_DIR).resolve("vanilla.yml");
+    }
+
+    @Test
+    void v4RetiresThePristineVanillaPresetAndFlipsTheSelection() throws Exception {
+        installV4Tree("vanilla");
+        Files.createDirectories(vanillaPreset().getParent());
+        Files.writeString(vanillaPreset(), pristineVanilla(), StandardCharsets.UTF_8);
+
+        Migrations.Result result = migrations().migrate();
+
+        assertEquals(4, result.fromVersion());
+        assertEquals(5, result.toVersion());
+        assertEquals(List.of(5), result.stepsApplied());
+        assertFalse(Files.exists(vanillaPreset()), "the pristine vanilla.yml must be retired");
+        assertTrue(Files.isRegularFile(
+                        dataFolder.resolve("config-backup-v4/effects/presets/vanilla.yml")),
+                "the retired vanilla.yml must be backed up");
+        assertEquals("signature", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"),
+                "the selection flips from the retired vanilla to signature");
+        assertEquals(5, load("config.yml").getInt("config-version"));
+
+        // Idempotent: a second run reads version 5 and does nothing.
+        Migrations.Result second = migrations().migrate();
+        assertTrue(second.stepsApplied().isEmpty());
+    }
+
+    @Test
+    void v4KeepsAnEditedVanillaPresetAndItsSelection() throws Exception {
+        installV4Tree("vanilla");
+        Files.createDirectories(vanillaPreset().getParent());
+        String edited = pristineVanilla().replace("display-name: Vanilla", "display-name: My Vanilla");
+        Files.writeString(vanillaPreset(), edited, StandardCharsets.UTF_8);
+
+        migrations().migrate();
+
+        assertEquals(edited, Files.readString(vanillaPreset(), StandardCharsets.UTF_8),
+                "an edited vanilla.yml is an owner file — never touched");
+        assertEquals("vanilla", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"),
+                "an edited vanilla.yml keeps its selection (still resolvable via directory discovery)");
+        assertFalse(Files.exists(dataFolder.resolve("config-backup-v4/effects/presets/vanilla.yml")),
+                "an edited file is not backed up — it stays in place");
+    }
+
+    @Test
+    void v4FlipsAVanillaSelectionWhenNoVanillaFileExists() throws Exception {
+        // A v4 tree that selected vanilla but never had the file on disk: the
+        // selection still flips so the runtime resolves signature, not an unknown
+        // name.
+        installV4Tree("vanilla");
+
+        migrations().migrate();
+
+        assertEquals("signature", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"));
+    }
+
+    @Test
+    void v4LeavesANonVanillaSelectionUntouched() throws Exception {
+        installV4Tree("custom");
+
+        migrations().migrate();
+
+        assertEquals("custom", load(ConfigStore.EFFECTS_FILE).getString("effects.preset"),
+                "a non-vanilla selection is never flipped");
+    }
+
+    @Test
+    void v4ScrubsAVanillaEffectsOverlaySelection() throws Exception {
+        installV4Tree("signature");
+        Path overrides = dataFolder.resolve(ConfigStore.STATE_DIR).resolve(ConfigStore.OVERRIDES_FILE);
+        Files.createDirectories(overrides.getParent());
+        Files.writeString(overrides, "effects:\n  preset: vanilla\n", StandardCharsets.UTF_8);
+
+        migrations().migrate();
+
+        YamlConfiguration overlay = load("state/overrides.yml");
+        assertFalse(overlay.isSet("effects.preset"),
+                "a machine-overlay vanilla selection is scrubbed when vanilla.yml is gone");
     }
 }

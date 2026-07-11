@@ -9,6 +9,12 @@ package me.vexmc.mental.v5.config.settings;
  * (final damage in HEARTS, one decimal, trailing .0 stripped); the crit
  * variant fires on an era-crit posture OR damage at/above
  * {@code critThresholdHearts} (HEARTS — 2 damage = 1 heart).
+ *
+ * @param healText the HEALING-indicator template shown to the last player who
+ *        hit the healed player (any heal source), {@code {HEALTH}} = the healed
+ *        amount in HEARTS. EMPTY (the DEFAULTS) disables healing indicators
+ *        entirely — the era-exact no-op: with no template, no heal sampler is
+ *        installed and nothing observes or renders heals.
  */
 public record DamageIndicatorsSettings(
         int lifetimeTicks,
@@ -20,7 +26,8 @@ public record DamageIndicatorsSettings(
         double drag,
         String text,
         String critText,
-        double critThresholdHearts) {
+        double critThresholdHearts,
+        String healText) {
 
     public static final int MIN_LIFETIME = 1;
     public static final int MAX_LIFETIME = 200;
@@ -35,5 +42,6 @@ public record DamageIndicatorsSettings(
             40, 0.6, 0.3, 0.25, 0.06, 0.05, 0.98,
             "&f-{HEALTH} &c❤&r",
             "&c&l** -{HEALTH} ❤ **",
-            5.0);
+            5.0,
+            "");
 }

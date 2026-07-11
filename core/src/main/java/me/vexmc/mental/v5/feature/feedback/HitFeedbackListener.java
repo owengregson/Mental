@@ -73,7 +73,7 @@ public final class HitFeedbackListener implements Listener {
     private final PlayerManager playerManager;
 
     private final boolean vanillaTune;
-    private final double lowHealthCeiling; // post-hit health (in half-hearts) below which the extra layer fires
+    private final double lowHealthThresholdPercent; // percent of the victim's max health below which the layer fires
     private final double audienceRadius;
 
     private final List<FeedbackEmit.ResolvedSound> normalSounds;
@@ -97,7 +97,7 @@ public final class HitFeedbackListener implements Listener {
         // preset reproducing its values) keeps vanilla's per-broadcast pitch
         // jitter instead of a robotic flat 1.0.
         this.vanillaTune = settings.vanillaTune();
-        this.lowHealthCeiling = settings.lowHealthThresholdHearts() * 2.0;
+        this.lowHealthThresholdPercent = settings.lowHealthThresholdPercent();
         this.normalSounds = FeedbackEmit.resolveSounds(settings.sounds(), table, "hit-feedback", "hit", logger);
         this.lowHealthSounds =
                 FeedbackEmit.resolveSounds(settings.lowHealthSounds(), table, "hit-feedback", "low-health", logger);
@@ -162,6 +162,13 @@ public final class HitFeedbackListener implements Listener {
         //    DID, and with no layer configured nothing extra was played.
         double postHitHealth = victim.getHealth() - finalDamage;
         boolean killing = postHitHealth <= 0.0;
+        // The ceiling is per-hit: a PERCENT of THIS victim's own maximum health,
+        // so a scaled-max-health victim gets a proportional threshold. getMaxHealth()
+        // is deliberate — the Attribute enum constant (GENERIC_MAX_HEALTH → MAX_HEALTH)
+        // was renamed in 1.21.2+, but this deprecated accessor is stable across the
+        // whole 1.9.4 → 26.x range, so the hot path never touches the version.
+        @SuppressWarnings("deprecation")
+        double lowHealthCeiling = victim.getMaxHealth() * lowHealthThresholdPercent / 100.0;
         boolean lowHealth = !killing && postHitHealth < lowHealthCeiling && !lowHealthSounds.isEmpty();
 
         if (!nearby.isEmpty()) {

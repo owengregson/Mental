@@ -1,13 +1,18 @@
 # ──────────────────────────────────────────────────────────────────────────
-#  Mental — Combat Effects preset: signature
+#  Mental — Combat Effects preset: signature  (the shipped default)
 #
 #  Mental's own tune. Hits play a lodestone-break + generic-hurt +
 #  breeze-deflect chord over a redstone-block burst, with a glow-squid
-#  chirp layered onto low-health hits; indicators keep the shipped feel;
-#  a death ships the full strike — the cosmetic lightning bolt, the
-#  glow-squid death call, and the REAL white/yellow/gold firework blast.
-#  A sound that does not exist on an older server resolves to an
-#  era-appropriate fallback, printed once in the boot report.
+#  chirp layered onto low-health hits; indicators keep the shipped feel and
+#  add a green healing number; a death ships the full strike — the cosmetic
+#  lightning bolt, the glow-squid death call, and the REAL white/yellow/gold
+#  firework blast. A sound that does not exist on an older server resolves
+#  to an era-appropriate fallback, printed once in the boot report.
+#
+#  This is the DEFAULT preset (effects.yml selects it). There is no "vanilla"
+#  preset anymore: the audibly-vanilla feel is simply "leave the Combat
+#  Effects modules OFF" in config.yml — a disabled module changes nothing the
+#  game does or shows, whatever this file says.
 #
 #  One preset = one complete Combat Effects tune: this file carries all
 #  three module sections. Which preset applies is chosen in effects.yml
@@ -48,11 +53,14 @@ description: Mental's own tune — the layered hit chord, the low-health chirp, 
 #             inert under emanate, so the signature burst carries zeros.
 #
 # The low-health extra layer: played ON TOP of the sounds above when the
-# victim's health AFTER this hit drops below low-health-threshold-hearts (in
-# HEARTS; 2 health = 1 heart). It is SUPPRESSED on the killing hit —
-# death-effects owns that moment. The glow-squid chirp falls back to
-# entity.squid.hurt below 1.17 (no glow squid existed), printed once in the
-# boot report.
+# victim's health AFTER this hit drops below low-health-threshold-percent
+# PERCENT of the victim's own maximum health (not absolute hearts — the
+# ceiling scales with a scaled-max-health victim; on a normal 20-max player
+# 35 means below 7 health = 3.5 hearts). Unlike the normal sounds, the
+# low-health layer is ALSO played to the victim, so the player under pressure
+# hears it too. It is SUPPRESSED on the killing hit — death-effects owns that
+# moment. The glow-squid chirp falls back to entity.squid.hurt below 1.17 (no
+# glow squid existed), printed once in the boot report.
 hit-feedback:
   sounds:
     - sound: block.lodestone.break
@@ -72,7 +80,7 @@ hit-feedback:
       mode: emanate
       speed: 0.15
       spread: {x: 0.0, y: 0.0, z: 0.0}
-  low-health-threshold-hearts: 4.0
+  low-health-threshold-percent: 35
   low-health-sounds:
     - sound: entity.glow_squid.hurt
       volume: 0.9
@@ -84,14 +92,20 @@ hit-feedback:
 # bystander sees it). It spawns on a front-half ring around the victim's
 # chest and falls under a light ballistic model, despawning the instant it
 # reaches its spawn ground plane or at lifetime-ticks, whichever comes first.
-# The signature tune keeps the shipped feel — these are the same defaults the
-# vanilla preset carries.
 #
 #   text / crit-text  the label templates. {HEALTH} is the final damage in
 #                     HEARTS (one decimal, a trailing .0 stripped); '&' colour
 #                     codes are translated. The crit variant is used on an
 #                     era-crit posture OR damage at/above crit-threshold-hearts
 #                     (also in HEARTS).
+#   heal-text         the HEALING-indicator template, shown to the LAST player
+#                     who hit the healed player within the last 10s (any heal
+#                     source — pots, regen, golden apples, and even a plugin's
+#                     own setHealth). {HEALTH} is the healed amount in HEARTS.
+#                     Heals are aggregated to at most one stand per 10 ticks,
+#                     so a regen drip does not spam stands. An EMPTY string
+#                     disables healing indicators entirely (no stand, and no
+#                     heal is even sampled) — the era-exact no-op.
 #   lifetime-ticks    hard despawn age in ticks. Clamped to [1, 200].
 #   ring-radius       how far off the chest, in blocks, the number spawns on
 #                     the front-half ring. Clamped to [0, 4].
@@ -113,6 +127,7 @@ damage-indicators:
   text: "&f-{HEALTH} &c❤&r"
   crit-text: "&c&l** -{HEALTH} ❤ **"
   crit-threshold-hearts: 5.0
+  heal-text: "&a+{HEALTH} &c❤&r"
 
 # ── death-effects ───────────────────────────────────────────────────────────
 # What plays the moment a player dies, from ANY cause (PlayerDeathEvent).

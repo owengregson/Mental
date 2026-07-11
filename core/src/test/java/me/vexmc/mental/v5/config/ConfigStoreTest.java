@@ -432,9 +432,9 @@ class ConfigStoreTest {
         // A 2.5.2 tree (version < 4 with the old per-module files): effects.yml
         // and custom.yml must NOT extract — the 3→4 migration owns creating both
         // (custom.yml's first extraction IS the import of the old effective
-        // values, and effects.yml must come up with custom selected). vanilla
-        // and signature are new-library files the migration never touches, so
-        // they extract normally.
+        // values, and effects.yml must come up with custom selected). signature
+        // is a new-library file the migration never touches, so it extracts
+        // normally.
         Files.writeString(dataFolder.resolve(ConfigStore.MAIN_FILE),
                 "config-version: 3\n", StandardCharsets.UTF_8);
         Path oldHitFeedback = dataFolder.resolve("effects/hit-feedback.yml");
@@ -448,7 +448,6 @@ class ConfigStoreTest {
                 "effects.yml must not extract while the 2.5.2 layout awaits migration");
         assertFalse(Files.exists(effectsPreset("custom")),
                 "custom.yml must not extract — the migration's import is its first extraction");
-        assertTrue(Files.isRegularFile(effectsPreset("vanilla")));
         assertTrue(Files.isRegularFile(effectsPreset("signature")));
 
         // Post-migration (stamped 4, old file moved away): both extract.
@@ -470,11 +469,31 @@ class ConfigStoreTest {
 
         ConfigStore.Sources sources = store.loadSources();
 
-        assertEquals("vanilla", sources.effects().getString("effects.preset"),
-                "the shipped selection is vanilla");
+        assertEquals("signature", sources.effects().getString("effects.preset"),
+                "the shipped selection is signature");
         assertEquals(ConfigStore.BUNDLED_EFFECTS_PRESETS.size() + 1, sources.effectsPresets().size());
         assertNotNull(sources.effectsPresets().get("mine"));
         assertNotNull(sources.effectsPresets().get("signature"));
+    }
+
+    @Test
+    void loadSourcesServesTheSignatureResourceWhenTheDiskFileIsMissing() throws Exception {
+        // The signature tune is the default preset — it must survive a torn
+        // install: with its disk file gone, loadSources serves the JAR resource
+        // (a loud line), so the signature stem is always resolvable.
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+        Files.delete(effectsPreset("signature"));
+
+        ConfigStore.Sources sources = store.loadSources();
+
+        var signature = sources.effectsPresets().get("signature");
+        assertNotNull(signature, "signature must be served from the jar when its disk file is gone");
+        assertFalse(signature.getKeys(false).isEmpty(),
+                "the served signature carries the bundled tune, not an empty config");
+        assertTrue(logged.stream().anyMatch(line ->
+                        line.contains("signature.yml") && line.contains("jar")),
+                () -> "expected a loud resource-fallback line, logged: " + logged);
     }
 
     @Test

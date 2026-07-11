@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,7 +50,23 @@ import org.bukkit.configuration.file.YamlConfiguration;
  *       the import IS its extraction, never a re-serialization of a human
  *       file). {@code effects.yml} is created with {@code custom} selected so
  *       an upgraded server comes up identical-sounding, and the old files move
- *       into {@code config-backup-v3/effects/} — one loud line per action.</li>
+ *       into {@code config-backup-v3/effects/} — one loud line per action. The
+ *       resolution reads FROZEN copies of the 2.5.2 effective values (inlined
+ *       below as historical constants — they must never track the live
+ *       preset), and the import writes the 2.5.5
+ *       {@code low-health-threshold-percent} key (a machine-write under the new
+ *       schema, so no legacy-key warn debt).</li>
+ *   <li>{@code 4 → 5}: the vanilla-preset retirement (2.5.5). The vanilla feel
+ *       is "disable the Combat Effects modules" now, so the bundled
+ *       {@code vanilla.yml} leaves the library: a byte-pristine copy is backed
+ *       up to {@code config-backup-v4/} and deleted (an edited copy stays, and
+ *       stays selectable via directory discovery); when the pristine file was
+ *       removed or was never present, {@code effects.yml}'s
+ *       {@code preset: vanilla} is textually flipped to {@code preset: signature}
+ *       (the new default) and a machine-overlay {@code effects.preset: vanilla}
+ *       is scrubbed — an edited vanilla.yml keeps its selection. The runtime
+ *       unknown-name loud fallback (→ signature) is the safety net either
+ *       way.</li>
  * </ul>
  *
  * <p>Each step backs up into {@code config-backup-v<N>/} first and is
@@ -56,7 +74,51 @@ import org.bukkit.configuration.file.YamlConfiguration;
  */
 public final class Migrations {
 
-    public static final int CURRENT_VERSION = 4;
+    public static final int CURRENT_VERSION = 5;
+
+    /**
+     * The 2.5.3/2.5.4 shipped {@code effects/presets/vanilla.yml}, newline-
+     * normalized SHA-256 — the pristine-delete pin for the 4 → 5 retirement.
+     * A vanilla.yml whose bytes hash to this was never tuned by the owner, so
+     * it is the old bundle verbatim and is safe to retire; any other bytes are
+     * an owner edit and stay. Kept here (not in {@link SupersededEffectsPresets})
+     * because vanilla is retired, not upgraded — the upgrade driver never visits
+     * it.
+     */
+    private static final String PRISTINE_VANILLA_HASH =
+            "7c32bf6adec4bd64319998f3e792a6f901eb78f0b20970fe494a524588560e83";
+
+    /* --------------------------------------------------------------------- */
+    /*  Frozen 2.5.2 effective values (the 3 → 4 import resolves these).      */
+    /*  Historical constants — they must NEVER track the live signature      */
+    /*  preset (the bundled YAML is that tune's source of truth now, and it   */
+    /*  may be re-tuned; the 3 → 4 import must reproduce exactly what 2.5.2   */
+    /*  shipped).                                                             */
+    /* --------------------------------------------------------------------- */
+
+    private static final List<HitFeedbackSettings.SoundSpec> FROZEN_SIGNATURE_HIT_SOUNDS = List.of(
+            new HitFeedbackSettings.SoundSpec("block.lodestone.break", 1.0f, 1.0f),
+            new HitFeedbackSettings.SoundSpec("entity.generic.hurt", 0.85f, 0.75f),
+            new HitFeedbackSettings.SoundSpec("entity.breeze.deflect", 0.75f, 1.15f));
+
+    private static final List<HitFeedbackSettings.ParticleSpec> FROZEN_SIGNATURE_HIT_PARTICLES = List.of(
+            new HitFeedbackSettings.ParticleSpec("block", "redstone_block", 6, 8,
+                    HitFeedbackSettings.Mode.EMANATE, 0.15f, 0, 0, 0));
+
+    private static final List<HitFeedbackSettings.SoundSpec> FROZEN_SIGNATURE_LOW_HEALTH_SOUNDS =
+            List.of(new HitFeedbackSettings.SoundSpec("entity.glow_squid.hurt", 0.9f, 1.2f));
+
+    private static final List<HitFeedbackSettings.SoundSpec> FROZEN_VANILLA_HIT_SOUNDS =
+            List.of(new HitFeedbackSettings.SoundSpec("entity.player.hurt", 1.0f, 1.0f));
+
+    private static final List<HitFeedbackSettings.SoundSpec> FROZEN_SIGNATURE_DEATH_SOUNDS =
+            List.of(new HitFeedbackSettings.SoundSpec("entity.glow_squid.death", 1.0f, 0.95f));
+
+    private static final List<Integer> FROZEN_SIGNATURE_FIREWORK_COLORS =
+            List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00);
+
+    /** The 2.5.2 default low-health threshold, in HEARTS — the read fallback for the import. */
+    private static final double FROZEN_2_5_2_THRESHOLD_HEARTS = 4.0;
 
     private final Path dataDir;
     private final Function<String, InputStream> resources;
@@ -95,6 +157,11 @@ public final class Migrations {
             migrateV3toV4();
             steps.add(4);
             version = 4;
+        }
+        if (version < 5 && Files.isRegularFile(dataDir.resolve(ConfigStore.MAIN_FILE))) {
+            migrateV4toV5();
+            steps.add(5);
+            version = 5;
         }
         return new Result(from, version, steps);
     }
@@ -366,21 +433,26 @@ public final class Migrations {
     private HitFeedbackSettings resolveOldHitFeedback(ConfigurationSection section) {
         ConfigReader reader = new ConfigReader(section, "effects/hit-feedback.yml (2.5.2)",
                 new ConfigIssues());
-        double threshold = reader.numberClamped("low-health-threshold-hearts",
-                HitFeedbackSettings.DEFAULTS.lowHealthThresholdHearts(), 0.0, 100.0);
+        // The 2.5.2 threshold was absolute HEARTS; 2.5.5 stores percent-of-max.
+        // Convert at import (hearts of a 20-max player as percent = hearts × 10)
+        // so the imported custom.yml carries the new key and never warns on
+        // parse (the B10 no-silent-drops rule, settled at write time).
+        double hearts = reader.numberClamped("low-health-threshold-hearts",
+                FROZEN_2_5_2_THRESHOLD_HEARTS, 0.0, 100.0);
+        double percent = Math.max(0.0, Math.min(100.0, hearts * 10.0));
         return switch (legacyPreset(section)) {
             case "signature" -> new HitFeedbackSettings(
-                    HitFeedbackSettings.SIGNATURE_SOUNDS,
-                    HitFeedbackSettings.SIGNATURE_PARTICLES,
-                    HitFeedbackSettings.SIGNATURE_LOW_HEALTH_SOUNDS,
-                    threshold);
+                    FROZEN_SIGNATURE_HIT_SOUNDS,
+                    FROZEN_SIGNATURE_HIT_PARTICLES,
+                    FROZEN_SIGNATURE_LOW_HEALTH_SOUNDS,
+                    percent);
             case "custom" -> new HitFeedbackSettings(
                     EffectsPresetParser.parseSounds(reader, "sounds", List.of()),
                     EffectsPresetParser.parseParticles(reader, List.of()),
                     EffectsPresetParser.parseSounds(reader, "low-health-sounds", List.of()),
-                    threshold);
+                    percent);
             default -> new HitFeedbackSettings(
-                    HitFeedbackSettings.VANILLA_SOUNDS, List.of(), List.of(), threshold);
+                    FROZEN_VANILLA_HIT_SOUNDS, List.of(), List.of(), percent);
         };
     }
 
@@ -391,9 +463,9 @@ public final class Migrations {
         return switch (legacyPreset(section)) {
             case "signature" -> new DeathEffectsSettings(
                     true,
-                    DeathEffectsSettings.SIGNATURE_SOUNDS,
-                    DeathEffectsSettings.SIGNATURE_PARTICLES,
-                    DeathEffectsSettings.SIGNATURE_FIREWORK_COLORS);
+                    FROZEN_SIGNATURE_DEATH_SOUNDS,
+                    List.of(),
+                    FROZEN_SIGNATURE_FIREWORK_COLORS);
             case "custom" -> new DeathEffectsSettings(
                     reader.flag("lightning", false),
                     EffectsPresetParser.parseSounds(reader, "sounds", List.of()),
@@ -449,7 +521,7 @@ public final class Migrations {
         yaml.set("description", "Imported from the 2.5.2 per-module effects configuration.");
         yaml.set("hit-feedback.sounds", soundMaps(hitFeedback.sounds()));
         yaml.set("hit-feedback.particles", particleMaps(hitFeedback.particles()));
-        yaml.set("hit-feedback.low-health-threshold-hearts", hitFeedback.lowHealthThresholdHearts());
+        yaml.set("hit-feedback.low-health-threshold-percent", hitFeedback.lowHealthThresholdPercent());
         yaml.set("hit-feedback.low-health-sounds", soundMaps(hitFeedback.lowHealthSounds()));
         yaml.set("damage-indicators.lifetime-ticks", indicators.lifetimeTicks());
         yaml.set("damage-indicators.ring-radius", indicators.ringRadius());
@@ -492,6 +564,10 @@ public final class Migrations {
      * the selection to {@code custom} when the import happened — a targeted
      * substitution (the {@code stampVersion} precedent) so every comment in the
      * template survives, where a YamlConfiguration round-trip would drop them.
+     * The template's default selection is {@code signature} (2.5.5), so the flip
+     * substitutes that line; when the import was skipped the default signature
+     * selection stands (the retired vanilla is gone — the 4 → 5 step then finds
+     * nothing to flip).
      */
     private void writeEffectsSelection(Path effectsFile, boolean selectCustom) {
         String template = readResource(ConfigStore.EFFECTS_FILE);
@@ -500,12 +576,165 @@ public final class Migrations {
             return;
         }
         String content = selectCustom
-                ? template.replaceFirst("(?m)^  preset: vanilla$", "  preset: custom")
+                ? template.replaceFirst("(?m)^  preset: signature$", "  preset: custom")
                 : template;
         try {
             Files.writeString(effectsFile, content, StandardCharsets.UTF_8);
         } catch (IOException failure) {
             log.accept("Could not write " + ConfigStore.EFFECTS_FILE + " during migration: " + failure);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  4 -> 5 : retire the bundled vanilla preset                         */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The vanilla-preset retirement (2.5.5). A byte-pristine
+     * {@code effects/presets/vanilla.yml} is backed up and deleted (an edited
+     * copy stays and remains selectable via directory discovery); when the
+     * pristine file was removed or was never present, {@code effects.yml}'s
+     * {@code preset: vanilla} is flipped to {@code preset: signature} (the new
+     * default) and a machine-overlay {@code effects.preset: vanilla} is scrubbed.
+     * An edited vanilla.yml keeps its selection untouched. One loud line per
+     * action; the runtime unknown-name loud fallback is the safety net either
+     * way.
+     */
+    private void migrateV4toV5() {
+        retirePristineVanillaPreset();
+        boolean vanillaGone = !Files.isRegularFile(
+                dataDir.resolve(ConfigStore.EFFECTS_PRESETS_DIR).resolve("vanilla.yml"));
+        if (vanillaGone) {
+            flipEffectsSelectionVanillaToSignature();
+            scrubVanillaEffectsOverlaySelection();
+        }
+        stampVersion(5);
+    }
+
+    /**
+     * Retires a byte-pristine vanilla.yml: back it up into {@code config-backup-v4/}
+     * and delete it (mirroring the 3 → 4 backup precedent). An edited copy —
+     * anything whose newline-normalized bytes do not hash to the shipped
+     * 2.5.3/2.5.4 bundle — is an owner file and is left in place, still selectable
+     * by directory discovery.
+     */
+    private void retirePristineVanillaPreset() {
+        Path vanillaFile = dataDir.resolve(ConfigStore.EFFECTS_PRESETS_DIR).resolve("vanilla.yml");
+        if (!Files.isRegularFile(vanillaFile)) {
+            return; // never present — nothing to retire
+        }
+        String onDisk;
+        try {
+            onDisk = Files.readString(vanillaFile, StandardCharsets.UTF_8);
+        } catch (IOException failure) {
+            log.accept("Could not read effects/presets/vanilla.yml during the 4→5 migration: " + failure);
+            return;
+        }
+        if (!isPristineVanilla(onDisk)) {
+            log.accept("effects/presets/vanilla.yml has local edits — kept in place and still"
+                    + " selectable; the bundled vanilla preset is retired in 2.5.5 (disable the"
+                    + " Combat Effects modules for the vanilla feel).");
+            return;
+        }
+        Path backupDir = dataDir.resolve("config-backup-v4").resolve(ConfigStore.EFFECTS_PRESETS_DIR);
+        try {
+            Files.createDirectories(backupDir);
+            Files.move(vanillaFile, backupDir.resolve("vanilla.yml"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            log.accept("Retired the pristine effects/presets/vanilla.yml (backup:"
+                    + " config-backup-v4/effects/presets/) — the vanilla feel is now 'disable the"
+                    + " Combat Effects modules'; the signature preset is the default.");
+        } catch (IOException failure) {
+            log.accept("Could not retire effects/presets/vanilla.yml: " + failure);
+        }
+    }
+
+    /**
+     * Textually flips {@code effects.yml}'s {@code   preset: vanilla} to
+     * {@code   preset: signature} (the {@link #writeEffectsSelection}
+     * replaceFirst precedent) so every comment survives. Runs only when
+     * vanilla.yml is gone; a selection that is already signature/custom/other
+     * never matches and is left alone.
+     */
+    private void flipEffectsSelectionVanillaToSignature() {
+        Path effectsFile = dataDir.resolve(ConfigStore.EFFECTS_FILE);
+        if (!Files.isRegularFile(effectsFile)) {
+            return; // fresh tree — ConfigStore extracts the signature-default template
+        }
+        try {
+            String text = Files.readString(effectsFile, StandardCharsets.UTF_8);
+            String flipped = text.replaceFirst("(?m)^  preset: vanilla$", "  preset: signature");
+            if (!flipped.equals(text)) {
+                Files.writeString(effectsFile, flipped, StandardCharsets.UTF_8);
+                log.accept("effects.yml selected the retired 'vanilla' preset — switched to"
+                        + " 'signature' (the new default); disable the Combat Effects modules for"
+                        + " the vanilla feel.");
+            }
+        } catch (IOException failure) {
+            log.accept("Could not update effects.yml during the 4→5 migration: " + failure);
+        }
+    }
+
+    /**
+     * Scrubs a machine-overlay {@code effects.preset: vanilla} when vanilla.yml
+     * is gone — the overlay wins over effects.yml, so a stale vanilla selection
+     * there would keep steering the retired preset (the runtime would loudly
+     * stand signature in on every reload). Boot-time scrubbing already drops the
+     * retired per-module effects keys; this one-time selection scrub belongs to
+     * the migration because it is tied to the file retirement. Loud, once.
+     */
+    private void scrubVanillaEffectsOverlaySelection() {
+        Path overrides = dataDir.resolve(ConfigStore.STATE_DIR).resolve(ConfigStore.OVERRIDES_FILE);
+        if (!Files.isRegularFile(overrides)) {
+            return;
+        }
+        YamlConfiguration yaml = new YamlConfiguration();
+        try {
+            yaml.load(new StringReader(Files.readString(overrides, StandardCharsets.UTF_8)));
+        } catch (IOException | InvalidConfigurationException failure) {
+            log.accept("state/overrides.yml could not be read during the 4→5 migration: "
+                    + failure.getMessage());
+            return;
+        }
+        if (!"vanilla".equalsIgnoreCase(String.valueOf(yaml.getString("effects.preset")))) {
+            return;
+        }
+        yaml.set("effects.preset", null);
+        ConfigurationSection effects = yaml.getConfigurationSection("effects");
+        if (effects != null && effects.getKeys(false).isEmpty()) {
+            yaml.set("effects", null);
+        }
+        try {
+            Files.writeString(overrides, yaml.saveToString(), StandardCharsets.UTF_8);
+            log.accept("state/overrides.yml selected the retired 'vanilla' effects preset —"
+                    + " removed the overlay key (signature is the default now).");
+        } catch (IOException failure) {
+            log.accept("Could not update state/overrides.yml during the 4→5 migration: " + failure);
+        }
+    }
+
+    /** Whether {@code text} is the byte-pristine 2.5.3/2.5.4 vanilla.yml (newline-normalized). */
+    private static boolean isPristineVanilla(String text) {
+        if (text == null) {
+            return false;
+        }
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
+        return PRISTINE_VANILLA_HASH.equals(sha256Hex(normalized));
+    }
+
+    /** SHA-256 hex, mirroring {@link SupersededEffectsPresets}'s normalization + encoding. */
+    private static String sha256Hex(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
         }
     }
 

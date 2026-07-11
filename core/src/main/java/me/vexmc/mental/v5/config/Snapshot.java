@@ -93,7 +93,7 @@ public final class Snapshot {
 
     /**
      * The selected Combat Effects preset name (the {@code effects.preset}
-     * selection, already fallen back to vanilla if the configured name matched
+     * selection, already fallen back to signature if the configured name matched
      * no file). The three FEEDBACK settings records in this snapshot came from
      * exactly this preset.
      */
@@ -139,7 +139,7 @@ public final class Snapshot {
                 Map.of(KnockbackProfile.LEGACY_17.name(), KnockbackProfile.LEGACY_17);
         private String selectedEffectsPreset = EffectsPreset.DEFAULT_NAME;
         private Map<String, EffectsPreset> effectsPresets =
-                Map.of(EffectsPreset.VANILLA.name(), EffectsPreset.VANILLA);
+                Map.of(EffectsPreset.FALLBACK.name(), EffectsPreset.FALLBACK);
         private AnticheatSettings anticheat = AnticheatSettings.DEFAULTS;
         private DebugSettings debug = DebugSettings.DEFAULTS;
         private boolean metricsEnabled = true;
