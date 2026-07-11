@@ -605,6 +605,94 @@ public final class HitRegistrationUnit implements FeatureUnit {
         }
     }
 
+    /**
+     * The two transaction states that mean a knock is ALREADY committed to the
+     * victim's client, so the region apply must land the damage to stay coherent
+     * (F1). {@code PRE_SENT} — the velocity burst rode the wire to the client;
+     * {@code PINNED} — the era vector was pinned to ship once via the genuine
+     * velocity event (a connectionless victim, OR a wire-failed burst: {@link
+     * HitTransaction#pinnedWireFailed} downgrades INTO {@code PINNED}, so there is no
+     * separate wire-failed state to enumerate). Both were already submitted to the
+     * victim's desk ({@code submitFromWire}) at plan time, so both have promised the
+     * victim a knock. Every other state has committed nothing:
+     * {@code REGISTERED}/{@code PLANNED} shipped no knock (velocity suppressed,
+     * paced-out, hurt-only, module off, or no view), and the resolved terminals are
+     * post-delivery — so era window-silence there stays era silence. Pure so the
+     * state inclusion is unit-pinned at this seam.
+     *
+     * <p>This is why {@code applyNonPlayer} needs no adoption and stays untouched: a
+     * non-player target resolves {@code victimId == null}, so {@code plan()} returns
+     * on its first guard as a {@code REGISTERED} "no-view" transaction — never
+     * PRE_SENT/PINNED — and a non-player victim carries no immunity window to clamp
+     * anyway.</p>
+     */
+    static boolean committedKnock(HitTransaction.State state) {
+        return state == HitTransaction.State.PRE_SENT || state == HitTransaction.State.PINNED;
+    }
+
+    /**
+     * Whether the region apply should adopt this hit as a boundary-fresh hit — clamp
+     * the victim's immunity to {@code max/2} so {@code victim.damage} lands full
+     * damage — enforcing the 1.6.0 boundary-hit design intent (an admitted boundary
+     * hit applies full damage) that the netty pre-send has already committed to on
+     * the victim's client (F1;
+     * {@code docs/superpowers/plans/2026-07-10-mental-255beta-feedback-coherence.md}).
+     *
+     * <p>True iff ALL hold:</p>
+     * <ul>
+     *   <li>{@code committedKnock} — a knock is already on the victim's client (a
+     *       PRE_SENT wire burst, or a PINNED velocity-event vector). An uncommitted
+     *       (REGISTERED) hit shipped no knock, so an era window-rejection there is
+     *       era-correct silence and must stay silent — never clamp it.</li>
+     *   <li>{@code noDamageTicks > maxNoDamageTicks / 2} — the LIVE victim is inside
+     *       the immunity window and vanilla would reject. This is exactly the race
+     *       sliver the fast path opens: the pre-send fires off the FROZEN boundary
+     *       view whose {@code damageImmune()} carries the 1.6.0 {@code +1} staleness
+     *       allowance ({@code noDamageTicks > max/2 + 1}), so a hit the pre-send
+     *       judged deliverable can find the live counter still one tick inside
+     *       {@code > max/2} when the region task lands (the damage task beating the
+     *       victim's per-tick counter decrement, or a view stale under load). The
+     *       perturbation this clamp applies is {@code <=} that sliver's own width. At
+     *       exactly {@code == max/2} vanilla's gate is strict {@code >} and ACCEPTS,
+     *       so there is nothing to adopt — no clamp.</li>
+     *   <li>{@code amount <= lastDamage} — a same-strength (or weaker) re-hit, which
+     *       vanilla's window rejects outright. The UPGRADE branch
+     *       ({@code amount > lastDamage}) is DELIBERATELY excluded: vanilla ACCEPTS
+     *       an upgrade but subtracts only the DELTA ({@code amount - lastDamage});
+     *       clamping the immunity there would make {@code victim.damage(amount)} deal
+     *       the FULL {@code amount}, over-damaging where the era dealt the
+     *       difference. The upgrade hit fires its own EDBEE with the delta as the
+     *       event damage and needs no adoption — so this branch must NEVER clamp.</li>
+     * </ul>
+     *
+     * <p>{@code maxNoDamageTicks / 2} is integer division to match vanilla's gate;
+     * for any integer {@code noDamageTicks} it is equivalent to the float
+     * {@code max/2.0} the sibling knockback gates use (floor and half-step land on
+     * the same integer threshold). Pure over primitives; the immunity/damage reads
+     * at the call site are flat Bukkit API across the whole 1.9.4→26.x range, so no
+     * version seam is needed there.</p>
+     */
+    static boolean adoptBoundary(
+            boolean committedKnock, int noDamageTicks, int maxNoDamageTicks,
+            double amount, double lastDamage) {
+        return committedKnock
+                && noDamageTicks > maxNoDamageTicks / 2
+                && amount <= lastDamage;
+    }
+
+    /**
+     * The F9 journal discriminator for an adopted boundary hit: the prior pre-send
+     * disposition with {@code "+boundary-adopted"} appended (the open F9 namespace;
+     * {@code commitPreSendState}'s overwrite is the precedent), so the journal
+     * Capture and the JOURNAL debug channel tell an adopted hit apart for suites and
+     * live diagnosis. A committed hit always carries a prior disposition
+     * ({@code "wire"} / {@code "pinned"} / {@code "unsendable-downgrade"}); the null
+     * fallback is defensive only. Pure so the composed value is unit-pinned.
+     */
+    static String boundaryAdopted(String prior) {
+        return prior == null ? "boundary-adopted" : prior + "+boundary-adopted";
+    }
+
     private SprintVerdict sprintVerdict(UUID attackerId) {
         if (wtapConsultWire.get()) {
             // NON-creating peek: a packetless attacker has no wire, so it falls
@@ -784,7 +872,26 @@ public final class HitRegistrationUnit implements FeatureUnit {
             session.activeInbound(tx);
         }
         try {
-            victim.damage(composedAmount(attacker), attacker);
+            // Hoisted so the adoption decision and the damage call read ONE amount
+            // (composedAmount re-reads live attacker state; a second call could drift).
+            double amount = composedAmount(attacker);
+            // Boundary adoption (F1;
+            // docs/superpowers/plans/2026-07-10-mental-255beta-feedback-coherence.md).
+            // When this hit already committed a knock to the victim's client — the
+            // wire burst rode (PRE_SENT) or the era vector was pinned to ship on the
+            // genuine velocity event (PINNED) — and the LIVE victim would window-reject
+            // it in the ≤1-tick race sliver the +1-stale boundary view opened, clamp
+            // the immunity to the boundary so the hit lands as the boundary-fresh hit
+            // the pre-send already promised. EDBEE then fires and the cosmetics realign
+            // with the knock the player already saw (knock ⇔ damage ⇔ EDBEE ⇔ effects).
+            // The upgrade branch is never clamped (adoptBoundary vetoes amount >
+            // lastDamage — vanilla deals only the delta there; a clamp would over-damage).
+            if (adoptBoundary(committedKnock(tx.state()), victim.getNoDamageTicks(),
+                    victim.getMaximumNoDamageTicks(), amount, victim.getLastDamage())) {
+                victim.setNoDamageTicks(victim.getMaximumNoDamageTicks() / 2);
+                tx.presend(boundaryAdopted(tx.presend())); // F9 journal discriminator
+            }
+            victim.damage(amount, attacker);
         } finally {
             if (session != null) {
                 session.clearActiveInbound();
