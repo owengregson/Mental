@@ -350,6 +350,43 @@ class MigrationsTest {
     }
 
     @Test
+    void theFullBootOrderKeepsA252SignatureServerIdenticalSounding() throws Exception {
+        // The exact boot sequence (extract → migrate → re-extract → parse) on a
+        // 2.5.2 tree running the signature tune: the first extraction pass must
+        // NOT preempt the import (effects.yml/custom.yml suppressed while the
+        // migration is pending), and the parsed snapshot must come up selecting
+        // custom with the signature-valued tune — no silent behavior change.
+        installV3Config();
+        writeOldEffectsFile("hit-feedback.yml", "hit-feedback:\n  preset: signature\n");
+        writeOldEffectsFile("death-effects.yml", "death-effects:\n  preset: signature\n");
+        ConfigStore store = new ConfigStore(dataFolder, resources, logged::add);
+
+        store.ensureDefaultFiles();                       // boot: extract first
+        Migrations.Result result = migrations().migrate(); // then the chain
+        store.ensureDefaultFiles();                       // post-migration fill
+
+        assertEquals(List.of(4), result.stepsApplied());
+        SnapshotParser.Result parsed = SnapshotParser.parse(store.loadSources());
+        assertEquals("custom", parsed.snapshot().selectedEffectsPreset(),
+                "the imported custom preset must be selected");
+        me.vexmc.mental.v5.config.settings.HitFeedbackSettings feedback =
+                (me.vexmc.mental.v5.config.settings.HitFeedbackSettings)
+                        parsed.snapshot().settings(
+                                me.vexmc.mental.v5.feature.Feature.HIT_FEEDBACK.settingsKey());
+        assertEquals(HitFeedbackSettings.SIGNATURE_SOUNDS, feedback.sounds(),
+                "the server must sound exactly as it did on 2.5.2");
+        DeathEffectsSettings death =
+                (DeathEffectsSettings) parsed.snapshot().settings(
+                        me.vexmc.mental.v5.feature.Feature.DEATH_EFFECTS.settingsKey());
+        assertTrue(death.lightning(), "the signature death strike survives the upgrade");
+        assertTrue(parsed.issues().isEmpty(), () -> "issues: " + parsed.issues());
+        // The whole library is present for the GUI.
+        assertTrue(parsed.snapshot().hasEffectsPreset("vanilla"));
+        assertTrue(parsed.snapshot().hasEffectsPreset("signature"));
+        assertTrue(parsed.snapshot().hasEffectsPreset("custom"));
+    }
+
+    @Test
     void aStampedV3TreeWithoutOldEffectsJustStampsForward() throws Exception {
         // Nothing legacy on disk: the step only advances the stamp — no backups
         // of effects, no custom import, no effects.yml (extraction owns it).
