@@ -103,7 +103,8 @@ Split by concern under `plugins/Mental/`, every option explained in its file:
 | `combo.yml` | The Combo Solver family — the combo-hold pocket servo and the combo reach handicap. |
 | `pots.yml` | The POTS family — `/potfill` and steep-throw fast pots. |
 | `loadout.yml` | Off-hand and crafting restrictions. |
-| `effects/*.yml` | One Combat Effects module per file — hit feedback, damage indicators, death effects. Regenerate when deleted; your edits stay. |
+| `effects.yml` | Which Combat Effects preset applies — `vanilla` (default), `signature`, `custom`, or any file you drop into `effects/presets/`. |
+| `effects/presets/*.yml` | One complete Combat Effects tune per file — hit feedback, damage indicators, death effects. Presets regenerate when deleted; your edits stay (`custom` starts as a copy of `signature`). |
 | `profiles/*.yml` | One knockback feel per file. Presets regenerate when deleted; your edits stay. |
 
 ```yaml

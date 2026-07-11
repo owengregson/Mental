@@ -15,6 +15,7 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.gui.DashboardMenu;
+import me.vexmc.mental.v5.gui.EffectsPresetMenu;
 import me.vexmc.mental.v5.gui.KnockbackFormulaMenu;
 import me.vexmc.mental.v5.gui.MeleeFormula;
 import me.vexmc.mental.v5.gui.MenuContext;
@@ -157,6 +158,16 @@ public final class BootSuite {
                             context.expect(list.getHolder() == presets,
                                     "profile-list (" + which + ") holder is not the menu");
                         }
+
+                        // The Combat Effects preset picker (2.5.3) rides the same sink
+                        // path with its own preview lore — render it headless too.
+                        EffectsPresetMenu effects = new EffectsPresetMenu(menuContext);
+                        assertIconsRender(context, effects.selfTestIcons(), "effects preset list");
+                        Inventory effectsList = effects.selfTestInventory();
+                        context.expect(effectsList.getSize() == 54,
+                                "effects-preset inventory size " + effectsList.getSize() + " != 54");
+                        context.expect(effectsList.getHolder() == effects,
+                                "effects-preset inventory holder is not the menu");
                     });
                 }),
                 new TestCase("legacy: era weapon damage resolves through the flattening name seam", context ->
