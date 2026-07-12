@@ -166,15 +166,16 @@ public final class HitFeedbackListener implements Listener {
         // hit mid-invuln deals difference damage with NO knock and no flinch").
         // Voicing it doubled the hit chord exactly when a simulate-crits 1.5×
         // (attacker falling — crit ≡ airborne) interleaved a plain hit inside
-        // the window. The predicate mirrors the server's own branch selector —
-        // nd is only re-armed AFTER a fresh hit's event returns, on every band
-        // 1.9.4→26.x (bytecode-verified per band, 2026-07-11 archaeology) — so
-        // nd > max/2 DURING the event identifies the delta branch exactly. No
+        // the window. The predicate is the ONE shared {@link UpgradeWindow} the
+        // damage-indicators window book also reads (they can never drift). No
         // suppressor mark either: vanilla broadcasts nothing for a delta hit,
-        // and a phantom mark would eat the NEXT legitimate broadcast. The
-        // delta damage INDICATOR deliberately stays (a display choice, not era
-        // wire — the number is information; 2.5.5 pinned it).
-        if (victim.getNoDamageTicks() > victim.getMaximumNoDamageTicks() / 2) {
+        // and a phantom mark would eat the NEXT legitimate broadcast. The delta
+        // damage INDICATOR no longer stays as its own crit-styled ghost either
+        // (2026-07-12, owner-directed — superseding the 2.5.5 "the number is
+        // information" choice): the window book folds the delta into the ONE
+        // rolled marker for the victim's window, so era-silence and one-marker
+        // now hold together.
+        if (UpgradeWindow.isDelta(victim)) {
             trace.record(new FeedbackTrace.Entry(
                     "hit-feedback", attacker.getUniqueId(), victim.getUniqueId(),
                     "ERA_SILENT_DELTA", "mid-window delta hit — vanilla/era play nothing"));

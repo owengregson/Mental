@@ -7,7 +7,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.LongSupplier;
-import me.vexmc.mental.platform.SpawnInvulnerability;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -114,7 +113,10 @@ public final class FeedbackCoherenceSuite {
      *       EDBEEs (with {@code finalDamage > 0}) — cosmetics fire once per
      *       accepted hit, never for a rejected swing;</li>
      *   <li>the count of damage-indicators {@code UNSENDABLE} decisions ==
-     *       the same accepted count (the clientless-attacker indicator branch);</li>
+     *       the same accepted count (the clientless-attacker indicator branch) —
+     *       each accepted fresh hit opens+ships exactly one window, though the
+     *       ship now TRAILS the hit by {@code roll-hold-ticks} (the 2026-07-12
+     *       held marker), so the suite waits for the ships before counting;</li>
      *   <li>the accepted count sits in the immunity band. Vanilla admits roughly
      *       one hit per {@code maxNoDamageTicks/2 ≈ 10} server ticks, but the
      *       observed count over this fixed-cadence barrage varies across the tier:
@@ -190,6 +192,17 @@ public final class FeedbackCoherenceSuite {
             context.note("immunity barrage: " + acceptedCount + " of 12 swings accepted; span "
                     + probe.spanTicks() + " ticks; startHealth=" + startHealth + " endHealth=" + endHealth);
 
+            // The indicator ship now TRAILS each fresh hit by roll-hold-ticks (the held
+            // marker ships on a later session tick). Each accepted fresh hit opens+ships
+            // exactly one window, so wait for the ship decisions to catch up before
+            // pinning the 1:1 relationship (the hit-feedback emits fire at the EDBEE and
+            // are already present).
+            context.awaitUntil(
+                    () -> countDecision(trace, "damage-indicators", "UNSENDABLE") >= acceptedCount, 40,
+                    () -> "every accepted hit's held window to ship past its roll-hold deadline (unsendable="
+                            + countDecision(trace, "damage-indicators", "UNSENDABLE")
+                            + " accepted=" + acceptedCount + ")");
+
             long emitDecisions = countHitFeedbackEmits(trace);
             long unsendable = countDecision(trace, "damage-indicators", "UNSENDABLE");
 
@@ -237,13 +250,22 @@ public final class FeedbackCoherenceSuite {
      * stronger hit and subtracts only the DELTA (amount − lastHurt = 3.0); the
      * EDBEE's {@code getFinalDamage()} is that delta on both modern Paper (an
      * INVULNERABILITY_REDUCTION modifier) and legacy CraftBukkit (the delta passed
-     * as the event damage). Pins: two accepted EDBEEs, the second ≈ 3.0, a second
-     * indicators decision (the delta NUMBER deliberately shows — a display
-     * choice), the 2.6.0 era-silence split (the delta hit records
-     * ERA_SILENT_DELTA and does NOT voice — vanilla zeroes the fresh-hit flag on
-     * the upgrade branch: no sound, no flinch, no knock; voicing it was the
-     * owner's double-sound-on-crits bug), and — the honest cross-version
-     * oracle — the displayed sum still equals the health actually lost.
+     * as the event damage).
+     *
+     * <p>The 2026-07-12 window contract (owner-directed, superseding the 2.5.5
+     * "the delta number deliberately shows" display choice): the opener and its
+     * in-window upgrade are ONE damage window, so the indicator side reads ONE
+     * window — a {@code WINDOW_HELD} (the opener opens and holds its marker for
+     * {@code roll-hold-ticks}) plus a {@code WINDOW_FOLDED} (the delta folds its
+     * amount into that held marker, never spawning its own crit-styled ghost) —
+     * and exactly ONE ship attempt once the hold elapses ({@code UNSENDABLE} for
+     * this clientless attacker). The opener and upgrade are staged in ONE server
+     * tick so the delta cannot race the roll-hold flush (which runs on a later
+     * session tick). Pins alongside: two accepted EDBEEs (the second ≈ 3.0), the
+     * 2.6.0 era-silence split (the delta records ERA_SILENT_DELTA and does NOT
+     * voice — vanilla zeroes the fresh-hit flag, so no sound/flinch/knock; voicing
+     * it was the owner's double-sound-on-crits bug), and the honest cross-version
+     * oracle that the displayed sum equals the health actually lost.
      */
     private static void runUpgradeDelta(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -264,8 +286,6 @@ public final class FeedbackCoherenceSuite {
                 victim.spawn(Arena.offset(centre, 0, 2));
             });
             context.awaitTicks(5);
-            context.expect(context.sync(() -> armAttacker(attacker)),
-                    "attack-damage/attack-speed attributes unresolved — cannot stage the fresh 7.0 hit");
 
             probe.watch(victim.uuid());
             boolean staged = context.sync(() -> {
@@ -284,47 +304,26 @@ public final class FeedbackCoherenceSuite {
             probe.reset();
             double startHealth = context.sync(() -> victim.player().getHealth());
 
-            // Hit 1: cleared nd so it lands fresh at 7.0 (a determinism stamp — the
-            // window it OPENS is what the upgrade below rides).
+            // Opener AND its in-window upgrade in ONE server tick — the deterministic
+            // shape runSameTickVoiceMerge proves on the matrix. Both EDBEEs fire this
+            // tick, so the delta CANNOT race the window's roll-hold flush (a later
+            // session tick): the opener OPENS+HOLDS the window and the delta FOLDS in.
+            // damage() carries the exact amounts to the same window branch on every band
+            // 1.9.4→26.x; the fresh opener re-arms noDamageTicks via the SERVER path (no
+            // Bukkit setNoDamageTicks(positive), so the 1.16.5–1.20.6 spawn-invuln trap
+            // never arms), and lastHurt is pinned to 7.0 so the 10.0 lands as the delta.
             context.syncRun(() -> {
                 victim.player().setNoDamageTicks(0);
-                attacker.attack(victim.player());
-            });
-            context.awaitUntil(() -> probe.accepted().size() >= 1, 40,
-                    "the fresh 7.0 opening hit to land");
-
-            // The upgrade hit, staged DETERMINISTICALLY: the window is re-stamped
-            // and the stronger hit delivered through the Bukkit damage(amount,
-            // attacker) seam in ONE sync run. Two hard-won reasons (2.6.0): the
-            // legacy tier double-ticks noDamageTicks, so riding hit 1's real
-            // window across staging hops decayed it to the max/2 boundary and
-            // flipped vanilla's branch from delta-upgrade to fresh-accept (the CI
-            // flake); and the NMS-attack seam feeds the amount through attributes
-            // + the attack meter, which the 1.17.1 band staged unreliably for
-            // clientless fakes (the archaeology round: the swing silently hit the
-            // amount<=lastDamage sub-bail) — damage() carries the exact amount to
-            // the same window branch on every band 1.9.4→26.x. The case pins the
-            // UPGRADE MECHANICS, never staging timing.
-            context.awaitTicks(2);
-            context.syncRun(() -> {
-                victim.player().setNoDamageTicks(victim.player().getMaximumNoDamageTicks());
-                // 1.16.5–1.20.6: the Bukkit setter also arms the respawn-invuln
-                // timer, whose gate voids ALL damage — the band-trap that made
-                // this staging silently no-op on 1.17.1 (archaeology round).
-                SpawnInvulnerability.disarm(
-                        victim.player(), victim.player().getMaximumNoDamageTicks());
+                victim.player().damage(HIT_DAMAGE, attacker.player());       // FRESH 7.0 → nd=max, lastHurt=7.0
                 victim.player().setLastDamage(HIT_DAMAGE);
-                victim.player().damage(UPGRADE_DAMAGE, attacker.player());
+                victim.player().damage(UPGRADE_DAMAGE, attacker.player());   // DELTA 3.0 (nd>max/2, 10>7)
             });
             context.awaitUntil(() -> probe.accepted().size() >= 2, 40,
-                    () -> "the in-window upgrade hit to fire a second EDBEE (accepted="
+                    () -> "the fresh opener and its in-window upgrade to fire two EDBEEs (accepted="
                             + probe.accepted().size() + ")");
-            context.awaitTicks(4);
-            double endHealth = context.sync(() -> victim.player().getHealth());
 
             List<CoherenceProbe.Hit> accepted = probe.accepted();
             context.note("upgrade: accepted=" + accepted.size() + " startHealth=" + startHealth
-                    + " endHealth=" + endHealth
                     + (accepted.size() >= 2 ? " secondFinalDamage=" + accepted.get(1).finalDamage() : ""));
             context.expect(accepted.size() == 2,
                     "the fresh hit and the in-window upgrade must land exactly two accepted EDBEEs, got "
@@ -335,17 +334,31 @@ public final class FeedbackCoherenceSuite {
             context.expectNear(UPGRADE_DAMAGE - HIT_DAMAGE, accepted.get(1).finalDamage(), 0.01,
                     "the in-window upgrade must fire the DELTA (10.0 − 7.0 = 3.0) as finalDamage");
 
-            long unsendable = countDecision(trace, "damage-indicators", "UNSENDABLE");
-            context.expect(unsendable == 2,
-                    "each accepted hit — the opener and the upgrade — must ship a damage-indicators "
-                            + "decision; got " + unsendable + " UNSENDABLE (trace=" + trace.entries() + ")");
+            // ONE window: the held opener ships once past its roll-hold deadline. Wait
+            // for that ship, then settle to prove no SECOND ship ever appears.
+            context.awaitUntil(() -> countDecision(trace, "damage-indicators", "UNSENDABLE") >= 1, 40,
+                    () -> "the held window to ship once past its roll-hold deadline (trace="
+                            + trace.entries() + ")");
+            context.awaitTicks(4);
+            double endHealth = context.sync(() -> victim.player().getHealth());
 
-            // The 2.6.0 era-silence split: the delta hit KEEPS its indicator (the
-            // number is information — a display choice, pinned above) but must
-            // NOT voice — vanilla zeroes the fresh-hit flag on the upgrade
-            // branch, so era plays no sound, no flinch, no knock for it (the
-            // owner's double-sound-on-crits report). The silence is a recorded
-            // decision, never a silent skip.
+            long held = countDecision(trace, "damage-indicators", "WINDOW_HELD");
+            long folded = countDecision(trace, "damage-indicators", "WINDOW_FOLDED");
+            long unsendable = countDecision(trace, "damage-indicators", "UNSENDABLE");
+            context.expect(held == 1,
+                    "the opener must OPEN and HOLD exactly one window; got " + held
+                            + " WINDOW_HELD (trace=" + trace.entries() + ")");
+            context.expect(folded == 1,
+                    "the in-window upgrade must FOLD into that one window, not ghost its own stand; got "
+                            + folded + " WINDOW_FOLDED (trace=" + trace.entries() + ")");
+            context.expect(unsendable == 1,
+                    "the ONE folded window must make exactly one (clientless) ship attempt; got "
+                            + unsendable + " UNSENDABLE (trace=" + trace.entries() + ")");
+
+            // The 2.6.0 era-silence split: the delta must NOT voice — vanilla zeroes the
+            // fresh-hit flag on the upgrade branch, so era plays no sound, no flinch, no
+            // knock for it (the owner's double-sound-on-crits report). The silence is a
+            // recorded decision, never a silent skip.
             long voiced = countHitFeedbackEmits(trace);
             long eraSilent = countDecision(trace, "hit-feedback", "ERA_SILENT_DELTA");
             context.expect(voiced == 1,

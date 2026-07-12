@@ -158,6 +158,8 @@ public final class EffectsPresetParser {
                 reader.text("text", d.text()),
                 reader.text("crit-text", d.critText()),
                 reader.numberClamped("crit-threshold-hearts", d.critThresholdHearts(), 0.0, 100.0),
+                reader.intClamped("roll-hold-ticks", d.rollHoldTicks(),
+                        DamageIndicatorsSettings.MIN_ROLL_HOLD, DamageIndicatorsSettings.MAX_ROLL_HOLD),
                 reader.text("heal-text", d.healText()));
     }
 

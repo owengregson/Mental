@@ -281,12 +281,22 @@ flag gating every client effect — no hurt sound, no flinch, no knockback
 attacker's 1.5× regularly converts silenced window hits into voiced delta
 events — the double. Fix: `HitFeedbackListener` goes ERA-SILENT (no sounds,
 no particles, no suppressor mark — vanilla broadcasts nothing to suppress) on
-delta hits, recording an `ERA_SILENT_DELTA` trace decision; the delta damage
-INDICATOR deliberately stays (a display choice — the number is information).
-The predicate — `noDamageTicks > max/2` during the event — mirrors the
-server's own branch selector and is bytecode-verified band-by-band
-(1.9.4/1.12.2/1.17.1/1.21.11): the fresh branch re-arms the window only AFTER
-its event returns on every band, so no version gate. Two verified-latent
+delta hits, recording an `ERA_SILENT_DELTA` trace decision.
+
+The delta damage INDICATOR originally stayed as its own stand (a 2.5.5 display
+choice — "the number is information"). **Superseded 2026-07-12, owner-directed:**
+that stand rendered a crit-styled `-0.3 ❤` ghost for every mid-window upgrade
+(the falling-crit `1.5×` on a plain fist → `0.5` delta damage → `0.25` hearts →
+`0.3`), silent and near-invisible in damage but loud on screen. The fix folds
+the delta into ONE per-victim window marker: a fresh hit's marker is HELD for
+`damage-indicators.roll-hold-ticks` (default 3) and mid-window deltas FOLD their
+amount into it (or BUMP the live stand in place once it shipped) — one indicator
+per damage window, carrying the rolled total, in DAMAGE POINTS (a fist reads `1`,
+not `0.5`). The shared `UpgradeWindow.isDelta` predicate — `noDamageTicks > max/2`
+during the event — now drives BOTH the era-silence and the window fold, so they
+cannot drift; it mirrors the server's own branch selector and is bytecode-verified
+band-by-band (1.9.4/1.12.2/1.17.1/1.21.11): the fresh branch re-arms the window
+only AFTER its event returns on every band, so no version gate. Two verified-latent
 issues deliberately NOT in scope (filed): the one-mark-vs-per-viewer-packet
 suppression gap (≥2 bystanders hear vanilla's hurt beside the custom sound)
 and the missing same-tick voice dedup (indicators merge, sounds don't).

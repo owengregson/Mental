@@ -47,12 +47,13 @@ class EffectsPresetParserTest {
             List.of(new SoundSpec("entity.glow_squid.hurt", 0.9f, 1.2f)),
             35.0);
 
-    /** The signature indicator tune — the shipped feel plus the green healing number. */
+    /** The signature indicator tune — the shipped feel, the 3-tick roll hold, plus the green healing number. */
     private static final DamageIndicatorsSettings SIGNATURE_INDICATORS = new DamageIndicatorsSettings(
             40, 0.6, 0.3, 0.25, 0.06, 0.05, 0.98,
             "&f-{HEALTH} &c❤&r",
             "&c&l** -{HEALTH} ❤ **",
             5.0,
+            3,
             "&a+{HEALTH} &c❤&r");
 
     /** The signature death strike — the cosmetic bolt, glow-squid death call, white/yellow/gold blast. */
