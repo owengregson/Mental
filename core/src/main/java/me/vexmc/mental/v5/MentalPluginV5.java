@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import java.io.IOException;
@@ -90,6 +91,7 @@ import me.vexmc.mental.v5.platform.PlatformProfile;
 import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
+import me.vexmc.mental.v5.feature.knockback.BlockResetTap;
 import me.vexmc.mental.v5.feature.knockback.FishingKnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.KnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.LatencyCompensationUnit;
@@ -162,6 +164,7 @@ public final class MentalPluginV5 extends JavaPlugin {
     private ViewBuilder viewBuilder;
     private SessionService sessions;
     private ConnectionDomains domains;
+    private BlockResetTap blockResetTap;
     /** The combo-hold reach handicap (design §1) and the transition dispatcher that drives it. */
     private ComboReachHandicap comboReachHandicap;
     private ComboEvents comboEvents;
@@ -294,7 +297,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         // The per-hit delivery journal capture (F9): formats one greppable line per
         // journaled hit into the JOURNAL debug channel — zero cost until the channel
         // is on. The desk stays the sole journal writer; this only reads each entry.
-        JournalCapture journalCapture = new JournalCapture(debug.scoped(DebugCategory.JOURNAL), this::snapshot);
+        JournalCapture journalCapture = new JournalCapture(debug.scoped(DebugCategory.JOURNAL), this::snapshot, domains);
         this.sessions = new SessionService(
                 scheduling, clock, viewBuilder, valve, this::snapshot, positions, domains,
                 comboEvents, journalCapture, getLogger());
@@ -326,12 +329,25 @@ public final class MentalPluginV5 extends JavaPlugin {
         PacketEvents.getAPI().getEventManager().registerListener(probeRim);
         getLogger().info("latency probe transport: " + probeTransport + " (rim="
                 + probeRim.getClass().getSimpleName() + ")");
+        // The input-ledger lanes active on this tier (spec §1.8): ENTITY_ACTION,
+        // use-item and window lanes exist across the whole range; the PLAYER_INPUT
+        // evidence lane is a 1.21.2+ wire fact (absent below — era-correct fallback).
+        boolean playerInputLane = PacketEvents.getAPI().getServerManager().getVersion()
+                .isNewerThanOrEquals(ServerVersion.V_1_21_2);
+        getLogger().info("input lanes: entity-action, use-item, window"
+                + (playerInputLane ? ", player-input" : "") );
 
         // The delivery routers (spec §3.4–§3.6): the desk's sole PlayerVelocityEvent
         // writer, the damage-pass router, and the capability-gated knockback-event
         // mirror. Always-on infra, inert while nothing submits to a desk (all of 4A1).
         getServer().getPluginManager().registerEvents(new DeskRouter(sessions, valve, clock, comboEvents), this);
         getServer().getPluginManager().registerEvents(new DamageRouter(sessions, clock, hitIds), this);
+        // The always-on block-hit sprint-reset door (2.6.0 — knockback semantics,
+        // not a damage rule; the era reconstruction a default config must have).
+        // SWORD_BLOCKING widens its item gate with the decorated-sword test while
+        // enabled; the base gate (shields) works with every feature off.
+        this.blockResetTap = new BlockResetTap(domains);
+        getServer().getPluginManager().registerEvents(blockResetTap, this);
         if (capabilities.knockbackEvent()) {
             new MirrorListener(sessions).register(this);
         }
@@ -697,7 +713,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new CritFallbackUnit(this::snapshot, sessions));
         reconciler.register(new ToolDurabilityUnit());
         reconciler.register(new PotionValuesUnit());
-        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration, this::snapshot));
+        reconciler.register(new SwordBlockingUnit(domains, swordBlockDecoration, this::snapshot, blockResetTap));
 
         // The cadence family (4C). Attack-cooldown is the complete B5 contract in
         // one scope (server rule + client spoof + tooltip hider + sweep re-disable);

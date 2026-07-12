@@ -539,7 +539,7 @@ public final class KnockbackEngine {
                 : vy;
 
         // Stage 2 — extra knock, directed along the attacker's facing (yaw). The
-        // sprint bonus rides the same SprintWire verdict the legacy path reads
+        // sprint bonus rides the same InputLedger verdict the legacy path reads
         // ({@code attacker.sprinting()}), not the vanilla attack-strength gate —
         // Mental's product is cooldown-free combat.
         double bonus = (attacker.sprinting() ? m.sprintBonus() : 0.0)

@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
  * arms the next one; the server flag wins a disagreement only after the wire
  * has been quiet — and never resurrects a spent engagement.
  */
-class SprintWireTest {
+class InputLedgerSprintTest {
 
     private static final class Clock implements TickClock {
         int tick;
@@ -33,7 +33,7 @@ class SprintWireTest {
     void startArmsSprintingAndFreshnessReadableTheSameTick() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         // No tick gating on reads: an ATTACK the same tick as the START sees it.
@@ -46,7 +46,7 @@ class SprintWireTest {
     @Test
     void stopDropsSprintingButFreshnessSurvivesTheReleaseHalfOfTheTap() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();  // arms
         wire.onSprintStop();   // the release never disarms freshness
@@ -58,7 +58,7 @@ class SprintWireTest {
     @Test
     void serverClearDropsBothAndALaterStartReArms() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         // The accepted bonus hit: mirror vanilla's in-attack clear and spend
@@ -80,7 +80,7 @@ class SprintWireTest {
     void reconcileAdoptsTheServerFlagOnlyAfterTheQuietWindow() {
         Clock clock = new Clock();
         clock.tick = 10;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStop(); // wire says not-sprinting, last write at tick 10
 
@@ -98,7 +98,7 @@ class SprintWireTest {
     @Test
     void reconcileSeedsAnUnseenAttackerFromTheServerFlag() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         // Absent wire history: reconcile seeds from the live flag immediately.
         wire.reconcile(true, new TickStamp(0), 3);
@@ -110,7 +110,7 @@ class SprintWireTest {
     @Test
     void unseenWireFallsBackToNotSprinting() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
         SprintVerdict verdict = wire.verdictAt(new TickStamp(0));
         assertFalse(verdict.sprinting());
         assertEquals(Boolean.FALSE, verdict.fresh());
@@ -121,7 +121,7 @@ class SprintWireTest {
     @Test
     void guardedServerClearNoOpsUnderANewerWireWrite() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         // A re-engage START arrives at tick 6 — strictly newer than a hit stamped
         // at tick 5. The deferred post-hit clear pertains to that T=5 hit and must
@@ -139,7 +139,7 @@ class SprintWireTest {
     void guardedServerClearAtOrBeforeTheStampClears() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                 // lastWrite = 5
         wire.onServerClear(new TickStamp(5)); // asOf == lastWrite, not strictly older ⇒ clears
@@ -153,7 +153,7 @@ class SprintWireTest {
     void clientSprintingSurvivesAServerClearAndOnlyStopLowersIt() {
         Clock clock = new Clock();
         clock.tick = 3;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         assertTrue(wire.clientSprinting(), "a START raises the raw client flag");
@@ -173,7 +173,7 @@ class SprintWireTest {
     void deprecatedNoArgServerClearStillRetroClearsUnconditionally() {
         Clock clock = new Clock();
         clock.tick = 6;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart(); // lastWrite = 6, sprinting + armed, clientSprinting
         wire.onServerClear(); // the old form has NO guard — clears even a fresh START
@@ -184,39 +184,44 @@ class SprintWireTest {
         assertTrue(wire.clientSprinting(), "even the unconditional clear never touches the raw client flag");
     }
 
-    /* ── the universal blockhit contract (held-block sprint reset) ───────── */
+    /* ── the block-hit gesture (2.6.0: one hit per reset, the chain retired) ─ */
 
     @Test
-    void heldBlockResetKeepsEveryComboHitFreshAcrossTheServerClear() {
+    void aBlockResetGrantsExactlyOneFreshHitAndTheConsumeSpendsIt() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();       // sprinting toward the target
-        wire.onBlockSprintReset();  // right-click block: the sticky held-block reset
+        wire.onBlockSprintReset();  // right-click block: the reconstructed era gesture
 
         // Hit #1 while holding the block — fresh, exactly like a w-tap.
         SprintVerdict first = wire.verdictAt(new TickStamp(5));
         assertTrue(first.sprinting());
         assertEquals(Boolean.TRUE, first.fresh());
 
-        // The accepted bonus hit clears the wire (the post-hit onServerClear) — but
-        // the block is still held, so the freshness the first hit spent must survive.
+        // The accepted bonus hit consumes the engagement — one hit per reset (the
+        // 2.6.0 owner directive; the 2.5.1 sticky held-chain is retired).
         wire.onServerClear(new TickStamp(5));
 
-        // Hit #2 while STILL holding the block — the defect this contract fixes:
-        // pre-change this read non-sprint (armed dropped, no re-arm without a new
-        // right-click). It now ships the FULL fresh sprint knock.
+        // Hit #2 while STILL holding the block ships PLAIN: the grant was spent,
+        // and the next block-hit takes a fresh right-click.
         SprintVerdict second = wire.verdictAt(new TickStamp(5));
-        assertTrue(second.sprinting(), "a held-block combo's second hit still ships the sprint knock");
-        assertEquals(Boolean.TRUE, second.fresh(), "and it ships the full fresh stamp, not a decayed one");
+        assertFalse(second.sprinting(), "a held-block combo's second hit is plain — one hit per reset");
+        assertEquals(Boolean.FALSE, second.fresh());
+
+        // The fresh right-click re-arms — the next engagement, fresh as ever.
+        wire.onBlockSprintReset();
+        SprintVerdict third = wire.verdictAt(new TickStamp(5));
+        assertTrue(third.sprinting(), "the re-engaged block arms the next one-hit grant");
+        assertEquals(Boolean.TRUE, third.fresh());
     }
 
     @Test
     void withoutABlockEngagementTheServerClearStillDropsFreshness() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                 // a plain sprinter, NO block engagement
         wire.onServerClear(new TickStamp(5)); // the first hit spends the freshness
@@ -229,35 +234,38 @@ class SprintWireTest {
     }
 
     @Test
-    void blockReleaseEndsTheResetSoAPostReleaseHitFallsBackToTheWire() {
+    void anUnspentBlockReArmSurvivesTheReleaseLikeTheEraReleaseReEngage() {
         Clock clock = new Clock();
         clock.tick = 3;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         wire.onBlockSprintReset();
-        wire.onServerClear(new TickStamp(3)); // a hit spent the freshness; block still held
-        assertTrue(wire.verdictAt(new TickStamp(3)).sprinting(), "held block: fresh");
-
-        // Release the block button (the client's RELEASE_USE_ITEM) — the "while
-        // currently blocking" boundary. The sticky reset drops; the underlying wire
-        // (cleared by the hit) governs again, so a post-release hit is not a sprint
-        // hit until a real re-tap.
+        // Release WITHOUT hitting: the era client's release re-engage is what
+        // re-armed the bonus, so a block-tap earns the same single fresh hit a
+        // w-tap does — the unspent gesture stands until a hit spends it.
         wire.onBlockReleased();
         SprintVerdict afterRelease = wire.verdictAt(new TickStamp(3));
-        assertFalse(afterRelease.sprinting(), "after the block releases the ordinary wire verdict returns");
-        assertEquals(Boolean.FALSE, afterRelease.fresh());
+        assertTrue(afterRelease.sprinting(), "an unspent block re-arm survives the release (era-exact)");
+        assertEquals(Boolean.TRUE, afterRelease.fresh());
+
+        // The hit spends it whole — and with the block released there is nothing
+        // left to re-arm without a new gesture.
+        wire.onServerClear(new TickStamp(3));
+        SprintVerdict afterHit = wire.verdictAt(new TickStamp(3));
+        assertFalse(afterHit.sprinting());
+        assertEquals(Boolean.FALSE, afterHit.fresh());
     }
 
     @Test
-    void reEngagingTheBlockAfterAReleaseReArmsTheReset() {
+    void reEngagingTheBlockAfterASpentGrantArmsTheNextOne() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         wire.onBlockSprintReset();
-        wire.onServerClear(new TickStamp(0));
-        wire.onBlockReleased();
+        wire.onServerClear(new TickStamp(0)); // the hit spent the grant
+        wire.onBlockReleased();               // evidence only — nothing left to drop
         assertFalse(wire.verdictAt(new TickStamp(0)).sprinting());
 
         // Press the block again (W still held → the raw client flag is up) — fresh.
@@ -269,24 +277,23 @@ class SprintWireTest {
     }
 
     @Test
-    void aStopSprintDuringAHeldBlockGatesTheResetUntilSprintResumes() {
+    void aStopDuringAHeldBlockDropsTheWireUntilSprintResumes() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
-        wire.onBlockSprintReset();
-        wire.onServerClear(new TickStamp(0)); // held-block, fresh
+        wire.onBlockSprintReset(); // armed and fresh — the one-hit grant stands
         assertTrue(wire.verdictAt(new TickStamp(0)).sprinting());
 
-        // Release the sprint key while still holding the block: a STOP lowers the
-        // raw client flag → the reset is gated. You are no longer moving at sprint
-        // speed, so no phantom sprint bonus (the resetSprintForBlock gate's spirit).
+        // Release the sprint key while still holding the block: a STOP drops the
+        // wire view. You are no longer moving at sprint speed, so no phantom
+        // sprint bonus — plain wire truth, no override needed.
         clock.tick = 1;
         wire.onSprintStop();
         assertFalse(wire.verdictAt(new TickStamp(1)).sprinting(),
-                "a STOP ends the held-block reset — no phantom bonus while standing");
+                "a STOP drops the wire — no phantom bonus while standing");
 
-        // Re-press sprint (still block-holding): the reset governs again.
+        // Re-press sprint (still block-holding): a genuine START re-arms.
         clock.tick = 2;
         wire.onSprintStart();
         assertTrue(wire.verdictAt(new TickStamp(2)).sprinting());
@@ -297,7 +304,7 @@ class SprintWireTest {
     void blockReleaseIsANoOpWhenNoResetIsHeld() {
         Clock clock = new Clock();
         clock.tick = 4;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart(); // a plain sprinter, never block-engaged
 
@@ -318,7 +325,7 @@ class SprintWireTest {
     @Test
     void wireSeqStampsIntoTheVerdictAtPeek() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         // A fresh wire peeks at INITIAL seq 0, and a live peek is always wire-provenanced.
         SprintVerdict fresh = wire.verdictAt(new TickStamp(0));
@@ -341,7 +348,7 @@ class SprintWireTest {
     @Test
     void sameTickReEngageAfterTheAttackSurvivesTheSeqGuardedClear() {
         Clock clock = new Clock();
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         clock.tick = 4;
         wire.onSprintStart();                                    // engagement: seq 1, sprinting+armed
@@ -363,7 +370,7 @@ class SprintWireTest {
     void seqGuardedClearWithNoLaterWriteClears() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                                    // seq 1
         SprintVerdict peek = wire.verdictAt(new TickStamp(5));
@@ -380,7 +387,7 @@ class SprintWireTest {
     void aStopAfterTheAttackIsNotRetroEatenButStaysNonSprinting() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                                    // seq 1
         SprintVerdict peek = wire.verdictAt(new TickStamp(5));
@@ -394,26 +401,27 @@ class SprintWireTest {
     }
 
     @Test
-    void heldBlockResetSurvivesTheSeqGuardedClear() {
+    void theSeqGuardedClearSpendsABlockReArmLikeAnyGesture() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                                    // seq 1
-        wire.onBlockSprintReset();                               // seq 2, sticky blockReset
+        wire.onBlockSprintReset();                               // seq 2 — the block gesture
         SprintVerdict peek = wire.verdictAt(new TickStamp(5));
         assertEquals(2L, peek.wireSeq());
-        wire.onServerClear(2L);                                  // 2 <= 2 ⇒ clears sprinting/armed, blockReset survives
-        SprintVerdict held = wire.verdictAt(new TickStamp(5));
-        assertTrue(held.sprinting(), "blockReset && clientSprinting ⇒ fresh sprint on the seq overload");
-        assertEquals(Boolean.TRUE, held.fresh());
+        wire.onServerClear(2L);                                  // 2 <= 2 ⇒ the consume applies
+        SprintVerdict spent = wire.verdictAt(new TickStamp(5));
+        assertFalse(spent.sprinting(), "the block grant is one hit — the consume spends it whole (2.6.0)");
+        assertEquals(Boolean.FALSE, spent.fresh());
+        assertTrue(wire.clientSprinting(), "the raw client flag survives, keeping the door eligible");
     }
 
     @Test
     void reconcileWritesCountForTheSeqGuard() {
         Clock clock = new Clock();
         clock.tick = 0;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                                    // engage at tick 0: seq 1
         SprintVerdict peek = wire.verdictAt(new TickStamp(0));
@@ -432,7 +440,7 @@ class SprintWireTest {
     void aHeldServerFlagNeverReArmsASpentEngagement() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                    // ONE engagement: clientSprinting up, sprinting+armed
         wire.onServerClear(new TickStamp(5));    // the bonus hit consumes it: the spend latch opens
@@ -459,7 +467,7 @@ class SprintWireTest {
     void aWtapReGestureReArmsASpentEngagement() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         wire.onServerClear(new TickStamp(5));            // engagement spent
@@ -481,7 +489,7 @@ class SprintWireTest {
     void aBlockHitReArmsASpentEngagement() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         wire.onServerClear(new TickStamp(5));   // spent; the raw client flag survives
@@ -500,7 +508,7 @@ class SprintWireTest {
     void aClientStopAfterTheClearBlocksTheReArmThenAStartReArmsFreshness() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         wire.onServerClear(new TickStamp(5));    // clearedAt = 5, clientSprinting still up
@@ -527,7 +535,7 @@ class SprintWireTest {
     void aReconcileNeverReArmsWithoutAPriorClear() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         // The published-view / packetless-fallback shape: the server flag disagrees
         // but no hit ever opened the spend latch (clearedAt absent). Reconcile is a
@@ -548,7 +556,7 @@ class SprintWireTest {
     void aServerGrantIsAdoptedOnlyWhenNoConsumeIsOutstanding() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();
         wire.onServerClear(new TickStamp(5));                 // the spend latch opens
@@ -577,7 +585,7 @@ class SprintWireTest {
     void seedFromASprintingServerFlagRaisesClientSprintingButAHitStillSpendsTheEngagement() {
         Clock clock = new Clock();
         clock.tick = 0;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         // A plugin load/reload mid-play creates the wire for a player who is ALREADY
         // sprinting. The first movement reconcile seeds the unseen wire from the live
@@ -610,7 +618,7 @@ class SprintWireTest {
     void seedFromANonSprintingServerFlagLeavesClientSprintingLowAndDoesNotReArm() {
         Clock clock = new Clock();
         clock.tick = 0;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         // The reloaded player was walking: a non-sprinting seed leaves the raw flag down.
         wire.reconcile(false, new TickStamp(0), 3); // unseen ⇒ seed to not-sprinting
@@ -629,7 +637,7 @@ class SprintWireTest {
     void theAdoptBranchNeverTouchesClientSprinting() {
         Clock clock = new Clock();
         clock.tick = 4;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart(); // seen=true, clientSprinting up, sprinting+armed, lastWrite = 4
         assertTrue(wire.clientSprinting(), "a START raises the raw client flag");
@@ -642,40 +650,39 @@ class SprintWireTest {
         assertTrue(wire.clientSprinting(), "the ADOPT branch never touches the raw client flag");
     }
 
-    /* ── the PLAYER_INPUT sprint-key corroborator (SWORD_BLOCKING block-hit gates) ─ */
+    /* ── the PLAYER_INPUT sprint-key corroborator (the block door's entry gate) ─ */
 
     @Test
-    void unknownKeyIntentLeavesBothBlockhitGatesByteIdentical() {
+    void unknownKeyIntentLeavesTheBlockhitGateByteIdentical() {
         Clock clock = new Clock();
         clock.tick = 4;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
-        // No onKeyIntent is ever called — keyIntent stays UNKNOWN (null), the value for
-        // every pre-1.21.2 / Via / packetless client. Both gates must collapse to the
-        // raw-flag test exactly.
+        // No onKeyIntent is ever called — keyIntent stays UNKNOWN (null), the value
+        // for every pre-1.21.2 / Via / packetless client. The entry gate must
+        // collapse to the raw-flag test exactly.
         wire.onSprintStart(); // clientSprinting = true
         assertTrue(wire.blockReArmEligible(),
                 "UNKNOWN keyIntent + clientSprinting=true ⇒ eligible, as the raw-flag gate always was");
 
         wire.onBlockSprintReset();
-        wire.onServerClear(new TickStamp(4)); // clears sprinting/armed; blockReset + clientSprinting survive
         assertTrue(wire.verdictAt(new TickStamp(4)).sprinting(),
-                "held-block override rides clientSprinting exactly as before with UNKNOWN keyIntent");
+                "the block gesture arms the wire with UNKNOWN keyIntent exactly as with a known one");
 
-        // Drop the raw client flag: with no keyIntent to widen them, both gates refuse.
+        // Drop the raw client flag: with no keyIntent to widen it, the gate refuses.
         clock.tick = 5;
-        wire.onSprintStop(); // clientSprinting = false; keyIntent still UNKNOWN; blockReset survives
+        wire.onSprintStop(); // clientSprinting = false; keyIntent still UNKNOWN
         assertFalse(wire.blockReArmEligible(),
                 "UNKNOWN keyIntent + clientSprinting=false ⇒ refused (byte-identical to the raw-flag gate)");
         assertFalse(wire.verdictAt(new TickStamp(6)).sprinting(),
-                "the block override ends with the raw flag when keyIntent is UNKNOWN");
+                "and the STOP dropped the wire view — no phantom bonus");
     }
 
     @Test
-    void aGenuineStopWithARecentlySprintingHeldKeyKeepsBothBlockhitGates() {
+    void aGenuineStopWithARecentlySprintingHeldKeyKeepsTheDoorEligible() {
         Clock clock = new Clock();
         clock.tick = 0;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();   // lastSprintingAt = 0, clientSprinting = true
         wire.onKeyIntent(true); // the raw sprint KEY is held (a ctrl/toggle holder)
@@ -686,50 +693,42 @@ class SprintWireTest {
         wire.onSprintStop();
         assertFalse(wire.clientSprinting(), "the blocked-tick STOP lowered the raw client flag");
 
-        // Gate 1 (blockReArmEligible): 5 ticks since last sprint, key still held ⇒ re-arm fires.
+        // The entry gate: 5 ticks since last sprint, key still held ⇒ the door may re-arm.
         assertTrue(wire.blockReArmEligible(),
                 "held sprint key + recent sprint carries the era block-hitter past the blocked STOP");
 
-        // The re-arm engages the sticky block reset; a later blocked STOP lowers the raw
-        // flag again while the block is STILL held.
-        wire.onBlockSprintReset(); // clientSprinting back up, blockReset sticky, lastSprintingAt = 5
-        clock.tick = 6;
-        wire.onSprintStop();
-        assertFalse(wire.clientSprinting());
-
-        // Gate 2 (verdictAt blockReset override): blockReset && !clientSprinting, rescued by
-        // the recent held sprint key.
-        SprintVerdict v = wire.verdictAt(new TickStamp(7));
-        assertTrue(v.sprinting(),
-                "the held-block override survives the STOP via the recent sprint-key corroborator");
+        // And the re-arm it admits is a full gesture: the next hit is fresh — the
+        // corroborator widens the DOOR, and the gesture itself carries the verdict.
+        wire.onBlockSprintReset();
+        SprintVerdict v = wire.verdictAt(new TickStamp(6));
+        assertTrue(v.sprinting(), "the corroborated block re-arm arms the wire");
         assertEquals(Boolean.TRUE, v.fresh());
     }
 
     @Test
-    void aHeldKeyThatHasNotSprintedInOverASecondIsRefusedByBothGates() {
+    void aHeldKeyThatHasNotSprintedInOverASecondIsRefusedByTheGate() {
         Clock clock = new Clock();
         clock.tick = 0;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         // A stationary defensive ctrl-holder: the sprint KEY is held, but the last time
         // the wire was actually sprinting is now stale (> 20 ticks).
         wire.onSprintStart();      // lastSprintingAt = 0
-        wire.onBlockSprintReset(); // blockReset sticky; lastSprintingAt still 0 (same tick)
         wire.onKeyIntent(true);
-        wire.onSprintStop();       // raw client flag down; lastSprintingAt stays 0; blockReset survives
+        wire.onSprintStop();       // raw client flag down; lastSprintingAt stays 0
 
         clock.tick = 25; // 25 ticks since the last sprint > ERA_BLOCKHIT_RECENCY_TICKS (20)
         assertFalse(wire.blockReArmEligible(),
                 "25 ticks since last sprint ⇒ the stationary defensive ctrl-holder earns no re-arm");
         assertFalse(wire.verdictAt(new TickStamp(25)).sprinting(),
-                "and the verdict override is refused past the recency window — no phantom bonus");
+                "and with no admitted gesture the wire stays plain — no phantom bonus");
     }
 
     @Test
     void keyIntentFalseNeverVetoesAClientSprintingPath() {
         Clock clock = new Clock();
         clock.tick = 3;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();    // clientSprinting = true (a double-tap-W sprinter IS sprinting)
         wire.onKeyIntent(false); // ...but the raw sprint KEY reads false (double-tap holds no key)
@@ -737,9 +736,8 @@ class SprintWireTest {
                 "clientSprinting=true passes regardless of a FALSE key intent — double-tap sprinters unaffected");
 
         wire.onBlockSprintReset();
-        wire.onServerClear(new TickStamp(3)); // clears sprinting/armed; blockReset + clientSprinting survive
         SprintVerdict v = wire.verdictAt(new TickStamp(3));
-        assertTrue(v.sprinting(), "the block override still rides clientSprinting; a FALSE key intent never vetoes it");
+        assertTrue(v.sprinting(), "the block gesture arms; a FALSE key intent never vetoes it");
         assertEquals(Boolean.TRUE, v.fresh());
     }
 
@@ -747,7 +745,7 @@ class SprintWireTest {
     void aKeyIntentWriteNeverDefeatsTheDeferredConsume() {
         Clock clock = new Clock();
         clock.tick = 5;
-        SprintWire wire = new SprintWire(clock);
+        InputLedger wire = new InputLedger(clock);
 
         wire.onSprintStart();                               // seq 1, sprinting + armed
         SprintVerdict peek = wire.verdictAt(new TickStamp(5));

@@ -141,7 +141,38 @@ public final class HitFeedbackListener implements Listener {
             return;
         }
         double finalDamage = event.getFinalDamage();
-        if (finalDamage <= 0.0) {
+        if (finalDamage < 0.0) {
+            return; // insanity guard only — a ZERO-damage melee is a CONNECTED hit (2.6.0)
+        }
+        // A non-cancelled 0-final-damage melee (a StarEnchants Blacksmith proc
+        // zeroing the fold, a plugin's setDamage(0)) still connected: vanilla
+        // still flinches/knocks it (snowball semantics), so the custom voice
+        // plays and — critically — the mark below arms, eating the vanilla
+        // broadcast. The old finalDamage<=0 early-return skipped BOTH: the
+        // player heard the raw vanilla hurt sound exactly where the custom one
+        // should be (the 2.6.0 SE-compat incoherence). The damage INDICATOR
+        // keeps its own 0-guard — no "0" stands; only the voice is coherent.
+
+        // The mid-window DELTA hit is ERA-SILENT (2.6.0 — the owner's
+        // double-sound-on-crits report): a stronger hit inside the victim's
+        // half-open invulnerability window deals only the difference, and
+        // vanilla zeroes the fresh-hit flag that gates EVERY client effect —
+        // no hurt sound, no flinch, no knockback (the compendium: "a stronger
+        // hit mid-invuln deals difference damage with NO knock and no flinch").
+        // Voicing it doubled the hit chord exactly when a simulate-crits 1.5×
+        // (attacker falling — crit ≡ airborne) interleaved a plain hit inside
+        // the window. The predicate mirrors the server's own branch selector —
+        // nd is only re-armed AFTER a fresh hit's event returns, on every band
+        // 1.9.4→26.x (bytecode-verified per band, 2026-07-11 archaeology) — so
+        // nd > max/2 DURING the event identifies the delta branch exactly. No
+        // suppressor mark either: vanilla broadcasts nothing for a delta hit,
+        // and a phantom mark would eat the NEXT legitimate broadcast. The
+        // delta damage INDICATOR deliberately stays (a display choice, not era
+        // wire — the number is information; 2.5.5 pinned it).
+        if (victim.getNoDamageTicks() > victim.getMaximumNoDamageTicks() / 2) {
+            trace.record(new FeedbackTrace.Entry(
+                    "hit-feedback", attacker.getUniqueId(), victim.getUniqueId(),
+                    "ERA_SILENT_DELTA", "mid-window delta hit — vanilla/era play nothing"));
             return;
         }
 

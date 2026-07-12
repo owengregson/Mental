@@ -5,11 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the heal aggregation/pacing arithmetic (F4). The fold is pure (long-tick
- * primitives, no Bukkit/PE), so it is asserted directly on the tick math the heal
- * sampler drives it with: a pot burst ships immediately, a 1-HP-a-tick regen drip
- * aggregates to one ship of 10 per {@value HealFold#WINDOW_TICKS}-tick window, an
- * empty accumulator never ships, and reset restores the immediate-ship sentinel.
+ * Pins the heal aggregation/pacing arithmetic (F4) and the one-heart floor
+ * (2.6.0). The fold is pure (long-tick primitives, no Bukkit/PE), so it is
+ * asserted directly on the tick math the heal sampler drives it with: a pot
+ * burst ships immediately, a sub-heart drip holds un-consumed until the sum
+ * crosses {@value HealFold#MIN_SHIP_HEALTH} points and then ships once with the
+ * whole accumulation, an empty accumulator never ships, and reset restores the
+ * immediate-ship sentinel.
  */
 class HealFoldTest {
 
@@ -25,23 +27,37 @@ class HealFoldTest {
     }
 
     @Test
-    void dripAggregatesToTenPerWindow() {
+    void subHeartDripHoldsUntilTheSumCrossesAHeart() {
         HealFold fold = new HealFold();
-        // The first drip ships immediately, arming the window at tick 0.
+        // A half-heart drip is UNDER the one-heart floor: nothing ships, and the
+        // accumulator is NOT consumed — the drip keeps building.
         fold.add(1.0);
-        assertEquals(1.0, fold.poll(0), 1.0e-9);
-        // Nine more 1-HP drips inside the window ship nothing — they accumulate.
-        for (int tick = 1; tick <= 9; tick++) {
+        assertEquals(0.0, fold.poll(0), 1.0e-9);
+        // The second half-heart crosses the floor exactly (strict <, so 2.0 ships):
+        // the very first ship rides the immediate sentinel and carries the SUM.
+        fold.add(1.0);
+        assertEquals(2.0, fold.poll(1), 1.0e-9);
+        // The window re-armed at tick 1: further drips aggregate as before...
+        for (int tick = 2; tick <= 10; tick++) {
             fold.add(1.0);
             assertEquals(0.0, fold.poll(tick), 1.0e-9);
         }
-        // The tenth tick is exactly WINDOW_TICKS past the last ship: the whole
-        // accumulated ten HP flushes as one indicator.
+        // ...and flush whole once the window elapses (nine 1-pt drips = 9.0).
+        assertEquals(9.0, fold.poll(11), 1.0e-9);
+    }
+
+    @Test
+    void subHeartSumHoldsEvenPastTheWindow() {
+        HealFold fold = new HealFold();
+        // Ship once to arm a real window, then trickle a single half-heart.
+        fold.add(4.0);
+        assertEquals(4.0, fold.poll(0), 1.0e-9);
         fold.add(1.0);
-        assertEquals(10.0, fold.poll(10), 1.0e-9);
-        // ...and the window re-arms, so the next in-window drips hold again.
+        // Far past the pacing window the sum is still sub-heart: the floor, not
+        // the window, is what holds it — and it stays accumulated, not dropped.
+        assertEquals(0.0, fold.poll(100), 1.0e-9);
         fold.add(1.0);
-        assertEquals(0.0, fold.poll(11), 1.0e-9);
+        assertEquals(2.0, fold.poll(101), 1.0e-9);
     }
 
     @Test

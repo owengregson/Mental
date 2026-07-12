@@ -103,7 +103,7 @@ class PacketTapStateTest {
      * the defensive wrapper parse is swallowed so the observation tap never breaks the
      * inbound pipeline. Pins that {@code PacketType.Play.Client.PLAYER_INPUT} resolves
      * in the shaded PacketEvents and is handled zero-touch; the {@code onKeyIntent}
-     * state semantics are pinned by {@code SprintWireTest}.
+     * state semantics are pinned by {@code InputLedgerSprintTest}.
      */
     @org.junit.jupiter.api.Test
     void playerInputInPlayStateIsHandledAndNeverBreaksThePipeline() {

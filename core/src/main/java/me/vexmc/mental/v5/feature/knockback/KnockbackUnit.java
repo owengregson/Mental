@@ -30,7 +30,8 @@ import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.kernel.wire.CompensationQuery;
 import me.vexmc.mental.kernel.wire.LatencyModel;
-import me.vexmc.mental.kernel.wire.SprintWire;
+import me.vexmc.mental.kernel.wire.InputLedger;
+import me.vexmc.mental.v5.feature.delivery.CorrectiveVelocity;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
@@ -376,7 +377,15 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         applyAttackerObligations(attacker, sprinting, tx.context().sprint());
     }
 
-    /** A protection plugin cancelling the melee hit withdraws the queued knock. */
+    /**
+     * A plugin cancelling the melee hit (a protection region, a StarEnchants
+     * dodge/immune proc at HIGH) withdraws the queued knock — and since 2.6.0,
+     * when the fast path had ALREADY committed a knock to the victim's client
+     * (PRE_SENT burst / PINNED vector) before the cancel could be known, it also
+     * corrects the client back to its true server velocity and journals the
+     * cancellation. The cosmetic silence of a cancelled hit is CORRECT (nothing
+     * landed); the knock-without-sound desync was the incoherence.
+     */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onMeleeCancelled(EntityDamageByEntityEvent event) {
         if (!event.isCancelled()
@@ -391,6 +400,13 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         HitTransaction tx = session.currentEventTransaction();
         if (tx != null && !(tx.context().source() instanceof HitSource.RodPull)) {
             session.desk().withdraw(tx.context().id());
+            boolean committed = tx.state() == HitTransaction.State.PRE_SENT
+                    || tx.state() == HitTransaction.State.PINNED;
+            if (committed) {
+                CorrectiveVelocity.ship(victim);
+                tx.presend(tx.presend() == null
+                        ? "cancelled-by-plugin" : tx.presend() + "+cancelled-by-plugin");
+            }
         }
     }
 
@@ -445,21 +461,23 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * sprint knock, the measured era server contract (real 1.8.9 re-armed only on
      * a client START: no-w-tap doubles flew 7.2 blocks, w-tap doubles 11.4) — and
      * re-arming takes a client-expressed re-gesture: a wire STOP→START (w-tap,
-     * s-tap, a GUI open) or the {@code SwordBlockingUnit} block re-arm. The server
-     * flag now simply keeps meaning "what the client last said," the only stable
-     * truth on 1.21.2+.</p>
+     * s-tap, a GUI open) or the always-on {@code BlockResetTap} block re-arm. The
+     * server flag now simply keeps meaning "what the client last said," the only
+     * stable truth on 1.21.2+.</p>
      *
-     * <p>The wire clear is guarded by the hit's {@code verdict}. A wire-peeked verdict
-     * carries the wire's arrival sequence at peek time ({@link SprintVerdict#wireSeq}),
-     * so the clear is ordered by ARRIVAL, not by tick granularity: vanilla cleared
-     * sprint synchronously inside {@code attack}, so it could never eat a re-engage
-     * that arrived afterwards; Mental's clear runs 1–2 ticks late at the deferred
-     * EDBEE, so a w-tap START that landed in the SAME tick as (and after) the ATTACK
-     * must survive — the 2.4.x same-tick retro-clear defect a tick stamp could not
-     * separate. The wire clear no-ops under a wire write with a larger seq
-     * ({@link SprintWire#onServerClear(long)}). A verdict with no wire provenance
-     * ({@link SprintVerdict#fromWire} false) falls back to the tick-stamp guard
-     * ({@link SprintWire#onServerClear(TickStamp)}), byte-identical to 2.4.1.</p>
+     * <p>The wire clear is guarded by the hit's {@code verdict}. A ledger-peeked
+     * verdict carries the gesture sequence at peek time
+     * ({@link SprintVerdict#wireSeq}), so the clear is ordered by ARRIVAL, not by
+     * tick granularity: vanilla cleared sprint synchronously inside {@code attack},
+     * so it could never eat a re-engage that arrived afterwards; Mental's clear
+     * runs 1–2 ticks late at the deferred EDBEE, so a w-tap START that landed in
+     * the SAME tick as (and after) the ATTACK must survive — the 2.4.x same-tick
+     * retro-clear defect a tick stamp could not separate. The clear no-ops under
+     * a gesture with a larger seq ({@link InputLedger#onServerClear(long)}). A
+     * verdict with NO wire provenance ({@link SprintVerdict#fromWire} false —
+     * view-fallback and Vanilla mints) spends NOTHING since 2.6.0: the old
+     * stamp-guarded fallback was same-tick-blind and could retro-eat a re-arm
+     * landing in the mint's own tick.</p>
      */
     private void applyAttackerObligations(LivingEntity attacker, boolean sprinting, SprintVerdict verdict) {
         if (!(attacker instanceof Player player)) {
@@ -482,22 +500,22 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         if (attackerSession != null) {
             attackerSession.ledger().scaleHorizontal(0.6);
         }
-        // Mirror vanilla's in-attack sprint clear onto the wire — but ONLY when a
-        // real connection domain already exists to clear. A packetless attacker
-        // (synthetic player / in-process bot) has no SprintWire the rim ever fed,
-        // and creating one here (domainFor is computeIfAbsent) would make it look
-        // connected — permanently standing its ground sampler down and free-falling
-        // its ledger to a zero vertical (the 2.4.4 domain-poisoning bug; the
-        // SwordBlockingUnit:259 non-creating idiom is the precedent).
-        if (domains.has(attackerId)) {
-            SprintWire wire = domains.domainFor(attackerId).sprint();
-            if (verdict.fromWire()) {
-                wire.onServerClear(verdict.wireSeq());
-            } else {
-                // No wire provenance (wtap-registration off / view-fallback verdict):
-                // the stamp guard is the best available ordering, byte-identical to 2.4.1.
-                wire.onServerClear(verdict.at());
-            }
+        // Mirror vanilla's in-attack sprint clear onto the ledger — but ONLY for a
+        // verdict the ledger itself produced, and only when a real connection
+        // domain already exists to clear. A packetless attacker (synthetic player /
+        // in-process bot) has no ledger the rim ever fed, and creating one here
+        // (domainFor is computeIfAbsent) would make it look connected —
+        // permanently standing its ground sampler down and free-falling its
+        // motion ledger to a zero vertical (the 2.4.4 domain-poisoning bug).
+        //
+        // A verdict WITHOUT wire provenance never spends the wire engagement
+        // (2.6.0): the old stamp-guarded fallback was same-tick-blind — a Vanilla
+        // mint (fast-path early-return, third-party ENTITY_ATTACK) consumed the
+        // engagement off the live stale-high flag and could retro-eat a re-arm
+        // START landing in the mint's own tick. No wire verdict, no wire consume;
+        // the view-fallback path keeps its documented no-engagement semantics.
+        if (verdict.fromWire() && domains.has(attackerId)) {
+            domains.domainFor(attackerId).sprint().onServerClear(verdict.wireSeq());
         }
         // NO deferred player.setSprinting(false): on 1.21.2+ that server-flag write is
         // echoed to the attacker's own client, which drops its local sprint and never

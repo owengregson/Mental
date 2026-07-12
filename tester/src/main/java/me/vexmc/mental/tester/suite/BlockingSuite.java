@@ -212,31 +212,31 @@ public final class BlockingSuite {
     }
 
     /* ------------------------------------------------------------------ */
-    /*  Case 6 — the universal blockhit contract (held-block fresh sprint) */
+    /*  Case 6 — the block-hit reset gesture (2.6.0: one hit per reset)    */
     /* ------------------------------------------------------------------ */
 
     /**
-     * The owner's universal blockhit contract: a hit delivered WHILE STILL HOLDING
-     * a sword block that reset sprint ships the FRESH sprint knock — the second and
-     * later hits of a held-block combo included, where the prior hit's post-hit
-     * sprint clear (the server half of the w-tap) would otherwise have dropped the
-     * freshness. The whole mechanic lives in the connection domain's
-     * {@code SprintWire}: the block right-click raises a sticky {@code blockReset}
-     * ({@code onBlockSprintReset}) that survives {@code onServerClear} and overrides
-     * the verdict while the raw client sprint flag holds, ended by the client's
-     * RELEASE_USE_ITEM ({@code onBlockReleased}) or a STOP_SPRINTING.
+     * The owner's block-hit contract (2.6.0 — one hit per reset, superseding the
+     * 2.5.1 held-chain): the block right-click is a reconstructed reset GESTURE
+     * ({@code onBlockSprintReset}, exactly START-shaped), so a hit delivered
+     * after it ships the FRESH sprint knock and SPENDS the grant — the next
+     * block-hit takes a fresh right-click. The door lives always-on in the
+     * {@code BlockResetTap} (knockback family); the SWORD_BLOCKING feature only
+     * contributes its decorated-sword test to the door's item gate.
      *
      * <p><b>Clientless honesty:</b> the contract is decided entirely by the
-     * arrival-order {@code SprintWire}, which a {@link FakePlayer} has no client to
-     * feed — it never creates a connection domain, so {@code resetSprintForBlock}
-     * finds no wire to re-arm and a synthetic melee resolves as a server-side hit
-     * that reads the live sprint flag, never the wire verdict. There is therefore
-     * no clientless staging of the held-block reset end to end; the full state
-     * table (engage → hit → post-hit clear → still-fresh → release/STOP boundaries →
-     * re-engage) is exhaustively unit-pinned in the kernel {@code SprintWireTest}.
-     * This case verifies the module enables and stages the block, then note-SKIPs
-     * the wire-dependent assertion — the established honesty pattern for a
-     * clientless gap (never a false PASS, never a false regression).</p>
+     * arrival-order {@code InputLedger}, which a {@link FakePlayer} has no client
+     * to feed — it never creates a connection domain, so the door finds no ledger
+     * to re-arm and a synthetic melee resolves as a server-side hit that reads
+     * the live sprint flag, never the wire verdict. There is therefore no
+     * clientless staging of the block reset end to end; the one-hit-per-reset
+     * state table (engage → hit → spend → release/STOP boundaries → re-engage)
+     * is exhaustively unit-pinned in the kernel {@code InputLedgerSprintTest},
+     * and the real-protocol cycle is asserted by the legacy-lab wire suite's
+     * {@code blockhit-one-credit} scenario. This case verifies the module
+     * enables and stages the block, then note-SKIPs the wire-dependent
+     * assertion — the established honesty pattern for a clientless gap (never a
+     * false PASS, never a false regression).</p>
      */
     private static void runHeldBlockFreshSprint(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -268,11 +268,12 @@ public final class BlockingSuite {
             });
             context.awaitTicks(2);
 
-            context.note("the held-block fresh-sprint contract is decided by the connection-domain "
-                    + "SprintWire, which a clientless FakePlayer has no packets to drive (no wire → "
-                    + "resetSprintForBlock has nothing to re-arm, and a synthetic melee reads the live "
-                    + "sprint flag, not the wire verdict) — the full engage/clear/hit/release/STOP/re-engage "
-                    + "state table is unit-pinned in kernel SprintWireTest");
+            context.note("the block-hit reset contract is decided by the connection-domain "
+                    + "InputLedger, which a clientless FakePlayer has no packets to drive (no ledger → "
+                    + "the BlockResetTap door has nothing to re-arm, and a synthetic melee reads the live "
+                    + "sprint flag, not the wire verdict) — the one-hit-per-reset state table is "
+                    + "unit-pinned in kernel InputLedgerSprintTest and asserted on the real protocol by "
+                    + "the legacy-lab blockhit-one-credit scenario");
         } finally {
             toggleModule(context, "sword-blocking", false);
             context.syncRun(() -> {

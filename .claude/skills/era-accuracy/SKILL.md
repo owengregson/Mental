@@ -72,16 +72,22 @@ sent STOP_SPRINTING), and the re-engage on release re-armed the sprint KB bonus
 clients (1.17+) KEEP the sprint flag through an item-use block (you're slowed
 but still flagged sprinting — visible as sprint particles while blocking), so
 that STOP/START never crosses the wire and block-hitting silently stops
-resetting sprint. Mental reconstructs it: the `SwordBlockingUnit` (was
-`SwordBlockingModule.resetSprintForBlock`) re-arms the sprint ledgers on the
-block right-click via the `SprintWire` (was `SprintTracker.armSprintReset`),
-gated on the RAW client sprint flag (the wire's client-sprint read, was
-`SprintTracker.isClientSprinting` — the only signal that survives the wire's own
-post-hit clear) so a stationary defensive block never gains a phantom bonus. The
-right-click that re-arms it is the born-cancelled `RIGHT_CLICK_AIR`
-`PlayerInteractEvent` (the listener is `ignoreCancelled=false`, self-filtering on
-`useItemInHand() != DENY`) or the victim-aimed `PlayerInteractEntityEvent` — both
-reach the re-arm (2026-07-10). NOTE the local-player sprint-particle visual during
+resetting sprint. Mental reconstructs it ALWAYS-ON since 2.6.0: the
+`BlockResetTap` (knockback core — moved out of default-OFF SWORD_BLOCKING,
+whose absence on defaults was half the 2.6.0 "resets never re-arm" report)
+re-arms the connection `InputLedger` on the block right-click, gated on the RAW
+client sprint flag (the only signal that survives the ledger's own post-hit
+clear) so a stationary defensive block never gains a phantom bonus. The item
+gate: shields always; SWORD_BLOCKING contributes its decorated-sword test while
+enabled. The re-arm is EXACTLY a START-shaped gesture — **one hit per reset**
+(2.6.0, the owner's directive; the 2.5.1 sticky held-chain is retired): the
+accepted bonus hit spends it, the next block-hit takes a fresh right-click, and
+an UNSPENT re-arm survives the block release (era-exact — the era client's
+release re-engage is what re-armed the bonus, so a block-tap earns the same
+single fresh hit a w-tap does). The right-click that re-arms it is the
+born-cancelled `RIGHT_CLICK_AIR` `PlayerInteractEvent` (the listener is
+`ignoreCancelled=false`, self-filtering on `useItemInHand() != DENY`) or the
+victim-aimed `PlayerInteractEntityEvent` — both reach the re-arm (2026-07-10). NOTE the local-player sprint-particle visual during
 a block is client-authoritative rendering and cannot be removed server-side (same
 family as the right-click "item rises" cosmetic) — only the FUNCTIONAL reset is
 restored.
@@ -100,26 +106,34 @@ observable era contract is **one engagement, one sprint knock** (2.5.1, the
 owner's directive — supersedes the 2.5.0 post-clear re-arm): the era server
 consumed the sprint flag INSIDE every bonus attack and re-armed only on a client
 START, so a no-w-tap double flew 7.2 blocks where a w-tap double flew 11.4
-(era-wire measurements, the reproduced target). The `SprintWire` mirrors that —
-the hit's wire clear (`onServerClear`) CONSUMES the engagement (`sprinting` +
-`armed` drop, `clearedAt` opens the SPEND LATCH), and while that latch is open
-`reconcile` is BLOCKED from resurrecting the bonus off the stale-high server
-flag. A held-W modern client's flag stays true forever (its STOP lives inside
-vanilla's cancelled ATTACK and never crosses the wire), so re-adopting it would
-hand every held hit a per-hit sprint knock — the 2.5.0 bug the owner ruled out
-(holding W comboed forever with zero reset skill). Re-arming takes a
-CLIENT-EXPRESSED re-gesture: a wire STOP→START cycle (w-tap / s-tap / GUI open),
-or the `SwordBlockingUnit` block re-arm (`onBlockSprintReset`) for block-hitting,
-since a modern item-use never drops the client flag. The 2.5.0 auto re-arm
+(era-wire measurements, the reproduced target). The `InputLedger` (2.6.0 —
+subsumed `SprintWire`, every write ringed for the journal's `trail=` token)
+mirrors that — the hit's seq-guarded consume (`onServerClear(long)`) spends the
+engagement (`sprinting` + `armed` drop, `clearedAt` opens the SPEND LATCH), and
+while that latch is open `reconcile` is BLOCKED from resurrecting the bonus off
+the stale-high server flag. A held-W modern client's flag stays true forever
+(its STOP lives inside vanilla's cancelled ATTACK and never crosses the wire),
+so re-adopting it would hand every held hit a per-hit sprint knock — the 2.5.0
+bug the owner ruled out (holding W comboed forever with zero reset skill).
+Re-arming takes a CLIENT-EXPRESSED re-gesture: a wire STOP→START cycle (w-tap /
+s-tap / GUI open), the always-on `BlockResetTap` re-arm for block-hitting
+(a modern item-use never drops the client flag), or — the 2.6.0 failsafe —
+the published flag's falling edge (`SERVER_FALL`: a STOP provably reached
+vanilla even if the tap missed it; closes the latch, never arms). Same-tick
+era order (bytecode-pinned 1.8.9 + 1.21.11, observed live): a same-tick
+w-tap+click crosses ATTACK before START on every client generation, so that
+click ships PLAIN (`note=start-trailed`) and the START arms the NEXT hit —
+pure arrival order is era truth, never reorder. The 2.5.0 auto re-arm
 assumed a held-W era client kept the bonus; it did not — the era client
 auto-re-engaged by sending a genuine START, which a modern client at spam cadence
 never does (its local flag never drops, so it sends exactly ONE START per
 engagement). PLAYER_INPUT on 1.21.2+ DOES carry a sprint bit (0x40, raw
 `keySprint.isDown()` intent — false for double-tap sprinters, true for stationary
-ctrl-holders; the server ignores it) — a re-arm corroborator for the two
-SWORD_BLOCKING block-hit gates only, never a verdict source (empirical 1.21.11
-extraction, `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`).
-Never re-add the deferred `setSprinting(false)`.
+ctrl-holders; the server ignores it) — the block door's entry-gate corroborator
+only, never a verdict source (empirical 1.21.11 extraction,
+`docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`); the raw
+byte still rides the ledger ring as `KEY_INPUT` evidence. Never re-add the
+deferred `setSprinting(false)`.
 
 ## Myths (do not implement, do not "fix")
 

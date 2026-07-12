@@ -9,7 +9,7 @@ import java.util.UUID;
  * subset; Phase 3 extends it with the full arbiter verdicts, world rules and
  * damage inputs.
  *
- * @param sprint                 the attack-time sprint answer (from the D1 SprintWire);
+ * @param sprint                 the attack-time sprint answer (from the D1 InputLedger);
  *                               {@code fresh} may be null when no wire view existed.
  * @param victimHasWire          whether the victim has a live PacketEvents user
  *                               (a pinned path when false).

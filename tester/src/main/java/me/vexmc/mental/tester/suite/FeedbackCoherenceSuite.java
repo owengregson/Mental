@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.LongSupplier;
+import me.vexmc.mental.platform.SpawnInvulnerability;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -90,6 +91,8 @@ public final class FeedbackCoherenceSuite {
                         context -> runHealAttribution(mental, tester, context)),
                 new TestCase("heal-indicator: a combined heal folds into exactly one paced decision",
                         context -> runHealFoldPacing(mental, tester, context)),
+                new TestCase("heal-indicator: sub-heart heals hold silently until the sum crosses one heart",
+                        context -> runSubHeartHoldsThenShips(mental, tester, context)),
                 new TestCase("heal-indicator: an unattributed heal is silent (no ambient-regen spam)",
                         context -> runUnattributedHealSilent(mental, tester, context)),
                 new TestCase("heal-indicator ZERO-TOUCH: module off, a stamp+heal writes no trace",
@@ -228,14 +231,17 @@ public final class FeedbackCoherenceSuite {
 
     /**
      * The window-UPGRADE case (D1's second branch): a fresh 7.0 hit, then WITHIN
-     * the still-open invulnerability window (2 ticks later, no clearing) the
-     * attacker's attack-damage rises to 10.0 and swings again. Vanilla admits the
+     * the still-open invulnerability window a 10.0 hit lands. Vanilla admits the
      * stronger hit and subtracts only the DELTA (amount − lastHurt = 3.0); the
      * EDBEE's {@code getFinalDamage()} is that delta on both modern Paper (an
      * INVULNERABILITY_REDUCTION modifier) and legacy CraftBukkit (the delta passed
      * as the event damage). Pins: two accepted EDBEEs, the second ≈ 3.0, a second
-     * indicators decision, and — the honest cross-version oracle — the displayed
-     * sum still equals the health actually lost.
+     * indicators decision (the delta NUMBER deliberately shows — a display
+     * choice), the 2.6.0 era-silence split (the delta hit records
+     * ERA_SILENT_DELTA and does NOT voice — vanilla zeroes the fresh-hit flag on
+     * the upgrade branch: no sound, no flinch, no knock; voicing it was the
+     * owner's double-sound-on-crits bug), and — the honest cross-version
+     * oracle — the displayed sum still equals the health actually lost.
      */
     private static void runUpgradeDelta(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -285,11 +291,29 @@ public final class FeedbackCoherenceSuite {
             context.awaitUntil(() -> probe.accepted().size() >= 1, 40,
                     "the fresh 7.0 opening hit to land");
 
-            // Raise attack-damage to 10.0 and swing AGAIN inside the window (no clear).
+            // The upgrade hit, staged DETERMINISTICALLY: the window is re-stamped
+            // and the stronger hit delivered through the Bukkit damage(amount,
+            // attacker) seam in ONE sync run. Two hard-won reasons (2.6.0): the
+            // legacy tier double-ticks noDamageTicks, so riding hit 1's real
+            // window across staging hops decayed it to the max/2 boundary and
+            // flipped vanilla's branch from delta-upgrade to fresh-accept (the CI
+            // flake); and the NMS-attack seam feeds the amount through attributes
+            // + the attack meter, which the 1.17.1 band staged unreliably for
+            // clientless fakes (the archaeology round: the swing silently hit the
+            // amount<=lastDamage sub-bail) — damage() carries the exact amount to
+            // the same window branch on every band 1.9.4→26.x. The case pins the
+            // UPGRADE MECHANICS, never staging timing.
             context.awaitTicks(2);
-            boolean raised = context.sync(() -> setAttackDamage(attacker, UPGRADE_DAMAGE));
-            context.expect(raised, "attack-damage attribute unresolved — cannot stage the upgrade");
-            context.syncRun(() -> attacker.attack(victim.player()));
+            context.syncRun(() -> {
+                victim.player().setNoDamageTicks(victim.player().getMaximumNoDamageTicks());
+                // 1.16.5–1.20.6: the Bukkit setter also arms the respawn-invuln
+                // timer, whose gate voids ALL damage — the band-trap that made
+                // this staging silently no-op on 1.17.1 (archaeology round).
+                SpawnInvulnerability.disarm(
+                        victim.player(), victim.player().getMaximumNoDamageTicks());
+                victim.player().setLastDamage(HIT_DAMAGE);
+                victim.player().damage(UPGRADE_DAMAGE, attacker.player());
+            });
             context.awaitUntil(() -> probe.accepted().size() >= 2, 40,
                     () -> "the in-window upgrade hit to fire a second EDBEE (accepted="
                             + probe.accepted().size() + ")");
@@ -313,6 +337,21 @@ public final class FeedbackCoherenceSuite {
             context.expect(unsendable == 2,
                     "each accepted hit — the opener and the upgrade — must ship a damage-indicators "
                             + "decision; got " + unsendable + " UNSENDABLE (trace=" + trace.entries() + ")");
+
+            // The 2.6.0 era-silence split: the delta hit KEEPS its indicator (the
+            // number is information — a display choice, pinned above) but must
+            // NOT voice — vanilla zeroes the fresh-hit flag on the upgrade
+            // branch, so era plays no sound, no flinch, no knock for it (the
+            // owner's double-sound-on-crits report). The silence is a recorded
+            // decision, never a silent skip.
+            long voiced = countHitFeedbackEmits(trace);
+            long eraSilent = countDecision(trace, "hit-feedback", "ERA_SILENT_DELTA");
+            context.expect(voiced == 1,
+                    "only the OPENER may voice — the mid-window delta hit is era-silent; got "
+                            + voiced + " voice decisions (trace=" + trace.entries() + ")");
+            context.expect(eraSilent == 1,
+                    "the delta hit must record its ERA_SILENT_DELTA decision; got " + eraSilent
+                            + " (trace=" + trace.entries() + ")");
 
             double displayedSum = 0.0;
             for (CoherenceProbe.Hit hit : accepted) {
@@ -413,6 +452,82 @@ public final class FeedbackCoherenceSuite {
             context.note("heal attributed victim→attacker; HEAL_UNSENDABLE carries no hearts by design "
                     + "(the plan puts the amount only on the sendable HEAL) — the +4.0 fold is unit-pinned "
                     + "in HealFoldTest");
+        } finally {
+            toggleModule(context, "damage-indicators", false);
+            setEffectsPreset(context, "signature");
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            probe.unregister();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  4a². the one-heart floor: sub-heart heals hold, never spam          */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The 2.6.0 one-heart floor, staged live on the StarEnchants-shaped setHealth
+     * path: a single half-heart heal (+1.0 pt) in fresh combat attribution writes
+     * NO heal decision — even well past the fold's pacing window, proving the
+     * FLOOR (not the window) is what held it — and a second +1.0 in a later
+     * sampler tick crosses {@code MIN_SHIP_HEALTH} and ships EXACTLY ONE decision
+     * carrying the accumulated sum (the un-consumed hold; the arithmetic is
+     * unit-pinned in HealFoldTest, this pins the live wiring end-to-end).
+     */
+    private static void runSubHeartHoldsThenShips(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        CoherenceProbe probe = CoherenceProbe.register(tester, () -> mental.clock().current().value());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        FeedbackTrace trace = mental.feedbackTrace();
+
+        try {
+            setEffectsPreset(context, "signature");
+            toggleModule(context, "damage-indicators", true);
+            context.expect(moduleActive(mental, "damage-indicators"), "damage-indicators failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            context.expect(context.sync(() -> armAttacker(attacker)),
+                    "attack-damage/attack-speed attributes unresolved — cannot stamp the attribution hit");
+
+            probe.watch(victim.uuid()); // freezes ambient regen so it can't top up the fold
+
+            // Stamp attribution with one real melee (nd cleared for determinism).
+            context.syncRun(() -> {
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+            });
+            context.awaitUntil(() -> !probe.accepted().isEmpty(), 40,
+                    "the attribution melee to land (stamping the last-hit)");
+
+            // Let the sampler's lastHealth catch the post-hit value, then trickle
+            // HALF a heart in one hop. The trace is cleared first so the hit's own
+            // UNSENDABLE cannot masquerade as a heal decision.
+            context.awaitTicks(3);
+            double preHeal = context.sync(() -> victim.player().getHealth());
+            trace.clear();
+            context.syncRun(() -> victim.player().setHealth(preHeal + 1.0));
+
+            // Well past the 10-tick fold window: the FLOOR is what holds it.
+            context.awaitTicks(15);
+            context.expect(countDecision(trace, "damage-indicators", "HEAL_UNSENDABLE") == 0,
+                    "a sub-heart heal must write NO heal decision (trace=" + trace.entries() + ")");
+
+            // The second half-heart crosses the floor: exactly one decision ships,
+            // carrying the accumulated (not the incremental) amount by construction.
+            context.syncRun(() -> victim.player().setHealth(preHeal + 2.0));
+            context.awaitUntil(() -> countDecision(trace, "damage-indicators", "HEAL_UNSENDABLE") >= 1, 40,
+                    () -> "the crossing heal to ship one decision (trace=" + trace.entries() + ")");
+            context.expect(countDecision(trace, "damage-indicators", "HEAL_UNSENDABLE") == 1,
+                    "exactly one decision for the accumulated heal, got trace=" + trace.entries());
+            context.note("half-heart held silently past the window; the crossing trickle shipped once");
         } finally {
             toggleModule(context, "damage-indicators", false);
             setEffectsPreset(context, "signature");
@@ -718,20 +833,6 @@ public final class FeedbackCoherenceSuite {
         }
         attackDamage.setBaseValue(HIT_DAMAGE);
         attackSpeed.setBaseValue(40.0);
-        return true;
-    }
-
-    /** Raises the attacker's attack-damage base (3b's in-window upgrade). */
-    private static boolean setAttackDamage(FakePlayer attacker, double value) {
-        Attribute damageAttribute = Attributes.attackDamage();
-        if (damageAttribute == null) {
-            return false;
-        }
-        AttributeInstance attackDamage = attacker.player().getAttribute(damageAttribute);
-        if (attackDamage == null) {
-            return false;
-        }
-        attackDamage.setBaseValue(value);
         return true;
     }
 

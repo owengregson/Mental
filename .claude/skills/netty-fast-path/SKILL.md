@@ -241,29 +241,40 @@ it did server-side must be re-implemented or it silently vanishes:
   where the client simultaneously predicts the same clear and re-engages, so
   the echo is always redundant. **The new contract is one engagement, one sprint
   knock** (2.5.1, the owner's directive — supersedes the 2.5.0 post-clear
-  re-arm). The hit's wire clear (`SprintWire.onServerClear`) CONSUMES the
-  engagement: `sprinting` + `armed` drop and `clearedAt` opens the SPEND LATCH.
+  re-arm). The hit's ledger clear (`InputLedger.onServerClear(long)`, seq-guarded
+  — 2.6.0 subsumed `SprintWire` into the `InputLedger`) CONSUMES the engagement:
+  `sprinting` + `armed` drop and `clearedAt` opens the SPEND LATCH.
   While that latch is open, `reconcile` is BLOCKED from adopting the stale-high
   server flag — a held-W modern client's flag stays true forever (vanilla's own
   clear lives inside the cancelled ATTACK, so its STOP never crosses the wire),
   and re-adopting it would resurrect the engagement the hit just spent, arming
   every held hit as a sprint knock (the 2.5.0 bug — holding W comboed forever).
   Nothing re-arms automatically: re-arming takes a CLIENT-EXPRESSED re-gesture —
-  a wire STOP→START cycle (w-tap / s-tap / GUI open), or the `SwordBlockingUnit`
-  block re-arm (`onBlockSprintReset`) for block-hitting, since a modern item-use
-  never drops the client flag. The latch (`clearedAt`) closes on any client
-  START/STOP, the block re-arm, or an applied adopt, and only adopt-TRUE is
-  blocked (a genuine external un-sprint, adopt-FALSE, is never blocked).
-  PLAYER_INPUT on 1.21.2+ DOES carry a sprint bit (0x40, raw `keySprint.isDown()`
-  intent — false for double-tap sprinters, true for stationary ctrl-holders; the
-  server ignores it) — a re-arm corroborator for the two SWORD_BLOCKING block-hit
-  gates only, never a verdict source (empirical 1.21.11 extraction,
-  `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`). This is
-  the measured era server contract: real 1.8.9 consumed the flag inside every
-  bonus attack and re-armed only on a client START — a no-w-tap double flew 7.2
-  blocks where a w-tap double flew 11.4; the 2.5.0 auto re-arm collapsed that
+  a wire STOP→START cycle (w-tap / s-tap / GUI open), or the block-hit re-arm
+  (`onBlockSprintReset`, the ALWAYS-ON `BlockResetTap` since 2.6.0 — shields on
+  defaults, SWORD_BLOCKING contributes its decorated-sword test while enabled),
+  since a modern item-use never drops the client flag. The block re-arm is
+  EXACTLY a START-shaped gesture — ONE hit per reset (2.6.0, the owner's
+  directive; the 2.5.1 sticky held-chain is retired), and an unspent re-arm
+  survives the block release (era-exact: the era client re-armed on release).
+  The latch (`clearedAt`) closes on any client START/STOP, the block re-arm, an
+  applied adopt, or the published flag's FALLING edge (`SERVER_FALL`, 2.6.0 —
+  a client STOP provably reached vanilla even if the tap missed it; closes,
+  never arms); only adopt-TRUE is blocked (a genuine external un-sprint,
+  adopt-FALSE, is never blocked). PLAYER_INPUT on 1.21.2+ DOES carry a sprint
+  bit (0x40, raw `keySprint.isDown()` intent — false for double-tap sprinters,
+  true for stationary ctrl-holders; the server ignores it) — the block door's
+  entry-gate corroborator only, never a verdict source (empirical 1.21.11
+  extraction, `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`).
+  This is the measured era server contract: real 1.8.9 consumed the flag inside
+  every bonus attack and re-armed only on a client START — a no-w-tap double flew
+  7.2 blocks where a w-tap double flew 11.4; the 2.5.0 auto re-arm collapsed that
   separation (no-w-tap and w-tap doubles both flew 10.09, its bug signature).
-  Never re-add the deferred `setSprinting(false)`.
+  Same-tick era order (2026-07-11, bytecode-pinned 1.8.9 + 1.21.11, observed
+  live): a same-tick w-tap+click crosses ATTACK before START — that hit ships
+  PLAIN (`note=start-trailed` in the journal) and the START arms the NEXT one;
+  pure arrival order, never reorder. Never re-add the deferred
+  `setSprinting(false)`.
 - **Attack-time sprint truth**: a faithful client sends STOP_SPRINTING in
   the same flush as its attack; vanilla read the flag INSIDE
   `Player.attack`, ahead of that packet, while the owning-thread damage
@@ -272,32 +283,35 @@ it did server-side must be re-implemented or it silently vanishes:
   `HitContext`; the authoritative pass consumes that stamp (was
   `takeAttackVerdict`) instead of a live read. Without the stamp,
   invuln-boundary (perfect-timing) sprint hits ship plain.
-- **The wire sprint view (wtap-registration, default on)**: the era queue
-  applied STOP/START/ATTACK in arrival order — a w-tap registered however
-  fast the tap. The tick-frozen `PlayerView` is up to a tick OLDER than that
-  contract, so registration reads the `SprintWire`'s arrival-order view first
-  (was `SprintTracker.peekWire`): the attacker's entity-action packets replayed
-  at arrival (fed by the parse rim into `GroundFsm`, was `GroundPacketTap`,
-  same-thread program order with their ATTACK), freshness armed on START
-  arrival, vanilla's in-attack clear mirrored onto the wire (`onServerClear`,
-  was `clearWireSprint`), and an owning-thread per-tick session reconcile (was
-  `reconcileWire`) that seeds and re-adopts server-granted `setSprinting` after
-  ≥3 ticks of wire silence (TickStamp compare — replaced the old 150 ms
-  constant), EXCEPT adopt-TRUE is latch-guarded (2.5.1): while a hit-consume is
-  outstanding (`clearedAt` known — a bonus hit spent the engagement and no client
-  gesture followed) the reconcile does NOT re-adopt the stale-high server flag,
-  because a held-W modern client's flag stays true forever and re-adopting it
-  would resurrect the spent engagement — one engagement, one sprint knock. The
-  latch closes on any client START/STOP, the block re-arm, or an applied adopt;
-  adopt-FALSE (a genuine external un-sprint) is never blocked. The deferred
-  server-flag `setSprinting(false)` that used to run beside the wire clear is GONE
-  (its modern-client echo latched sprint off), so the wire clear alone consumes
-  the engagement. A null wire view (feature off, synthetic players) =
-  published-view fallback, byte-identical to pre-1.7.0 — and it has NO engagement
-  semantics: with no wire there is no latch, so every held hit carries the bonus
-  there, deliberate for packetless synthetics. Bukkit toggle events must NEVER
-  write the wire view — they fire at packet application, so a boundary-applied
-  STOP would overwrite a newer wire START (in D1 they don't exist at all).
+- **The InputLedger (wtap-registration, default on — 2.6.0 subsumed
+  `SprintWire`)**: the era queue applied STOP/START/ATTACK in arrival order — a
+  w-tap registered however fast the tap. The tick-frozen `PlayerView` is up to
+  a tick OLDER than that contract, so registration reads the connection
+  `InputLedger`'s arrival-order verdict (`verdictAt`, ringing an ATTACK event
+  beside the peek): the attacker's entity-action packets fed by the parse rim
+  DIRECTLY into the ledger (same-thread program order with their ATTACK; the
+  movement packets feed `GroundFsm` separately), freshness armed on START
+  arrival, vanilla's in-attack clear mirrored as the seq-guarded consume
+  (`onServerClear(long)` — a gesture newer than the verdict peek survives it),
+  and a reconcile that runs ON THE NETTY THREAD, once per movement packet (NOT
+  an owning-thread per-tick task — a pre-2.6.0 doc drift), seeding and
+  re-adopting server-granted `setSprinting` after ≥3 quiet ticks, adopt-TRUE
+  latch-guarded (2.5.1) and the falling edge closing the latch (`SERVER_FALL`,
+  2.6.0). The `seq`/`eventSeq` PARTITION is load-bearing: `seq` counts RESET
+  GESTURES only (START/STOP/block re-arm/seed/adopt — the consume-guard
+  currency), while observations (KEY_INPUT snapshots, RELEASE_USE_ITEM,
+  WINDOW_CLOSE, ATTACK) ring `eventSeq` only — folding them re-creates the
+  2.5.1 consume-veto bug (any strafe edge vetoing the spend). Every applied
+  write records into a bounded diagnostic ring: the journal's
+  `resetseq=`/`trail=`/`note=` tokens (`trail=STOP-2,START+0` self-explains a
+  verdict; `note=starved` = a consume on a ledger that never saw a START, the
+  dead-feed alarm) — ask for one JOURNAL line before diagnosing any sprint
+  report. The deferred server-flag `setSprinting(false)` stays GONE. A null
+  ledger (feature off, synthetic players) = published-view fallback,
+  byte-identical to pre-1.7.0 — NO engagement semantics, deliberate for
+  packetless synthetics. Bukkit toggle events must NEVER write the ledger —
+  they fire at packet application, so a boundary-applied STOP would overwrite
+  a newer wire START (in D1 they don't exist at all).
 - Deliberate omissions stay deliberate: sweep, durability, statistics,
   hunger (1.7.10 target feel).
 
