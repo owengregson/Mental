@@ -12,22 +12,26 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSo
 import me.vexmc.mental.kernel.port.TickClock;
 
 /**
- * Cancels exactly the one vanilla {@code entity.player.hurt} broadcast that a
- * melee hit the {@link HitFeedbackListener} is voicing itself triggers — never
- * the hurt sound of a fall, fire, or drowning. Copies {@link
+ * Cancels the vanilla {@code entity.player.hurt} broadcast that a melee hit the
+ * {@link HitFeedbackListener} is voicing itself triggers — EVERY per-viewer
+ * packet of it (2.6.1: the broadcast is one packet per receiving client, so the
+ * old first-packet consume left every later bystander hearing raw vanilla
+ * beside the custom replacement) — and never the hurt sound of a fall, fire, or
+ * drowning outside a voiced hit's window. Copies {@link
  * me.vexmc.mental.v5.feature.cadence.AttackSoundListener}'s shape verbatim
  * ({@code PacketListenerAbstract} at NORMAL, reference-compared packet types,
  * every parse wrapped so a failure never propagates on the netty thread) but,
- * crucially, is <em>mark-scoped</em>: the packet is dropped ONLY when a
- * correlated mark {@link HurtSoundMarks} consumes.
+ * crucially, is <em>mark-scoped</em>: the packet is dropped ONLY while a
+ * correlated {@link HurtSoundMarks} mark is live.
  *
  * <p>That is the whole point of the {@link HurtSoundMarks} ring. A blanket cancel
  * of {@code entity.player.hurt} would also eat the sounds of environmental damage;
  * instead the listener arms a mark keyed to the victim (by entity id for the
  * entity-attached {@code ENTITY_SOUND_EFFECT}, by world position for the positional
  * {@code SOUND_EFFECT}) the instant before the server broadcasts, and only a hurt
- * sound that finds and consumes such a mark is suppressed. An environmental hurt
- * sound carries no mark, consumes nothing, and passes through.</p>
+ * sound matching such a live mark is suppressed. An environmental hurt sound
+ * outside a mark's window matches nothing and passes through (the in-window
+ * collateral trade is documented on the ring).</p>
  */
 public final class HurtSoundSuppressor extends PacketListenerAbstract {
 
@@ -50,7 +54,7 @@ public final class HurtSoundSuppressor extends PacketListenerAbstract {
             try {
                 WrapperPlayServerEntitySoundEffect wrapper = new WrapperPlayServerEntitySoundEffect(event);
                 if (isPlayerHurt(wrapper.getSound())
-                        && marks.consume(wrapper.getEntityId(), clock.current().value())) {
+                        && marks.suppresses(wrapper.getEntityId(), clock.current().value())) {
                     event.setCancelled(true);
                 }
             } catch (Exception ignored) {
@@ -65,7 +69,7 @@ public final class HurtSoundSuppressor extends PacketListenerAbstract {
                 // back to real world coordinates by PE — no manual scaling here.
                 Vector3d position = wrapper.getPosition();
                 if (isPlayerHurt(wrapper.getSound()) && position != null
-                        && marks.consumeNear(position.getX(), position.getY(), position.getZ(),
+                        && marks.suppressesNear(position.getX(), position.getY(), position.getZ(),
                                 clock.current().value())) {
                     event.setCancelled(true);
                 }

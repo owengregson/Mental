@@ -87,6 +87,8 @@ public final class FeedbackCoherenceSuite {
                         context -> runImmunityCoherence(mental, tester, context)),
                 new TestCase("coherence: an in-window UPGRADE hit ships a delta event and stays fold-accurate",
                         context -> runUpgradeDelta(mental, tester, context)),
+                new TestCase("coherence: two accepted hits in one tick voice ONCE (same-tick merge)",
+                        context -> runSameTickVoiceMerge(mental, tester, context)),
                 new TestCase("heal-indicator: a setHealth heal attributes to the last attacker (HEAL_UNSENDABLE)",
                         context -> runHealAttribution(mental, tester, context)),
                 new TestCase("heal-indicator: a combined heal folds into exactly one paced decision",
@@ -454,6 +456,85 @@ public final class FeedbackCoherenceSuite {
                     + "in HealFoldTest");
         } finally {
             toggleModule(context, "damage-indicators", false);
+            setEffectsPreset(context, "signature");
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            probe.unregister();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  3c. same-tick voice merge: one chord per victim per tick (2.6.1)   */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Two ACCEPTED fresh hits staged in one tick (a plugin clearing the window
+     * and re-dealing — the shape same-tick bonus-damage plugins produce). The
+     * indicators always merged this via the merge book; the voice chorded twice
+     * (the 2.6.1 dedup gap). Pins: two accepted EDBEEs, exactly ONE voice
+     * decision, exactly ONE {@code SAME_TICK_MERGED} decision — the merge is
+     * recorded, never a silent skip. Broadcast suppression for the merged hit
+     * rides the (now broadcast-scoped) first mark and is unit-pinned in
+     * {@code HurtSoundMarksTest} — clientless fakes emit no outbound packets to
+     * assert here.
+     */
+    private static void runSameTickVoiceMerge(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        CoherenceProbe probe = CoherenceProbe.register(tester, () -> mental.clock().current().value());
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        FeedbackTrace trace = mental.feedbackTrace();
+
+        try {
+            setEffectsPreset(context, "signature");
+            toggleModule(context, "hit-feedback", true);
+            context.expect(moduleActive(mental, "hit-feedback"), "hit-feedback failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+            boolean staged = context.sync(() -> setMaxHealth(victim, 40.0));
+            if (!staged) {
+                context.skip("max-health attribute absent — cannot stage the double hit");
+                return;
+            }
+            context.syncRun(() -> victim.player().setHealth(40.0));
+
+            probe.watch(victim.uuid());
+            trace.clear();
+            probe.reset();
+
+            // Both hits in ONE sync run = one tick; the window cleared between so
+            // BOTH land fresh (a zero nd write never arms the 1.16.5–1.20.6
+            // spawn-invuln trap). Bukkit damage() carries exact amounts.
+            context.syncRun(() -> {
+                victim.player().setNoDamageTicks(0);
+                victim.player().damage(4.0, attacker.player());
+                victim.player().setNoDamageTicks(0);
+                victim.player().damage(5.0, attacker.player());
+            });
+            context.awaitUntil(() -> probe.accepted().size() >= 2, 40,
+                    () -> "both same-tick hits to fire accepted EDBEEs (accepted="
+                            + probe.accepted().size() + ")");
+            context.awaitTicks(2);
+
+            long voiced = countHitFeedbackEmits(trace);
+            long merged = countDecision(trace, "hit-feedback", "SAME_TICK_MERGED");
+            context.expect(probe.accepted().size() == 2,
+                    "exactly two accepted EDBEEs, got " + probe.accepted().size());
+            context.expect(voiced == 1,
+                    "one voice per victim per tick — got " + voiced + " voice decisions (trace="
+                            + trace.entries() + ")");
+            context.expect(merged == 1,
+                    "the merged hit must record SAME_TICK_MERGED; got " + merged
+                            + " (trace=" + trace.entries() + ")");
+        } finally {
+            toggleModule(context, "hit-feedback", false);
             setEffectsPreset(context, "signature");
             context.syncRun(() -> {
                 attacker.remove();
