@@ -270,6 +270,27 @@ through `damage(amount, attacker)` so downstream plugins see an attributed
 event. SE's dodge/immune cancel procs are untouched (§2.1's reconcile makes
 them coherent from Mental's side).
 
+### 2.4 Delta-hit era silence (folded in 2026-07-11, owner-directed)
+
+The owner's "hit sound/effect plays double on crits / in the air" report,
+root-caused and adversarially verified during the round: a stronger hit
+inside the victim's half-open invulnerability window takes vanilla's UPGRADE
+branch, which fires the Bukkit event with the DELTA but zeroes the fresh-hit
+flag gating every client effect — no hurt sound, no flinch, no knockback
+(era-exact per the compendium). With `simulate-crits` on (default), a falling
+attacker's 1.5× regularly converts silenced window hits into voiced delta
+events — the double. Fix: `HitFeedbackListener` goes ERA-SILENT (no sounds,
+no particles, no suppressor mark — vanilla broadcasts nothing to suppress) on
+delta hits, recording an `ERA_SILENT_DELTA` trace decision; the delta damage
+INDICATOR deliberately stays (a display choice — the number is information).
+The predicate — `noDamageTicks > max/2` during the event — mirrors the
+server's own branch selector and is bytecode-verified band-by-band
+(1.9.4/1.12.2/1.17.1/1.21.11): the fresh branch re-arms the window only AFTER
+its event returns on every band, so no version gate. Two verified-latent
+issues deliberately NOT in scope (filed): the one-mark-vs-per-viewer-packet
+suppression gap (≥2 bystanders hear vanilla's hurt beside the custom sound)
+and the missing same-tick voice dedup (indicators merge, sounds don't).
+
 ## 3. Heal indicator threshold
 
 `HealFold.poll`: `MIN_SHIP_HEALTH = 2.0` health points (1 heart); the
