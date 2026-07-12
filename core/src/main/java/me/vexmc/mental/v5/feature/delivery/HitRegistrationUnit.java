@@ -14,6 +14,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import me.vexmc.mental.api.event.AsyncHitRegisterEvent;
+import me.vexmc.mental.platform.SpawnInvulnerability;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -926,6 +927,12 @@ public final class HitRegistrationUnit implements FeatureUnit {
             if (adoptBoundary(committedKnock(tx.state()), victim.getNoDamageTicks(),
                     victim.getMaximumNoDamageTicks(), amount, victim.getLastDamage())) {
                 victim.setNoDamageTicks(victim.getMaximumNoDamageTicks() / 2);
+                // On 1.16.5–1.20.6 the Bukkit setter ALSO arms the player's
+                // respawn-invulnerability timer, whose ServerPlayer gate then
+                // silently voids the very damage() below — the adopted hit dealt
+                // NOTHING on those six bands (2026-07-11 archaeology; spec §2.4's
+                // dig). Disarm the companion; a no-op everywhere else.
+                SpawnInvulnerability.disarm(victim, victim.getMaximumNoDamageTicks() / 2);
                 tx.presend(boundaryAdopted(tx.presend())); // F9 journal discriminator
             } else if (foreignWindowReject(committedKnock(tx.state()), victim.getNoDamageTicks(),
                     victim.getMaximumNoDamageTicks(), amount, victim.getLastDamage())) {
