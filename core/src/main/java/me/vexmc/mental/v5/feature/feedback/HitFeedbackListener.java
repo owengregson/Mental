@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Logger;
 import me.vexmc.mental.kernel.port.TickClock;
@@ -61,11 +62,11 @@ import org.bukkit.event.entity.EntityDamageEvent;
  *
  * <h2>Why the mark</h2>
  * Before it plays anything, the listener ARMS a {@link HurtSoundMarks} mark keyed
- * to this victim. The suppressor consumes exactly that mark to cancel the single
- * vanilla {@code entity.player.hurt} broadcast this same hit triggers — so the
- * replacement stands alone, while a fall/fire hurt sound (no mark) still plays.
- * Suppression is mark-scoped, not a blanket cancel, precisely so environmental
- * hurt sounds survive.
+ * to this victim. The suppressor matches that mark to cancel the vanilla
+ * {@code entity.player.hurt} broadcast this same hit triggers — every per-viewer
+ * packet of it (2.6.1) — so the replacement stands alone, while a fall/fire hurt
+ * sound outside a mark's window still plays. Suppression is mark-scoped, not a
+ * blanket cancel, precisely so environmental hurt sounds survive.
  *
  * <p>Sounds and particles are resolved to PacketEvents values ONCE at construction
  * (assemble time), against the era-correct {@link FeedbackSoundTable}; a name with
@@ -82,6 +83,10 @@ public final class HitFeedbackListener implements Listener {
     private static final float VANILLA_JITTER = 0.2f;
 
     private final HurtSoundMarks marks;
+    /** Per-victim last-voiced tick — the same-tick voice dedup (2.6.1). Region threads
+     *  may differ per victim on Folia, hence concurrent; pruned opportunistically. */
+    private final ConcurrentHashMap<UUID, Long> lastVoiceTick = new ConcurrentHashMap<>();
+
     private final TickClock clock;
     private final FeedbackTrace trace;
     private final PlayerManager playerManager;
@@ -178,6 +183,27 @@ public final class HitFeedbackListener implements Listener {
 
         Location loc = victim.getLocation();
         long now = clock.current().value();
+
+        // One voice per victim per tick (2.6.1 — the same-tick dedup the
+        // indicators always had via the merge book, which sounds lacked): a
+        // second accepted ENTITY_ATTACK EDBEE landing on this victim in the same
+        // tick (a plugin clearing the window and re-dealing, same-tick bonus
+        // instances) merges into the first hit's voice instead of chording
+        // twice. Coherence holds without a second mark: the first hit's mark is
+        // broadcast-scoped now, so it eats the merged hit's vanilla broadcast
+        // too, and the indicator half is the merge book's. Recorded, never a
+        // silent skip. Opportunistic prune keeps the map bounded.
+        Long previousVoice = lastVoiceTick.put(victim.getUniqueId(), now);
+        if (previousVoice != null && previousVoice.longValue() == now) {
+            trace.record(new FeedbackTrace.Entry(
+                    "hit-feedback", attacker.getUniqueId(), victim.getUniqueId(),
+                    "SAME_TICK_MERGED", "second accepted hit this tick — one voice per victim per tick"));
+            return;
+        }
+        if (lastVoiceTick.size() > 512) {
+            lastVoiceTick.values().removeIf(tick -> now - tick > 40);
+        }
+
         // 1. Arm the suppressor for THIS hit — the vanilla broadcast that follows is now eaten.
         marks.mark(victim.getEntityId(), loc.getX(), loc.getY(), loc.getZ(), now);
 
