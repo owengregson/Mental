@@ -534,6 +534,7 @@ public final class Migrations {
         yaml.set("damage-indicators.text", indicators.text());
         yaml.set("damage-indicators.crit-text", indicators.critText());
         yaml.set("damage-indicators.crit-threshold-hearts", indicators.critThresholdHearts());
+        yaml.set("damage-indicators.roll-hold-ticks", indicators.rollHoldTicks());
         yaml.set("death-effects.lightning", death.lightning());
         yaml.set("death-effects.firework.colors", hexColors(death.fireworkColors()));
         yaml.set("death-effects.sounds", soundMaps(death.sounds()));

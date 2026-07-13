@@ -6,15 +6,22 @@ package me.vexmc.mental.v5.config.settings;
  * a front-half ring and falls under {@code IndicatorBallistics}; it despawns
  * the instant it reaches the spawn-time ground plane or at
  * {@code lifetimeTicks}. Text templates carry the {@code {HEALTH}} placeholder
- * (final damage in HEARTS, one decimal, trailing .0 stripped); the crit
- * variant fires on an era-crit posture OR damage at/above
- * {@code critThresholdHearts} (HEARTS — 2 damage = 1 heart).
+ * (final damage in DAMAGE POINTS / HP — the raw amount the bar loses, one
+ * decimal, trailing .0 stripped); the crit variant fires on an era-crit posture
+ * OR damage at/above {@code critThresholdHearts} (still a HEARTS threshold —
+ * 2 damage = 1 heart — a threshold, not display).
  *
+ * @param rollHoldTicks how many server ticks a fresh hit's marker is HELD before
+ *        shipping, so vanilla's mid-window UPGRADE deltas fold into the one
+ *        rolled marker instead of ghosting their own stand. {@code 0} ships the
+ *        marker the same tick (upgrades then bump the live stand in place);
+ *        clamped to {@code [MIN_ROLL_HOLD, MAX_ROLL_HOLD]}. The DEFAULTS value 3
+ *        is a cosmetic smoothing choice — it changes no game state.
  * @param healText the HEALING-indicator template shown to the last player who
  *        hit the healed player (any heal source), {@code {HEALTH}} = the healed
- *        amount in HEARTS. EMPTY (the DEFAULTS) disables healing indicators
- *        entirely — the era-exact no-op: with no template, no heal sampler is
- *        installed and nothing observes or renders heals.
+ *        amount in DAMAGE POINTS. EMPTY (the DEFAULTS) disables healing
+ *        indicators entirely — the era-exact no-op: with no template, no heal
+ *        stand is ever drawn.
  */
 public record DamageIndicatorsSettings(
         int lifetimeTicks,
@@ -27,6 +34,7 @@ public record DamageIndicatorsSettings(
         String text,
         String critText,
         double critThresholdHearts,
+        int rollHoldTicks,
         String healText) {
 
     public static final int MIN_LIFETIME = 1;
@@ -37,11 +45,14 @@ public record DamageIndicatorsSettings(
     public static final double MAX_GRAVITY = 0.5;
     public static final double MIN_DRAG = 0.5;
     public static final double MAX_DRAG = 1.0;
+    public static final int MIN_ROLL_HOLD = 0;
+    public static final int MAX_ROLL_HOLD = 10;
 
     public static final DamageIndicatorsSettings DEFAULTS = new DamageIndicatorsSettings(
             40, 0.6, 0.3, 0.25, 0.06, 0.05, 0.98,
             "&f-{HEALTH} &c❤&r",
             "&c&l** -{HEALTH} ❤ **",
             5.0,
+            3,
             "");
 }

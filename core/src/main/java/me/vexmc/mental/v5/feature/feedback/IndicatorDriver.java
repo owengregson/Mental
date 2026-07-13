@@ -53,7 +53,6 @@ final class IndicatorDriver {
     private final Player attacker;
     private final User user;
     private final IndicatorBallistics.Params params;
-    private final IndicatorMergeBook merges = new IndicatorMergeBook();
 
     private final List<Live> live = new ArrayList<>(); // guarded by this
     private TaskHandle task; // guarded by this
@@ -64,14 +63,6 @@ final class IndicatorDriver {
         this.attacker = attacker;
         this.user = user;
         this.params = params;
-    }
-
-    /**
-     * This attacker's same-tick aggregation slot — it lives and dies with the
-     * driver, so forget/close bound its memory exactly as they bound the stands.
-     */
-    IndicatorMergeBook merges() {
-        return merges;
     }
 
     /** Adopts one just-spawned indicator and lazily arms the 1-tick drive task. */

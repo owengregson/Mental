@@ -35,9 +35,12 @@ public final class SupersededEffectsPresets {
     private static final Map<String, Set<String>> ARCHIVED_HASHES = Map.of(
             // The 2.5.3/2.5.4 signature.yml, superseded by the 2.5.5 rewrite
             // (the low-health-threshold-hearts → -percent key and the new
-            // damage-indicators heal-text key).
+            // damage-indicators heal-text key); and the 2.5.5→2.6.1 revision,
+            // superseded by the 2026-07-12 window/HP-units rewrite ({HEALTH} in
+            // damage points, the roll-hold-ticks knob and its window prose).
             "signature", Set.of(
-                    "6781856643e401f3e1ff9f7901a8138f998367ccb369641d11399df6889f3af1"));
+                    "6781856643e401f3e1ff9f7901a8138f998367ccb369641d11399df6889f3af1",
+                    "40a57e598f9d0d397d6314e76ba351bd9ff163ae90cf23b30c7e9ebaf1cdd7ad"));
 
     private SupersededEffectsPresets() {}
 

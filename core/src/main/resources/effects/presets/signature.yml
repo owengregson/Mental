@@ -93,19 +93,32 @@ hit-feedback:
 # chest and falls under a light ballistic model, despawning the instant it
 # reaches its spawn ground plane or at lifetime-ticks, whichever comes first.
 #
+# ONE number per hit WINDOW, showing the final ROLLED amount. A fresh hit's
+# marker is held for roll-hold-ticks (below) before it shows; a stronger hit
+# landing inside the victim's brief invulnerability window (vanilla deals only
+# the DIFFERENCE there, silently) FOLDS into that one marker — its amount is
+# added in and the marker updates — instead of popping a second "-0.3 ❤" ghost.
+#
 #   text / crit-text  the label templates. {HEALTH} is the final damage in
-#                     HEARTS (one decimal, a trailing .0 stripped); '&' colour
-#                     codes are translated. The crit variant is used on an
-#                     era-crit posture OR damage at/above crit-threshold-hearts
-#                     (also in HEARTS).
+#                     DAMAGE POINTS — the raw amount the health bar loses, NOT
+#                     halved into hearts, so a bare-fist hit reads 1 (not 0.5);
+#                     one decimal, a trailing .0 stripped, '&' colour codes
+#                     translated. The crit variant is used on an era-crit posture
+#                     OR damage at/above crit-threshold-hearts (that THRESHOLD is
+#                     still in HEARTS — 2 damage = 1 heart).
 #   heal-text         the HEALING-indicator template, shown to the LAST player
 #                     who hit the healed player within the last 10s (any heal
 #                     source — pots, regen, golden apples, and even a plugin's
-#                     own setHealth). {HEALTH} is the healed amount in HEARTS.
-#                     Heals are aggregated to at most one stand per 10 ticks,
-#                     so a regen drip does not spam stands. An EMPTY string
+#                     own setHealth). {HEALTH} is the healed amount in DAMAGE
+#                     POINTS. Heals are aggregated to at most one stand per 10
+#                     ticks, so a regen drip does not spam stands. An EMPTY string
 #                     disables healing indicators entirely (no stand, and no
 #                     heal is even sampled) — the era-exact no-op.
+#   roll-hold-ticks   how many server ticks a fresh hit's marker is held before
+#                     it shows, so mid-window upgrade differences fold into the
+#                     one rolled number rather than spawning their own stand.
+#                     0 shows the marker the same tick (upgrades then update the
+#                     live stand in place). Clamped to [0, 10]; purely cosmetic.
 #   lifetime-ticks    hard despawn age in ticks. Clamped to [1, 200].
 #   ring-radius       how far off the chest, in blocks, the number spawns on
 #                     the front-half ring. Clamped to [0, 4].
@@ -127,6 +140,7 @@ damage-indicators:
   text: "&f-{HEALTH} &c❤&r"
   crit-text: "&c&l** -{HEALTH} ❤ **"
   crit-threshold-hearts: 5.0
+  roll-hold-ticks: 3
   heal-text: "&a+{HEALTH} &c❤&r"
 
 # ── death-effects ───────────────────────────────────────────────────────────

@@ -301,8 +301,10 @@ public final class FeedbackSuite {
     /**
      * A fake attacker has no PacketEvents user, so the indicator cannot be
      * drawn on anything — the listener must journal {@code UNSENDABLE} instead
-     * of spawning an undrawable stand or throwing. That decision IS the pass:
-     * the sendable path's spawn/metadata encode is unit-pinned
+     * of spawning an undrawable stand or throwing. Under the window model
+     * (2026-07-12) that decision arrives at SHIP time, one roll hold after the
+     * hit's own {@code WINDOW_HELD}: the pair, in that order, IS the pass; the
+     * sendable path's spawn/metadata encode is unit-pinned
      * (IndicatorStandPacketsTest), out of a clientless suite's reach.
      */
     private static void runIndicatorsUnsendable(
@@ -333,13 +335,27 @@ public final class FeedbackSuite {
             context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40,
                     "the staged hit to land with damage-indicators enabled");
 
+            // The marker is HELD for roll-hold-ticks before its one ship attempt
+            // (the 2026-07-12 window model), so the UNSENDABLE decision TRAILS the
+            // hit's own WINDOW_HELD — wait for the ship, then pin the exact pair.
+            context.awaitUntil(
+                    () -> entriesFor(trace, "damage-indicators").stream()
+                            .anyMatch(entry -> "UNSENDABLE".equals(entry.decision())), 40,
+                    () -> "the held window to ship (journaling UNSENDABLE) past its roll hold (trace="
+                            + trace.entries() + ")");
+
             List<FeedbackTrace.Entry> entries = entriesFor(trace, "damage-indicators");
-            context.expect(entries.size() == 1,
-                    "expected exactly one damage-indicators decision for one landed hit, got "
-                            + entries.size() + " (trace=" + trace.entries() + ")");
-            context.expect("UNSENDABLE".equals(entries.get(0).decision()),
-                    "a clientless attacker (no PacketEvents user) must decide UNSENDABLE, got '"
+            context.expect(entries.size() == 2,
+                    "expected exactly two damage-indicators decisions for one landed hit — the held "
+                            + "window and its one ship attempt — got " + entries.size()
+                            + " (trace=" + trace.entries() + ")");
+            context.expect("WINDOW_HELD".equals(entries.get(0).decision()),
+                    "the landed hit must OPEN and HOLD its window first, got '"
                             + entries.get(0).decision() + "' (" + entries.get(0).detail() + ")");
+            context.expect("UNSENDABLE".equals(entries.get(1).decision()),
+                    "a clientless attacker (no PacketEvents user) must decide UNSENDABLE at ship "
+                            + "time, got '" + entries.get(1).decision() + "' ("
+                            + entries.get(1).detail() + ")");
         } finally {
             toggleModule(context, "damage-indicators", false);
             context.expect(!moduleActive(mental, "damage-indicators"),

@@ -55,6 +55,12 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
     /** The CURRENT assembly's per-attacker drivers; empty whenever the feature is off. */
     private volatile ConcurrentHashMap<UUID, IndicatorDriver> drivers;
 
+    /** The CURRENT assembly's per-victim damage-window book; null whenever the feature is off. */
+    private volatile IndicatorWindowBook windows;
+
+    /** The CURRENT assembly's coordinator (window flush / death / forget seams); null when off. */
+    private volatile DamageIndicatorsListener listener;
+
     /** The CURRENT assembly's heal consumer, or null when off / heal-text blank (mirrors {@link #drivers}). */
     private volatile HealIndicators heal;
 
@@ -90,57 +96,80 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
 
         ConcurrentHashMap<UUID, IndicatorDriver> map = new ConcurrentHashMap<>();
         this.drivers = map;
+        IndicatorWindowBook book = new IndicatorWindowBook();
+        this.windows = book;
 
         // The healing indicator is built ONLY when a heal-text template is set — a
-        // blank template (the DEFAULTS) installs no sampler at all, so heal detection
-        // and its per-victim maps never come into existence (the era-exact no-op).
+        // blank template (the DEFAULTS) installs no heal maps at all, so heal detection
+        // never comes into existence (the era-exact no-op for the HEAL path).
         HealIndicators healIndicators = null;
         if (settings.healText() != null && !settings.healText().isBlank()) {
             IndicatorBallistics.Params params = new IndicatorBallistics.Params(
                     settings.launchVertical(), settings.launchOutward(), settings.gravity(), settings.drag());
             healIndicators = new HealIndicators(
                     map, settings, scheduling, params, trace, logger, modernSpawn, bundleSupported);
-            sessions.setHealSampler(healIndicators);
         }
         this.heal = healIndicators;
-        HealIndicators installed = healIndicators; // effectively final for the teardown lambda
+        HealIndicators installedHeal = healIndicators; // effectively final for the sampler / teardown lambdas
 
-        scope.listen(new DamageIndicatorsListener(
-                settings, map, scheduling, clock, modernSpawn, bundleSupported, trace, logger, healIndicators));
-        if (healIndicators != null) {
-            scope.listen(new HealDeathBoundary(healIndicators));
-        }
-        scope.task(() -> (AutoCloseable) () -> {
-            // Scope close clears the heal sampler (restoring zero-touch), then tears
-            // every stand down and cancels every drive task.
-            if (installed != null) {
-                sessions.clearHealSampler();
+        DamageIndicatorsListener coordinator = new DamageIndicatorsListener(
+                settings, map, book, scheduling, clock, modernSpawn, bundleSupported, trace, logger, healIndicators);
+        this.listener = coordinator;
+        scope.listen(coordinator);
+
+        // ONE per-victim tick, installed whenever the feature is ON: it flushes the
+        // roll-held damage windows ALWAYS (the marker's hold needs a per-victim pulse)
+        // and, when heal indicators are configured, runs the heal delta detection on
+        // top. It rides the SAME session-tick seam and victim region thread as the hits
+        // and deaths, so every window mutation stays single-writer per victim. Zero-touch
+        // holds: scope close clears it, and a module-off server installs none.
+        sessions.setHealSampler((victimId, previousHealth, currentHealth, now) -> {
+            coordinator.flush(victimId, now.value());
+            if (installedHeal != null) {
+                installedHeal.sample(victimId, previousHealth, currentHealth, now);
             }
+        });
+
+        scope.listen(new HealDeathBoundary(coordinator, healIndicators));
+        scope.task(() -> (AutoCloseable) () -> {
+            // Scope close clears the sampler (restoring zero-touch), drops every pending
+            // window, then tears every stand down and cancels every drive task.
+            sessions.clearHealSampler();
             this.heal = null;
+            this.listener = null;
+            book.close();
             map.values().forEach(IndicatorDriver::close);
             map.clear();
         });
     }
 
     /**
-     * The heal consumer's death boundary ({@link HealIndicators#onDeath}): the
-     * in-band respawn guard only fires when a session tick OBSERVES the corpse,
-     * but instant/1-tick auto-respawn (the practice-server norm) completes
-     * between samples — the next sample would read pre-death health → full
-     * respawn health as a giant heal and draw a phantom indicator on the
-     * KILLER's client. Scope-owned, so a disabled module listens to nothing.
+     * The damage-indicators death boundary. It flushes the victim's still-held
+     * damage window immediately ({@link DamageIndicatorsListener#deathFlush}) so the
+     * killing marker shows before an instant respawn, and — when heal indicators are
+     * on — clears the heal fold/attribution ({@link HealIndicators#onDeath}): the
+     * in-band respawn guard only fires when a session tick OBSERVES the corpse, but
+     * instant/1-tick auto-respawn (the practice-server norm) completes between
+     * samples, and the next sample would read pre-death → full respawn health as a
+     * giant heal and draw a phantom indicator on the KILLER's client. Scope-owned, so
+     * a disabled module listens to nothing.
      */
-    private record HealDeathBoundary(HealIndicators heal) implements Listener {
+    private record HealDeathBoundary(DamageIndicatorsListener listener, HealIndicators heal) implements Listener {
         @EventHandler(priority = EventPriority.MONITOR)
         public void onDeath(PlayerDeathEvent event) {
-            heal.onDeath(event.getEntity().getUniqueId());
+            UUID victim = event.getEntity().getUniqueId();
+            listener.deathFlush(victim);
+            if (heal != null) {
+                heal.onDeath(victim);
+            }
         }
     }
 
     /**
      * Session forget (quit): closes that attacker's driver — stands destroyed, task
-     * cancelled — and drops the player from the heal consumer's attribution/fold maps
-     * (both as a heal victim and as any victim's stamped attacker).
+     * cancelled — drops the player's pending damage window, and drops the player from
+     * the heal consumer's attribution/fold maps (both as a heal victim and as any
+     * victim's stamped attacker).
      */
     public void forget(UUID player) {
         ConcurrentHashMap<UUID, IndicatorDriver> map = drivers;
@@ -149,6 +178,10 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
             if (driver != null) {
                 driver.close();
             }
+        }
+        IndicatorWindowBook book = windows;
+        if (book != null) {
+            book.forget(player);
         }
         HealIndicators healIndicators = heal;
         if (healIndicators != null) {

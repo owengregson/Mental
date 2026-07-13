@@ -21,6 +21,7 @@ import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -31,39 +32,45 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 
 /**
- * Spawns one damage indicator per landed melee at EDBEE MONITOR — the same
- * once-per-hit seam as {@link HitFeedbackListener}, on the victim's region
- * thread. Unlike the rest of the FEEDBACK family this plays to ONE user: the
- * indicator is an attacker-client-only packet armor stand — no other client
- * ever receives a byte of it, and no server entity exists behind it.
+ * The {@code damage-indicators} coordinator: one indicator per victim damage
+ * WINDOW, carrying the final rolled amount, drawn ONLY on the attacker's client
+ * (a client-only packet armor stand — no other client ever receives a byte of
+ * it, and no server entity exists behind it). The EDBEE fires at MONITOR on the
+ * victim's region thread; the driver ticks each stand on the attacker's region.
+ *
+ * <h2>The window model (2026-07-12)</h2>
+ * A FRESH melee hit opens a window through the {@link IndicatorWindowBook} and
+ * HOLDS its marker for {@code roll-hold-ticks} ticks. Vanilla's mid-window
+ * UPGRADE deltas (a stronger hit inside the victim's half-open invulnerability
+ * window — {@link UpgradeWindow}) FOLD into that one held marker (sum the
+ * displayed amounts, OR the crit) instead of ghosting their own crit-styled
+ * stand — the owner's "-0.3 ❤" double-report. If the marker already shipped, a
+ * delta BUMPS the live stand in place (the 2.5.3 replace-in-place path, reused —
+ * no new packet surface). The held marker ships once its hold elapses (the roll
+ * flush on the victim's session tick), or immediately on the victim's death.
  *
  * <h2>Frozen ground truth</h2>
- * The landing plane is scanned HERE, at spawn time — the one moment block reads
- * are region-legal — from the spawn column downward (≤{@value #GROUND_SCAN_DEPTH}
- * blocks, first solid top wins; a shaft with no floor freezes a
- * {@value #GROUND_SCAN_DEPTH}-block fallback). The driver's per-tick step then
- * performs ZERO world reads: the indicator falls under pure kernel ballistics
- * against that frozen plane.
+ * The landing plane is scanned HERE, at the fresh EDBEE — the one moment block
+ * reads are region-legal — from the spawn column downward (≤{@value
+ * #GROUND_SCAN_DEPTH} blocks, first solid top wins). The driver's per-tick step
+ * then performs ZERO world reads: the indicator falls under pure kernel
+ * ballistics against that frozen plane. A held window carries that frozen
+ * geometry to its (later, same-region) ship, so shipping never re-reads the
+ * world either.
  *
- * <h2>Variant</h2>
- * The crit template fires on the era crit posture ({@link DamageShaper}'s
- * falling-attacker read) OR on damage at/above the configured heart threshold —
- * a big hit reads as a crit even when the posture missed it.
+ * <h2>Units</h2>
+ * {@code {HEALTH}} renders in DAMAGE POINTS ({@link IndicatorText}); a bare-fist
+ * hit reads {@code 1}, not {@code 0.5}. The crit-threshold knob keeps its HEARTS
+ * semantics — it is a threshold, not display.
  *
- * <h2>Same-tick aggregation (the plugin-bonus fold)</h2>
- * Enchantment plugins deal their bonus as a SECOND {@code victim.damage(bonus,
- * attacker)} inside the first hit's aftermath — a second EDBEE for the same
- * (attacker, victim) pair in the same tick, a multiplicity vanilla's
- * no-damage-ticks never produce on their own. Each such event is folded into
- * the tick's remembered spawn through the attacker's {@link IndicatorMergeBook}:
- * the just-spawned stand is destroyed and a replacement carrying the SUMMED
- * damage ships in the same bundle, at the same ring position and ballistic
- * phase, against the same frozen ground plane (zero fresh world reads). The
- * fold accepts the two common shapes — a second {@code ENTITY_ATTACK} (the
- * {@code damage(amount, attacker)} API) and a {@code CUSTOM} carrying a Player
- * damager (the modern {@code DamageSource} API) — but a {@code CUSTOM} event
- * with no same-pair-same-tick spawn to fold into is ignored outright, so
- * plugin-authored ambient damage never invents a phantom indicator.
+ * <h2>Same-tick / plugin-bonus fold</h2>
+ * An enchantment plugin's bonus (a second {@code victim.damage(bonus, attacker)}
+ * in the hit's aftermath) lands with the window already open — a same-tick fresh
+ * fold, or (with {@code noDamageTicks} re-armed) a delta fold — so it sums into
+ * the one window exactly as the 2.5.3 merge book did. A standalone CUSTOM hit
+ * (fresh branch, no live window) opens a window of its own, exactly as it drew
+ * its own stand before the window model; only a CUSTOM-cause DELTA with no live
+ * window is ambient plugin damage and never invents a stand.
  */
 public final class DamageIndicatorsListener implements Listener {
 
@@ -79,6 +86,7 @@ public final class DamageIndicatorsListener implements Listener {
 
     private final DamageIndicatorsSettings settings;
     private final ConcurrentHashMap<UUID, IndicatorDriver> drivers;
+    private final IndicatorWindowBook windows;
     private final Scheduling scheduling;
     private final TickClock clock;
     private final PlayerManager playerManager;
@@ -89,8 +97,8 @@ public final class DamageIndicatorsListener implements Listener {
      * The F4 last-hit attribution stamper, or null when heal indicators are off
      * (heal-text blank) — a null-check no-op then, so the zero-touch contract holds.
      * Stamped on every qualifying EDBEE (Player attacker+victim, {@code finalDamage
-     * > 0}), before the sendability early-returns, so a clientless attacker is still
-     * recorded as the healer.
+     * > 0}) INCLUDING delta hits (a delta is real combat; heal attribution must see
+     * it), before any window routing.
      */
     private final HealIndicators heal;
 
@@ -103,10 +111,12 @@ public final class DamageIndicatorsListener implements Listener {
 
     public DamageIndicatorsListener(
             DamageIndicatorsSettings settings, ConcurrentHashMap<UUID, IndicatorDriver> drivers,
-            Scheduling scheduling, TickClock clock, boolean modernSpawn, boolean bundleSupported,
+            IndicatorWindowBook windows, Scheduling scheduling, TickClock clock,
+            boolean modernSpawn, boolean bundleSupported,
             FeedbackTrace trace, Logger logger, HealIndicators heal) {
         this.settings = settings;
         this.drivers = drivers;
+        this.windows = windows;
         this.scheduling = scheduling;
         this.clock = clock;
         this.playerManager = PacketEvents.getAPI().getPlayerManager();
@@ -121,12 +131,9 @@ public final class DamageIndicatorsListener implements Listener {
     }
 
     /**
-     * Spawns one indicator for this hit — variant, text, ring placement, frozen
-     * ground plane, a client-only entity id, the spawn+metadata ship, and the
-     * hand-off to the attacker's driver — journaling the decision throughout.
-     * A same-pair-same-tick event (an enchantment plugin's bonus damage) folds
-     * into the tick's remembered stand through {@link #respawnMerged} instead
-     * of spawning a second one.
+     * Routes one landed melee into the window book: a fresh hit opens+holds a
+     * window, a mid-window upgrade delta folds/bumps into it, journaling the
+     * decision throughout. A delta never spawns its own stand.
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onHit(EntityDamageByEntityEvent event) {
@@ -145,79 +152,166 @@ public final class DamageIndicatorsListener implements Listener {
             return;
         }
 
+        long tick = clock.current().value();
+        UUID victimId = victim.getUniqueId();
+        UUID attackerId = attacker.getUniqueId();
+
         // Stamp the last-hit attribution for the heal-indicator path (F4) — identity
         // only, so a clientless attacker (no PE user) is still recorded as the healer.
-        // Both the melee and the plugin-bonus CUSTOM fold qualify; stamped BEFORE the
-        // sendability early-returns for exactly that reason. The reference is null when
-        // heal indicators are off (zero-touch no-op).
+        // Runs for EVERY qualifying event, deltas included (a delta is real combat).
+        // The reference is null when heal indicators are off (zero-touch no-op).
         if (heal != null) {
-            heal.recordHit(victim.getUniqueId(), attacker.getUniqueId(), clock.current().value());
+            heal.recordHit(victimId, attackerId, tick);
         }
 
-        User user = playerManager.getUser(attacker);
-        if (user == null) {
-            if (melee) {
-                // Synthetic / disconnecting attacker, in-process bot — no client to draw on.
-                trace.record(new FeedbackTrace.Entry(
-                        "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
-                        "UNSENDABLE", "attacker has no PacketEvents user"));
-            }
-            return;
-        }
-
-        // The merge target rides the attacker's driver. A melee hit creates the
-        // driver on demand (it is about to adopt a stand either way); a CUSTOM
-        // event only ever FOLDS into an existing same-tick spawn, so a missing
-        // driver means there is nothing to fold — never a phantom indicator for
-        // plugin-authored damage that isn't a melee bonus.
-        IndicatorDriver driver = melee
-                ? drivers.computeIfAbsent(
-                        attacker.getUniqueId(), id -> new IndicatorDriver(scheduling, attacker, user, params))
-                : drivers.get(attacker.getUniqueId());
-        if (driver == null) {
-            return;
-        }
-
-        long tick = clock.current().value();
-        // The crit posture is a property of the SWING, not the remaining health, so
-        // it is decided on the RAW finalDamage — a killing overkill still reads crit.
+        // The crit posture is a property of the SWING, not the remaining health, so it
+        // is decided on the RAW finalDamage — a killing overkill still reads crit.
         boolean crit = DamageShaper.isLegacyCritical(attacker) || finalDamage >= critThresholdDamage;
 
-        // Overkill clamp (F3): a killing hit only subtracts the victim's pre-hit red
-        // hearts, not the full swing. getHealth() at EDBEE MONITOR is that pre-hit pool
-        // (the event fires before the subtraction), so the RENDERED and MERGE-FOLDED
-        // amount is the health actually lost. A victim already at 0 (a same-tick death
-        // race) loses nothing visible: skip the stand entirely, but keep the decision
-        // in the trace so the seam still reports what happened.
+        // Overkill clamp (F3): getHealth() at EDBEE MONITOR is the pre-hit pool (the
+        // event fires before the subtraction), so the rolled/folded amount is the health
+        // actually lost. A victim already at 0 (a same-tick death race) loses nothing
+        // visible: record the decision but ship nothing.
         double displayed = displayedDamage(finalDamage, victim.getHealth());
         if (displayed <= 0.0) {
             trace.record(new FeedbackTrace.Entry(
-                    "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
+                    "damage-indicators", attackerId, victimId,
                     crit ? "CRIT" : "NORMAL", "dmg=" + finalDamage + " shown=0"));
             return;
         }
 
-        IndicatorMergeBook.Merged merged = driver.merges().merge(
-                victim.getUniqueId(), tick, displayed, crit, critThresholdDamage);
-        if (merged != null) {
-            respawnMerged(attacker, victim, user, driver, merged, tick, finalDamage, displayed);
-            return;
+        // A FRESH hit — either cause: a standalone CUSTOM ability hit is a hit of
+        // its own and opens a window exactly as it drew its own stand before the
+        // window model — opens/holds a window; a mid-window delta folds/bumps into
+        // the live one. The upgrade-window predicate is the ONE shared source
+        // hit-feedback's era-silence also reads.
+        if (!UpgradeWindow.isDelta(victim)) {
+            onFreshHit(victim, attacker, victimId, attackerId, tick, displayed, crit);
+        } else {
+            onDeltaHit(victim, attacker, victimId, attackerId, tick, displayed, crit, melee);
         }
-        if (!melee) {
-            return; // a CUSTOM event with no same-pair-same-tick spawn — not a hit of its own
+    }
+
+    private void onFreshHit(
+            Player victim, Player attacker, UUID victimId, UUID attackerId,
+            long tick, double displayed, boolean crit) {
+        IndicatorPlacement.Spawn spawn = place(victim, attacker);
+        double groundY = scanGround(victim.getWorld(), spawn);
+        IndicatorWindowBook.FreshResult result = windows.onFresh(
+                victimId, attackerId, tick, displayed, crit,
+                settings.rollHoldTicks(), victim.getMaximumNoDamageTicks(), spawn, groundY);
+        // A now-closed prior window drew its held stand as this fresh hit displaced it
+        // (two fresh hits inside one hold — rare; the invuln window normally outlasts
+        // the hold). It is out of the book: draw and forget it.
+        if (result.priorShip() != null) {
+            draw(result.priorShip(), result.priorShip().crit() ? "CRIT" : "NORMAL");
         }
+        switch (result.kind()) {
+            case OPEN_HELD -> trace.record(new FeedbackTrace.Entry(
+                    "damage-indicators", attackerId, victimId, "WINDOW_HELD",
+                    "hold=" + settings.rollHoldTicks() + "t dmg=" + displayed));
+            case FOLD_HELD -> trace.record(new FeedbackTrace.Entry(
+                    "damage-indicators", attackerId, victimId, "WINDOW_FOLDED",
+                    "same-tick fresh fold dmg=" + displayed));
+            case OPEN_SHIP -> windows.shipped(victimId,
+                    draw(result.action(), result.action().crit() ? "CRIT" : "NORMAL"));
+            case FOLD_BUMP -> windows.shipped(victimId, draw(result.action(), "WINDOW_BUMPED"));
+        }
+    }
 
-        String rendered = IndicatorText.render(crit ? settings.critText() : settings.text(), displayed);
-        Component name = LegacyComponentSerializer.legacyAmpersand().deserialize(rendered);
+    private void onDeltaHit(
+            Player victim, Player attacker, UUID victimId, UUID attackerId,
+            long tick, double displayed, boolean crit, boolean melee) {
+        IndicatorWindowBook.DeltaResult result = windows.onDelta(victimId, attackerId, tick, displayed, crit);
+        switch (result.kind()) {
+            case FOLD_HELD -> trace.record(new FeedbackTrace.Entry(
+                    "damage-indicators", attackerId, victimId, "WINDOW_FOLDED",
+                    "delta folded into held window dmg=" + displayed));
+            case BUMP -> windows.shipped(victimId, draw(result.action(), "WINDOW_BUMPED"));
+            case UNTRACKED -> {
+                if (!melee) {
+                    // A CUSTOM-cause DELTA with no live window is a plugin topping up an
+                    // untracked (environmental) window — ambient, never a hit of its own,
+                    // no phantom stand (standalone CUSTOM hits are fresh-branch and DO
+                    // open windows above). Recorded, never a silent skip.
+                    trace.record(new FeedbackTrace.Entry(
+                            "damage-indicators", attackerId, victimId, "WINDOW_UNTRACKED",
+                            "custom-cause delta with no live window — dropped dmg=" + displayed));
+                    return;
+                }
+                // A melee delta whose window opener never passed the cause gate
+                // (environmental — fall/fire). Ship the melee DELTA once: the honest
+                // melee contribution. getLastDamage()+delta ROLLED totals are NOT read —
+                // the pre-event lastHurt is not cross-version-reliable during the upgrade
+                // EDBEE (CraftBukkit stamps lastHurt around the event differently per
+                // band), and the environmental opener's damage is not ours to show.
+                // Remember it as a shipped window so a further delta bumps this one stand.
+                IndicatorPlacement.Spawn spawn = place(victim, attacker);
+                double groundY = scanGround(victim.getWorld(), spawn);
+                IndicatorWindowBook.Ship plan = new IndicatorWindowBook.Ship(
+                        victimId, attackerId, spawn, groundY, displayed, crit, -1);
+                int entityId = draw(plan, crit ? "CRIT" : "NORMAL");
+                windows.rememberUntracked(victimId, attackerId, tick, displayed, crit,
+                        victim.getMaximumNoDamageTicks(), spawn, groundY, entityId);
+            }
+        }
+    }
 
+    /**
+     * The roll-hold flush — invoked once per tick per victim from the session tick
+     * (the same seam the heal sampler rides), on the victim's region thread. A held
+     * window whose hold elapsed ships its one stand here, trailing the fresh hit by
+     * {@code roll-hold-ticks}.
+     */
+    public void flush(UUID victimId, long now) {
+        IndicatorWindowBook.Ship plan = windows.due(victimId, now);
+        if (plan != null) {
+            windows.shipped(victimId, draw(plan, plan.crit() ? "CRIT" : "NORMAL"));
+        }
+    }
+
+    /**
+     * The death boundary: flush a still-held window immediately with its (already
+     * overkill-clamped) killing total, so the marker shows before an instant respawn.
+     * The entry is dropped, so no {@link IndicatorWindowBook#shipped} tracking follows.
+     */
+    public void deathFlush(UUID victimId) {
+        IndicatorWindowBook.Ship plan = windows.onDeath(victimId);
+        if (plan != null) {
+            draw(plan, plan.crit() ? "CRIT" : "NORMAL");
+        }
+    }
+
+    /** The front-half ring placement off the victim's chest, toward the attacker (the one region-legal geometry read). */
+    private IndicatorPlacement.Spawn place(Player victim, Player attacker) {
         Location victimLoc = victim.getLocation();
         Location attackerLoc = attacker.getLocation();
-        IndicatorPlacement.Spawn spawn = IndicatorPlacement.place(
+        return IndicatorPlacement.place(
                 victimLoc.getX(), victimLoc.getY(), victimLoc.getZ(),
                 attackerLoc.getX(), attackerLoc.getZ(),
                 settings.ringRadius(), CHEST_OFFSET, settings.heightJitter(),
                 ThreadLocalRandom.current());
-        double groundY = scanGround(victim.getWorld(), spawn);
+    }
+
+    /**
+     * Draws one window's stand on the attacker's client — a fresh spawn
+     * ({@code priorEntityId < 0}) or a replace-in-place bump (destroy the prior +
+     * spawn the new in ONE bundle, so the client never renders a frame with zero or
+     * two stands for the hit). Geometry is frozen in the {@link IndicatorWindowBook.Ship},
+     * so this performs ZERO world reads and is region-thread-agnostic (it writes only
+     * to the attacker's PacketEvents User). Returns the live entity id, or a negative
+     * sentinel when unsendable (no client) or no entity id — journaling the decision
+     * throughout, never a silent skip.
+     */
+    private int draw(IndicatorWindowBook.Ship plan, String decision) {
+        Player attacker = Bukkit.getPlayer(plan.attackerId());
+        User user = attacker == null ? null : playerManager.getUser(attacker);
+        if (user == null) {
+            trace.record(new FeedbackTrace.Entry(
+                    "damage-indicators", plan.attackerId(), plan.victimId(), "UNSENDABLE",
+                    attacker == null ? "attacker offline" : "attacker has no PacketEvents user"));
+            return -1;
+        }
 
         int entityId;
         try {
@@ -230,76 +324,37 @@ public final class DamageIndicatorsListener implements Listener {
                         + " on this server — indicators are skipped");
             }
             trace.record(new FeedbackTrace.Entry(
-                    "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
+                    "damage-indicators", plan.attackerId(), plan.victimId(),
                     "ID_UNAVAILABLE", "generateEntityId() failed"));
-            return;
-        }
-
-        List<PacketWrapper<?>> packets = IndicatorStandPackets.spawn(
-                entityId, UUID.randomUUID(), spawn, name, user.getClientVersion(), modernSpawn);
-        ship(user, packets, bundleSupported);
-
-        driver.add(entityId, IndicatorBallistics.launch(spawn, params), groundY, settings.lifetimeTicks());
-        driver.merges().remember(victim.getUniqueId(), tick, entityId, displayed, crit, spawn, groundY);
-
-        trace.record(new FeedbackTrace.Entry(
-                "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
-                crit ? "CRIT" : "NORMAL",
-                "y=" + spawn.y() + " ttl=" + settings.lifetimeTicks()
-                        + " dmg=" + finalDamage + shownSuffix(finalDamage, displayed)));
-    }
-
-    /**
-     * Ships the fold: the remembered stand's destroy and the replacement's
-     * spawn+metadata ride ONE bundle/flush, so the attacker's client never
-     * renders a frame with zero — or two — indicators for this hit. The
-     * replacement reuses the first spawn's frozen geometry (ring position,
-     * launch bearing, ground plane), so the merge path performs ZERO world
-     * reads; only the presentation changes: the summed damage rendered through
-     * the OR-ed crit's template. Should the entity id ever be unavailable, the
-     * original stand simply stays — an under-reporting indicator beats a
-     * vanished one.
-     */
-    private void respawnMerged(
-            Player attacker, Player victim, User user, IndicatorDriver driver,
-            IndicatorMergeBook.Merged merged, long tick, double eventDamageRaw, double eventDisplayed) {
-        int entityId;
-        try {
-            entityId = SpigotReflectionUtil.generateEntityId();
-        } catch (IllegalStateException noId) {
-            if (noEntityIdWarned.compareAndSet(false, true)) {
-                logger.warning("damage-indicators: could not generate a client-only entity id"
-                        + " on this server — indicators are skipped");
-            }
-            trace.record(new FeedbackTrace.Entry(
-                    "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
-                    "ID_UNAVAILABLE", "generateEntityId() failed"));
-            return;
+            return -1;
         }
 
         String rendered = IndicatorText.render(
-                merged.crit() ? settings.critText() : settings.text(), merged.totalDamage());
+                plan.crit() ? settings.critText() : settings.text(), plan.total());
         Component name = LegacyComponentSerializer.legacyAmpersand().deserialize(rendered);
+        IndicatorBallistics.State launch = IndicatorBallistics.launch(plan.spawn(), params);
+        IndicatorDriver driver = drivers.computeIfAbsent(
+                plan.attackerId(), id -> new IndicatorDriver(scheduling, attacker, user, params));
 
-        List<PacketWrapper<?>> packets = new ArrayList<>(3);
-        packets.add(IndicatorStandPackets.destroy(merged.priorEntityId()));
-        packets.addAll(IndicatorStandPackets.spawn(
-                entityId, UUID.randomUUID(), merged.spawn(), name, user.getClientVersion(), modernSpawn));
-        ship(user, packets, bundleSupported);
-
-        driver.replace(
-                merged.priorEntityId(), entityId,
-                IndicatorBallistics.launch(merged.spawn(), params), merged.groundY(), settings.lifetimeTicks());
-        driver.merges().remember(
-                victim.getUniqueId(), tick, entityId,
-                merged.totalDamage(), merged.crit(), merged.spawn(), merged.groundY());
+        List<PacketWrapper<?>> packets;
+        if (plan.priorEntityId() >= 0) {
+            packets = new ArrayList<>(3);
+            packets.add(IndicatorStandPackets.destroy(plan.priorEntityId()));
+            packets.addAll(IndicatorStandPackets.spawn(
+                    entityId, UUID.randomUUID(), plan.spawn(), name, user.getClientVersion(), modernSpawn));
+            ship(user, packets, bundleSupported);
+            driver.replace(plan.priorEntityId(), entityId, launch, plan.groundY(), settings.lifetimeTicks());
+        } else {
+            packets = IndicatorStandPackets.spawn(
+                    entityId, UUID.randomUUID(), plan.spawn(), name, user.getClientVersion(), modernSpawn);
+            ship(user, packets, bundleSupported);
+            driver.add(entityId, launch, plan.groundY(), settings.lifetimeTicks());
+        }
 
         trace.record(new FeedbackTrace.Entry(
-                "damage-indicators", attacker.getUniqueId(), victim.getUniqueId(),
-                merged.crit() ? "CRIT" : "NORMAL",
-                "y=" + merged.spawn().y() + " ttl=" + settings.lifetimeTicks()
-                        + " dmg=" + eventDamageRaw + shownSuffix(eventDamageRaw, eventDisplayed)
-                        + " merged total=" + merged.totalDamage()));
+                "damage-indicators", plan.attackerId(), plan.victimId(), decision,
+                "y=" + plan.spawn().y() + " ttl=" + settings.lifetimeTicks() + " total=" + plan.total()));
+        return entityId;
     }
 
     /**
@@ -312,11 +367,6 @@ public final class DamageIndicatorsListener implements Listener {
      */
     static double displayedDamage(double finalDamage, double preHitHealth) {
         return preHitHealth <= 0.0 ? 0.0 : Math.min(finalDamage, preHitHealth);
-    }
-
-    /** {@code " shown=<displayed>"} when the clamp bit (raw != displayed), else empty — the trace stays terse on the common no-clamp hit. */
-    private static String shownSuffix(double raw, double displayed) {
-        return raw == displayed ? "" : " shown=" + displayed;
     }
 
     /**

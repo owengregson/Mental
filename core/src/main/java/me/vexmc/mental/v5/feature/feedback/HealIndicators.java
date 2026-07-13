@@ -31,8 +31,8 @@ import org.bukkit.entity.Player;
  * attacker-client-only packet armor stand off the victim's chest, riding the same
  * {@link IndicatorDriver} / {@link IndicatorStandPackets} / {@link IndicatorPlacement}
  * stack as the damage path — the ONE difference being that it NEVER touches
- * {@link IndicatorMergeBook} (the same-tick damage fold must not cross-contaminate a
- * heal, a hard rule).
+ * {@link IndicatorWindowBook} (the per-victim damage-window fold must not
+ * cross-contaminate a heal, a hard rule).
  *
  * <h2>Detection over attribution over pacing</h2>
  * The per-tick delta ({@code current − previous}) catches every heal source the
@@ -234,7 +234,7 @@ final class HealIndicators implements SessionService.HealSampler {
 
         trace.record(new FeedbackTrace.Entry(
                 "damage-indicators", attackerId, victimId, "HEAL",
-                "healed=" + IndicatorText.hearts(shippedAmount)));
+                "healed=" + IndicatorText.points(shippedAmount)));
     }
 
     /** Session forget (quit): drop this player as a heal victim AND as any victim's stamped attacker. */
