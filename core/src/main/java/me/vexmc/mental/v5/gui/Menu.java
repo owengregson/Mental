@@ -128,6 +128,23 @@ public abstract class Menu implements InventoryHolder {
         destination.open(viewer);
     }
 
+    /**
+     * Opens a chat prompt to set one text overlay key ({@code label} names the
+     * field), then reopens this screen — whether the player enters a value or
+     * cancels. The write flows through {@code Management.setOverlay} (the invariant
+     * write-back path); the reopen shows the new value. Used by the in-GUI text
+     * editors (kill title, indicator templates, and the like).
+     */
+    protected final void promptOverlay(
+            @NotNull Player viewer, @NotNull String label, @NotNull String overlayKey) {
+        ctx.chatPrompt().request(viewer, label,
+                input -> {
+                    ctx.management().setOverlay(overlayKey, input);
+                    open(viewer);
+                },
+                () -> open(viewer));
+    }
+
     /** One placed tile: an icon and an optional click handler. */
     public record Tile(@NotNull ItemStack item, @Nullable Consumer<InventoryClickEvent> onClick) {
         public static @NotNull Tile of(@NotNull ItemStack item, @Nullable Consumer<InventoryClickEvent> onClick) {

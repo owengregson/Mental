@@ -47,6 +47,19 @@ class DashboardModelTest {
     }
 
     @Test
+    void homeRowsCoverEveryFamilyExactlyOnce() {
+        // The home-layer reachability guarantee: every Family appears in exactly
+        // one home row, so a new family constant forces a home-row edit rather
+        // than silently vanishing from the dashboard.
+        List<Family> flat = DashboardModel.homeRows().stream().flatMap(List::stream).toList();
+        assertEquals(EnumSet.allOf(Family.class),
+                EnumSet.copyOf(flat),
+                "every family must appear in a home row");
+        assertEquals(Family.values().length, flat.size(),
+                "no family may appear in two home rows");
+    }
+
+    @Test
     void infrastructureDescriptorsAreNeverSurfaced() {
         // Always-on infrastructure (anticheat coexistence) carries no
         // modules.* toggle and is configured on its own screen — it must never

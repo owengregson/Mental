@@ -41,10 +41,7 @@ public final class CompatibilityMenu extends Menu {
     protected void draw(@NotNull Player viewer) {
         set(22, anticheatTile(), click -> {
             AnticheatMode next = cycle(ctx.plugin().snapshot().anticheat().mode());
-            apply(viewer, () -> {
-                ctx.plugin().overlaySet(ANTICHEAT_KEY, enumKey(next));
-                ctx.management().reload();
-            });
+            apply(viewer, () -> ctx.management().setOverlay(ANTICHEAT_KEY, enumKey(next)));
         });
         set(31, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
     }

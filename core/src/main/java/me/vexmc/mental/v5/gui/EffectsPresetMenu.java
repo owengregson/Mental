@@ -6,7 +6,6 @@ import java.util.Map;
 import me.vexmc.mental.v5.config.EffectsPreset;
 import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
-import me.vexmc.mental.v5.feature.Family;
 import me.vexmc.mental.v5.text.Brand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -24,8 +23,8 @@ import org.jetbrains.annotations.NotNull;
  * re-assembles the three effects modules live. The value preview is READ-ONLY:
  * the hit tune, the indicator feel, and the death strike at a glance.
  *
- * <p>No back stack, so Back is hardcoded to the Combat Effects family screen
- * (which keeps the module on/off toggles).</p>
+ * <p>No back stack, so Back is hardcoded to the Combat Effects hub
+ * ({@link EffectsMenu}), which the preset picker is reached from.</p>
  */
 public final class EffectsPresetMenu extends Menu {
 
@@ -73,7 +72,7 @@ public final class EffectsPresetMenu extends Menu {
                     click -> apply(viewer, () -> ctx.management().setEffectsPreset(name)));
         }
 
-        set(49, Buttons.back(), click -> navigate(viewer, new FamilyMenu(ctx, Family.FEEDBACK)));
+        set(49, Buttons.back(), click -> navigate(viewer, new EffectsMenu(ctx)));
     }
 
     /** Every loaded preset name, sorted — any file dropped into effects/presets/ shows up. */

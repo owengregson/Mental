@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.gui;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import me.vexmc.mental.platform.MenuMaterials;
@@ -28,16 +29,8 @@ public final class DashboardMenu extends Menu {
     /** The status plate's slot — row 0, centred. */
     private static final int STATUS_SLOT = 4;
 
-    /** The two rows the family section tiles balance across (rows 2 and 3). */
-    private static final int SECTION_ROW_TOP = 18;
-    private static final int SECTION_ROW_BOTTOM = 27;
-
-    /**
-     * At or below this many sections a single centred row reads cleaner than a
-     * split; above it the tiles balance across two rows so a crowded row never
-     * cramps.
-     */
-    private static final int SINGLE_ROW_LIMIT = 5;
+    /** The first-slot of each of the three grouped family rows (rows 1–3). */
+    private static final int[] FAMILY_ROW_BASES = {9, 18, 27};
 
     /** Row-4 nav tiles (compatibility / debug), aligned above reload / close. */
     private static final int COMPAT_SLOT = 39;
@@ -65,7 +58,7 @@ public final class DashboardMenu extends Menu {
     protected void draw(@NotNull Player viewer) {
         set(STATUS_SLOT, statusPlate());
 
-        drawSections(viewer, DashboardModel.sections());
+        drawFamilyRows(viewer);
 
         set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility",
                 "Anticheat posture."),
@@ -79,42 +72,33 @@ public final class DashboardMenu extends Menu {
     }
 
     /**
-     * Lays the family navigation tiles out balanced and centred: a single centred
-     * row for a small set, or — for a larger one — two centred rows in a downward V
-     * (funnel). The TOP row takes the wider share and the bottom row the narrower
-     * remainder, so the two centred rows taper inward rather than sitting as a full
-     * rectangular block: a block would need a count that fills both rows to the same
-     * width, which the section count never reaches, so the shape opens into a V
-     * instead. Every {@link Family} still renders — the catalog is the registry, so
-     * a new family surfaces here with no edit to this method.
+     * Renders the family tiles grouped into centred rows off
+     * {@link DashboardModel#homeRows()} — the engine, the era rules, then the
+     * cosmetic/loot pair. Each tile opens its destination: the FEEDBACK tile the
+     * dedicated Combat Effects hub, the LOOT tile the Loot Protection screen, and
+     * every other family the generic {@link FamilyMenu}. Adding a family means
+     * adding it to a home row (pinned by {@code DashboardModelTest}).
      */
-    private void drawSections(@NotNull Player viewer, @NotNull List<Family> sections) {
-        int count = sections.size();
-        if (count == 0) {
-            return;
+    private void drawFamilyRows(@NotNull Player viewer) {
+        List<List<Family>> rows = DashboardModel.homeRows();
+        for (int r = 0; r < rows.size() && r < FAMILY_ROW_BASES.length; r++) {
+            List<Tile> tiles = new ArrayList<>();
+            for (Family family : rows.get(r)) {
+                tiles.add(Tile.of(
+                        Buttons.nav(family.iconName(), family.displayName(), family.blurb()),
+                        click -> navigate(viewer, homeDestination(family))));
+            }
+            placeCentered(FAMILY_ROW_BASES[r], tiles);
         }
-        if (count <= SINGLE_ROW_LIMIT) {
-            placeSectionRow(viewer, sections, 0, count, SECTION_ROW_TOP);
-            return;
-        }
-        // The V-split: the top row takes the wider half (floor(count/2) + 1), the
-        // bottom the narrower remainder — the two centred rows funnel inward. For the
-        // eight families that is 5 over 3, so SUSTAIN rides up into the top row.
-        int top = count / 2 + 1;
-        placeSectionRow(viewer, sections, 0, top, SECTION_ROW_TOP);
-        placeSectionRow(viewer, sections, top, count, SECTION_ROW_BOTTOM);
     }
 
-    /** Centres {@code sections[from, to)} within the nine-wide row at {@code rowBase}. */
-    private void placeSectionRow(
-            @NotNull Player viewer, @NotNull List<Family> sections, int from, int to, int rowBase) {
-        int count = to - from;
-        int start = rowBase + Math.max(0, (9 - count) / 2);
-        for (int i = 0; i < count && start + i <= rowBase + 8; i++) {
-            Family family = sections.get(from + i);
-            set(start + i, Buttons.nav(family.iconName(), family.displayName(), family.blurb()),
-                    click -> navigate(viewer, new FamilyMenu(ctx, family)));
-        }
+    /** The screen a home family tile opens — dedicated for FEEDBACK and LOOT, generic otherwise. */
+    private @NotNull Menu homeDestination(@NotNull Family family) {
+        return switch (family) {
+            case FEEDBACK -> new EffectsMenu(ctx);
+            case LOOT -> new LootProtectionMenu(ctx);
+            default -> new FamilyMenu(ctx, family);
+        };
     }
 
     /**

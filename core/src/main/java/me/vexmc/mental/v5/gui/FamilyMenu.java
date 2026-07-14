@@ -20,11 +20,9 @@ import org.jetbrains.annotations.NotNull;
  * <p>The {@link Family#KNOCKBACK} section additionally carries a nav tile to the
  * "Melee Knockback Formula" chooser ({@link KnockbackFormulaMenu}) — the era
  * formula, then a preset — which is where the server-wide profile is actually
- * selected. The {@link Family#FEEDBACK} section carries the same shape of nav
- * tile to the Combat Effects preset picker ({@link EffectsPresetMenu}) — one
- * preset for the whole cosmetic tune, the knockback model mirrored. The
- * feature toggles keep their home here in both cases (the family screens must
- * stay reachable).</p>
+ * selected. The FEEDBACK and LOOT families are reached from the home through
+ * their own dedicated screens ({@link EffectsMenu} / {@link LootProtectionMenu}),
+ * not this generic toggle screen.</p>
  */
 public final class FamilyMenu extends Menu {
 
@@ -69,12 +67,6 @@ public final class FamilyMenu extends Menu {
             set(FORMULA_SLOT, Buttons.nav("PISTON", "Melee Knockback Formula",
                     "Choose the era formula, then a preset."),
                     click -> navigate(viewer, new KnockbackFormulaMenu(ctx)));
-            set(49, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
-        } else if (family == Family.FEEDBACK) {
-            drawToggles(viewer, entries, TOGGLE_ROW_BASE);
-            set(FORMULA_SLOT, Buttons.nav("JUKEBOX", "Combat Effects Preset",
-                    "Pick the preset — one tune for hits, indicators and deaths."),
-                    click -> navigate(viewer, new EffectsPresetMenu(ctx)));
             set(49, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
         } else {
             drawToggles(viewer, entries, PLAIN_ROW_BASE);
