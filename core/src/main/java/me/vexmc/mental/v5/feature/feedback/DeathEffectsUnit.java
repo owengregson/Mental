@@ -2,6 +2,7 @@ package me.vexmc.mental.v5.feature.feedback;
 
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.manager.server.ServerVersion;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.ServerEnvironment;
@@ -30,13 +31,16 @@ public final class DeathEffectsUnit implements FeatureUnit {
 
     private final ServerEnvironment environment;
     private final Scheduling scheduling;
+    private final Supplier<Snapshot> snapshotSupplier;
     private final FeedbackTrace trace;
     private final Logger logger;
 
     public DeathEffectsUnit(
-            ServerEnvironment environment, Scheduling scheduling, FeedbackTrace trace, Logger logger) {
+            ServerEnvironment environment, Scheduling scheduling, Supplier<Snapshot> snapshotSupplier,
+            FeedbackTrace trace, Logger logger) {
         this.environment = environment;
         this.scheduling = scheduling;
+        this.snapshotSupplier = snapshotSupplier;
         this.trace = trace;
         this.logger = logger;
     }
@@ -62,8 +66,17 @@ public final class DeathEffectsUnit implements FeatureUnit {
         boolean inlineByName = serverVersion.isNewerThanOrEquals(ServerVersion.V_1_19_3);
         boolean modernBlockData = environment.isAtLeast(1, 13, 0);
         boolean lightningSupported = environment.isAtLeast(1, 19, 0);
+        // The kill title's wire split: 1.17 replaced the single combined title
+        // packet with three dedicated Set-Title-{Times,Text,Subtitle} packets.
+        // Resolve the shape ONCE here; the death path never touches the version.
+        boolean splitTitlePackets = serverVersion.isNewerThanOrEquals(ServerVersion.V_1_17);
         FeedbackSoundTable table = new FeedbackSoundTable(
                 environment.major(), environment.minor(), inlineByName);
+
+        // {PROTECT_SECONDS} in the kill title reads the Drop Protection window
+        // LIVE (blank when that feature is off), so a drop-protection reload is
+        // reflected without re-assembling death-effects.
+        Supplier<String> protectSecondsToken = () -> protectSecondsToken(snapshotSupplier.get());
 
         DeathLightning lightningTasks = new DeathLightning(scheduling);
         // The blast rocket's item-data flavor (1.20.5+ component vs classic NBT)
@@ -72,7 +85,17 @@ public final class DeathEffectsUnit implements FeatureUnit {
         DeathFirework firework = new DeathFirework(settings.fireworkColors(), serverVersion);
         scope.listen(new DeathEffectsListener(
                 settings, table, modernBlockData, lightningSupported, lightningTasks, firework,
-                trace, logger));
+                splitTitlePackets, protectSecondsToken, trace, logger));
         scope.task(() -> lightningTasks); // the registry closes with the scope, cancelling pending destroys
+    }
+
+    /**
+     * The {@code {PROTECT_SECONDS}} token value — the configured Drop Protection
+     * window in whole seconds, or {@code ""} when that feature is off. Part B
+     * (drop-protection) fills the live read; until then the feature does not
+     * exist, so the token is correctly blank.
+     */
+    private static String protectSecondsToken(Snapshot snapshot) {
+        return "";
     }
 }

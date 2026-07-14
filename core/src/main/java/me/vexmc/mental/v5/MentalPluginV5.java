@@ -728,7 +728,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         // Death-effects strikes cosmetic packet lightning + sound + burst at
         // PlayerDeathEvent; its scope-owned destroy-task registry needs scheduling.
         reconciler.register(new HitFeedbackUnit(environment, clock, feedbackTrace, getLogger()));
-        reconciler.register(new DeathEffectsUnit(environment, scheduling, feedbackTrace, getLogger()));
+        reconciler.register(new DeathEffectsUnit(
+                environment, scheduling, this::snapshot, feedbackTrace, getLogger()));
         // Damage-indicators caches a per-attacker driver holding the attacker's
         // PacketEvents User — a relogged player's stale driver must be dropped on
         // quit or the fresh connection would keep addressing the dead one.
