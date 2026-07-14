@@ -101,6 +101,7 @@ class ReconcilerTest {
         return SnapshotParser.parse(new ConfigStore.Sources(
                 main, empty, empty, empty,
                 new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(),
                 effects, Map.of("signature", signature, "muted", muted), Map.of())).snapshot();
     }
 

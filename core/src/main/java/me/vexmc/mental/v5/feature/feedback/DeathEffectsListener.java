@@ -12,8 +12,12 @@ import com.github.retrooper.packetevents.protocol.sound.SoundCategory;
 import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetTitleSubtitle;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetTitleText;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetTitleTimes;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSoundEffect;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTitle;
 import io.github.retrooper.packetevents.util.SpigotReflectionUtil;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,9 +25,14 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.logging.Logger;
 import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
+import me.vexmc.mental.v5.config.settings.DeathEffectsSettings.KillTitle;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.ParticleSpec;
+import me.vexmc.mental.v5.text.Placeholders;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -87,7 +96,13 @@ public final class DeathEffectsListener implements Listener {
     private final boolean lightning;
     private final List<FeedbackEmit.ResolvedSound> sounds;
     private final List<FeedbackEmit.ResolvedParticle> particles;
+    private final boolean hasCosmetics;
     private final boolean hasEffects;
+
+    private final KillTitle killTitle;
+    private final boolean hasTitle;
+    private final boolean splitTitlePackets;
+    private final Supplier<String> protectSecondsToken;
 
     private final String soundSummary;
     private final String particleSummary;
@@ -99,6 +114,7 @@ public final class DeathEffectsListener implements Listener {
     public DeathEffectsListener(
             DeathEffectsSettings settings, FeedbackSoundTable table, boolean modernBlockData,
             boolean lightningSupported, DeathLightning lightningTasks, DeathFirework firework,
+            boolean splitTitlePackets, Supplier<String> protectSecondsToken,
             FeedbackTrace trace, Logger logger) {
         this.playerManager = PacketEvents.getAPI().getPlayerManager();
         this.lightningTasks = lightningTasks;
@@ -108,8 +124,15 @@ public final class DeathEffectsListener implements Listener {
         this.lightning = settings.lightning() && lightningSupported;
         this.sounds = FeedbackEmit.resolveSounds(settings.sounds(), table, "death-effects", "death", logger);
         this.particles = resolveParticles(settings.particles(), modernBlockData, logger);
-        this.hasEffects = this.lightning || !this.sounds.isEmpty()
+        this.hasCosmetics = this.lightning || !this.sounds.isEmpty()
                 || !this.particles.isEmpty() || firework.hasBlast();
+        this.killTitle = settings.killTitle();
+        this.hasTitle = this.killTitle.present();
+        this.splitTitlePackets = splitTitlePackets;
+        this.protectSecondsToken = protectSecondsToken;
+        // The kill title fires on its own audience of one (the killer), so the
+        // module is "doing something" whenever EITHER a cosmetic OR a title is set.
+        this.hasEffects = this.hasCosmetics || this.hasTitle;
         this.soundSummary = FeedbackEmit.summariseSounds(this.sounds);
         this.particleSummary = FeedbackEmit.summariseParticles(this.particles);
 
@@ -135,8 +158,23 @@ public final class DeathEffectsListener implements Listener {
         Player killer = victim.getKiller();
         UUID killerId = killer == null ? null : killer.getUniqueId();
         UUID victimId = victim.getUniqueId();
-        World world = victim.getWorld();
 
+        // The kill title goes to the KILLER alone — an audience of exactly one,
+        // and a different audience from the 48-block cosmetic send below, so it
+        // fires even when no bystander is nearby. PvP kills only.
+        if (hasTitle) {
+            String titleDetail = sendKillTitle(killer, victim);
+            if (titleDetail != null) {
+                trace.record(new FeedbackTrace.Entry(
+                        "death-effects", killerId, victimId, "TITLE", titleDetail));
+            }
+        }
+
+        if (!hasCosmetics) {
+            return; // title-only tune — nothing broadcasts to the nearby audience
+        }
+
+        World world = victim.getWorld();
         double radiusSquared = AUDIENCE_RADIUS * AUDIENCE_RADIUS;
         List<Player> audience = new ArrayList<>();
         for (Player candidate : Bukkit.getOnlinePlayers()) {
@@ -273,8 +311,118 @@ public final class DeathEffectsListener implements Listener {
     }
 
     // ------------------------------------------------------------------------
+    // Kill title — the title + subtitle flashed to the killer of an enemy player.
+    // ------------------------------------------------------------------------
+
+    /**
+     * Flashes the configured title + subtitle to the killer of an ENEMY player.
+     * PvP only: a {@code null} killer (mob / environmental death) or a self-kill
+     * sends nothing, and a killer with no PacketEvents user (a synthetic /
+     * disconnecting player) is skipped. Mental's own {@code {NAME}}/{@code
+     * {VICTIM}}/{@code {KILLER}}/{@code {PROTECT_SECONDS}} tokens are substituted
+     * on the raw ampersand string first, then PlaceholderAPI (when installed),
+     * then the legacy-code deserialization — so colour codes and tokens ride
+     * through untouched. Returns a journal detail when a title was sent, or
+     * {@code null} when it was not. The send is wrapped catch-Throwable: a missed
+     * title beats a surfaced exception, exactly like the cosmetic path.
+     */
+    private String sendKillTitle(Player killer, Player victim) {
+        if (killer == null || killer.equals(victim)) {
+            return null; // no player killer, or a self-kill — not an enemy kill
+        }
+        User user = playerManager.getUser(killer);
+        if (user == null) {
+            return null; // synthetic / disconnecting killer — nothing to send to
+        }
+        Component title = render(killTitle.title(), killer, victim);
+        Component subtitle = render(killTitle.subtitle(), killer, victim);
+        try {
+            if (splitTitlePackets) {
+                user.writePacketSilently(titleTimes(killTitle));
+                user.writePacketSilently(titleText(title));
+                user.writePacketSilently(titleSubtitle(subtitle));
+            } else {
+                user.writePacketSilently(legacyTitleTimes(killTitle));
+                user.writePacketSilently(legacyTitleText(title));
+                user.writePacketSilently(legacyTitleSubtitle(subtitle));
+            }
+            user.flushPackets();
+        } catch (Throwable reconfiguring) {
+            // A missed title beats a surfaced exception on the send path.
+            return null;
+        }
+        return "kill-title -> " + killer.getName() + " (victim=" + victim.getName() + ")";
+    }
+
+    /**
+     * Renders one title line for the killer: token substitution on the raw
+     * string, then PlaceholderAPI (no-op when absent), then legacy-code
+     * deserialization to a component. The relocated {@code net.kyori} component
+     * this produces is the exact type the relocated title wrappers expect.
+     */
+    private Component render(String template, Player killer, Player victim) {
+        String tokens = substituteTokens(template, victim.getName(), killer.getName(), protectSecondsToken.get());
+        String rendered = Placeholders.apply(killer, tokens);
+        return LegacyComponentSerializer.legacyAmpersand().deserialize(rendered);
+    }
+
+    // ------------------------------------------------------------------------
     // Packet shapes (package-private statics — pinned by DeathEffectsPacketsTest).
     // ------------------------------------------------------------------------
+
+    /**
+     * Substitutes Mental's own kill-title tokens on the RAW ampersand string,
+     * before any deserialization — pure string work, so the template's colour
+     * codes ride through untouched. {@code {NAME}} and {@code {VICTIM}} are the
+     * slain player; {@code {KILLER}} is the killer; {@code {PROTECT_SECONDS}} is
+     * the Drop Protection window (blank when that feature is off).
+     */
+    static String substituteTokens(String template, String victimName, String killerName, String protectSeconds) {
+        if (template == null || template.isEmpty()) {
+            return "";
+        }
+        return template
+                .replace("{NAME}", victimName)
+                .replace("{VICTIM}", victimName)
+                .replace("{KILLER}", killerName)
+                .replace("{PROTECT_SECONDS}", protectSeconds);
+    }
+
+    /** The modern (1.17+) title-times packet. */
+    static WrapperPlayServerSetTitleTimes titleTimes(KillTitle title) {
+        return new WrapperPlayServerSetTitleTimes(title.fadeIn(), title.stay(), title.fadeOut());
+    }
+
+    /** The modern (1.17+) title-text packet. */
+    static WrapperPlayServerSetTitleText titleText(Component title) {
+        return new WrapperPlayServerSetTitleText(title);
+    }
+
+    /** The modern (1.17+) title-subtitle packet. */
+    static WrapperPlayServerSetTitleSubtitle titleSubtitle(Component subtitle) {
+        return new WrapperPlayServerSetTitleSubtitle(subtitle);
+    }
+
+    /** The legacy (&lt;1.17) combined title packet carrying only the times. */
+    static WrapperPlayServerTitle legacyTitleTimes(KillTitle title) {
+        // Cast the first null to Component so the all-null argument list selects
+        // the Component constructor over the String one (both are otherwise viable).
+        return new WrapperPlayServerTitle(
+                WrapperPlayServerTitle.TitleAction.SET_TIMES_AND_DISPLAY,
+                (Component) null, null, null, title.fadeIn(), title.stay(), title.fadeOut());
+    }
+
+    /** The legacy (&lt;1.17) combined title packet carrying only the title line. */
+    static WrapperPlayServerTitle legacyTitleText(Component title) {
+        return new WrapperPlayServerTitle(
+                WrapperPlayServerTitle.TitleAction.SET_TITLE, title, null, null, 0, 0, 0);
+    }
+
+    /** The legacy (&lt;1.17) combined title packet carrying only the subtitle line. */
+    static WrapperPlayServerTitle legacyTitleSubtitle(Component subtitle) {
+        return new WrapperPlayServerTitle(
+                WrapperPlayServerTitle.TitleAction.SET_SUBTITLE, null, subtitle, null, 0, 0, 0);
+    }
 
     /**
      * The cosmetic-bolt spawn: a {@code LIGHTNING_BOLT} at {@code at} with no UUID

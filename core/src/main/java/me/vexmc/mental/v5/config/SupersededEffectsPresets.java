@@ -35,12 +35,18 @@ public final class SupersededEffectsPresets {
     private static final Map<String, Set<String>> ARCHIVED_HASHES = Map.of(
             // The 2.5.3/2.5.4 signature.yml, superseded by the 2.5.5 rewrite
             // (the low-health-threshold-hearts → -percent key and the new
-            // damage-indicators heal-text key); and the 2.5.5→2.6.1 revision,
+            // damage-indicators heal-text key); the 2.5.5→2.6.1 revision,
             // superseded by the 2026-07-12 window/HP-units rewrite ({HEALTH} in
-            // damage points, the roll-hold-ticks knob and its window prose).
+            // damage points, the roll-hold-ticks knob and its window prose); and
+            // the 2.6.2 revision, superseded by 2.7.0 adding the death-effects
+            // kill-title block.
             "signature", Set.of(
                     "6781856643e401f3e1ff9f7901a8138f998367ccb369641d11399df6889f3af1",
-                    "40a57e598f9d0d397d6314e76ba351bd9ff163ae90cf23b30c7e9ebaf1cdd7ad"));
+                    "40a57e598f9d0d397d6314e76ba351bd9ff163ae90cf23b30c7e9ebaf1cdd7ad",
+                    // The 2.6.2 signature.yml, superseded by 2.7.0 adding the
+                    // death-effects kill-title block; a pristine install upgrades
+                    // in place to gain the "KILLED: {NAME}" title.
+                    "f0cf052e062349b8dc8f03cade450480cde0f9ae065c106a7082218df5a05858"));
 
     private SupersededEffectsPresets() {}
 

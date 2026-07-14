@@ -10,8 +10,12 @@ import me.vexmc.mental.v5.config.settings.AnticheatSettings;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
+import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
 import me.vexmc.mental.v5.config.settings.DebugSettings;
+import me.vexmc.mental.v5.config.settings.DropProtectionSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
+import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
 import me.vexmc.mental.v5.config.settings.NoSettings;
@@ -184,13 +188,77 @@ public final class SnapshotParser {
                     moved.reachHandicap(), moved.comboHold().sub("reach-handicap"));
             case POT_FILL -> parsePotFill(moved.potFill());
             case FAST_POTS -> parseFastPots(moved.fastPots());
-            // The FEEDBACK family reads the selected Combat Effects preset —
-            // one tune, three sections (the knockback-profile model).
-            case HIT_FEEDBACK -> effects.hitFeedback();
-            case DAMAGE_INDICATORS -> effects.damageIndicators();
-            case DEATH_EFFECTS -> effects.deathEffects();
+            case DROP_PROTECTION -> parseDropProtection(reader(
+                    sources.dropProtection(), "drop-protection", ConfigStore.DROP_PROTECTION_FILE, issues));
+            // The FEEDBACK family reads the selected Combat Effects preset, then
+            // layers any in-GUI per-field overrides (the machine overlay) on top —
+            // effective = overlay ?? preset ?? default. The overrides live under
+            // effects.<module>.<field> on the effects.yml root the overlay merges
+            // into (the preset files are never re-serialized).
+            case HIT_FEEDBACK -> applyHitOverrides(
+                    effects.hitFeedback(), effectsOverrides(sources, "hit", issues));
+            case DAMAGE_INDICATORS -> applyIndicatorOverrides(
+                    effects.damageIndicators(), effectsOverrides(sources, "indicators", issues));
+            case DEATH_EFFECTS -> applyDeathOverrides(
+                    effects.deathEffects(), effectsOverrides(sources, "death", issues));
             default -> NoSettings.DEFAULTS;
         };
+    }
+
+    /**
+     * A reader over the in-GUI override subsection for one effects module
+     * ({@code effects.<module>} on the effects.yml root the overlay merges into).
+     * A null section (no override set) makes every field read fall back to the
+     * preset value, so an un-edited install is byte-identical to the preset.
+     */
+    private static ConfigReader effectsOverrides(
+            ConfigStore.Sources sources, String module, ConfigIssues issues) {
+        ConfigurationSection section = sources.effects().getConfigurationSection("effects." + module);
+        return new ConfigReader(section, "effects." + module, issues);
+    }
+
+    /** Layers the GUI-editable death fields (kill title + lightning) over the preset. */
+    private static DeathEffectsSettings applyDeathOverrides(DeathEffectsSettings preset, ConfigReader reader) {
+        if (reader.section() == null) {
+            return preset;
+        }
+        DeathEffectsSettings.KillTitle kt = preset.killTitle();
+        DeathEffectsSettings.KillTitle title = new DeathEffectsSettings.KillTitle(
+                reader.text("kill-title", kt.title()),
+                reader.text("kill-subtitle", kt.subtitle()),
+                reader.intClamped("title-fade-in", kt.fadeIn(), 0, 200),
+                reader.intClamped("title-stay", kt.stay(), 0, 400),
+                reader.intClamped("title-fade-out", kt.fadeOut(), 0, 200));
+        return new DeathEffectsSettings(
+                reader.flag("lightning", preset.lightning()),
+                preset.sounds(), preset.particles(), preset.fireworkColors(), title);
+    }
+
+    /** Layers the GUI-editable indicator label templates over the preset. */
+    private static DamageIndicatorsSettings applyIndicatorOverrides(
+            DamageIndicatorsSettings preset, ConfigReader reader) {
+        if (reader.section() == null) {
+            return preset;
+        }
+        return new DamageIndicatorsSettings(
+                preset.lifetimeTicks(), preset.ringRadius(), preset.heightJitter(),
+                preset.launchVertical(), preset.launchOutward(), preset.gravity(), preset.drag(),
+                reader.text("text", preset.text()),
+                reader.text("crit-text", preset.critText()),
+                preset.critThresholdHearts(),
+                preset.rollHoldTicks(),
+                reader.text("heal-text", preset.healText()));
+    }
+
+    /** Layers the GUI-editable hit-feedback low-health threshold over the preset. */
+    private static HitFeedbackSettings applyHitOverrides(HitFeedbackSettings preset, ConfigReader reader) {
+        if (reader.section() == null) {
+            return preset;
+        }
+        return new HitFeedbackSettings(
+                preset.sounds(), preset.particles(), preset.lowHealthSounds(),
+                reader.numberClamped("low-health-threshold-percent",
+                        preset.lowHealthThresholdPercent(), 0.0, 100.0));
     }
 
     /**
@@ -430,6 +498,21 @@ public final class SnapshotParser {
         return new PotFillSettings(
                 reader.text("permission", d.permission()),
                 reader.numberAtLeast("cost-per-potion", d.costPerPotion(), 0.0));
+    }
+
+    /**
+     * The {@code drop-protection} tunables: the killer-only pickup window in
+     * whole seconds (at least 1, capped at an hour so a typo cannot lock loot
+     * forever) and the per-player glow colour (GOLD or YELLOW — the two named
+     * team colours near the requested gold tint). Every knob is an era-exact
+     * no-op only because the module defaults OFF; enabled-at-DEFAULTS is the
+     * shipped 15-second gold-glow feel.
+     */
+    private static DropProtectionSettings parseDropProtection(ConfigReader reader) {
+        DropProtectionSettings d = DropProtectionSettings.DEFAULTS;
+        return new DropProtectionSettings(
+                reader.intClamped("seconds", d.seconds(), 1, 3600),
+                reader.oneOf("glow-color", d.glowColor(), DropProtectionSettings.GlowColor.class));
     }
 
     private static FastPotsSettings parseFastPots(ConfigReader reader) {

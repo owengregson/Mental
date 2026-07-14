@@ -39,6 +39,7 @@ import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.command.MentalCommand;
 import me.vexmc.mental.v5.debug.JournalCapture;
 import me.vexmc.mental.v5.debug.PlayerDebugSink;
+import me.vexmc.mental.v5.gui.ChatPrompt;
 import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.v5.gui.MenuManager;
 import me.vexmc.mental.v5.manage.Management;
@@ -84,6 +85,7 @@ import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
 import me.vexmc.mental.v5.feature.loadout.HitboxUnit;
 import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
+import me.vexmc.mental.v5.feature.loot.DropProtectionUnit;
 import me.vexmc.mental.v5.feature.pots.FastPotsUnit;
 import me.vexmc.mental.v5.feature.pots.PotFillUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
@@ -179,6 +181,7 @@ public final class MentalPluginV5 extends JavaPlugin {
 
     private Management management;
     private MenuManager menuManager;
+    private ChatPrompt chatPrompt;
     private MentalFacade facade;
 
     private List<String> parseIssues = List.of();
@@ -379,8 +382,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // trivially. Menu reads flow through the live snapshot + reconciler; every
         // write flows through Management / the machine overlay, never the human
         // YAML. The bare /mental opens it for a permitted player.
-        this.menuManager = new MenuManager(new MenuContext(this, management));
+        this.chatPrompt = new ChatPrompt(scheduling);
+        this.menuManager = new MenuManager(new MenuContext(this, management, chatPrompt));
         getServer().getPluginManager().registerEvents(menuManager, this);
+        getServer().getPluginManager().registerEvents(chatPrompt, this);
         PluginCommand command = getCommand("mental");
         if (command != null) {
             command.setExecutor(new MentalCommand(this, menuManager));
@@ -437,6 +442,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         isolate("menu manager shutdown", () -> {
             if (menuManager != null) {
                 menuManager.shutdown();
+            }
+        });
+        isolate("chat prompt shutdown", () -> {
+            if (chatPrompt != null) {
+                chatPrompt.shutdown();
             }
         });
         isolate("reconciler.closeAll", () -> {
@@ -639,6 +649,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         overlay.set(key, value);
     }
 
+    /** Clears one machine-overlay key (reset to the human file / preset value); persists. */
+    public void overlayRemove(@NotNull String key) {
+        overlay.remove(key);
+    }
+
     /** True when {@code feature} has an open scope right now (the tester's module-active check). */
     public boolean featureActive(@NotNull Feature feature) {
         return reconciler.active(feature);
@@ -728,7 +743,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         // Death-effects strikes cosmetic packet lightning + sound + burst at
         // PlayerDeathEvent; its scope-owned destroy-task registry needs scheduling.
         reconciler.register(new HitFeedbackUnit(environment, clock, feedbackTrace, getLogger()));
-        reconciler.register(new DeathEffectsUnit(environment, scheduling, feedbackTrace, getLogger()));
+        reconciler.register(new DeathEffectsUnit(
+                environment, scheduling, this::snapshot, feedbackTrace, getLogger()));
         // Damage-indicators caches a per-attacker driver holding the attacker's
         // PacketEvents User — a relogged player's stale driver must be dropped on
         // quit or the fresh connection would keep addressing the dead one.
@@ -736,6 +752,12 @@ public final class MentalPluginV5 extends JavaPlugin {
                 new DamageIndicatorsUnit(sessions, scheduling, clock, feedbackTrace, getLogger());
         sessions.addForgetHook(damageIndicators::forget);
         reconciler.register(damageIndicators);
+
+        // The loot family (2.7.0). Drop protection locks a slain player's drops
+        // to the killer for a window and glows them gold to the killer alone —
+        // a pure Bukkit rule (capture + version-split pickup gate) plus a global
+        // expiry sweep, all torn down on disable (zero-touch).
+        reconciler.register(new DropProtectionUnit(this::snapshot, scheduling, environment));
 
         // The sustain family (4C). Golden apples + potion durations compute era
         // values from the kernel and apply them at the confirmed terminal event

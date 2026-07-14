@@ -22,9 +22,35 @@ public record DeathEffectsSettings(
         boolean lightning,
         List<SoundSpec> sounds,
         List<ParticleSpec> particles,
-        List<Integer> fireworkColors) {
+        List<Integer> fireworkColors,
+        KillTitle killTitle) {
 
     /** The vanilla tune: a strict nothing — {@code parse(empty)}'s era-exact no-op. */
     public static final DeathEffectsSettings DEFAULTS =
-            new DeathEffectsSettings(false, List.of(), List.of(), List.of());
+            new DeathEffectsSettings(false, List.of(), List.of(), List.of(), KillTitle.NONE);
+
+    /**
+     * The title + subtitle flashed to the KILLER at the moment they kill an
+     * enemy player — PvP only (never a mob/environmental death, and never a
+     * self-kill). Both lines carry {@code &} colour codes and, when
+     * PlaceholderAPI is installed, its placeholders; Mental's own tokens are
+     * substituted first — {@code {NAME}}/{@code {VICTIM}} (the slain player),
+     * {@code {KILLER}} (you), and {@code {PROTECT_SECONDS}} (the configured
+     * drop-protection window in whole seconds, blank when that feature is off).
+     *
+     * <p>An empty title AND subtitle sends no title — the era-exact no-op that
+     * keeps a text-free {@code death-effects} section zero-touch even with the
+     * module enabled. The three timings are client title ticks: fade-in, stay,
+     * fade-out.</p>
+     */
+    public record KillTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+
+        /** No title — empty text with vanilla 10/40/10-tick timings; the no-op. */
+        public static final KillTitle NONE = new KillTitle("", "", 10, 40, 10);
+
+        /** Whether any text is set; a blank pair sends nothing at all. */
+        public boolean present() {
+            return !title.isBlank() || !subtitle.isBlank();
+        }
+    }
 }

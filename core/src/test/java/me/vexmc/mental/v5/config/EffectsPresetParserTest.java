@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStreamReader;
@@ -56,12 +57,16 @@ class EffectsPresetParserTest {
             3,
             "&a+{HEALTH} &c❤&r");
 
-    /** The signature death strike — the cosmetic bolt, glow-squid death call, white/yellow/gold blast. */
+    /** The signature death strike — the cosmetic bolt, glow-squid death call, white/yellow/gold blast, kill title. */
     private static final DeathEffectsSettings SIGNATURE_DEATH = new DeathEffectsSettings(
             true,
             List.of(new SoundSpec("entity.glow_squid.death", 1.0f, 0.95f)),
             List.of(),
-            List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00));
+            List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00),
+            new DeathEffectsSettings.KillTitle(
+                    "&c&lKILLED:&r &f{NAME}&r",
+                    "&c➥&r &7This player's drops are protected for &r&f&n15s&r&7!",
+                    5, 40, 10));
 
     private static YamlConfiguration resource(String stem) {
         String classpath = ConfigStore.EFFECTS_PRESETS_DIR + "/" + stem + ".yml";
@@ -162,6 +167,7 @@ class EffectsPresetParserTest {
         return SnapshotParser.parse(new ConfigStore.Sources(
                 empty, new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
                 new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(),
                 effects, presets, Map.of()));
     }
 
@@ -187,6 +193,38 @@ class EffectsPresetParserTest {
         assertEquals(SIGNATURE_HIT, settings(snapshot, Feature.HIT_FEEDBACK));
         assertEquals(SIGNATURE_INDICATORS, settings(snapshot, Feature.DAMAGE_INDICATORS));
         assertEquals(SIGNATURE_DEATH, settings(snapshot, Feature.DEATH_EFFECTS));
+        assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
+    }
+
+    @Test
+    void anEffectsOverlayFieldOverridesThePresetValuePerField() throws Exception {
+        // Simulate what Overlay.apply does at load: set per-field overrides on
+        // the effects.yml root under effects.<module>.<field>. The parser layers
+        // them over the selected preset — overridden fields win, the rest keep
+        // the preset value (effective = overlay ?? preset ?? default).
+        YamlConfiguration effects = new YamlConfiguration();
+        effects.loadFromString("effects:\n  preset: signature\n");
+        effects.set("effects.death.kill-title", "&aOVERRIDDEN {NAME}");
+        effects.set("effects.death.title-stay", 80);
+        effects.set("effects.death.lightning", false);
+        effects.set("effects.indicators.text", "&e{HEALTH}");
+        SnapshotParser.Result result = SnapshotParser.parse(new ConfigStore.Sources(
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(),
+                effects, bundledPresetSources(), Map.of()));
+        Snapshot snapshot = result.snapshot();
+
+        DeathEffectsSettings death = settings(snapshot, Feature.DEATH_EFFECTS);
+        assertEquals("&aOVERRIDDEN {NAME}", death.killTitle().title(), "the overridden title wins");
+        assertEquals(80, death.killTitle().stay(), "the overridden timing wins");
+        assertEquals("&c➥&r &7This player's drops are protected for &r&f&n15s&r&7!",
+                death.killTitle().subtitle(), "an un-overridden field keeps the preset value");
+        assertFalse(death.lightning(), "the lightning override wins over the signature's true");
+
+        DamageIndicatorsSettings indicators = settings(snapshot, Feature.DAMAGE_INDICATORS);
+        assertEquals("&e{HEALTH}", indicators.text(), "the indicator text override wins");
+        assertEquals("&c&l** -{HEALTH} ❤ **", indicators.critText(), "un-overridden crit-text keeps the preset");
         assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
     }
 
@@ -402,6 +440,43 @@ class EffectsPresetParserTest {
     }
 
     @Test
+    void deathEffectsKillTitleParsesWithColourCodesAndClampedTimings() throws Exception {
+        // The kill-title block carries a coloured title/subtitle (codes ride the
+        // raw string untouched) and three client-tick timings; a stay past the
+        // ceiling clamps loud, an absent block keeps KillTitle.NONE.
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                death-effects:
+                  kill-title:
+                    title: "&c&lKILLED:&r &f{NAME}&r"
+                    subtitle: "&7protected for {PROTECT_SECONDS}s"
+                    fade-in: 5
+                    stay: 999
+                    fade-out: 10
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("titled", file, issues);
+        DeathEffectsSettings.KillTitle title = parsed.deathEffects().killTitle();
+        assertEquals("&c&lKILLED:&r &f{NAME}&r", title.title());
+        assertEquals("&7protected for {PROTECT_SECONDS}s", title.subtitle());
+        assertEquals(5, title.fadeIn());
+        assertEquals(400, title.stay(), "stay clamps to the 400-tick ceiling");
+        assertEquals(10, title.fadeOut());
+        assertTrue(title.present(), "text is set — a title is sent");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("stay"), () -> issues.all().get(0));
+    }
+
+    @Test
+    void deathEffectsWithNoKillTitleBlockIsTitleless() throws Exception {
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("death-effects:\n  lightning: true\n");
+        EffectsPreset parsed = EffectsPresetParser.parse("bare", file, new ConfigIssues());
+        assertEquals(DeathEffectsSettings.KillTitle.NONE, parsed.deathEffects().killTitle());
+        assertTrue(!parsed.deathEffects().killTitle().present(), "no text — sends nothing");
+    }
+
+    @Test
     void deathEffectsWithoutAFireworkBlockLaunchesNone() throws Exception {
         // Absent (or empty) firework: means NO firework — the block is opt-in.
         YamlConfiguration file = new YamlConfiguration();
@@ -455,6 +530,7 @@ class EffectsPresetParserTest {
         SnapshotParser.Result result = SnapshotParser.parse(new ConfigStore.Sources(
                 main, new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
                 new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(),
                 effects, presets, Map.of()));
         assertEquals(HitFeedbackSettings.DEFAULTS,
                 settings(result.snapshot(), Feature.HIT_FEEDBACK),

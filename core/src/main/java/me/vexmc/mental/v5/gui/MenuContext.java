@@ -19,7 +19,8 @@ import org.jetbrains.annotations.NotNull;
  * goes through {@link Management} (or the machine overlay for the always-on config
  * sections), never the human YAML.</p>
  */
-public record MenuContext(@NotNull MentalPluginV5 plugin, @NotNull Management management) {
+public record MenuContext(
+        @NotNull MentalPluginV5 plugin, @NotNull Management management, @NotNull ChatPrompt chatPrompt) {
 
     /** The region-correct scheduling surface menus dispatch their inventory work on. */
     public @NotNull Scheduling scheduling() {

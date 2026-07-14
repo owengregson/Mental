@@ -53,7 +53,9 @@ class FeatureRegistryTest {
             // FEEDBACK (2.5.2)
             "hit-feedback",
             "damage-indicators",
-            "death-effects");
+            "death-effects",
+            // LOOT (2.7.0)
+            "drop-protection");
 
     @Test
     void yamlKeysAreExactlyTheOperatorContractSetUniqueAndNonNull() {

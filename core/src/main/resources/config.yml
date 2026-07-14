@@ -330,9 +330,17 @@ modules:
   damage-indicators: false
   # death-effects: a cosmetic strike the moment a player dies, from ANY cause
   # (PlayerDeathEvent) — optional packet-rendered lightning, sounds, a colored
-  # firework blast, and particles at the death spot. Tuned in the selected
-  # effects/presets/ file. Default OFF.
+  # firework blast, particles, and a kill title to the killer. Tuned in the
+  # selected effects/presets/ file. Default OFF.
   death-effects: false
+
+  # ── Loot Protection ────────────────────────────────────────────────────────
+  # drop-protection: when a player kills another player, the victim's dropped
+  # items are locked to the KILLER for a configurable window (drop-protection.yml)
+  # and glow gold to the killer alone — everyone else sees a plain drop they
+  # cannot pick up until the window elapses, after which the loot is free-for-all.
+  # Only PvP kills trigger it; mob/environmental deaths drop normally. Default OFF.
+  drop-protection: false
 
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky

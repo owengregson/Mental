@@ -62,10 +62,7 @@ public final class DebugMenu extends Menu {
         boolean masterOn = ctx.plugin().snapshot().debug().enabled();
         set(4, Buttons.toggle("REDSTONE_TORCH", "Debug logging", masterOn,
                 "Master switch for verbose logging. Enable it, then pick channels below."),
-                click -> apply(viewer, () -> {
-                    ctx.plugin().overlaySet(ENABLED_KEY, !masterOn);
-                    ctx.management().reload();
-                }));
+                click -> apply(viewer, () -> ctx.management().setOverlay(ENABLED_KEY, !masterOn)));
 
         Set<String> active = ctx.plugin().snapshot().debug().categories();
         DebugCategory[] values = DebugCategory.values();
@@ -73,10 +70,8 @@ public final class DebugMenu extends Menu {
             DebugCategory category = values[i];
             boolean on = active.contains(category.key());
             set(CATEGORY_SLOTS[i], categoryTile(category, on),
-                    click -> apply(viewer, () -> {
-                        ctx.plugin().overlaySet(CATEGORY_PREFIX + category.key(), !on);
-                        ctx.management().reload();
-                    }));
+                    click -> apply(viewer,
+                            () -> ctx.management().setOverlay(CATEGORY_PREFIX + category.key(), !on)));
         }
 
         // The player-facing sink toggle: route the active channels above to the

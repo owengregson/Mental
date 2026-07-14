@@ -46,6 +46,7 @@ public final class ConfigStore {
     public static final String COMBO_FILE = "combo.yml";
     public static final String POTS_FILE = "pots.yml";
     public static final String LOADOUT_FILE = "loadout.yml";
+    public static final String DROP_PROTECTION_FILE = "drop-protection.yml";
     public static final String EFFECTS_DIR = "effects";
     /** The Combat Effects selection file — {@code knockback.yml}'s role for the FEEDBACK family. */
     public static final String EFFECTS_FILE = "effects.yml";
@@ -140,6 +141,7 @@ public final class ConfigStore {
             Configuration combo,
             Configuration pots,
             Configuration loadout,
+            Configuration dropProtection,
             Configuration effects,
             Map<String, Configuration> effectsPresets,
             Map<String, Configuration> profiles) {
@@ -159,7 +161,7 @@ public final class ConfigStore {
                 Map<String, Configuration> profiles) {
             return new Sources(main, knockback, hitReg, latency,
                     new MemoryConfiguration(), new MemoryConfiguration(), new MemoryConfiguration(),
-                    new MemoryConfiguration(), Map.of(),
+                    new MemoryConfiguration(), new MemoryConfiguration(), Map.of(),
                     profiles);
         }
     }
@@ -190,6 +192,9 @@ public final class ConfigStore {
         extractIfMissing(KNOCKBACK_FILE, dataDir.resolve(KNOCKBACK_FILE));
         extractIfMissing(HIT_REG_FILE, dataDir.resolve(HIT_REG_FILE));
         extractIfMissing(LATENCY_FILE, dataDir.resolve(LATENCY_FILE));
+        // drop-protection.yml (2.7.0) is a brand-new concern file with no old
+        // config.yml location, so it extracts unconditionally when missing.
+        extractIfMissing(DROP_PROTECTION_FILE, dataDir.resolve(DROP_PROTECTION_FILE));
         // The 2.5.2 per-concern splits extract like everything else — only when
         // missing — with ONE guard: while config.yml still carries a section
         // that moved into the file, extraction is suppressed so a pristine
@@ -426,6 +431,7 @@ public final class ConfigStore {
                 loadYaml(dataDir.resolve(COMBO_FILE), COMBO_FILE),
                 loadYaml(dataDir.resolve(POTS_FILE), POTS_FILE),
                 loadYaml(dataDir.resolve(LOADOUT_FILE), LOADOUT_FILE),
+                loadYaml(dataDir.resolve(DROP_PROTECTION_FILE), DROP_PROTECTION_FILE),
                 loadYaml(dataDir.resolve(EFFECTS_FILE), EFFECTS_FILE),
                 loadEffectsPresets(),
                 profiles);

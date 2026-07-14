@@ -14,6 +14,7 @@ import me.vexmc.mental.v5.config.ProbeStrategy;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
+import me.vexmc.mental.v5.gui.ChatPrompt;
 import me.vexmc.mental.v5.gui.DashboardMenu;
 import me.vexmc.mental.v5.gui.EffectsPresetMenu;
 import me.vexmc.mental.v5.gui.KnockbackFormulaMenu;
@@ -124,7 +125,8 @@ public final class BootSuite {
                     // main/region-affine on some servers); no viewer is needed — the String-title path and
                     // the headless icon render exercise every sink.
                     context.syncRun(() -> {
-                        MenuContext menuContext = new MenuContext(mental, mental.management());
+                        MenuContext menuContext = new MenuContext(
+                                mental, mental.management(), new ChatPrompt(mental.scheduling()));
                         DashboardMenu dashboard = new DashboardMenu(menuContext);
 
                         List<ItemStack> icons = dashboard.selfTestIcons();

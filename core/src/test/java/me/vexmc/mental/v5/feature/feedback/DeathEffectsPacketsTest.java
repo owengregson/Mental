@@ -16,8 +16,15 @@ import com.github.retrooper.packetevents.netty.NettyManager;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.protocol.particle.data.ParticleDustData;
 import com.github.retrooper.packetevents.util.Vector3d;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetTitleSubtitle;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetTitleText;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetTitleTimes;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTitle;
 import io.github.retrooper.packetevents.impl.netty.NettyManagerImpl;
+import me.vexmc.mental.v5.config.settings.DeathEffectsSettings.KillTitle;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -127,5 +134,50 @@ class DeathEffectsPacketsTest {
         assertEquals(boltId, spawn.getEntityId(), "the shared cosmetic-bolt id");
         assertSame(EntityTypes.LIGHTNING_BOLT, spawn.getEntityType(), "a client-only lightning render");
         assertEquals(death, spawn.getPosition(), "spawned at the frozen death location");
+    }
+
+    // ---------------------------------------------------------------------
+    // The kill-title wire — modern (1.17+) split packets and the legacy combined.
+    // ---------------------------------------------------------------------
+
+    private static final KillTitle KILL_TITLE = new KillTitle(
+            "&c&lKILLED:&r &fSteve&r", "&7protected", 5, 40, 10);
+
+    @Test
+    void modernTitleTimesCarriesTheThreeTickValues() {
+        WrapperPlayServerSetTitleTimes times = DeathEffectsListener.titleTimes(KILL_TITLE);
+        assertEquals(5, times.getFadeInTicks());
+        assertEquals(40, times.getStayTicks());
+        assertEquals(10, times.getFadeOutTicks());
+    }
+
+    @Test
+    void modernTitleTextAndSubtitleCarryTheirComponents() {
+        Component title = LegacyComponentSerializer.legacyAmpersand().deserialize("&c&lKILLED:&r &fSteve&r");
+        Component subtitle = LegacyComponentSerializer.legacyAmpersand().deserialize("&7protected");
+        WrapperPlayServerSetTitleText text = DeathEffectsListener.titleText(title);
+        WrapperPlayServerSetTitleSubtitle sub = DeathEffectsListener.titleSubtitle(subtitle);
+        assertEquals(title, text.getTitle(), "the title component rides the modern text packet");
+        assertEquals(subtitle, sub.getSubtitle(), "the subtitle component rides the modern subtitle packet");
+    }
+
+    @Test
+    void legacyTitlePacketsCarryTheRightActionsAndPayloads() {
+        Component title = LegacyComponentSerializer.legacyAmpersand().deserialize("&c&lKILLED:&r &fSteve&r");
+        Component subtitle = LegacyComponentSerializer.legacyAmpersand().deserialize("&7protected");
+
+        WrapperPlayServerTitle times = DeathEffectsListener.legacyTitleTimes(KILL_TITLE);
+        assertSame(WrapperPlayServerTitle.TitleAction.SET_TIMES_AND_DISPLAY, times.getAction());
+        assertEquals(5, times.getFadeInTicks());
+        assertEquals(40, times.getStayTicks());
+        assertEquals(10, times.getFadeOutTicks());
+
+        WrapperPlayServerTitle titlePacket = DeathEffectsListener.legacyTitleText(title);
+        assertSame(WrapperPlayServerTitle.TitleAction.SET_TITLE, titlePacket.getAction());
+        assertEquals(title, titlePacket.getTitle());
+
+        WrapperPlayServerTitle subPacket = DeathEffectsListener.legacyTitleSubtitle(subtitle);
+        assertSame(WrapperPlayServerTitle.TitleAction.SET_SUBTITLE, subPacket.getAction());
+        assertEquals(subtitle, subPacket.getSubtitle());
     }
 }
