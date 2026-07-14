@@ -95,4 +95,24 @@ public final class Management {
         plugin.overlaySet("modules." + feature.yamlKey(), enabled);
         return plugin.reloadAll();
     }
+
+    /**
+     * Writes one machine-overlay key and reloads — the single write-back the
+     * in-GUI value editors, the compatibility screen, and the debug screen all
+     * flow through, so no GUI code reaches past this seam into the plugin's
+     * overlay directly. The key is a dotted config path (e.g.
+     * {@code effects.death.kill-title}, {@code drop-protection.seconds},
+     * {@code anticheat.mode}); the human files are never re-serialized.
+     * Returns the reload's warn-and-fallback issues.
+     */
+    public @NotNull List<String> setOverlay(@NotNull String key, @NotNull Object value) {
+        plugin.overlaySet(key, value);
+        return plugin.reloadAll();
+    }
+
+    /** Clears one machine-overlay key (reset an in-GUI edit back to the file / preset) and reloads. */
+    public @NotNull List<String> clearOverlay(@NotNull String key) {
+        plugin.overlayRemove(key);
+        return plugin.reloadAll();
+    }
 }

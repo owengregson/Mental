@@ -640,6 +640,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         overlay.set(key, value);
     }
 
+    /** Clears one machine-overlay key (reset to the human file / preset value); persists. */
+    public void overlayRemove(@NotNull String key) {
+        overlay.remove(key);
+    }
+
     /** True when {@code feature} has an open scope right now (the tester's module-active check). */
     public boolean featureActive(@NotNull Feature feature) {
         return reconciler.active(feature);

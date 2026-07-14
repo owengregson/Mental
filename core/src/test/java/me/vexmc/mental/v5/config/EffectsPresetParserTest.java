@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStreamReader;
@@ -192,6 +193,38 @@ class EffectsPresetParserTest {
         assertEquals(SIGNATURE_HIT, settings(snapshot, Feature.HIT_FEEDBACK));
         assertEquals(SIGNATURE_INDICATORS, settings(snapshot, Feature.DAMAGE_INDICATORS));
         assertEquals(SIGNATURE_DEATH, settings(snapshot, Feature.DEATH_EFFECTS));
+        assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
+    }
+
+    @Test
+    void anEffectsOverlayFieldOverridesThePresetValuePerField() throws Exception {
+        // Simulate what Overlay.apply does at load: set per-field overrides on
+        // the effects.yml root under effects.<module>.<field>. The parser layers
+        // them over the selected preset — overridden fields win, the rest keep
+        // the preset value (effective = overlay ?? preset ?? default).
+        YamlConfiguration effects = new YamlConfiguration();
+        effects.loadFromString("effects:\n  preset: signature\n");
+        effects.set("effects.death.kill-title", "&aOVERRIDDEN {NAME}");
+        effects.set("effects.death.title-stay", 80);
+        effects.set("effects.death.lightning", false);
+        effects.set("effects.indicators.text", "&e{HEALTH}");
+        SnapshotParser.Result result = SnapshotParser.parse(new ConfigStore.Sources(
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(),
+                effects, bundledPresetSources(), Map.of()));
+        Snapshot snapshot = result.snapshot();
+
+        DeathEffectsSettings death = settings(snapshot, Feature.DEATH_EFFECTS);
+        assertEquals("&aOVERRIDDEN {NAME}", death.killTitle().title(), "the overridden title wins");
+        assertEquals(80, death.killTitle().stay(), "the overridden timing wins");
+        assertEquals("&c➥&r &7This player's drops are protected for &r&f&n15s&r&7!",
+                death.killTitle().subtitle(), "an un-overridden field keeps the preset value");
+        assertFalse(death.lightning(), "the lightning override wins over the signature's true");
+
+        DamageIndicatorsSettings indicators = settings(snapshot, Feature.DAMAGE_INDICATORS);
+        assertEquals("&e{HEALTH}", indicators.text(), "the indicator text override wins");
+        assertEquals("&c&l** -{HEALTH} ❤ **", indicators.critText(), "un-overridden crit-text keeps the preset");
         assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
     }
 

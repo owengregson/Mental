@@ -64,6 +64,10 @@ public final class Overlay {
             case "combo-hold", "combo-reach-handicap" -> sources.combo();
             case "pot-fill", "fast-pots" -> sources.pots();
             case "disable-offhand", "disable-crafting" -> sources.loadout();
+            // The 2.7.0 Loot Protection tunables (seconds, glow-color): an
+            // in-GUI edit rides the drop-protection.yml root, winning over the
+            // file exactly as every other split override does.
+            case "drop-protection" -> sources.dropProtection();
             // The 2.5.3 Combat Effects selection: effects.preset (the GUI's
             // preset picker and the tester's staging key) rides the effects.yml
             // root the parser reads the selection from. The three retired
