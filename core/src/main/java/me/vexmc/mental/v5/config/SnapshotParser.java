@@ -246,6 +246,7 @@ public final class SnapshotParser {
                 reader.text("text", preset.text()),
                 reader.text("crit-text", preset.critText()),
                 preset.critThresholdHearts(),
+                preset.rollHoldTicks(),
                 reader.text("heal-text", preset.healText()));
     }
 
