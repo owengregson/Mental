@@ -11,6 +11,7 @@ import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DebugSettings;
+import me.vexmc.mental.v5.config.settings.DropProtectionSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
@@ -184,6 +185,8 @@ public final class SnapshotParser {
                     moved.reachHandicap(), moved.comboHold().sub("reach-handicap"));
             case POT_FILL -> parsePotFill(moved.potFill());
             case FAST_POTS -> parseFastPots(moved.fastPots());
+            case DROP_PROTECTION -> parseDropProtection(reader(
+                    sources.dropProtection(), "drop-protection", ConfigStore.DROP_PROTECTION_FILE, issues));
             // The FEEDBACK family reads the selected Combat Effects preset —
             // one tune, three sections (the knockback-profile model).
             case HIT_FEEDBACK -> effects.hitFeedback();
@@ -430,6 +433,21 @@ public final class SnapshotParser {
         return new PotFillSettings(
                 reader.text("permission", d.permission()),
                 reader.numberAtLeast("cost-per-potion", d.costPerPotion(), 0.0));
+    }
+
+    /**
+     * The {@code drop-protection} tunables: the killer-only pickup window in
+     * whole seconds (at least 1, capped at an hour so a typo cannot lock loot
+     * forever) and the per-player glow colour (GOLD or YELLOW — the two named
+     * team colours near the requested gold tint). Every knob is an era-exact
+     * no-op only because the module defaults OFF; enabled-at-DEFAULTS is the
+     * shipped 15-second gold-glow feel.
+     */
+    private static DropProtectionSettings parseDropProtection(ConfigReader reader) {
+        DropProtectionSettings d = DropProtectionSettings.DEFAULTS;
+        return new DropProtectionSettings(
+                reader.intClamped("seconds", d.seconds(), 1, 3600),
+                reader.oneOf("glow-color", d.glowColor(), DropProtectionSettings.GlowColor.class));
     }
 
     private static FastPotsSettings parseFastPots(ConfigReader reader) {

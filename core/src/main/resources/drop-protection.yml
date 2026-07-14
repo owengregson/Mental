@@ -1,0 +1,28 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  Mental — the Loot Protection family (drop-protection)
+#
+#  Settings only: the on/off switch lives in config.yml under modules:
+#  (modules.drop-protection — default OFF). When enabled, a player killed by
+#  another player has their dropped items locked to the KILLER for the window
+#  below and glowing to the killer alone; everyone else sees a plain drop they
+#  cannot pick up until the window elapses, after which the loot is free for
+#  anyone. Only PvP kills trigger it — mob and environmental deaths drop
+#  exactly as vanilla.
+#
+#  The block below is optional and shown at its defaults — an absent block (or
+#  an absent key) means exactly these values, so uncomment only what you change.
+#  These same values are also editable in-game from the Loot Protection screen
+#  of the /mental menu (which writes the machine overlay, never this file).
+#  Deleting this file regenerates the pristine bundle.
+# ──────────────────────────────────────────────────────────────────────────
+
+drop-protection:
+  # seconds: how long the victim's drops stay locked to the killer, in whole
+  # seconds. After it elapses the loot is free-for-all. Clamped to [1, 3600].
+  seconds: 15
+
+  # glow-color: the colour of the glow the KILLER (and only the killer) sees on
+  # the protected items. The client draws the glow in a named team colour, so
+  # only the 16 chat colours are possible — Mental offers the two nearest the
+  # requested gold: GOLD (&6) or YELLOW (&e).
+  glow-color: GOLD

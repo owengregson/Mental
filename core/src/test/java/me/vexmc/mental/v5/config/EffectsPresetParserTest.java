@@ -166,6 +166,7 @@ class EffectsPresetParserTest {
         return SnapshotParser.parse(new ConfigStore.Sources(
                 empty, new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
                 new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(),
                 effects, presets, Map.of()));
     }
 
@@ -496,6 +497,7 @@ class EffectsPresetParserTest {
         SnapshotParser.Result result = SnapshotParser.parse(new ConfigStore.Sources(
                 main, new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
                 new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(),
                 effects, presets, Map.of()));
         assertEquals(HitFeedbackSettings.DEFAULTS,
                 settings(result.snapshot(), Feature.HIT_FEEDBACK),

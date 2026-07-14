@@ -8,6 +8,7 @@ import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
+import me.vexmc.mental.v5.config.settings.DropProtectionSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
@@ -91,11 +92,17 @@ public final class DeathEffectsUnit implements FeatureUnit {
 
     /**
      * The {@code {PROTECT_SECONDS}} token value — the configured Drop Protection
-     * window in whole seconds, or {@code ""} when that feature is off. Part B
-     * (drop-protection) fills the live read; until then the feature does not
-     * exist, so the token is correctly blank.
+     * window in whole seconds, or {@code ""} when that feature is off. Read live
+     * from the snapshot so a drop-protection reload is reflected without
+     * re-assembling death-effects.
      */
+    @SuppressWarnings("unchecked")
     private static String protectSecondsToken(Snapshot snapshot) {
-        return "";
+        if (!snapshot.enabled(Feature.DROP_PROTECTION)) {
+            return "";
+        }
+        DropProtectionSettings dropProtection = snapshot.settings(
+                (SettingsKey<DropProtectionSettings>) Feature.DROP_PROTECTION.settingsKey());
+        return Integer.toString(dropProtection.seconds());
     }
 }

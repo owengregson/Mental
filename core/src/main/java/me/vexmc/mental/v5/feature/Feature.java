@@ -5,6 +5,7 @@ import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
 import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
+import me.vexmc.mental.v5.config.settings.DropProtectionSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
 import me.vexmc.mental.v5.config.settings.FishingKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.HitFeedbackSettings;
@@ -358,7 +359,21 @@ public enum Feature {
                     Facets.handled(),
                     Facets.none("no damage contribution"),
                     Facets.none("no damage contribution")),
-            new SettingsKey<>("death-effects", DeathEffectsSettings.class));
+            new SettingsKey<>("death-effects", DeathEffectsSettings.class)),
+
+    /* --------------------------------- LOOT --------------------------------- */
+
+    DROP_PROTECTION("drop-protection", Family.LOOT, "Drop Protection",
+            "Lock a slain player's drops to their killer for a few seconds — gold-glowing to the killer only.",
+            "CHEST", false,
+            new Facets(
+                    // A pure Bukkit rule: capture the drops on death, gate pickup on the event.
+                    Facets.handled(),
+                    // The gold glow is a per-connection cosmetic sent to the killer alone.
+                    Facets.handled(),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("drop-protection", DropProtectionSettings.class));
 
     private final String yamlKey;
     private final Family family;

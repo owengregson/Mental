@@ -15,6 +15,7 @@ import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
+import me.vexmc.mental.v5.config.settings.DropProtectionSettings;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
 import me.vexmc.mental.v5.config.settings.DeathEffectsSettings;
 import me.vexmc.mental.v5.config.settings.FastPotsSettings;
@@ -56,6 +57,7 @@ class SnapshotTest {
                 yaml(files.getOrDefault(ConfigStore.COMBO_FILE, "")),
                 yaml(files.getOrDefault(ConfigStore.POTS_FILE, "")),
                 yaml(files.getOrDefault(ConfigStore.LOADOUT_FILE, "")),
+                yaml(files.getOrDefault(ConfigStore.DROP_PROTECTION_FILE, "")),
                 yaml(files.getOrDefault(ConfigStore.EFFECTS_FILE, "")),
                 Map.of(),
                 Map.of());
@@ -135,6 +137,9 @@ class SnapshotTest {
         assertTrue(death.sounds().isEmpty(), "vanilla death tune plays nothing");
         assertTrue(death.particles().isEmpty(), "vanilla death tune pops nothing");
         assertTrue(death.fireworkColors().isEmpty(), "vanilla death tune launches no firework");
+        // Drop protection defaults to the shipped 15-second gold-glow window
+        // (inert while the module is OFF, which is the default).
+        assertEquals(DropProtectionSettings.DEFAULTS, settings(snapshot, Feature.DROP_PROTECTION));
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -154,6 +159,33 @@ class SnapshotTest {
 
     private static AnticheatMode AnticheatModeDefault() {
         return AnticheatMode.AUTO;
+    }
+
+    @Test
+    void dropProtectionParsesSecondsAndGlowColor() throws Exception {
+        SnapshotParser.Result result = parseFiles(Map.of(ConfigStore.DROP_PROTECTION_FILE, """
+                drop-protection:
+                  seconds: 30
+                  glow-color: YELLOW
+                """));
+        assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
+        DropProtectionSettings dp = settings(result.snapshot(), Feature.DROP_PROTECTION);
+        assertEquals(30, dp.seconds());
+        assertEquals(DropProtectionSettings.GlowColor.YELLOW, dp.glowColor());
+    }
+
+    @Test
+    void dropProtectionClampsSecondsAndFallsBackOnUnknownColor() throws Exception {
+        SnapshotParser.Result result = parseFiles(Map.of(ConfigStore.DROP_PROTECTION_FILE, """
+                drop-protection:
+                  seconds: 0
+                  glow-color: rainbow
+                """));
+        DropProtectionSettings dp = settings(result.snapshot(), Feature.DROP_PROTECTION);
+        assertEquals(1, dp.seconds(), "seconds clamps to a floor of 1");
+        assertEquals(DropProtectionSettings.GlowColor.GOLD, dp.glowColor(),
+                "an unknown glow colour falls back to the GOLD default");
+        assertEquals(2, result.issues().size(), () -> "issues: " + result.issues());
     }
 
     @Test

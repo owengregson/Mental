@@ -30,7 +30,9 @@ public enum Family {
     POTS("Potions", "SPLASH_POTION",
             "Splash-potion utilities — the /potfill command and steep-throw fast pots."),
     FEEDBACK("Combat Effects", "NOTE_BLOCK",
-            "Hit sounds and particles, pop-off damage indicators, and death effects.");
+            "Hit sounds and particles, pop-off damage indicators, and death effects."),
+    LOOT("Loot Protection", "CHEST",
+            "Reserve a slain player's drops to their killer for a short window, gold-glowing to the killer.");
 
     private final String displayName;
     private final String iconName;
