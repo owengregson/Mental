@@ -466,12 +466,17 @@ public final class Migrations {
                     true,
                     FROZEN_SIGNATURE_DEATH_SOUNDS,
                     List.of(),
-                    FROZEN_SIGNATURE_FIREWORK_COLORS);
+                    FROZEN_SIGNATURE_FIREWORK_COLORS,
+                    // The 2.5.2 tune predates kill-title (2.7.0); the imported
+                    // values carry none — the new title arrives only on a fresh
+                    // signature selection or the pristine-upgrade path.
+                    DeathEffectsSettings.KillTitle.NONE);
             case "custom" -> new DeathEffectsSettings(
                     reader.flag("lightning", false),
                     EffectsPresetParser.parseSounds(reader, "sounds", List.of()),
                     EffectsPresetParser.parseParticles(reader, List.of()),
-                    EffectsPresetParser.parseFireworkColors(reader, List.of()));
+                    EffectsPresetParser.parseFireworkColors(reader, List.of()),
+                    EffectsPresetParser.parseKillTitle(reader, DeathEffectsSettings.KillTitle.NONE));
             default -> DeathEffectsSettings.DEFAULTS;
         };
     }

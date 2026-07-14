@@ -169,7 +169,30 @@ public final class EffectsPresetParser {
                 reader.flag("lightning", d.lightning()),
                 parseSounds(reader, "sounds", d.sounds()),
                 parseParticles(reader, d.particles()),
-                parseFireworkColors(reader, d.fireworkColors()));
+                parseFireworkColors(reader, d.fireworkColors()),
+                parseKillTitle(reader, d.killTitle()));
+    }
+
+    /**
+     * The {@code kill-title:} block — the title + subtitle flashed to the killer
+     * of an enemy player. An absent block keeps the fallback whole, so a
+     * {@code death-effects} section with no kill-title stays the era-exact
+     * no-op; an absent line inside a present block keeps that field's fallback.
+     * The three timings are client title ticks, clamped to sane bounds
+     * (a stay past 400 ticks is almost certainly a typo).
+     */
+    static DeathEffectsSettings.KillTitle parseKillTitle(
+            ConfigReader reader, DeathEffectsSettings.KillTitle fallback) {
+        ConfigReader title = reader.sub("kill-title");
+        if (title.section() == null) {
+            return fallback;
+        }
+        return new DeathEffectsSettings.KillTitle(
+                title.text("title", fallback.title()),
+                title.text("subtitle", fallback.subtitle()),
+                title.intClamped("fade-in", fallback.fadeIn(), 0, 200),
+                title.intClamped("stay", fallback.stay(), 0, 400),
+                title.intClamped("fade-out", fallback.fadeOut(), 0, 200));
     }
 
     /* ------------------------------------------------------------------ */

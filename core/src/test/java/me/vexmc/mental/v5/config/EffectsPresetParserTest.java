@@ -56,12 +56,16 @@ class EffectsPresetParserTest {
             3,
             "&a+{HEALTH} &c❤&r");
 
-    /** The signature death strike — the cosmetic bolt, glow-squid death call, white/yellow/gold blast. */
+    /** The signature death strike — the cosmetic bolt, glow-squid death call, white/yellow/gold blast, kill title. */
     private static final DeathEffectsSettings SIGNATURE_DEATH = new DeathEffectsSettings(
             true,
             List.of(new SoundSpec("entity.glow_squid.death", 1.0f, 0.95f)),
             List.of(),
-            List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00));
+            List.of(0xFFFFFF, 0xFFFF55, 0xFFAA00),
+            new DeathEffectsSettings.KillTitle(
+                    "&c&lKILLED:&r &f{NAME}&r",
+                    "&c➥&r &7This player's drops are protected for &r&f&n15s&r&7!",
+                    5, 40, 10));
 
     private static YamlConfiguration resource(String stem) {
         String classpath = ConfigStore.EFFECTS_PRESETS_DIR + "/" + stem + ".yml";
@@ -399,6 +403,43 @@ class EffectsPresetParserTest {
         assertEquals(List.of(0xFF00AA, 0x00FF55), death.fireworkColors(),
                 "firework colors parse from hex, # prefix tolerated, config order kept");
         assertTrue(issues.all().isEmpty(), () -> "issues: " + issues.all());
+    }
+
+    @Test
+    void deathEffectsKillTitleParsesWithColourCodesAndClampedTimings() throws Exception {
+        // The kill-title block carries a coloured title/subtitle (codes ride the
+        // raw string untouched) and three client-tick timings; a stay past the
+        // ceiling clamps loud, an absent block keeps KillTitle.NONE.
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                death-effects:
+                  kill-title:
+                    title: "&c&lKILLED:&r &f{NAME}&r"
+                    subtitle: "&7protected for {PROTECT_SECONDS}s"
+                    fade-in: 5
+                    stay: 999
+                    fade-out: 10
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("titled", file, issues);
+        DeathEffectsSettings.KillTitle title = parsed.deathEffects().killTitle();
+        assertEquals("&c&lKILLED:&r &f{NAME}&r", title.title());
+        assertEquals("&7protected for {PROTECT_SECONDS}s", title.subtitle());
+        assertEquals(5, title.fadeIn());
+        assertEquals(400, title.stay(), "stay clamps to the 400-tick ceiling");
+        assertEquals(10, title.fadeOut());
+        assertTrue(title.present(), "text is set — a title is sent");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("stay"), () -> issues.all().get(0));
+    }
+
+    @Test
+    void deathEffectsWithNoKillTitleBlockIsTitleless() throws Exception {
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("death-effects:\n  lightning: true\n");
+        EffectsPreset parsed = EffectsPresetParser.parse("bare", file, new ConfigIssues());
+        assertEquals(DeathEffectsSettings.KillTitle.NONE, parsed.deathEffects().killTitle());
+        assertTrue(!parsed.deathEffects().killTitle().present(), "no text — sends nothing");
     }
 
     @Test

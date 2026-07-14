@@ -185,3 +185,21 @@ death-effects:
       volume: 1.0
       pitch: 0.95
   particles: []
+  # kill-title: the big title + subtitle flashed to the KILLER at the moment
+  # they kill an ENEMY player — PvP only, never a mob/environmental death and
+  # never a self-kill. Both lines translate '&' colour codes and, when
+  # PlaceholderAPI is installed, its %placeholders%. Mental's own tokens are
+  # substituted first:
+  #   {NAME} / {VICTIM}   the player you just killed
+  #   {KILLER}            you (the killer)
+  #   {PROTECT_SECONDS}   the configured Drop Protection window in whole seconds
+  #                       (blank when the Drop Protection feature is disabled)
+  # Leave BOTH title and subtitle empty to send no title — the era-exact no-op
+  # that keeps this section silent even with the module on. The three timings
+  # are client title ticks (20 ticks = 1 second).
+  kill-title:
+    title: "&c&lKILLED:&r &f{NAME}&r"
+    subtitle: "&c➥&r &7This player's drops are protected for &r&f&n15s&r&7!"
+    fade-in: 5
+    stay: 40
+    fade-out: 10
