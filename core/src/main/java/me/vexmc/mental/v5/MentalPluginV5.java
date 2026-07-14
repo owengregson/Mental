@@ -84,6 +84,7 @@ import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
 import me.vexmc.mental.v5.feature.loadout.HitboxUnit;
 import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
+import me.vexmc.mental.v5.feature.loot.DropProtectionUnit;
 import me.vexmc.mental.v5.feature.pots.FastPotsUnit;
 import me.vexmc.mental.v5.feature.pots.PotFillUnit;
 import me.vexmc.mental.v5.feature.EphemeralDecoration;
@@ -737,6 +738,12 @@ public final class MentalPluginV5 extends JavaPlugin {
                 new DamageIndicatorsUnit(sessions, scheduling, clock, feedbackTrace, getLogger());
         sessions.addForgetHook(damageIndicators::forget);
         reconciler.register(damageIndicators);
+
+        // The loot family (2.7.0). Drop protection locks a slain player's drops
+        // to the killer for a window and glows them gold to the killer alone —
+        // a pure Bukkit rule (capture + version-split pickup gate) plus a global
+        // expiry sweep, all torn down on disable (zero-touch).
+        reconciler.register(new DropProtectionUnit(this::snapshot, scheduling, environment));
 
         // The sustain family (4C). Golden apples + potion durations compute era
         // values from the kernel and apply them at the confirmed terminal event
