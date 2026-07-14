@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5.gui;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import me.vexmc.mental.platform.MenuMaterials;
@@ -125,6 +126,28 @@ public abstract class Menu implements InventoryHolder {
     /** Opens another screen for the viewer (navigation). */
     protected final void navigate(@NotNull Player viewer, @NotNull Menu destination) {
         destination.open(viewer);
+    }
+
+    /** One placed tile: an icon and an optional click handler. */
+    public record Tile(@NotNull ItemStack item, @Nullable Consumer<InventoryClickEvent> onClick) {
+        public static @NotNull Tile of(@NotNull ItemStack item, @Nullable Consumer<InventoryClickEvent> onClick) {
+            return new Tile(item, onClick);
+        }
+    }
+
+    /**
+     * Places {@code tiles} contiguously and centred within the nine-wide row
+     * whose first slot is {@code rowBase} — the one shared layout primitive the
+     * screens build on, retiring the per-screen centring math. Extra tiles past
+     * the row width are dropped (the caller sizes its rows).
+     */
+    protected final void placeCentered(int rowBase, @NotNull List<Tile> tiles) {
+        int count = tiles.size();
+        int start = rowBase + Math.max(0, (9 - count) / 2);
+        for (int i = 0; i < count && start + i <= rowBase + 8; i++) {
+            Tile tile = tiles.get(i);
+            set(start + i, tile.item(), tile.onClick());
+        }
     }
 
     final void handleClick(@NotNull InventoryClickEvent event) {

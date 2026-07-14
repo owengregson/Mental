@@ -39,6 +39,7 @@ import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.command.MentalCommand;
 import me.vexmc.mental.v5.debug.JournalCapture;
 import me.vexmc.mental.v5.debug.PlayerDebugSink;
+import me.vexmc.mental.v5.gui.ChatPrompt;
 import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.v5.gui.MenuManager;
 import me.vexmc.mental.v5.manage.Management;
@@ -180,6 +181,7 @@ public final class MentalPluginV5 extends JavaPlugin {
 
     private Management management;
     private MenuManager menuManager;
+    private ChatPrompt chatPrompt;
     private MentalFacade facade;
 
     private List<String> parseIssues = List.of();
@@ -380,8 +382,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // trivially. Menu reads flow through the live snapshot + reconciler; every
         // write flows through Management / the machine overlay, never the human
         // YAML. The bare /mental opens it for a permitted player.
-        this.menuManager = new MenuManager(new MenuContext(this, management));
+        this.chatPrompt = new ChatPrompt(scheduling);
+        this.menuManager = new MenuManager(new MenuContext(this, management, chatPrompt));
         getServer().getPluginManager().registerEvents(menuManager, this);
+        getServer().getPluginManager().registerEvents(chatPrompt, this);
         PluginCommand command = getCommand("mental");
         if (command != null) {
             command.setExecutor(new MentalCommand(this, menuManager));
@@ -438,6 +442,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         isolate("menu manager shutdown", () -> {
             if (menuManager != null) {
                 menuManager.shutdown();
+            }
+        });
+        isolate("chat prompt shutdown", () -> {
+            if (chatPrompt != null) {
+                chatPrompt.shutdown();
             }
         });
         isolate("reconciler.closeAll", () -> {

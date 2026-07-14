@@ -48,6 +48,63 @@ final class Buttons {
         return icon.build();
     }
 
+    /**
+     * A numeric stepper tile: the current value plus the click grammar every
+     * stepper shares (left/right adjust by one, shift by ten). The caller's click
+     * handler reads {@code event.isRightClick()}/{@code isShiftClick()}.
+     */
+    static @NotNull ItemStack stepper(
+            @NotNull String materialName, @NotNull String title, @NotNull String value,
+            @NotNull String blurb) {
+        Icon icon = title(materialName, title);
+        wrap(blurb).forEach(line -> icon.lore(line, Brand.MUTED));
+        icon.blank();
+        icon.lore(kv("Value", value));
+        icon.lore(Component.text("▸ Left +1   ▸ Shift-Left +10", Brand.SECONDARY));
+        icon.lore(Component.text("▸ Right −1   ▸ Shift-Right −10", Brand.SECONDARY));
+        return icon.build();
+    }
+
+    /** A cycle tile: the current option plus a "click to cycle" hint. */
+    static @NotNull ItemStack cycle(
+            @NotNull String materialName, @NotNull String title, @NotNull String current,
+            @NotNull String blurb) {
+        Icon icon = title(materialName, title);
+        wrap(blurb).forEach(line -> icon.lore(line, Brand.MUTED));
+        icon.blank();
+        icon.lore(kv("Current", current));
+        icon.lore(Component.text("▸ Click to cycle", Brand.SECONDARY));
+        return icon.build();
+    }
+
+    /**
+     * A text-edit tile: the current value (raw {@code &} codes shown so the admin
+     * edits what they see; wrapped), plus a "click to edit in chat" hint. An
+     * empty value shows a muted placeholder.
+     */
+    static @NotNull ItemStack editText(
+            @NotNull String materialName, @NotNull String title, @NotNull String value,
+            @NotNull String blurb) {
+        Icon icon = title(materialName, title);
+        wrap(blurb).forEach(line -> icon.lore(line, Brand.MUTED));
+        icon.blank();
+        if (value.isEmpty()) {
+            icon.lore(Component.text("(empty)", Brand.MUTED));
+        } else {
+            wrap(value).forEach(line -> icon.lore(line, Brand.ACCENT));
+        }
+        icon.lore(Component.text("▸ Click to edit in chat", Brand.SECONDARY));
+        return icon.build();
+    }
+
+    /** A muted-label / accent-value lore line, shared by the value tiles. */
+    private static @NotNull Component kv(@NotNull String label, @NotNull String value) {
+        return Component.text()
+                .append(Component.text(label + ": ", Brand.MUTED))
+                .append(Component.text(value, Brand.ACCENT))
+                .build();
+    }
+
     static @NotNull ItemStack back() {
         return Icon.of(MenuMaterials.of("ARROW"))
                 .name(Component.text("Back", Brand.SECONDARY).decoration(TextDecoration.BOLD, true))
