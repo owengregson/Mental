@@ -3,12 +3,16 @@ package me.vexmc.mental.v5.rim;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.manager.server.ServerVersion;
 import com.github.retrooper.packetevents.protocol.player.User;
+import com.github.retrooper.packetevents.protocol.sound.Sound;
+import com.github.retrooper.packetevents.protocol.sound.SoundCategory;
+import com.github.retrooper.packetevents.protocol.sound.Sounds;
 import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBundle;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerHurtAnimation;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSoundEffect;
 import java.util.List;
 import me.vexmc.mental.kernel.model.KnockbackVector;
 import me.vexmc.mental.kernel.wire.FeedbackPlan;
@@ -48,6 +52,15 @@ public final class BurstSender {
 
     private final boolean modernProtocol;
 
+    /**
+     * The vanilla hurt sound, resolved once at construction. {@code
+     * entity.player.hurt} is UNIVERSAL (1.9.4+) and a KNOWN PacketEvents sound, so
+     * it carries a valid per-version id across the whole range with no era table —
+     * unlike a user-configured name, which is why {@link
+     * me.vexmc.mental.v5.feature.feedback.FeedbackSoundTable} is not needed here.
+     */
+    private final Sound hurtSound;
+
     public BurstSender() {
         this(PacketEvents.getAPI().getServerManager()
                 .getVersion()
@@ -56,6 +69,7 @@ public final class BurstSender {
 
     public BurstSender(boolean modernProtocol) {
         this.modernProtocol = modernProtocol;
+        this.hurtSound = Sounds.getByNameOrCreate("entity.player.hurt");
     }
 
     /**
@@ -88,6 +102,36 @@ public final class BurstSender {
             // The target may be mid-(re)configuration where a Play packet can't
             // encode; drop the burst rather than surface a pipeline exception.
             return Outcome.UNSENDABLE;
+        }
+    }
+
+    /**
+     * Ships the victim's OWN {@code entity.player.hurt} to the victim alone — the
+     * one client vanilla's blocked branch leaves silent (vanilla's hurt BROADCAST
+     * excludes the victim, and its blocked path skips the {@code
+     * ClientboundDamageEventPacket} the victim's client would derive its hurt sound
+     * from). Written SILENTLY like the burst above, so it enters at Mental's own
+     * encoder and BYPASSES Mental's own {@code HurtSoundSuppressor} — otherwise
+     * that suppressor, armed by {@code hit-feedback} for this same hit to eat the
+     * vanilla BYSTANDER broadcast, would also swallow this positional restoration
+     * (the crowded-combat "flinch flashes, sound silent while sword-blocking" gap)
+     * exactly as {@code HitFeedbackListener}'s own replacement is silent-written for
+     * the same reason. A null user (bot / reconfiguring target) is a no-op.
+     *
+     * @param user     the victim's PacketEvents user, or null (no-op)
+     * @param position the victim's world position (the positional sound origin)
+     * @param pitch    the era hurt-sound pitch (vanilla {@code 1 + (r1 − r2) × 0.2})
+     */
+    public void shipHurtSound(User user, Vector3d position, float pitch) {
+        if (user == null) {
+            return;
+        }
+        try {
+            user.writePacketSilently(
+                    new WrapperPlayServerSoundEffect(hurtSound, SoundCategory.PLAYER, position, 1.0f, pitch));
+            user.flushPackets();
+        } catch (Throwable reconfiguring) {
+            // A missed cosmetic beats a surfaced exception on the send path.
         }
     }
 
