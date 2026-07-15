@@ -53,7 +53,7 @@ class EffectsPresetParserTest {
             40, 0.6, 0.3, 0.25, 0.06, 0.05, 0.98,
             "&f-{HEALTH} &c❤&r",
             "&c&l** -{HEALTH} ❤ **",
-            5.0,
+            25.0,
             3,
             "&a+{HEALTH} &c❤&r");
 
@@ -360,6 +360,59 @@ class EffectsPresetParserTest {
         ConfigIssues issues = new ConfigIssues();
         EffectsPreset parsed = EffectsPresetParser.parse("both", file, issues);
         assertEquals(20.0, parsed.hitFeedback().lowHealthThresholdPercent(), 0.0,
+                "the explicit percent wins over the retired hearts key");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("percent wins"), () -> issues.all().get(0));
+    }
+
+    /* --------------------------- the crit-marker percent threshold (2.7.1) --------------------------- */
+
+    @Test
+    void critThresholdPercentClampsToRangeWithAWarning() throws Exception {
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                damage-indicators:
+                  crit-threshold-percent: 140
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("clamped", file, issues);
+        assertEquals(100.0, parsed.damageIndicators().critThresholdPercent(), 0.0,
+                "percent clamps to [0, 100]");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("crit-threshold-percent"), () -> issues.all().get(0));
+    }
+
+    @Test
+    void legacyCritHeartsKeyWarnsOnceAndConvertsToPercent() throws Exception {
+        // The pre-2.7.1 absolute crit-threshold-hearts is retired; a lingering key
+        // (with no percent key) is honoured with one warn and converted hearts × 10
+        // — never silently dropped (mandate B10), the low-health precedent.
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                damage-indicators:
+                  crit-threshold-hearts: 5.0
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("legacy", file, issues);
+        assertEquals(50.0, parsed.damageIndicators().critThresholdPercent(), 0.0,
+                "5 hearts of a 20-max player = 50% of max health");
+        assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
+        assertTrue(issues.all().get(0).contains("crit-threshold-hearts"), () -> issues.all().get(0));
+    }
+
+    @Test
+    void bothCritThresholdKeysPercentWinsWithANotice() throws Exception {
+        // Both present ⇒ the explicit percent wins and the retired hearts key is
+        // noted once — never a silent double-read.
+        YamlConfiguration file = new YamlConfiguration();
+        file.loadFromString("""
+                damage-indicators:
+                  crit-threshold-percent: 30
+                  crit-threshold-hearts: 5.0
+                """);
+        ConfigIssues issues = new ConfigIssues();
+        EffectsPreset parsed = EffectsPresetParser.parse("both", file, issues);
+        assertEquals(30.0, parsed.damageIndicators().critThresholdPercent(), 0.0,
                 "the explicit percent wins over the retired hearts key");
         assertEquals(1, issues.all().size(), () -> "issues: " + issues.all());
         assertTrue(issues.all().get(0).contains("percent wins"), () -> issues.all().get(0));

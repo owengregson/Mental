@@ -8,8 +8,9 @@ package me.vexmc.mental.v5.config.settings;
  * {@code lifetimeTicks}. Text templates carry the {@code {HEALTH}} placeholder
  * (final damage in DAMAGE POINTS / HP — the raw amount the bar loses, one
  * decimal, trailing .0 stripped); the crit variant fires on an era-crit posture
- * OR damage at/above {@code critThresholdHearts} (still a HEARTS threshold —
- * 2 damage = 1 heart — a threshold, not display).
+ * (a critical hit) OR damage at/above {@code critThresholdPercent} PERCENT of
+ * the victim's max (total) health — percent-of-max, not absolute hearts, so it
+ * scales with a scaled-max-health victim (a threshold, not display).
  *
  * @param rollHoldTicks how many server ticks a fresh hit's marker is HELD before
  *        shipping, so vanilla's mid-window UPGRADE deltas fold into the one
@@ -33,7 +34,7 @@ public record DamageIndicatorsSettings(
         double drag,
         String text,
         String critText,
-        double critThresholdHearts,
+        double critThresholdPercent,
         int rollHoldTicks,
         String healText) {
 
@@ -52,7 +53,7 @@ public record DamageIndicatorsSettings(
             40, 0.6, 0.3, 0.25, 0.06, 0.05, 0.98,
             "&f-{HEALTH} &c❤&r",
             "&c&l** -{HEALTH} ❤ **",
-            5.0,
+            25.0,
             3,
             "");
 }

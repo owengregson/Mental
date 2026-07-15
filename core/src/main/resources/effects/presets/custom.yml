@@ -99,9 +99,10 @@ hit-feedback:
 #                     DAMAGE POINTS — the raw amount the health bar loses, NOT
 #                     halved into hearts, so a bare-fist hit reads 1 (not 0.5);
 #                     one decimal, a trailing .0 stripped, '&' colour codes
-#                     translated. The crit variant is used on an era-crit posture
-#                     OR damage at/above crit-threshold-hearts (that THRESHOLD is
-#                     still in HEARTS — 2 damage = 1 heart).
+#                     translated. The crit variant is used on a critical hit (an
+#                     era-crit posture) OR damage at/above crit-threshold-percent
+#                     of the victim's max (total) health — the margin scales
+#                     with a scaled-max-health victim.
 #   heal-text         the HEALING-indicator template, shown to the LAST player
 #                     who hit the healed player within the last 10s (any heal
 #                     source — pots, regen, golden apples, a plugin's setHealth).
@@ -133,7 +134,7 @@ damage-indicators:
   drag: 0.98
   text: "&f-{HEALTH} &c❤&r"
   crit-text: "&c&l** -{HEALTH} ❤ **"
-  crit-threshold-hearts: 5.0
+  crit-threshold-percent: 25.0
   roll-hold-ticks: 3
   heal-text: "&a+{HEALTH} &c❤&r"
 
