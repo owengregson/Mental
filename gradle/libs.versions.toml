@@ -20,8 +20,8 @@ packetevents = "2.13.0"
 # compile classpath stays single-versioned and the shaded copy is API-identical
 # to what core compiles against.
 adventure = "4.9.3"
-annotations = "26.0.2"
-junit = "6.1.1"
+annotations = "26.1.0"
+junit = "6.1.2"
 reflection-remapper = "0.1.3"
 shadow = "9.5.1"
 run-paper = "3.0.2"
