@@ -60,8 +60,8 @@ import org.bukkit.event.entity.EntityDamageEvent;
  *
  * <h2>Units</h2>
  * {@code {HEALTH}} renders in DAMAGE POINTS ({@link IndicatorText}); a bare-fist
- * hit reads {@code 1}, not {@code 0.5}. The crit-threshold knob keeps its HEARTS
- * semantics — it is a threshold, not display.
+ * hit reads {@code 1}, not {@code 0.5}. The crit-threshold knob is a PERCENT of
+ * the victim's max (total) health, scaling with a scaled-max-health victim — it is a threshold, not display.
  *
  * <h2>Same-tick / plugin-bonus fold</h2>
  * An enchantment plugin's bonus (a second {@code victim.damage(bonus, attacker)}
@@ -103,7 +103,7 @@ public final class DamageIndicatorsListener implements Listener {
     private final HealIndicators heal;
 
     private final IndicatorBallistics.Params params;
-    private final double critThresholdDamage; // half-hearts, precomputed from the hearts knob
+    private final double critThresholdPercent; // PERCENT of the victim's max health — the crit-indicator margin
     private final boolean modernSpawn; // server 1.19+: the unified SPAWN_ENTITY packet
     private final boolean bundleSupported; // server 1.19.4+: spawn+metadata land in one client frame
 
@@ -125,7 +125,7 @@ public final class DamageIndicatorsListener implements Listener {
         this.heal = heal;
         this.params = new IndicatorBallistics.Params(
                 settings.launchVertical(), settings.launchOutward(), settings.gravity(), settings.drag());
-        this.critThresholdDamage = settings.critThresholdHearts() * 2.0;
+        this.critThresholdPercent = settings.critThresholdPercent();
         this.modernSpawn = modernSpawn;
         this.bundleSupported = bundleSupported;
     }
@@ -164,9 +164,16 @@ public final class DamageIndicatorsListener implements Listener {
             heal.recordHit(victimId, attackerId, tick);
         }
 
-        // The crit posture is a property of the SWING, not the remaining health, so it
-        // is decided on the RAW finalDamage — a killing overkill still reads crit.
-        boolean crit = DamageShaper.isLegacyCritical(attacker) || finalDamage >= critThresholdDamage;
+        // The crit posture is a property of the SWING, not the REMAINING health, so it
+        // is decided on the RAW finalDamage — a killing overkill still reads crit. The
+        // marker fires on a critical hit ({@code isLegacyCritical}) OR a hit landing at
+        // or above the configured PERCENT of the victim's MAX (total) health, so the
+        // margin scales with a scaled-max-health victim. getMaxHealth() is the
+        // deprecated-but-stable accessor across 1.9.4→26.x (the hit-feedback low-health
+        // posture's precedent), so the hot path never touches the version.
+        @SuppressWarnings("deprecation")
+        double critMargin = victim.getMaxHealth() * critThresholdPercent / 100.0;
+        boolean crit = DamageShaper.isLegacyCritical(attacker) || finalDamage >= critMargin;
 
         // Overkill clamp (F3): getHealth() at EDBEE MONITOR is the pre-hit pool (the
         // event fires before the subtraction), so the rolled/folded amount is the health

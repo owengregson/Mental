@@ -2,6 +2,7 @@ package me.vexmc.mental.v5.feature.knockback;
 
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.protocol.player.User;
+import com.github.retrooper.packetevents.util.Vector3d;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
@@ -56,7 +57,6 @@ import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.session.SessionService;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.Sound;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -559,13 +559,18 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
      * {@code ClientboundDamageEventPacket} that the blocked branch replaces with a
      * no-op {@code onBlocked} (blockSound empty) — so the one missing audience is
      * the victim (F4; the 2.4.0 record wrongly assumed vanilla still served it).
-     * Mental's HURT_ANIMATION burst is soundless by design. A world broadcast
-     * would double the sound for the bystanders vanilla already served. Since the
-     * temp-shield exemption (audit C1) this path also fires on the off-hand tier
-     * (1.9.4–1.20.6): {@code Sound.ENTITY_PLAYER_HURT} is spelled identically
-     * across that whole range (the ToolWear precedent), and the four-arg
-     * {@code playSound} is used because the {@code SoundCategory} overload only
-     * exists from API 1.11.</p>
+     * Mental's HURT_ANIMATION burst is soundless by design. Since the temp-shield
+     * exemption (audit C1) this path also fires on the off-hand tier (1.9.4–1.20.6),
+     * where {@code entity.player.hurt} is spelled identically across the whole range
+     * (universal since 1.9.4, so no era table is needed). The restoration is
+     * SILENT-written through the {@code BurstSender} so it BYPASSES the {@code
+     * hit-feedback} {@code HurtSoundSuppressor}: that suppressor is armed for THIS
+     * hit to eat the vanilla BYSTANDER broadcast, and a plain {@code playSound} — a
+     * positional {@code SOUND_EFFECT} near the victim — was swallowed by it too (the
+     * 2.7.1 "flinch flashes but the hurt sound stays silent while sword-blocking"
+     * report), exactly as {@code HitFeedbackListener} silent-writes its own
+     * replacement to avoid the same self-suppression. A world broadcast would
+     * instead double the sound for the bystanders vanilla already served.</p>
      */
     private void deliverBlockedKnock(
             CombatSession session, Player victim, LivingEntity attacker, HitSource source,
@@ -599,19 +604,20 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         Runnable delivery = () -> {
             desk.submit(fresh, era);
             desk.awaitVelocityEvent(fresh);
+            // The victim's PacketEvents user — fetched once for BOTH the wire burst
+            // and the hurt-sound restoration below (null for a clientless fake / an
+            // in-process bot: no client to reach, so both are no-ops there).
+            User user = PacketEvents.getAPI().getPlayerManager().getUser(victim);
             boolean wireCopy = wirePreSent;
-            if (!wirePreSent) {
-                User user = PacketEvents.getAPI().getPlayerManager().getUser(victim);
-                if (user != null) {
-                    // No registration burst reached the wire (server-side melee, or a
-                    // paced-out velocity): ship VELOCITY + HURT now, exactly as the
-                    // fast path would have — the client sees the era knock and flinch.
-                    // Honor the ship Outcome (the blocked-path twin of F2): a burst the
-                    // wire refused (UNSENDABLE) placed no copy on the wire, so it must
-                    // NOT arm a valve for a wire copy that never existed.
-                    BurstSender.Outcome outcome = burstSender().ship(user, entityId, era, hurtYaw, bundle);
-                    wireCopy = outcome == BurstSender.Outcome.DELIVERED;
-                }
+            if (!wirePreSent && user != null) {
+                // No registration burst reached the wire (server-side melee, or a
+                // paced-out velocity): ship VELOCITY + HURT now, exactly as the
+                // fast path would have — the client sees the era knock and flinch.
+                // Honor the ship Outcome (the blocked-path twin of F2): a burst the
+                // wire refused (UNSENDABLE) placed no copy on the wire, so it must
+                // NOT arm a valve for a wire copy that never existed.
+                BurstSender.Outcome outcome = burstSender().ship(user, entityId, era, hurtYaw, bundle);
+                wireCopy = outcome == BurstSender.Outcome.DELIVERED;
             }
             if (wireCopy) {
                 // A wire copy already carries the value; arm the valve so the
@@ -625,13 +631,17 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
                 valve.arm(victimId, ValvePayload.of(entityId, era), clock.current());
             }
             // The victim's own hurt sound — the one client vanilla's blocked branch
-            // leaves silent (see the javadoc). Play it to the victim alone; pitch
-            // mirrors vanilla LivingEntity.handleDamageEvent (1 + (r1 − r2) × 0.2).
+            // leaves silent (see the javadoc). SILENT-written to the victim alone so
+            // it BYPASSES the hit-feedback HurtSoundSuppressor, which — armed for this
+            // same hit to eat the vanilla bystander broadcast — would otherwise also
+            // swallow this positional restoration (the crowded-combat gap), leaving
+            // the blocker silent though the flinch flashed. Pitch mirrors vanilla
+            // LivingEntity.handleDamageEvent (1 + (r1 − r2) × 0.2).
+            Location soundAt = victim.getLocation();
             float pitch = 1.0f + (ThreadLocalRandom.current().nextFloat()
                     - ThreadLocalRandom.current().nextFloat()) * 0.2f;
-            // Four-arg overload: the SoundCategory form floors at API 1.11, and this
-            // path now runs down to 1.9.4 (the off-hand temp-shield exemption).
-            victim.playSound(victim.getLocation(), Sound.ENTITY_PLAYER_HURT, 1.0f, pitch);
+            burstSender().shipHurtSound(
+                    user, new Vector3d(soundAt.getX(), soundAt.getY(), soundAt.getZ()), pitch);
             // The authoritative motion: overwrites vanilla's blocked deltaMovement,
             // triggers the velocity event (→ desk SHIP journal), and moves the server
             // entity (server-authoritative for anticheats and clientless fakes).

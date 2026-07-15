@@ -157,10 +157,45 @@ public final class EffectsPresetParser {
                         DamageIndicatorsSettings.MIN_DRAG, DamageIndicatorsSettings.MAX_DRAG),
                 reader.text("text", d.text()),
                 reader.text("crit-text", d.critText()),
-                reader.numberClamped("crit-threshold-hearts", d.critThresholdHearts(), 0.0, 100.0),
+                parseCritThresholdPercent(reader, d.critThresholdPercent()),
                 reader.intClamped("roll-hold-ticks", d.rollHoldTicks(),
                         DamageIndicatorsSettings.MIN_ROLL_HOLD, DamageIndicatorsSettings.MAX_ROLL_HOLD),
                 reader.text("heal-text", d.healText()));
+    }
+
+    /**
+     * The crit-marker threshold as a PERCENT of the victim's max (total) health.
+     * Through 2.7.0 the crit marker fired on an absolute {@code
+     * crit-threshold-hearts}; 2.7.1 replaced it with {@code crit-threshold-percent}
+     * so the margin scales with a scaled-max-health victim (and reads naturally as
+     * "a big hit is a quarter of your health"). A lingering hearts key (with no
+     * percent key) is honoured with one warn and converted — hearts of a 20-max
+     * player as percent = {@code hearts × 10} — never silently dropped (mandate
+     * B10: loud, once); when BOTH keys are present the explicit percent wins and
+     * the retired hearts key is noted. This is the exact twin of {@link
+     * #parseLowHealthThresholdPercent}.
+     */
+    private static double parseCritThresholdPercent(ConfigReader reader, double fallback) {
+        ConfigurationSection section = reader.section();
+        boolean hasPercent = section != null && section.isSet("crit-threshold-percent");
+        boolean hasHearts = section != null && section.isSet("crit-threshold-hearts");
+        if (hasPercent) {
+            if (hasHearts) {
+                reader.issues().add(reader.prefix() + ": both crit-threshold-percent and the retired"
+                        + " crit-threshold-hearts are set — percent wins; delete the hearts line");
+            }
+            return reader.numberClamped("crit-threshold-percent", fallback, 0.0, 100.0);
+        }
+        if (hasHearts) {
+            double hearts = reader.numberClamped("crit-threshold-hearts", fallback / 10.0, 0.0, 100.0);
+            double percent = Math.max(0.0, Math.min(100.0, hearts * 10.0));
+            reader.issues().warn(reader.prefix() + ".crit-threshold-hearts",
+                    "retired in 2.7.1 for crit-threshold-percent (percent of max health);"
+                            + " converted " + hearts + " hearts",
+                    "crit-threshold-percent: " + percent);
+            return percent;
+        }
+        return fallback;
     }
 
     static DeathEffectsSettings parseDeathEffects(ConfigReader reader) {
