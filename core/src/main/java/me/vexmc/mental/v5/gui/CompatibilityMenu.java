@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.gui;
 
+import java.util.List;
 import java.util.Locale;
 import me.vexmc.mental.v5.config.AnticheatMode;
 import me.vexmc.mental.v5.text.Brand;
@@ -11,17 +12,31 @@ import org.jetbrains.annotations.NotNull;
 
 /**
  * Coexistence posture: how Mental behaves alongside movement-prediction
- * anticheats. It is not a {@code modules.*} toggle — it is always-on
- * infrastructure driven by a config enum ({@code anticheat.mode}).
+ * anticheats, as three radio tiles (one per {@link AnticheatMode}). It is not a
+ * {@code modules.*} toggle — it is always-on infrastructure driven by a config
+ * enum ({@code anticheat.mode}).
  *
- * <p>The tile cycles the enum by writing its <em>machine-overlay</em> key and
- * reloading through {@link me.vexmc.mental.v5.manage.Management}; the human YAML
- * is never re-serialized (Task 6.0 constraint 2). The overlay wins over the file,
- * so the reload picks up the change atomically.</p>
+ * <p>Selecting a tile writes its <em>machine-overlay</em> key and reloads through
+ * {@link me.vexmc.mental.v5.manage.Management}; the human YAML is never
+ * re-serialized. The overlay wins over the file, so the reload picks up the
+ * change atomically.</p>
  */
 public final class CompatibilityMenu extends Menu {
 
     private static final String ANTICHEAT_KEY = "anticheat.mode";
+
+    private static final int HEADER_SLOT = 4;
+    private static final int AUTO_SLOT = 11;
+    private static final int FORCE_SAFE_SLOT = 13;
+    private static final int OFF_SLOT = 15;
+    private static final int BACK_SLOT = 22;
+
+    private static final String AUTO_BLURB =
+            "Detect GrimAC and Vulcan and hold pre-send back automatically — the shipped default.";
+    private static final String FORCE_SAFE_BLURB =
+            "Always hold pre-send back, anticheat or not — the most conservative posture.";
+    private static final String OFF_BLURB =
+            "Full fast path, no accommodation. For servers that trust their anticheat pairing.";
 
     public CompatibilityMenu(@NotNull MenuContext ctx) {
         super(ctx);
@@ -29,53 +44,61 @@ public final class CompatibilityMenu extends Menu {
 
     @Override
     protected @NotNull Component title() {
-        return Component.text("Mental · Compatibility", Brand.PRIMARY);
+        return Component.text("Mental", Brand.PRIMARY, TextDecoration.BOLD)
+                .append(Component.text(" · ", Brand.MUTED))
+                .append(Component.text("Compatibility", Palette.system().accent()));
     }
 
     @Override
     protected int rows() {
-        return 4;
+        return 3;
     }
 
     @Override
     protected void draw(@NotNull Player viewer) {
-        set(22, anticheatTile(), click -> {
-            AnticheatMode next = cycle(ctx.plugin().snapshot().anticheat().mode());
-            apply(viewer, () -> ctx.management().setOverlay(ANTICHEAT_KEY, enumKey(next)));
-        });
-        set(31, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
+        paintChrome(Palette.system().pane());
+        AnticheatMode mode = ctx.plugin().snapshot().anticheat().mode();
+
+        set(HEADER_SLOT, headerCard(mode));
+        set(AUTO_SLOT, radioTile("ENDER_EYE", "auto", AUTO_BLURB, mode == AnticheatMode.AUTO),
+                click -> apply(viewer, () -> ctx.management().setOverlay(ANTICHEAT_KEY, "auto")));
+        set(FORCE_SAFE_SLOT, radioTile("IRON_BARS", "force-safe", FORCE_SAFE_BLURB, mode == AnticheatMode.FORCE_SAFE),
+                click -> apply(viewer, () -> ctx.management().setOverlay(ANTICHEAT_KEY, "force-safe")));
+        set(OFF_SLOT, radioTile("BARRIER", "off", OFF_BLURB, mode == AnticheatMode.OFF),
+                click -> apply(viewer, () -> ctx.management().setOverlay(ANTICHEAT_KEY, "off")));
+        set(BACK_SLOT, Buttons.back("the Dashboard"), click -> navigate(viewer, new DashboardMenu(ctx)));
     }
 
-    private @NotNull ItemStack anticheatTile() {
+    /** Boot self-test seam: header + three radios + back, as pure Bukkit stacks. */
+    public @NotNull List<ItemStack> selfTestIcons() {
         AnticheatMode mode = ctx.plugin().snapshot().anticheat().mode();
-        Icon icon = Buttons.title("IRON_BARS", "Anticheat coexistence");
-        Buttons.wrap("How Mental coexists with movement-prediction anticheats "
-                + "(GrimAC, Vulcan). AUTO suppresses pre-sent velocity only while one is installed.")
-                .forEach(line -> icon.lore(line, Brand.MUTED));
+        return List.of(
+                headerCard(mode),
+                radioTile("ENDER_EYE", "auto", AUTO_BLURB, mode == AnticheatMode.AUTO),
+                radioTile("IRON_BARS", "force-safe", FORCE_SAFE_BLURB, mode == AnticheatMode.FORCE_SAFE),
+                radioTile("BARRIER", "off", OFF_BLURB, mode == AnticheatMode.OFF),
+                Buttons.back("the Dashboard"));
+    }
+
+    private @NotNull ItemStack headerCard(@NotNull AnticheatMode mode) {
+        Icon icon = Buttons.title("IRON_BARS", "Anticheat Coexistence", Brand.TEXT);
+        Buttons.wrap("Mental's pre-send fast path predicts what an anticheat may dislike. Pick how"
+                + " hard Mental yields when one is present.").forEach(line -> icon.lore(line, Brand.MUTED));
         icon.blank();
-        option(icon, "auto", mode == AnticheatMode.AUTO, "coordinate only when one is present");
-        option(icon, "force-safe", mode == AnticheatMode.FORCE_SAFE, "always behave as if one is present");
-        option(icon, "off", mode == AnticheatMode.OFF, "never adjust");
-        icon.blank();
-        icon.lore(Component.text("▸ Click to cycle", Brand.SECONDARY));
+        icon.lore(Buttons.kv("Mode", mode.name().toLowerCase(Locale.ROOT), Brand.TEXT));
         return icon.build();
     }
 
-    private static void option(@NotNull Icon icon, @NotNull String name, boolean selected, @NotNull String note) {
-        icon.lore(Component.text()
-                .append(Component.text((selected ? "● " : "○ ") + name,
-                        selected ? Brand.SUCCESS : Brand.MUTED).decoration(TextDecoration.BOLD, selected))
-                .append(Component.text("  — " + note, Brand.MUTED))
-                .build());
-    }
-
-    private static @NotNull AnticheatMode cycle(@NotNull AnticheatMode mode) {
-        AnticheatMode[] values = AnticheatMode.values();
-        return values[(mode.ordinal() + 1) % values.length];
-    }
-
-    /** The config token for an enum value — lower-cased, dash-separated (config.yml style). */
-    private static @NotNull String enumKey(@NotNull Enum<?> value) {
-        return value.name().toLowerCase(Locale.ROOT).replace('_', '-');
+    private @NotNull ItemStack radioTile(
+            @NotNull String materialName, @NotNull String label, @NotNull String blurb, boolean selected) {
+        Icon icon = Buttons.title(materialName, label, selected ? Brand.SUCCESS : Brand.TEXT);
+        Buttons.wrap(blurb).forEach(line -> icon.lore(line, Brand.MUTED));
+        icon.blank();
+        if (selected) {
+            icon.lore(Component.text("● SELECTED", Brand.SUCCESS).decoration(TextDecoration.BOLD, true));
+        } else {
+            icon.lore(Component.text("▸ Click to select", Brand.SECONDARY));
+        }
+        return icon.glow(selected).build();
     }
 }
