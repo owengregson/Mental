@@ -55,7 +55,21 @@ class FeatureRegistryTest {
             "damage-indicators",
             "death-effects",
             // LOOT (2.7.0)
-            "drop-protection");
+            "drop-protection",
+            // Combat Test 8c (2026-07-18) — the thirteen imported rule modules
+            "weapon-attack-speeds",
+            "charged-attacks",
+            "ct8c-damage",
+            "ct8c-crits",
+            "ct8c-sweep",
+            "ct8c-iframes",
+            "ct8c-shields",
+            "ct8c-regen",
+            "ct8c-consumables",
+            "ct8c-potions",
+            "ct8c-reach",
+            "ct8c-projectiles",
+            "cleaving");
 
     @Test
     void yamlKeysAreExactlyTheOperatorContractSetUniqueAndNonNull() {
