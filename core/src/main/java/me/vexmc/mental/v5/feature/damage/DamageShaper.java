@@ -1,6 +1,8 @@
 package me.vexmc.mental.v5.feature.damage;
 
 import java.lang.reflect.Method;
+import me.vexmc.mental.kernel.math.Ct8cPotionMath;
+import me.vexmc.mental.kernel.math.Ct8cTables;
 import me.vexmc.mental.kernel.math.DamageTables;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.CritPosture;
@@ -56,6 +58,152 @@ public final class DamageShaper {
             damage *= DamageTables.critMultiplier();
         }
         return Math.max(0.0, damage + DamageTables.sharpnessBonus(sharpnessLevel));
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  CT8c pure composition (Task D; unit-pinned) — spec §2.2/§2.3/§2.8/§2.9  */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The Combat Test 8c melee composition (spec §2.2 tables, §2.3 crit ordering,
+     * §2.8 potions, §2.9 cleaving/impaling). Two things separate it from the
+     * legacy composition ({@link #composeLegacy}):
+     *
+     * <ul>
+     *   <li><b>Enchant folds before the crit.</b> Sharpness, Cleaving and
+     *       Impaling are added to the base BEFORE the flat ×1.5 (spec §2.3:
+     *       "vanilla adds it after"), so the crit multiplies the enchant too —
+     *       the exact inverse of the era rule.</li>
+     *   <li><b>Strength/Weakness are ±20%/level MULTIPLY_TOTAL</b> on the weapon
+     *       base ({@link Ct8cPotionMath}), replacing vanilla's flat values; they
+     *       multiply the ATTACK_DAMAGE (weapon base) only, never the enchant
+     *       additive.</li>
+     * </ul>
+     *
+     * <p>The crit-ordering pin: Sharpness V iron sword crit =
+     * {@code (2 + 1 + 2 + 3) × 1.5 = 12} (base 5 + modern Sharpness V bonus 3,
+     * then ×1.5). {@code impalingBonus} is the already-resolved {@code 2.5×level}
+     * for a wet victim (the wet predicate is the unit's Bukkit read, kept out of
+     * this pure method); it is 0 for a dry or non-Impaling hit.</p>
+     */
+    public static double composeCt8c(
+            double weaponBase, int strengthAmp, int weaknessAmp,
+            boolean critical, int sharpnessLevel, int cleavingLevel, double impalingBonus) {
+        double multiplier = 1.0
+                + (strengthAmp < 0 ? 0.0 : Ct8cPotionMath.strengthMultiplier(strengthAmp))
+                + (weaknessAmp < 0 ? 0.0 : Ct8cPotionMath.weaknessMultiplier(weaknessAmp));
+        // Strength/Weakness ride the weapon base only (they are ATTACK_DAMAGE
+        // modifiers); the enchant additive is added afterwards, all before crit.
+        double damage = weaponBase * multiplier
+                + DamageTables.vanillaSharpnessBonus(sharpnessLevel)
+                + cleavingBonus(cleavingLevel)
+                + impalingBonus;
+        if (critical) {
+            damage *= DamageTables.critMultiplier(); // the flat ×1.5 (spec §2.3)
+        }
+        return Math.max(0.0, damage);
+    }
+
+    /**
+     * The CT8c Cleaving damage bonus: {@code 1 + level} (+2/+3/+4 for I/II/III,
+     * spec §2.9), 0 when the weapon carries no Cleaving. Folded as enchant
+     * damage before the crit, exactly like Sharpness.
+     */
+    private static double cleavingBonus(int cleavingLevel) {
+        return cleavingLevel <= 0 ? 0.0 : 1.0 + cleavingLevel;
+    }
+
+    /** The CT8c Impaling bonus for a wet victim: {@code 2.5 × level} (vanilla value; spec §2.9 widens only the scope). */
+    public static double impalingBonus(int impalingLevel) {
+        return impalingLevel <= 0 ? 0.0 : 2.5 * impalingLevel;
+    }
+
+    /**
+     * The CT8c weapon-table base damage for a weapon's effective material (spec
+     * §2.2), read straight from the pure kernel {@link Ct8cTables#damage}. The
+     * name is the EFFECTIVE material already normalized through {@link
+     * LegacyMaterialNames#modernize} (the {@link #ct8cToolBase(ItemStack)} shell
+     * does that); non-weapons and the empty hand resolve to {@code FIST}/{@code
+     * NONE} → the bare {@code 2.0} base.
+     */
+    public static double ct8cToolBase(String effectiveMaterialName) {
+        return Ct8cTables.damage(weaponClassOf(effectiveMaterialName), tierOf(effectiveMaterialName));
+    }
+
+    /** The CT8c weapon-table base for a live weapon stack (effective-material aware). */
+    public static double ct8cToolBase(ItemStack weapon) {
+        return ct8cToolBase(LegacyMaterialNames.modernize(EffectiveMaterial.of(weapon).name()));
+    }
+
+    /** The CT8c ATTACK_SPEED attribute value for a weapon's effective material (spec §2.2) — feeds the i-frame delay. */
+    public static double ct8cAttackSpeed(String effectiveMaterialName) {
+        return Ct8cTables.attackSpeed(weaponClassOf(effectiveMaterialName), tierOf(effectiveMaterialName));
+    }
+
+    /** The CT8c ATTACK_SPEED attribute value for a live weapon stack (effective-material aware). */
+    public static double ct8cAttackSpeed(ItemStack weapon) {
+        return ct8cAttackSpeed(LegacyMaterialNames.modernize(EffectiveMaterial.of(weapon).name()));
+    }
+
+    /**
+     * The CT8c weapon class for a modern (post-flattening) material name. The
+     * {@code _PICKAXE} suffix is tested before {@code _AXE} because a pickaxe
+     * name also ends with {@code _AXE}; anything unmatched (bare hand, non-tool)
+     * is the {@code FIST} row.
+     */
+    static Ct8cTables.WeaponClass weaponClassOf(String name) {
+        if (name.endsWith("_SWORD")) {
+            return Ct8cTables.WeaponClass.SWORD;
+        }
+        if (name.endsWith("_PICKAXE")) {
+            return Ct8cTables.WeaponClass.PICKAXE;
+        }
+        if (name.endsWith("_AXE")) {
+            return Ct8cTables.WeaponClass.AXE;
+        }
+        if (name.endsWith("_SHOVEL")) {
+            return Ct8cTables.WeaponClass.SHOVEL;
+        }
+        if (name.endsWith("_HOE")) {
+            return Ct8cTables.WeaponClass.HOE;
+        }
+        if (name.equals("TRIDENT")) {
+            return Ct8cTables.WeaponClass.TRIDENT;
+        }
+        return Ct8cTables.WeaponClass.FIST;
+    }
+
+    /** The CT8c material tier for a modern material name; {@code NONE} for the tierless fist/trident/non-tool. */
+    static Ct8cTables.Tier tierOf(String name) {
+        if (name.startsWith("WOODEN_")) {
+            return Ct8cTables.Tier.WOOD;
+        }
+        if (name.startsWith("STONE_")) {
+            return Ct8cTables.Tier.STONE;
+        }
+        if (name.startsWith("IRON_")) {
+            return Ct8cTables.Tier.IRON;
+        }
+        if (name.startsWith("GOLDEN_")) {
+            return Ct8cTables.Tier.GOLD;
+        }
+        if (name.startsWith("DIAMOND_")) {
+            return Ct8cTables.Tier.DIAMOND;
+        }
+        if (name.startsWith("NETHERITE_")) {
+            return Ct8cTables.Tier.NETHERITE;
+        }
+        return Ct8cTables.Tier.NONE;
+    }
+
+    /** The attacker's 0-based Strength amplifier, or −1 when absent — feeds the CT8c ±20% fold. */
+    public static int strengthAmplifier(Player attacker) {
+        return amplifier(attacker, STRENGTH);
+    }
+
+    /** The attacker's 0-based Weakness amplifier, or −1 when absent — feeds the CT8c −20% fold. */
+    public static int weaknessAmplifier(Player attacker) {
+        return amplifier(attacker, WEAKNESS);
     }
 
     /**
