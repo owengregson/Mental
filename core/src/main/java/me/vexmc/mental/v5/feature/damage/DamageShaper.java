@@ -281,6 +281,11 @@ public final class DamageShaper {
         return base == null ? Double.NaN : base;
     }
 
+    /** The weapon's Sharpness level (0 when absent or unresolved) — the CT8c composition's enchant input. */
+    public static int sharpnessLevelOf(ItemStack weapon) {
+        return sharpnessLevel(weapon);
+    }
+
     private static int sharpnessLevel(ItemStack weapon) {
         Enchantment sharpness = Enchantments.sharpness();
         if (weapon == null || weapon.getType() == Material.AIR || sharpness == null) {
