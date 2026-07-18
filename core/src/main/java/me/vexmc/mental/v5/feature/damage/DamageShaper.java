@@ -1,7 +1,6 @@
 package me.vexmc.mental.v5.feature.damage;
 
 import java.lang.reflect.Method;
-import me.vexmc.mental.kernel.math.Ct8cPotionMath;
 import me.vexmc.mental.kernel.math.Ct8cTables;
 import me.vexmc.mental.kernel.math.DamageTables;
 import me.vexmc.mental.platform.Attributes;
@@ -10,6 +9,7 @@ import me.vexmc.mental.platform.EffectiveMaterial;
 import me.vexmc.mental.platform.Enchantments;
 import me.vexmc.mental.platform.LegacyMaterialNames;
 import me.vexmc.mental.platform.PotionEffects;
+import me.vexmc.mental.v5.feature.sustain.Ct8cPotionValues;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
@@ -75,9 +75,9 @@ public final class DamageShaper {
      *       "vanilla adds it after"), so the crit multiplies the enchant too —
      *       the exact inverse of the era rule.</li>
      *   <li><b>Strength/Weakness are ±20%/level MULTIPLY_TOTAL</b> on the weapon
-     *       base ({@link Ct8cPotionMath}), replacing vanilla's flat values; they
-     *       multiply the ATTACK_DAMAGE (weapon base) only, never the enchant
-     *       additive.</li>
+     *       base ({@link Ct8cPotionValues}, gated on {@code ct8cPotions}), replacing
+     *       vanilla's flat values; they multiply the ATTACK_DAMAGE (weapon base)
+     *       only, never the enchant additive.</li>
      * </ul>
      *
      * <p>The crit-ordering pin: Sharpness V iron sword crit =
@@ -85,16 +85,25 @@ public final class DamageShaper {
      * then ×1.5). {@code impalingBonus} is the already-resolved {@code 2.5×level}
      * for a wet victim (the wet predicate is the unit's Bukkit read, kept out of
      * this pure method); it is 0 for a dry or non-Impaling hit.</p>
+     *
+     * <p><b>The Strength/Weakness gate (Task INT wire 3).</b> The CT8c ±20%/level
+     * MULTIPLY_TOTAL fold belongs to {@code CT8C_POTIONS}, not this ct8c-damage
+     * path — so {@code ct8cPotions} gates it. With CT8C_POTIONS OFF the table-base
+     * overwrite must NOT silently erase the attacker's Strength: it applies the
+     * server's vanilla flat {@code +3}/{@code −4} instead (spec §2.8, "replaces
+     * vanilla flat +3/−4"), so a Strength buff still lands. With it ON the fold is
+     * the multiplicative {@link Ct8cPotionValues#apply} (MULTIPLY_TOTAL is
+     * sequential — Strength I + Weakness I is {@code ×1.2×0.8}, not {@code ×1.0}).</p>
      */
     public static double composeCt8c(
             double weaponBase, int strengthAmp, int weaknessAmp,
-            boolean critical, int sharpnessLevel, int cleavingLevel, double impalingBonus) {
-        double multiplier = 1.0
-                + (strengthAmp < 0 ? 0.0 : Ct8cPotionMath.strengthMultiplier(strengthAmp))
-                + (weaknessAmp < 0 ? 0.0 : Ct8cPotionMath.weaknessMultiplier(weaknessAmp));
+            boolean ct8cPotions, boolean critical, int sharpnessLevel, int cleavingLevel, double impalingBonus) {
         // Strength/Weakness ride the weapon base only (they are ATTACK_DAMAGE
         // modifiers); the enchant additive is added afterwards, all before crit.
-        double damage = weaponBase * multiplier
+        double base = ct8cPotions
+                ? Ct8cPotionValues.apply(weaponBase, strengthAmp, weaknessAmp)
+                : vanillaPotionBase(weaponBase, strengthAmp, weaknessAmp);
+        double damage = base
                 + DamageTables.vanillaSharpnessBonus(sharpnessLevel)
                 + cleavingBonus(cleavingLevel)
                 + impalingBonus;
@@ -102,6 +111,25 @@ public final class DamageShaper {
             damage *= DamageTables.critMultiplier(); // the flat ×1.5 (spec §2.3)
         }
         return Math.max(0.0, damage);
+    }
+
+    /**
+     * The server's vanilla flat Strength/Weakness on a weapon base: {@code +3×(amp+1)}
+     * for Strength, {@code −4×(amp+1)} for Weakness (spec §2.8, "replaces vanilla flat
+     * +3/−4"), clamped ≥ 0. Used by {@link #composeCt8c} when {@code CT8C_POTIONS} is
+     * off, so the ct8c-damage table overwrite preserves the attacker's Strength buff
+     * rather than dropping it — the counterpart to {@link DamageTables#recoverPureBase},
+     * which subtracts exactly these flats out of a modern attribute value.
+     */
+    private static double vanillaPotionBase(double weaponBase, int strengthAmp, int weaknessAmp) {
+        double value = weaponBase;
+        if (strengthAmp >= 0) {
+            value += 3.0 * (strengthAmp + 1);
+        }
+        if (weaknessAmp >= 0) {
+            value -= 4.0 * (weaknessAmp + 1);
+        }
+        return Math.max(0.0, value);
     }
 
     /**
@@ -238,27 +266,59 @@ public final class DamageShaper {
      * @param oldPotionValues whether {@code old-potion-values} is enabled this hit
      * @param legacyToolDamage whether the fast path composes off the legacy tool table
      * @param simulateCrits whether the fast path injects the era crit
+     * @param ct8cPotions whether {@code ct8c-potions} is enabled this hit — the CT8c
+     *        ±20%/level Strength/Weakness fold on the fast-path amount (Task INT wire 3),
+     *        the {@code CT8C_POTIONS}-alone seam (ct8c-damage's EDBEE overwrite is where
+     *        the both-on path lands). Off ⇒ byte-identical to the legacy order.
      */
     public double compose(
             Player attacker,
-            boolean simulateCrits, boolean legacyToolDamage, boolean oldPotionValues) {
+            boolean simulateCrits, boolean legacyToolDamage, boolean oldPotionValues, boolean ct8cPotions) {
         ItemStack weapon = attacker.getInventory().getItemInMainHand();
         int sharpness = sharpnessLevel(weapon);
         boolean critical = simulateCrits && isLegacyCritical(attacker);
 
-        int strengthAmp = oldPotionValues ? amplifier(attacker, STRENGTH) : -1;
-        int weaknessAmp = oldPotionValues ? amplifier(attacker, WEAKNESS) : -1;
+        // Either potion family needs the amplifiers; with both off they stay absent
+        // (−1), so the amount is byte-identical to the pre-CT8c legacy composition.
+        boolean anyPotionFold = oldPotionValues || ct8cPotions;
+        int strengthAmp = anyPotionFold ? amplifier(attacker, STRENGTH) : -1;
+        int weaknessAmp = anyPotionFold ? amplifier(attacker, WEAKNESS) : -1;
         double weaponBase = legacyToolDamage ? eraToolBase(weapon) : Double.NaN;
         if (Double.isNaN(weaponBase)) {
             // No legacy tool value (hands, hoes, non-tool) or legacy tables off:
-            // recover the pure weapon base from the live attribute so the era
-            // potion factors land on the bare weapon (never the modern modifiers).
+            // recover the pure weapon base from the live attribute so the potion
+            // factors land on the bare weapon (never the modern modifiers). Both the
+            // era and the CT8c ±20% folds want the pure base, so recover for either.
             double attributeBase = Attributes.valueOr(attacker, Attributes.attackDamage(), 1.0);
-            weaponBase = oldPotionValues
+            weaponBase = anyPotionFold
                     ? DamageTables.recoverPureBase(attributeBase, strengthAmp, weaknessAmp)
                     : attributeBase;
         }
-        return composeLegacy(weaponBase, strengthAmp, weaknessAmp, oldPotionValues, critical, sharpness);
+        return composeFastPath(
+                weaponBase, strengthAmp, weaknessAmp, ct8cPotions, oldPotionValues, critical, sharpness);
+    }
+
+    /**
+     * The pure fast-path amount composition (Task INT wire 3). When {@code ct8cPotions}
+     * is on, the CT8c ±20%/level MULTIPLY_TOTAL Strength/Weakness fold ({@link
+     * Ct8cPotionValues#apply}, spec §2.8) replaces the era/vanilla potion values on the
+     * bare weapon base — this is the {@code CT8C_POTIONS}-alone path (when ct8c-damage is
+     * also on, its EDBEE overwrite supersedes this amount). Otherwise it is exactly the
+     * legacy order ({@link #composeLegacy}, era Strength gated on {@code oldPotionValues}),
+     * so the whole seam is byte-identical when {@code ct8cPotions} is off. Pure so all
+     * three toggle combinations are unit-pinned at this seam.
+     */
+    public static double composeFastPath(
+            double weaponBase, int strengthAmp, int weaknessAmp,
+            boolean ct8cPotions, boolean oldPotionValues, boolean critical, int sharpnessLevel) {
+        if (ct8cPotions) {
+            // Fold the ±20% onto the pure base, then run the rest of the legacy order
+            // (crit, Sharpness) with potions OFF so the era factors never double-apply.
+            return composeLegacy(
+                    Ct8cPotionValues.apply(weaponBase, strengthAmp, weaknessAmp),
+                    -1, -1, false, critical, sharpnessLevel);
+        }
+        return composeLegacy(weaponBase, strengthAmp, weaknessAmp, oldPotionValues, critical, sharpnessLevel);
     }
 
     /**

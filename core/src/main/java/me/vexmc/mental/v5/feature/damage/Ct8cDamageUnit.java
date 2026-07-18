@@ -3,6 +3,7 @@ package me.vexmc.mental.v5.feature.damage;
 import java.lang.reflect.Field;
 import me.vexmc.mental.platform.CleavingRegistrar;
 import me.vexmc.mental.platform.CritPosture;
+import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -17,6 +18,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageModifier;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -28,16 +30,18 @@ import org.jetbrains.annotations.Nullable;
  * {@code Ct8cCritsUnit} multiplies the finished BASE at a later priority, so the
  * enchant is inside the crit exactly as spec §2.3 requires, whichever units are on.
  *
- * <p><b>No cross-feature snapshot reads.</b> Cleaving folds in via the platform
- * {@link CleavingRegistrar} handle, which is installed ONLY when the {@code
- * cleaving} feature is enabled — so a disabled Cleaving yields a level of 0
- * naturally, no {@code enabled(CLEAVING)} check needed. Strength/Weakness are the
- * CT8c ±20% because ct8c-damage recomputes the base from the table (discarding
- * the attribute's vanilla Strength contribution), so it owns the melee
- * Strength/Weakness fold; {@code Ct8cPotionsUnit} must not also substitute the
- * attack-damage modifier for melee (it would double-apply) — it owns instant
- * health/damage and tipped arrows. Impaling now reaches ALL wet victims
- * (spec §2.9): the wet predicate is this unit's Bukkit read.</p>
+ * <p><b>Feature reads.</b> Cleaving folds in via the platform {@link
+ * CleavingRegistrar} handle, which is installed ONLY when the {@code cleaving}
+ * feature is enabled — so a disabled Cleaving yields a level of 0 naturally, no
+ * {@code enabled(CLEAVING)} check needed. The melee Strength/Weakness fold is
+ * split by module (Task INT wire 3): the CT8c ±20% belongs to {@code
+ * ct8c-potions}, so this unit reads {@code featureActive(CT8C_POTIONS)} and passes
+ * it to {@link DamageShaper#composeCt8c} — with it OFF the table-base overwrite
+ * preserves the server's vanilla flat +3/−4 (never erasing Strength), with it ON
+ * it is the ±20%. {@code Ct8cPotionsUnit} stays presence-only for that half (it
+ * owns instant health/damage and tipped arrows), so there is no double-apply.
+ * Impaling now reaches ALL wet victims (spec §2.9): the wet predicate is this
+ * unit's Bukkit read.</p>
  *
  * <p>Zero-touch: assembled only when enabled; touches only player melee.</p>
  */
@@ -65,10 +69,18 @@ public final class Ct8cDamageUnit implements FeatureUnit, Listener {
             return;
         }
         ItemStack weapon = attacker.getInventory().getItemInMainHand();
+        // The ±20%/level Strength/Weakness fold belongs to CT8C_POTIONS, not this
+        // ct8c-damage path (Task INT wire 3). With CT8C_POTIONS off the table-base
+        // overwrite preserves the server's vanilla flat +3/−4 instead of erasing
+        // Strength; with it on it is the CT8c ±20%. Presence-read of the sibling
+        // module, decided live per hit (the toggle can change under a reload).
+        boolean ct8cPotions =
+                JavaPlugin.getPlugin(MentalPluginV5.class).featureActive(Feature.CT8C_POTIONS);
         double composed = DamageShaper.composeCt8c(
                 DamageShaper.ct8cToolBase(weapon),
                 DamageShaper.strengthAmplifier(attacker),
                 DamageShaper.weaknessAmplifier(attacker),
+                ct8cPotions,
                 false, // crit is Ct8cCritsUnit's ×1.5 at a later priority — enchant stays inside it
                 DamageShaper.sharpnessLevelOf(weapon),
                 cleavingLevel(weapon),

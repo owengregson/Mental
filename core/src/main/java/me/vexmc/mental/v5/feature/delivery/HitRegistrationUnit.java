@@ -964,18 +964,24 @@ public final class HitRegistrationUnit implements FeatureUnit {
 
     /**
      * The fast-path damage amount (spec §4.6): the {@link me.vexmc.mental.v5.feature.damage.DamageShaper}
-     * legacy composition — weapon base → era Strength/Weakness → crit ×1.5 →
+     * legacy composition — weapon base → era/CT8c Strength/Weakness → crit ×1.5 →
      * Sharpness — off the attacker's live state. {@code simulateCrits}/{@code
      * legacyToolDamage} come from the hit-reg settings; {@code old-potion-values}
-     * from its live toggle. Owning thread only (the attacker read is
-     * region-guarded by the caller).
+     * and {@code ct8c-potions} from their live toggles (the CT8c ±20% fold, Task INT
+     * wire 3). Owning thread only (the attacker read is region-guarded by the caller).
      */
     private double composedAmount(Player attacker) {
         HitRegSettings settings = settings();
         return shaper.compose(
                 attacker,
                 settings.simulateCrits(), settings.legacyToolDamage(),
-                snapshot.get().enabled(Feature.POTION_VALUES));
+                snapshot.get().enabled(Feature.POTION_VALUES),
+                // The CT8c ±20% Strength/Weakness fold on the fast-path amount — the
+                // CT8C_POTIONS-alone seam (Task INT wire 3). When ct8c-damage is ALSO
+                // on, its EDBEE BASE overwrite supersedes this amount; off, this is the
+                // only place the ±20% lands on Mental-delivered melee. Byte-identical
+                // when CT8C_POTIONS is disabled.
+                snapshot.get().enabled(Feature.CT8C_POTIONS));
     }
 
     /**

@@ -62,9 +62,10 @@ class DamageShaperTest {
         // The plan's crit-ordering pin: Sharpness V iron sword crit =
         // (2 + 1 + 2 + 3) × 1.5 = 12 — enchant added BEFORE the ×1.5 (spec §2.3,
         // "vanilla adds it after"). Iron sword base 5, Sharpness V modern bonus 3.
-        assertEquals(8.0, DamageShaper.composeCt8c(5.0, -1, -1, false, 5, 0, 0.0), 1e-9,
+        // No potion present, so the ct8c-potions gate (arg 4) is inert either way.
+        assertEquals(8.0, DamageShaper.composeCt8c(5.0, -1, -1, true, false, 5, 0, 0.0), 1e-9,
                 "no crit: base 5 + Sharpness V 3 = 8");
-        assertEquals(12.0, DamageShaper.composeCt8c(5.0, -1, -1, true, 5, 0, 0.0), 1e-9,
+        assertEquals(12.0, DamageShaper.composeCt8c(5.0, -1, -1, true, true, 5, 0, 0.0), 1e-9,
                 "crit: (5 + 3) × 1.5 = 12");
     }
 
@@ -72,25 +73,65 @@ class DamageShaperTest {
     void ct8cFoldsCleavingAsEnchantDamageBeforeCrit() {
         // Cleaving damage bonus 1+level (spec §2.9): netherite axe base 8 +
         // Cleaving III (+4) = 12, no crit; ×1.5 under crit = 18.
-        assertEquals(12.0, DamageShaper.composeCt8c(8.0, -1, -1, false, 0, 3, 0.0), 1e-9);
-        assertEquals(18.0, DamageShaper.composeCt8c(8.0, -1, -1, true, 0, 3, 0.0), 1e-9);
+        assertEquals(12.0, DamageShaper.composeCt8c(8.0, -1, -1, true, false, 0, 3, 0.0), 1e-9);
+        assertEquals(18.0, DamageShaper.composeCt8c(8.0, -1, -1, true, true, 0, 3, 0.0), 1e-9);
+    }
+
+    /* ------------ CT8c Strength/Weakness gating: the three toggle combinations (Task INT wire 3) ------------ */
+
+    @Test
+    void ct8cPotionsOnFoldsStrengthWeaknessAsTheCt8cPercentMultipliers() {
+        // "both on" (ct8c-damage + ct8c-potions): the ±20%/level MULTIPLY_TOTAL
+        // (spec §2.8), delegated to Ct8cPotionValues.apply — MULTIPLICATIVE when a
+        // player carries both, so the plan's base-7 pins land exactly.
+        assertEquals(8.4, DamageShaper.composeCt8c(7.0, 0, -1, true, false, 0, 0, 0.0), 1e-9,
+                "Strength I: 7 × 1.2 = 8.4");
+        assertEquals(5.6, DamageShaper.composeCt8c(7.0, -1, 0, true, false, 0, 0, 0.0), 1e-9,
+                "Weakness I: 7 × 0.8 = 5.6");
+        assertEquals(6.72, DamageShaper.composeCt8c(7.0, 0, 0, true, false, 0, 0, 0.0), 1e-9,
+                "both I: 7 × 1.2 × 0.8 = 6.72 (MULTIPLY_TOTAL is sequential, not additive)");
     }
 
     @Test
-    void ct8cAppliesStrengthAndWeaknessAsPercentMultipliersOnTheWeaponBase() {
-        // Spec §2.8: Strength +20%/level, Weakness −20%/level, MULTIPLY_TOTAL on
-        // the ATTACK_DAMAGE (weapon base) — before the enchant additive.
-        assertEquals(6.0, DamageShaper.composeCt8c(5.0, 0, -1, false, 0, 0, 0.0), 1e-9,
-                "Strength I: 5 × 1.2 = 6");
-        assertEquals(4.0, DamageShaper.composeCt8c(5.0, -1, 0, false, 0, 0, 0.0), 1e-9,
-                "Weakness I: 5 × 0.8 = 4");
+    void ct8cPotionsOffPreservesVanillaFlatStrengthRatherThanErasingIt() {
+        // "damage-only" (ct8c-damage on, ct8c-potions OFF): the ±20% fold belongs to
+        // CT8C_POTIONS, so with it off the table-base overwrite must NOT silently erase
+        // the attacker's Strength — it preserves the server's vanilla flat +3/−4
+        // (spec §2.8, "replaces vanilla flat +3/−4").
+        assertEquals(10.0, DamageShaper.composeCt8c(7.0, 0, -1, false, false, 0, 0, 0.0), 1e-9,
+                "Strength I: 7 + 3 = 10 (vanilla flat, preserved)");
+        assertEquals(3.0, DamageShaper.composeCt8c(7.0, -1, 0, false, false, 0, 0, 0.0), 1e-9,
+                "Weakness I: 7 − 4 = 3 (vanilla flat, preserved)");
+        assertEquals(6.0, DamageShaper.composeCt8c(7.0, 0, 0, false, false, 0, 0, 0.0), 1e-9,
+                "both I: 7 + 3 − 4 = 6 (vanilla flat, preserved)");
+    }
+
+    @Test
+    void ct8cFastPathAppliesThePercentFoldWhenPotionsAloneAreEnabled() {
+        // "potions-only" (ct8c-potions on, ct8c-damage OFF): ct8c-damage's EDBEE
+        // overwrite is inactive, so the ±20% fold rides the fast-path amount seam
+        // (composeFastPath) instead — the CT8C_POTIONS gate replacing the era values.
+        assertEquals(8.4, DamageShaper.composeFastPath(7.0, 0, -1, true, false, false, 0), 1e-9,
+                "Strength I on the fast-path amount: 7 × 1.2 = 8.4");
+        assertEquals(6.72, DamageShaper.composeFastPath(7.0, 0, 0, true, false, false, 0), 1e-9,
+                "both I on the fast-path amount: 7 × 1.2 × 0.8 = 6.72");
+    }
+
+    @Test
+    void fastPathIsByteIdenticalToTheLegacyOrderWhenCt8cPotionsAreOff() {
+        // Zero-touch regression: ct8c-potions OFF ⇒ composeFastPath is exactly the
+        // legacy order it delegates to (era Strength gated on old-potion-values).
+        assertEquals(14.25, DamageShaper.composeFastPath(8.0, -1, -1, false, false, false, 5), 1e-9,
+                "classic sharpness-5 diamond: 8 + 6.25 = 14.25");
+        assertEquals(34.25, DamageShaper.composeFastPath(8.0, 0, -1, false, true, false, 5), 1e-9,
+                "era Strength I (old-potion-values on): 8 × 3.5 + 6.25 = 34.25");
     }
 
     @Test
     void ct8cAddsTheImpalingBonusAsEnchantDamageOnAWetVictim() {
         // Spec §2.9: Impaling now hits ALL wet victims; the wet predicate lives
         // in the unit, the already-resolved 2.5×level bonus folds in here.
-        assertEquals(9.5, DamageShaper.composeCt8c(7.0, -1, -1, false, 0, 0, 2.5), 1e-9,
+        assertEquals(9.5, DamageShaper.composeCt8c(7.0, -1, -1, true, false, 0, 0, 2.5), 1e-9,
                 "trident base 7 + Impaling I (2.5) on a wet victim");
     }
 }
