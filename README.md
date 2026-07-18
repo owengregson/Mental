@@ -21,8 +21,8 @@
 
 <p align="center">
   <a href="https://bstats.org/plugin/bukkit/Mental/31788"><picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/stats/players-dark.svg">
-    <img src="assets/stats/players.svg" width="820" alt="Players on servers running Mental — last 14 days">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/owengregson/Mental/bstats-charts/assets/stats/players-dark.svg">
+    <img src="https://raw.githubusercontent.com/owengregson/Mental/bstats-charts/assets/stats/players.svg" width="820" alt="Players on servers running Mental — last 14 days">
   </picture></a>
 </p>
 

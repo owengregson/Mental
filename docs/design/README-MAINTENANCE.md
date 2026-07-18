@@ -56,7 +56,11 @@ raw.githubusercontent URLs — release pages don't resolve relative paths). Foot
 `<sub><b>MENTAL</b> by <a href="https://github.com/owengregson">@owengregson</a></sub>`.
 
 ## Player chart
-`scripts/render-bstats-chart.mjs` + `.github/workflows/bstats-chart.yml` own
-`assets/stats/players{,-dark}.svg` (players only, last 14 days, refreshed 6-hourly). README paths
-never change. To restyle the chart, edit the script's theme objects/renderer — keep it consistent
-with BRAND-GUIDE (panel, ruler ticks, accent line).
+`scripts/render-bstats-chart.mjs` renders `assets/stats/players{,-dark}.svg` (players only, last
+14 days). `.github/workflows/bstats-chart.yml` re-renders them every 6 hours and force-pushes the
+result as a single orphan commit to the `bstats-charts` data branch; the README embeds the charts
+from that branch by absolute raw.githubusercontent URL (main is branch-protected, so the refresh
+never lands on main — and release changelogs stay free of chart noise). The copies committed on
+main are a static snapshot; the data branch is the live source. To restyle the chart, edit the
+script's theme objects/renderer — keep it consistent with BRAND-GUIDE (panel, ruler ticks, accent
+line) — then run the workflow once (workflow_dispatch) to publish.

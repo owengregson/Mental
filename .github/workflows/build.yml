@@ -126,8 +126,9 @@ jobs:
           # Classification, safest-first: any toolchain file → full fan-out;
           # otherwise anything NOT on the docs allowlist → code (unknown paths
           # deliberately fall through to code, never to docs); all-docs → skip.
+          # assets/ (README + branding art) counts as docs: never a build input.
           toolchain_re='(^|/)[^/]*\.gradle\.kts$|^gradle/|^gradle\.properties$|^gradlew|^support-matrix\.json$|^scripts/|^\.github/workflows/'
-          docs_re='^(docs/|\.claude/|legacy-lab/|\.github/dependabot\.yml$|LICENSE$|\.gitignore$)|\.md$'
+          docs_re='^(docs/|assets/|\.claude/|legacy-lab/|\.github/dependabot\.yml$|LICENSE$|\.gitignore$)|\.md$'
 
           if printf '%s\n' "$changed" | grep -qE "$toolchain_re"; then
             klass=toolchain; versions=$all_lanes
