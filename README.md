@@ -107,7 +107,8 @@ Mental runs two complete knockback calculations — choose the one your server s
 - **Legacy** — the true 1.7.10 formula: sprint resets, residual stacking, era verticals.
   A full preset library in `profiles/legacy/`, every knob tunable.
 - **Modern** — the modern vanilla formula, with the same customization surface. Presets
-  in `profiles/modern/`: `modern-vanilla`, `modern-uplift`, `modern-combo`.
+  in `profiles/modern/`: `modern-vanilla`, `modern-uplift`, `modern-combo`, and `ct8c`
+  (Java Edition Combat Test 8c knockback).
 
 Both sides expose the full knob set — pushes, friction, verticals, air multipliers, w-tap
 bonuses — so `custom` can start from either world.
@@ -128,8 +129,8 @@ The knockback profile is one server-wide setting — pick it in-game or in `knoc
 | `velt` | A modern practice-server tuning — snappy and consistent. |
 
 More ship alongside: `kohi`, `minehq`, `mmc`, `legacy-1.7`, `legacy-1.8`, `custom`
-(yours to edit) in `profiles/legacy/`, and `modern-vanilla`, `modern-uplift`, `modern-combo`
-in `profiles/modern/` for servers on the modern knockback formula. The full guide to what
+(yours to edit) in `profiles/legacy/`, and `modern-vanilla`, `modern-uplift`, `modern-combo`,
+`ct8c` in `profiles/modern/` for servers on the modern knockback formula. The full guide to what
 each knob does lives in [docs/knockback-profiles.md](docs/knockback-profiles.md).
 
 <br>
@@ -164,11 +165,17 @@ The full pipeline, edge cases included: [docs/fast-path.md](docs/fast-path.md).
   <img src="assets/headers/ingame.svg" height="54" alt="In-game management">
 </p>
 
-`/mental` (or `/mtl`) opens the management menu — operators only, by default:
+`/mental` (or `/mtl`) opens the management suite — operators only, by default. Redesigned in
+2.9.0 with a colour-coded screen per feature family, on chrome that renders in full colour
+right down to 1.9.4:
 
-- **Dashboard** — every feature family at a glance, toggle anything live.
-- **Knockback** — switch the server's preset, inspect the active values.
-- **Combat Effects** — hit sounds, particles, damage indicators, death effects, with presets.
+- **Dashboard** — every feature family at a glance, plus Combat Presets, compatibility and debug.
+- **Family screens** — flip any module live; right-click a module to open its settings screen and
+  tune it in-game (left/right to step a value, Q to reset it to the file default).
+- **Preset Gallery** — browse and apply knockback profiles (legacy/modern tabs) and combat-effects
+  tunes, each with a live preview.
+- **Combat Presets** — apply a whole ruleset at once: the Combat Test 8c snapshot, the classic 1.7
+  feel, or Mental-transparent vanilla.
 - **No restarts** — changes apply immediately; `/mental reload` re-reads the files from console.
 
 Your hand-edited YAML is never rewritten: in-game changes are stored as a separate overlay,
@@ -187,6 +194,7 @@ Everything lives under `plugins/Mental/`, split by topic — each file documents
 | `config.yml` | Module toggles, metrics, debug. |
 | `knockback.yml` | The selected knockback profile. |
 | `profiles/` | The preset library (`legacy/` and `modern/`) — add your own here. |
+| `bundles/` | Rules bundles — apply a whole ruleset (`ct8c`, `signature`, `vanilla`) at once. |
 | `combat.yml` | Hit registration, reach, latency compensation. |
 | `combo.yml` | The combo solver family. |
 | `rules.yml` | The optional 1.8 ruleset modules. |
@@ -217,6 +225,11 @@ default, each a one-line toggle, grouped by family:
 > **Running another combat-rules plugin?** Enable each rule in exactly one plugin — the same
 > rule enabled twice applies twice.
 
+> **Combat Test 8c.** A port of Mojang's experimental *Combat Test 8c* snapshot ships as
+> thirteen more opt-in modules — reworked shields, charged attacks, per-weapon attack speeds,
+> the split-vertical knockback and more — with a matching `ct8c` knockback profile. Apply the
+> whole set in one click from **Combat Presets**, or turn each module on its own.
+
 <br>
 
 <p align="center">
@@ -245,7 +258,7 @@ Supported — every release is gated on a real Folia server before it ships.
 
 **Something feels off — how do I debug?**
 `/mental debug subscribe` streams what Mental sees (hits, knocks, sprint reads) to your chat
-in real time.
+in real time — or open the **Debug** screen in `/mental` and hit *Stream to my chat*.
 
 <br>
 
