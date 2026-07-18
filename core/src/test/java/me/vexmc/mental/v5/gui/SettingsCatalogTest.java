@@ -32,7 +32,8 @@ class SettingsCatalogTest {
     private static final Set<String> KNOWN_ROOTS = Set.of(
             "hit-registration", "latency-compensation", "fishing-knockback", "projectile-knockback",
             "combo-hold", "combo-reach-handicap", "pot-fill", "fast-pots", "disable-offhand",
-            "disable-crafting", "drop-protection", "effects", "anticheat", "debug", "modules");
+            "disable-crafting", "drop-protection", "charged-attacks", "effects", "anticheat",
+            "debug", "modules");
 
     /** The toggle-only features (GUI §4.2) — no settings page, by design. */
     private static final List<Feature> TOGGLE_ONLY = List.of(
@@ -41,7 +42,13 @@ class SettingsCatalogTest {
             Feature.TOOL_DURABILITY, Feature.SWORD_BLOCKING, Feature.ATTACK_COOLDOWN,
             Feature.ATTACK_SOUNDS, Feature.SWEEP, Feature.GOLDEN_APPLES,
             Feature.ENDER_PEARL_COOLDOWN, Feature.REGEN, Feature.POTION_DURATIONS,
-            Feature.POTION_VALUES, Feature.HITBOX);
+            Feature.POTION_VALUES, Feature.HITBOX,
+            // Combat Test 8c rule features that are era-fixed toggles (the two with
+            // tunables — WEAPON_ATTACK_SPEEDS, CHARGED_ATTACKS — own settings pages).
+            Feature.CT8C_PROJECTILES, Feature.CT8C_DAMAGE, Feature.CT8C_CRITS,
+            Feature.CT8C_IFRAMES, Feature.CT8C_SHIELDS, Feature.CLEAVING,
+            Feature.CT8C_SWEEP, Feature.CT8C_REGEN, Feature.CT8C_CONSUMABLES,
+            Feature.CT8C_POTIONS, Feature.CT8C_REACH);
 
     /** An all-empty parse — every settings record is its DEFAULTS (parse(empty) contract). */
     private static Snapshot defaults() {

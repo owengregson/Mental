@@ -32,7 +32,8 @@ public final class PresetCatalog {
             Map.entry("signature", "NETHER_STAR"),
             Map.entry("modern-vanilla", "NETHERITE_SWORD"),
             Map.entry("modern-uplift", "NETHERITE_AXE"),
-            Map.entry("modern-combo", "TRIDENT"), Map.entry("custom", "WRITABLE_BOOK"));
+            Map.entry("modern-combo", "TRIDENT"), Map.entry("ct8c", "NETHERITE_HOE"),
+            Map.entry("custom", "WRITABLE_BOOK"));
 
     private static final Map<String, String> EFFECTS_ICONS = Map.of(
             "signature", "NETHER_STAR", "custom", "WRITABLE_BOOK");

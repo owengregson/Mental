@@ -15,13 +15,13 @@ import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * The Combat Presets picker — the {@link EffectsPresetMenu} model mirrored a third
- * time, for rules bundles. Lists every loaded {@code bundles/*.yml} by stem;
- * clicking a tile applies it server-wide through {@code Management.applyBundle},
- * which validates the whole bundle, writes its batch of module/profile/preset keys
- * into the machine overlay in one persist, and reloads once. A bundle is a macro,
- * not a mode — applying one flips a whole ruleset at once (the CT8c snapshot, the
- * classic 1.7 feel, or Mental-transparent vanilla).
+ * The Combat Presets picker on the redesigned chrome — the whole-ruleset macros, a
+ * sibling to the {@link PresetGalleryMenu}. Lists every loaded {@code bundles/*.yml}
+ * by stem; clicking a tile applies it server-wide through {@code
+ * Management.applyBundle}, which validates the whole bundle, writes its batch of
+ * module/profile/preset keys into the machine overlay in one persist, and reloads
+ * once. A bundle is a macro, not a mode — applying one flips a whole ruleset at once
+ * (the CT8c snapshot, the classic 1.7 feel, or Mental-transparent vanilla).
  *
  * <p>Because a bundle leaves no live "active bundle" state behind, the ACTIVE mark
  * is computed read-only: a bundle reads as active when the current config already
@@ -29,8 +29,9 @@ import org.jetbrains.annotations.NotNull;
  * a no-op. The tile preview is READ-ONLY: what the bundle turns on, and which
  * profile/preset it selects.</p>
  *
- * <p>No back stack, so Back is hardcoded to the {@link DashboardMenu} the picker is
- * reached from.</p>
+ * <p>Reached from the {@link DashboardMenu} Combat Presets tile; with no back stack,
+ * Back returns there. The neutral {@link Palette#system()} chrome matches its
+ * dashboard-nav siblings (Compatibility, Debug).</p>
  */
 public final class CombatPresetsMenu extends Menu {
 
@@ -40,10 +41,13 @@ public final class CombatPresetsMenu extends Menu {
             "signature", "NETHER_STAR",
             "vanilla", "GRASS_BLOCK");
 
-    /** The picker's two bundle rows (rows 2–3 of a six-row inventory). */
-    private static final int[] BUNDLE_SLOTS = {
-            19, 20, 21, 22, 23, 24, 25,
-            28, 29, 30, 31, 32, 33, 34};
+    /** Bundle tiles ride content rows of at most seven, chunked from row 2 down. */
+    private static final int TILES_PER_ROW = 7;
+    private static final int FIRST_BUNDLE_ROW_BASE = 18;
+    private static final int HEADER_SLOT = 4;
+    private static final int BACK_SLOT = 49;
+
+    private final Palette.Theme theme = Palette.system();
 
     public CombatPresetsMenu(@NotNull MenuContext ctx) {
         super(ctx);
@@ -51,34 +55,46 @@ public final class CombatPresetsMenu extends Menu {
 
     @Override
     protected @NotNull Component title() {
-        return Component.text("Mental · Combat Presets", Brand.PRIMARY);
+        return Component.text("Mental", Brand.PRIMARY, TextDecoration.BOLD)
+                .append(Component.text(" · ", Brand.MUTED))
+                .append(Component.text("Combat Presets", theme.accent()));
     }
 
     @Override
     protected int rows() {
-        // BUNDLE_SLOTS reach slot 34, so the picker needs the full six rows.
         return 6;
     }
 
     @Override
     protected void draw(@NotNull Player viewer) {
-        Icon header = Buttons.title("CHEST", "Combat Presets");
+        paintChrome(theme.pane());
+
+        Icon header = Buttons.title("CHEST", "Combat Presets", theme.accent());
         Buttons.wrap("One preset applies a whole ruleset at once — a batch of module"
                 + " toggles, plus the knockback profile and effects tune it needs."
                 + " It is a macro: applying one leaves the server in a fully-known state.")
                 .forEach(line -> header.lore(line, Brand.MUTED));
-        set(4, header.build());
+        set(HEADER_SLOT, header.build());
 
+        // Bundles flow across up to two centred content rows (seven per row) — the
+        // three shipped bundles centre on row 2; an operator's extra bundles spill
+        // to row 3. Beyond fourteen, the surplus falls outside the six-row frame and
+        // Menu.set drops it (a bundle count that high is not a real deployment).
         List<String> names = bundleNames();
-        for (int i = 0; i < names.size() && i < BUNDLE_SLOTS.length; i++) {
-            String name = names.get(i);
-            RulesBundle bundle = ctx.plugin().bundles().get(name);
-            boolean active = bundle != null && matchesCurrent(bundle);
-            set(BUNDLE_SLOTS[i], bundleTile(bundle, name, active),
-                    click -> apply(viewer, () -> ctx.management().applyBundle(name)));
+        for (int i = 0; i < names.size(); i += TILES_PER_ROW) {
+            int rowBase = FIRST_BUNDLE_ROW_BASE + (i / TILES_PER_ROW) * 9;
+            int count = Math.min(TILES_PER_ROW, names.size() - i);
+            int[] slots = Layout.contentRow(rowBase, count);
+            for (int j = 0; j < count; j++) {
+                String name = names.get(i + j);
+                RulesBundle bundle = ctx.plugin().bundles().get(name);
+                boolean active = bundle != null && matchesCurrent(bundle);
+                set(slots[j], bundleTile(bundle, name, active),
+                        click -> apply(viewer, () -> ctx.management().applyBundle(name)));
+            }
         }
 
-        set(49, Buttons.back(), click -> navigate(viewer, new DashboardMenu(ctx)));
+        set(BACK_SLOT, Buttons.back("the Dashboard"), click -> navigate(viewer, new DashboardMenu(ctx)));
     }
 
     /** Every loaded bundle name, sorted — any file dropped into bundles/ shows up. */
@@ -114,9 +130,11 @@ public final class CombatPresetsMenu extends Menu {
     private void preview(@NotNull Icon icon, @NotNull RulesBundle bundle) {
         long on = bundle.modules().values().stream().filter(Boolean::booleanValue).count();
         long off = bundle.modules().size() - on;
-        icon.lore(kv("Modules", on + " on · " + off + " off"));
-        bundle.knockbackProfile().ifPresent(profile -> icon.lore(kv("Knockback", profile)));
-        bundle.effectsPreset().ifPresent(preset -> icon.lore(kv("Effects", preset)));
+        icon.lore(Buttons.kv("Modules", on + " on · " + off + " off", theme.accent()));
+        bundle.knockbackProfile().ifPresent(
+                profile -> icon.lore(Buttons.kv("Knockback", profile, theme.accent())));
+        bundle.effectsPreset().ifPresent(
+                preset -> icon.lore(Buttons.kv("Effects", preset, theme.accent())));
     }
 
     /**
@@ -143,27 +161,18 @@ public final class CombatPresetsMenu extends Menu {
     }
 
     /**
-     * Boot self-test seam (mirrors {@link EffectsPresetMenu#selfTestIcons}): the
-     * load-bearing icons rendered with no viewer, so the tester can prove the
-     * Adventure/String sink path classloads on legacy servers. Returns only Bukkit
-     * types.
+     * Boot self-test seam: the load-bearing icons rendered with no viewer, so the
+     * tester can prove the Adventure/String sink path classloads on legacy servers.
+     * Returns only Bukkit types.
      */
     public @NotNull List<ItemStack> selfTestIcons() {
         List<ItemStack> icons = new ArrayList<>();
-        Icon header = Buttons.title("CHEST", "Combat Presets");
-        icons.add(header.build());
+        icons.add(Buttons.title("CHEST", "Combat Presets", theme.accent()).build());
         for (String name : bundleNames()) {
             RulesBundle bundle = ctx.plugin().bundles().get(name);
             icons.add(bundleTile(bundle, name, bundle != null && matchesCurrent(bundle)));
         }
-        icons.add(Buttons.back());
+        icons.add(Buttons.back("the Dashboard"));
         return icons;
-    }
-
-    private static @NotNull Component kv(@NotNull String label, @NotNull String value) {
-        return Component.text()
-                .append(Component.text(label + ": ", Brand.MUTED))
-                .append(Component.text(value, Brand.ACCENT))
-                .build();
     }
 }

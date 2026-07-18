@@ -1,6 +1,7 @@
 package me.vexmc.mental.v5.gui;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -47,16 +48,26 @@ class LayoutTest {
     }
 
     @Test
-    void contentRowCapacityHoldsForEveryLiveCaller() {
-        // Layout.contentRow throws past 7 by design, and the headless boot self-test
-        // never exercises draw()'s layout math — so an 8th feature in a family (FamilyMenu
-        // lays its cards with ONE content row) or a 15th debug channel (DebugMenu's two
-        // rows are 7 + 7) would surface only as a crash on the first LIVE open. These
-        // pins turn that would-be runtime crash into a build failure that names the
-        // layout decision the addition needs (a second row, a page, a different grid).
+    void familyScreensLayOutWithinTheInventoryForEveryLiveCaller() {
+        // FamilyMenu chunks its feature cards across content rows of at most seven
+        // (DAMAGE's ten and SUSTAIN's eight ride two rows), so Layout.contentRow can
+        // never overflow the frame — but the screen must still fit the six-row
+        // inventory ceiling, and each chunk must be a legal content row. The headless
+        // boot self-test renders selfTestIcons()/selfTestInventory(), neither of which
+        // exercises draw()'s per-row slot math; these pins run that exact math so a
+        // family that outgrows the layout fails the build rather than the first LIVE open.
         for (Family family : Family.values()) {
-            assertTrue(DashboardModel.entries(family).size() <= 7,
-                    () -> family + " has more than 7 features — FamilyMenu's single content row overflows");
+            int rows = FamilyMenu.rowsFor(family);
+            assertTrue(rows <= 6,
+                    () -> family + " needs " + rows + " inventory rows — past the six-row ceiling;"
+                            + " it needs a different grouping or pagination");
+            int entries = DashboardModel.entries(family).size();
+            for (int i = 0; i < entries; i += 7) {
+                int base = 9 + (i / 7) * 9;
+                int count = Math.min(7, entries - i);
+                assertDoesNotThrow(() -> Layout.contentRow(base, count),
+                        () -> family + " content row at base " + base + " overflows with " + count + " cards");
+            }
         }
         assertTrue(DebugCategory.values().length <= 14,
                 "more than 14 debug channels — DebugMenu's two content rows (7 + 7) overflow");

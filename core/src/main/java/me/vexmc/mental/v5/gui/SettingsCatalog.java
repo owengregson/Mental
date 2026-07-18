@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import me.vexmc.mental.v5.config.Snapshot;
+import me.vexmc.mental.v5.config.settings.ChargedAttackSettings;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
@@ -20,6 +21,7 @@ import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
+import me.vexmc.mental.v5.config.settings.WeaponSpeedSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import org.jetbrains.annotations.NotNull;
 
@@ -443,6 +445,46 @@ public final class SettingsCatalog {
                         Knob.info("Pickup Rule", "PLAYER_HEAD",
                                 "Only the killer may pick the drops up while the window runs; afterwards"
                                         + " they are free-for-all.")))));
+
+        // Combat Test 8c — the two rule features that carry tunables (the other
+        // eleven CT8c modules are era-fixed toggles). CHARGED_ATTACKS exposes its
+        // scalar charge gate; WEAPON_ATTACK_SPEEDS's twelve-value per-class att/s
+        // table is a POINTER (the overlay is scalar-only, and the ladder is file
+        // work), mirroring how OFFHAND / CRAFTING / combo geometry surface lists.
+        pages.put(Feature.CHARGED_ATTACKS, new Page(Feature.CHARGED_ATTACKS, List.of(
+                List.of(
+                        Knob.toggle("charged-attacks.require-full-charge", "Require Full Charge", "CLOCK",
+                                "Reject a hit landed below 100% charge — a landed hit needs a full recharge.",
+                                s -> settings(s, Feature.CHARGED_ATTACKS, ChargedAttackSettings.class)
+                                        .requireFullCharge()),
+                        Knob.stepInt("charged-attacks.miss-recovery-ticks", "Miss Recovery", "REPEATER",
+                                "After an air swing, a re-attack is allowed once more than this many ticks pass.",
+                                0, 20, 1, "ticks",
+                                s -> settings(s, Feature.CHARGED_ATTACKS, ChargedAttackSettings.class)
+                                        .missRecoveryTicks()),
+                        Knob.stepDouble("charged-attacks.charged-threshold", "Charge Threshold", "REDSTONE",
+                                "The charge scale (0–2) at or above which a hit counts as charged — 1.95 = 195%.",
+                                1.0, 2.0, 0.05, "×",
+                                s -> settings(s, Feature.CHARGED_ATTACKS, ChargedAttackSettings.class)
+                                        .chargedThreshold()),
+                        Knob.stepDouble("charged-attacks.charged-reach-bonus", "Reach Bonus", "TARGET",
+                                "Extra reach, in blocks, granted to a charged hit.",
+                                0.0, 2.0, 0.1, "blocks",
+                                s -> settings(s, Feature.CHARGED_ATTACKS, ChargedAttackSettings.class)
+                                        .chargedReachBonus()),
+                        Knob.toggle("charged-attacks.deny-bonus-while-crouching", "Deny Bonus Crouched",
+                                "LEATHER_BOOTS",
+                                "Deny the charged reach bonus while the attacker is crouching (8c behavior).",
+                                s -> settings(s, Feature.CHARGED_ATTACKS, ChargedAttackSettings.class)
+                                        .denyBonusWhileCrouching())))));
+
+        pages.put(Feature.WEAPON_ATTACK_SPEEDS, new Page(Feature.WEAPON_ATTACK_SPEEDS, List.of(
+                List.of(
+                        Knob.pointer("Attack Speeds", "DIAMOND_SWORD",
+                                "The per-class attacks-per-second table — fist, sword, axe, pickaxe, shovel,"
+                                        + " trident, and the tier-sensitive hoe ladder — is precision tuning,"
+                                        + " edited in the file.",
+                                "config.yml", "weapon-attack-speeds")))));
 
         return pages;
     }

@@ -18,6 +18,7 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.gui.ChatPrompt;
+import me.vexmc.mental.v5.gui.CombatPresetsMenu;
 import me.vexmc.mental.v5.gui.CompatibilityMenu;
 import me.vexmc.mental.v5.gui.DashboardMenu;
 import me.vexmc.mental.v5.gui.DebugMenu;
@@ -207,6 +208,11 @@ public final class BootSuite {
                         assertScreenRenders(context, compatibility, compatibility.selfTestIcons(), "compatibility");
                         DebugMenu debug = new DebugMenu(menuContext);
                         assertScreenRenders(context, debug, debug.selfTestIcons(), "debug");
+
+                        // The Combat Presets screen (rules bundles) rides the same headless sink path.
+                        CombatPresetsMenu combatPresets = new CombatPresetsMenu(menuContext);
+                        assertScreenRenders(context, combatPresets, combatPresets.selfTestIcons(),
+                                "combat presets");
 
                         // §7.2: the pane-regression guard on every version — a legacy pane-colour break can
                         // never ship silently, since STONE (the resolver's fall-through) fails the check.
