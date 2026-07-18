@@ -3,12 +3,14 @@ package me.vexmc.mental.v5.api;
 import java.util.OptionalDouble;
 import java.util.Set;
 import me.vexmc.mental.api.Mental;
+import me.vexmc.mental.api.MentalCombat;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.manage.Management;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The v5 implementation of the public {@link Mental.MentalApi} surface (spec
@@ -64,6 +66,20 @@ public record MentalFacade(
 
     @Override
     public int apiVersion() {
-        return 2;
+        return 3;
+    }
+
+    @Override
+    public boolean has(@NotNull Mental.MentalApi.Capability capability) {
+        return switch (capability) {
+            case COMBO_EVENTS, COMBO_CHAIN_EVENTS, COMBO_HIT_EVENTS,
+                 COMBO_QUERY, WINDOW_QUERY, KNOCKBACK_OUTCOMES -> true;
+            case MITIGATION_PREVIEW -> false;   // deferred to 3.1 by ruling
+        };
+    }
+
+    @Override
+    public @Nullable MentalCombat combat() {
+        return plugin.combatQuery();
     }
 }
