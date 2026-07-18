@@ -693,6 +693,16 @@ public final class MentalPluginV5 extends JavaPlugin {
         overlay.remove(key);
     }
 
+    /**
+     * Whether one machine-overlay key currently wins over its human file value —
+     * the GUI's read-only "overridden in-GUI?" probe, additive beside
+     * {@link #overlaySet}/{@link #overlayRemove} (both untouched). Powers the
+     * settings screens' ⚑ marker and Q-to-reset affordance.
+     */
+    public boolean overlayHas(@NotNull String key) {
+        return overlay.has(key);
+    }
+
     /** True when {@code feature} has an open scope right now (the tester's module-active check). */
     public boolean featureActive(@NotNull Feature feature) {
         return reconciler.active(feature);

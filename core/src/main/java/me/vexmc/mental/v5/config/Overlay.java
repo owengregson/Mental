@@ -10,6 +10,7 @@ import java.util.Map;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * The machine-owned configuration overlay (spec §10): a flat
@@ -36,6 +37,16 @@ public final class Overlay {
     /** The overridden keys, in insertion order (for the GUI's "modified" marks). */
     public Map<String, Object> overrides() {
         return Map.copyOf(overrides);
+    }
+
+    /**
+     * The GUI's "is this knob overridden in-GUI?" probe — true when {@code key}
+     * has a machine-overlay value winning over the human file. Read-only and
+     * additive; it powers the settings screens' ⚑ marker and the Q-to-reset
+     * affordance ({@code Management.clearOverlay} only makes sense when this holds).
+     */
+    public boolean has(@NotNull String key) {
+        return overrides.containsKey(key);
     }
 
     /**
