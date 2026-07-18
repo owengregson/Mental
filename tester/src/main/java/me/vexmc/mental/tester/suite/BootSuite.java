@@ -8,22 +8,30 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import me.vexmc.mental.api.Mental;
+import me.vexmc.mental.platform.MenuMaterials;
+import me.vexmc.mental.platform.PaneColor;
 import me.vexmc.mental.platform.ServerEnvironment;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.ProbeStrategy;
+import me.vexmc.mental.v5.feature.Family;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.gui.ChatPrompt;
+import me.vexmc.mental.v5.gui.CompatibilityMenu;
 import me.vexmc.mental.v5.gui.DashboardMenu;
-import me.vexmc.mental.v5.gui.EffectsPresetMenu;
-import me.vexmc.mental.v5.gui.KnockbackFormulaMenu;
+import me.vexmc.mental.v5.gui.DebugMenu;
+import me.vexmc.mental.v5.gui.FamilyMenu;
 import me.vexmc.mental.v5.gui.MeleeFormula;
+import me.vexmc.mental.v5.gui.Menu;
 import me.vexmc.mental.v5.gui.MenuContext;
-import me.vexmc.mental.v5.gui.ProfileMenu;
+import me.vexmc.mental.v5.gui.PresetGalleryMenu;
+import me.vexmc.mental.v5.gui.SettingsCatalog;
+import me.vexmc.mental.v5.gui.SettingsMenu;
 import me.vexmc.mental.v5.platform.ManifestEntry;
 import me.vexmc.mental.v5.platform.SwordBlockAdapter;
 import me.vexmc.mental.v5.platform.WeaponTooltipAdapter;
+import me.vexmc.mental.v5.preset.PresetKind;
 import me.vexmc.mental.tester.TestCase;
 import me.vexmc.mental.tester.TestContext;
 import org.bukkit.Bukkit;
@@ -130,14 +138,14 @@ public final class BootSuite {
                     context.syncRun(() -> context.expect(mental.probeSelfTest(),
                             "probe send self-test threw on " + mental.environment().describe()));
                 }),
-                new TestCase("boot: dashboard GUI renders headless (Adventure + String sinks load)", context -> {
+                new TestCase("boot: every management screen renders headless (Adventure + String sinks load)", context -> {
                     // Proves the TextPort/Adventure seam and the universal String-API sinks actually
-                    // classload and execute on THIS server. On legacy servers (< 1.16.5) the Paper-native
-                    // Component sinks are absent and net.kyori ships only as Mental's relocated copy, so a
-                    // broken shade or a stray Component→Bukkit call would throw right here rather than on the
-                    // first live /mental open. Run on the global tick (createInventory + item meta are
-                    // main/region-affine on some servers); no viewer is needed — the String-title path and
-                    // the headless icon render exercise every sink.
+                    // classload and execute on THIS server, for EVERY redesigned screen. On legacy servers
+                    // (< 1.16.5) the Paper-native Component sinks are absent and net.kyori ships only as
+                    // Mental's relocated copy, so a broken shade or a stray Component→Bukkit call would
+                    // throw right here rather than on the first live /mental open. Run on the global tick
+                    // (createInventory + item meta are main/region-affine on some servers); no viewer is
+                    // needed — the String-title path and the headless icon render exercise every sink.
                     context.syncRun(() -> {
                         MenuContext menuContext = new MenuContext(
                                 mental, mental.management(), new ChatPrompt(mental.scheduling()));
@@ -156,34 +164,53 @@ public final class BootSuite {
                         context.expect(inventory.getHolder() == dashboard,
                                 "inventory holder is not the menu — the click-router identity test would break");
 
-                        // The melee-formula chooser and both per-formula preset lists render the
-                        // same String/Adventure sink path, and the modern presets pull the
-                        // Netherite/Trident icon names (absent below 1.16 → MenuMaterials fallback);
-                        // exercise them so a legacy classload break or a stray null icon surfaces at
-                        // boot rather than on first open.
-                        KnockbackFormulaMenu formula = new KnockbackFormulaMenu(menuContext);
-                        assertIconsRender(context, formula.selfTestIcons(), "formula chooser");
-                        context.expect(formula.selfTestInventory().getHolder() == formula,
-                                "formula-chooser inventory holder is not the menu");
-                        for (MeleeFormula which : MeleeFormula.values()) {
-                            ProfileMenu presets = new ProfileMenu(menuContext, which);
-                            assertIconsRender(context, presets.selfTestIcons(), "profile list " + which);
-                            Inventory list = presets.selfTestInventory();
-                            context.expect(list.getSize() == 54,
-                                    "profile-list (" + which + ") inventory size " + list.getSize() + " != 54");
-                            context.expect(list.getHolder() == presets,
-                                    "profile-list (" + which + ") holder is not the menu");
+                        // Every family renders on the one FamilyMenu metaphor — a 3+ row chest whose
+                        // holder identity the click router still recognizes.
+                        for (Family family : Family.values()) {
+                            FamilyMenu menu = new FamilyMenu(menuContext, family);
+                            assertScreenRenders(context, menu, menu.selfTestIcons(), "family " + family);
+                            int size = menu.selfTestInventory().getSize();
+                            context.expect(size % 9 == 0 && size >= 27,
+                                    "family (" + family + ") inventory size " + size + " is not a 3+ row chest");
                         }
 
-                        // The Combat Effects preset picker (2.5.3) rides the same sink
-                        // path with its own preview lore — render it headless too.
-                        EffectsPresetMenu effects = new EffectsPresetMenu(menuContext);
-                        assertIconsRender(context, effects.selfTestIcons(), "effects preset list");
+                        // Every descriptor-driven settings page — the catalog's own iteration seam IS the
+                        // render list, so a newly configured page can never ship un-rendered.
+                        for (Feature feature : SettingsCatalog.configuredFeatures()) {
+                            SettingsMenu menu = new SettingsMenu(menuContext, feature);
+                            assertScreenRenders(context, menu, menu.selfTestIcons(), "settings " + feature);
+                        }
+
+                        // The knockback gallery renders per MeleeFormula tab (keeping the MeleeFormula
+                        // compile pin alive); the modern tab pulls the Netherite/Trident icon names
+                        // (absent below 1.16 → MenuMaterials fallback), so a legacy classload break or a
+                        // stray null icon surfaces at boot rather than on first open.
+                        PresetGalleryMenu knockback = new PresetGalleryMenu(menuContext, PresetKind.KNOCKBACK);
+                        for (MeleeFormula which : MeleeFormula.values()) {
+                            assertIconsRender(context, knockback.selfTestIcons(which), "knockback gallery " + which);
+                        }
+                        Inventory knockbackList = knockback.selfTestInventory();
+                        context.expect(knockbackList.getSize() == 54,
+                                "knockback-gallery inventory size " + knockbackList.getSize() + " != 54");
+                        context.expect(knockbackList.getHolder() == knockback,
+                                "knockback-gallery inventory holder is not the menu");
+
+                        // The Combat Effects gallery rides the same sink path with its own preview lore.
+                        PresetGalleryMenu effects = new PresetGalleryMenu(menuContext, PresetKind.EFFECTS);
+                        assertScreenRenders(context, effects, effects.selfTestIcons(), "effects gallery");
                         Inventory effectsList = effects.selfTestInventory();
                         context.expect(effectsList.getSize() == 54,
-                                "effects-preset inventory size " + effectsList.getSize() + " != 54");
-                        context.expect(effectsList.getHolder() == effects,
-                                "effects-preset inventory holder is not the menu");
+                                "effects-gallery inventory size " + effectsList.getSize() + " != 54");
+
+                        // The two neutral system screens.
+                        CompatibilityMenu compatibility = new CompatibilityMenu(menuContext);
+                        assertScreenRenders(context, compatibility, compatibility.selfTestIcons(), "compatibility");
+                        DebugMenu debug = new DebugMenu(menuContext);
+                        assertScreenRenders(context, debug, debug.selfTestIcons(), "debug");
+
+                        // §7.2: the pane-regression guard on every version — a legacy pane-colour break can
+                        // never ship silently, since STONE (the resolver's fall-through) fails the check.
+                        panesRenderEraCorrect(context);
                     });
                 }),
                 new TestCase("legacy: era weapon damage resolves through the flattening name seam", context ->
@@ -415,6 +442,45 @@ public final class BootSuite {
         for (ItemStack icon : icons) {
             context.expect(icon != null && icon.getType() != Material.AIR,
                     "a " + label + " icon rendered as null/AIR — an Icon build sink failed");
+        }
+    }
+
+    /** Asserts a menu's headless render built non-AIR icons and kept its holder identity. */
+    private static void assertScreenRenders(@NotNull TestContext context, @NotNull Menu menu,
+            @NotNull List<ItemStack> icons, @NotNull String label) {
+        assertIconsRender(context, icons, label);
+        context.expect(menu.selfTestInventory().getHolder() == menu,
+                label + " inventory holder is not the menu — the click-router identity test would break");
+    }
+
+    /**
+     * §7.2 pane-regression guard: every {@link PaneColor} must resolve to a real coloured pane on this
+     * exact server. STONE is {@code MenuMaterials.FALLBACK} — its appearance means neither the modern
+     * per-colour material nor the pre-flattening STAINED_GLASS_PANE resolved, the exact silent legacy
+     * regression this check exists to catch. On a flattened server (the modern name is present) the stack
+     * is that per-colour material with durability 0 and NO data value; below 1.13 it is STAINED_GLASS_PANE
+     * carrying the colour's own data value. Runs on every version including 1.9.4.
+     */
+    @SuppressWarnings("deprecation") // getDurability() is the pre-1.13 pane data-value accessor
+    private static void panesRenderEraCorrect(@NotNull TestContext context) {
+        for (PaneColor color : PaneColor.values()) {
+            ItemStack pane = MenuMaterials.pane(color);
+            context.expect(pane != null && pane.getType() != Material.AIR
+                            && !"STONE".equals(pane.getType().name()),
+                    "pane " + color + " resolved to null/AIR/STONE — the pane resolver fell through");
+            if (Material.getMaterial(color.modernName()) != null) {
+                context.expect(pane.getType().name().equals(color.modernName()),
+                        "modern pane " + color + " must be " + color.modernName()
+                                + " (got " + pane.getType().name() + ")");
+                context.expect(pane.getDurability() == 0,
+                        "modern pane " + color + " must carry no data value (got " + pane.getDurability() + ")");
+            } else {
+                context.expect(pane.getType().name().equals("STAINED_GLASS_PANE"),
+                        "legacy pane " + color + " must be STAINED_GLASS_PANE (got " + pane.getType().name() + ")");
+                context.expect(pane.getDurability() == color.legacyData(),
+                        "legacy pane " + color + " must carry data " + color.legacyData()
+                                + " (got " + pane.getDurability() + ")");
+            }
         }
     }
 
