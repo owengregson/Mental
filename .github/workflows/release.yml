@@ -325,31 +325,45 @@ jobs:
           # The supported range (floor → ceiling) comes from support-matrix.json.
           support_range=$(jq -r '[.entries[] | select(.platform=="paper") | .version] | .[0] + " → " + .[-1]' support-matrix.json)
 
+          # Human-written, player-facing highlights: each release branch updates
+          # .github/release-highlights.md with a version marker on its first
+          # line (<!-- vX.Y.Z -->). The section is injected only when the
+          # marker matches THIS tag — a stale file from an earlier release is
+          # silently skipped, so forgetting to update it degrades gracefully to
+          # the commit changelog instead of shipping the wrong highlights.
+          highlights=""
+          if [ -f .github/release-highlights.md ] \
+            && head -1 .github/release-highlights.md | grep -q "<!-- $TAG -->"; then
+            highlights=$(tail -n +2 .github/release-highlights.md)
+          fi
+
           {
-            echo "**Supports** Paper $support_range · Folia — **one jar**, no plugin dependencies."
+            echo "**Runs on** every Paper server $support_range (plus Folia) — one jar, no other plugins needed, Java 8 or newer."
             echo
-            echo "> **One jar, every version — no flags, no per-version builds.** Mental ships a single Multi-Release jar that classloads on **any** Java your server itself runs, from **Java 8 up**: legacy JVMs read the Java-8 bytecode tree, modern JVMs (1.17+) read the original Java-17 tree — byte-for-byte the behaviour the matrix has proven for months. Every version 1.9.4 → 26.x is covered, **1.14.4 included**."
-            echo ">"
-            echo "> **Recommended Java:** run the newest Java your server build accepts flagless — that is all Mental needs."
+            if [ -n "$highlights" ]; then
+              echo "### What's new for your server"
+              echo
+              echo "$highlights"
+              echo
+            fi
+            echo "### Install or update"
             echo
-            echo "### Install"
+            echo "1. Download \`$JAR_NAME\` below and drop it into your server's \`plugins/\` folder (replacing the old jar if you're updating — your config is kept)."
+            echo "2. Restart the server. That's it — the defaults are the classic combat, no setup required."
             echo
-            echo "1. Download \`$JAR_NAME\` below and drop it into your server's \`plugins/\` folder."
-            echo "2. Restart the server."
+            echo "Configuration is generated under \`plugins/Mental/\`, every option documented inside its own file. Pick a knockback preset in-game with \`/mental\` or in \`knockback.yml\`. Upgrading from a very old single-file config? It migrates automatically and your original is kept as \`config-v1-backup.yml\`."
             echo
-            echo "That's it — the defaults are the classic combat. Configuration is generated under \`plugins/Mental/\`: \`knockback.yml\` selects the knockback profile (presets live in \`plugins/Mental/profiles/\`), and every option is documented in its file."
-            echo
-            echo "Upgrading from an old single-file config? It migrates automatically — tuned knockback values become \`profiles/custom.yml\` (and stay selected), and the original is kept as \`config-v1-backup.yml\`."
+            echo "> **One jar, every version.** Modern Java reads Mental's Java-17 build, older Java reads the Java-8 build packed in the same file — no flags, no per-version downloads, 1.14.4 included."
             echo
             echo "<details>"
-            echo "<summary>Changelog — $count commits $since</summary>"
+            echo "<summary>Full changelog — $count commits $since</summary>"
             echo
             echo "$changelog"
             echo
             echo "</details>"
             echo
             echo "---"
-            echo "_Released automatically after unit tests and the full ${{ join(fromJSON(needs.detect.outputs.matrix), ', ') }} integration matrix passed on real Paper servers._"
+            echo "_Published automatically only after unit tests and live integration runs on real servers of all ${{ join(fromJSON(needs.detect.outputs.matrix), ', ') }} passed._"
           } > release-notes.md
 
           echo "── release-notes.md ──"
