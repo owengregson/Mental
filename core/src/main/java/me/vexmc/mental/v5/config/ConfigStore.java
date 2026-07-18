@@ -118,7 +118,7 @@ public final class ConfigStore {
     public static final List<String> BUNDLED_PROFILES = List.of(
             "legacy-1.7", "legacy-1.8", "kohi", "minehq", "badlion", "velt",
             "mmc", "lunar", "signature",
-            "modern-vanilla", "modern-uplift", "modern-combo", "custom");
+            "modern-vanilla", "modern-uplift", "modern-combo", "ct8c", "custom");
 
     /**
      * The formula-category folder a bundled preset lives in — derived from the

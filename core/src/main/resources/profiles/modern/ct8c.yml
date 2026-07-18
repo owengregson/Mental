@@ -1,0 +1,102 @@
+# ──────────────────────────────────────────────────────────────────────────
+#  ct8c — the Java Edition Combat Test 8c knockback formula
+#
+#  Provenance: the `1.16_combat-6` experimental snapshot (Combat Test 8c),
+#  spec §2.5. Every number below is code-confirmed against a full decompile of
+#  the SHA1-verified `1_16_combat-6` client remapped with Mojang's official
+#  mappings — `LivingEntity.knockback`. Where the wiki/spreadsheet and the
+#  binary disagreed, the binary won (design doc §1). This is the knockback
+#  companion of the `ct8c` rules bundle; the combat RULES (charge, damage,
+#  shields, i-frames, regen, potions, reach) live in the default-OFF `ct8c-*`
+#  rule features, NOT here — a profile only shapes knockback.
+#
+#  CT8c rewrote the vanilla knockback vertical (spec §2.5). After the scalar
+#  resistance step (strength = f·(1 − resist)):
+#
+#      vx = old.x/2 − dir.x·strength
+#      vy = onGround ? min(0.4, 0.75·strength)          # grounded — a re-stamp
+#                    : min(0.4, old.y + 0.5·strength)   # airborne — ADD, capped
+#      vz = old.z/2 − dir.z·strength
+#
+#  That is the `vertical-shape: ct8c-split` below. The horizontal is the modern
+#  two-stage knock Mental already ships: a positional BASE knock away from the
+#  attacker, then (while sprinting / with Knockback) a yaw-directed EXTRA knock
+#  — each a full application of the CT8c knockback function, so the sprint push
+#  re-stamps the grounded vertical exactly as the decompiled code does.
+#
+#  Because the airborne branch is an ADD, a victim already falling fast can be
+#  knocked NET-DOWNWARD (old.y −1.0, strength 0.4 → −0.8). `limits.vertical-min`
+#  MUST stay at -3.9 (the packet floor / no-op) or that downward knock is
+#  clamped away.
+#
+#  Delivery is immediate/tracker (send-then-restore, like the other modern
+#  presets — no server-side residual survives, so combos are off). Resistance is
+#  NONE: the modern formula owns the scalar (1 − knockback-resistance) itself, so
+#  no separate armor-resistance policy runs. `shield-blocking-cancels: false` —
+#  CT8c shields grant 0.5 knockback resistance while blocking (they do NOT cancel
+#  the knock), and that lives in the `ct8c-shields` rule feature.
+#
+#  The legacy knobs (base/extra/friction/wtap-extra/range-reduction/
+#  speed-scaling) are INERT while `formula: modern` — the `modern:` block is the
+#  whole tuning surface. This preset is regenerated when the file is missing;
+#  your edits stay.
+# ──────────────────────────────────────────────────────────────────────────
+display-name: Combat Test 8c
+description: "Java Edition Combat Test 8c knockback — the modern two-stage math with the split vertical (grounded 0.75×strength, airborne ADD-capped)."
+
+knockback:
+  # legacy | modern. `modern` swaps in the two-stage 26.1.2 formula whose
+  # vertical the `vertical-shape` below reshapes to the CT8c split.
+  formula: modern
+
+  # The modern formula's knobs — the whole tuning surface in this mode.
+  modern:
+    # The base positional knock strength (CT8c base is the vanilla 0.4).
+    base-strength: 0.4
+    # The flat sprint addition to the yaw-directed extra knock (spec §2.5:
+    # "sprint adds +1 knockback level" — 0.5 per level, vanilla-1.16).
+    sprint-bonus: 0.5
+    # The addition per Knockback enchant level (0.5/level, vanilla-1.16).
+    enchant-bonus: 0.5
+    residual:
+      # Surviving fraction of the victim's motion per application — CT8c keeps
+      # the vanilla old.x/2 residual (0.5).
+      horizontal: 0.5
+      vertical: 0.5
+    # The vertical ceiling shared by both ground states (spec §2.5: min(0.4, …)).
+    vertical-cap: 0.4
+    # INERT under `vertical-shape: ct8c-split` — the split owns both ground
+    # states, so the vanilla downward toggle does nothing here. Left true for
+    # documentation clarity.
+    downward-knockback: true
+    # vanilla | ct8c-split. THE defining knob of this preset (spec §2.5):
+    #   grounded : vy = min(vertical-cap, vertical-grounded-factor·strength)
+    #              — a re-stamp, independent of the victim's own vy
+    #   airborne : vy = min(vertical-cap, old.y + vertical-airborne-factor·strength)
+    #              — an ADD, capped (a deep fall can ship net-downward)
+    vertical-shape: ct8c-split
+    # The grounded multiplier: CT8c's 0.75·strength (a standing hit at the 0.4
+    # base ships min(0.4, 0.30) = 0.30; a sprint hit re-stamps to
+    # min(0.4, 0.75·0.5) = 0.375).
+    vertical-grounded-factor: 0.75
+    # The airborne ADD multiplier: CT8c's 0.5·strength added to the victim's
+    # own falling vy, then capped at vertical-cap.
+    vertical-airborne-factor: 0.5
+
+  limits:
+    # REQUIRED at -3.9 (the packet floor / no-op): the airborne split can ship a
+    # net-downward knock, and a higher floor would clamp it away.
+    vertical-min: -3.9
+  # Send-then-restore, like the other modern presets: no server-side residual
+  # survives, so melee never feeds itself.
+  delivery:
+    melee: immediate
+    projectile: tracker
+  modifiers:
+    combos: false
+    # NONE: the modern formula applies the scalar (1 − knockback-resistance)
+    # internally, so no separate armor-resistance roll runs.
+    armor-resistance: none
+    # false — CT8c shields grant 0.5 knockback RESISTANCE while blocking (owned
+    # by the ct8c-shields rule feature), they do not cancel the knock outright.
+    shield-blocking-cancels: false

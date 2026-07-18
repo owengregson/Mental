@@ -148,6 +148,25 @@ class ProfileParserTest {
         }
     }
 
+    @Test
+    void ct8cBundledFileParsesTheSplitVerticalShape() {
+        // The dedicated ct8c pin: the modern-folder file must round-trip to the
+        // Presets.CT8C constant, and specifically carry the CT8C_SPLIT shape with
+        // the vanilla grounded/airborne factors (spec §2.5 / plan §3.4).
+        YamlConfiguration file = resource("ct8c");
+        KnockbackProfile parsed = ProfileParser.parse(
+                "ct8c",
+                file.getString("display-name", "ct8c"),
+                file.getString("description", ""),
+                knockbackReader(file, "ct8c"));
+        assertEquals(Presets.CT8C, parsed);
+        assertTrue(parsed.modern().enabled());
+        assertEquals(me.vexmc.mental.kernel.profile.VerticalShape.CT8C_SPLIT,
+                parsed.modern().verticalShape());
+        assertEquals(0.75, parsed.modern().groundedVerticalFactor());
+        assertEquals(0.5, parsed.modern().airborneVerticalFactor());
+    }
+
     /* ------------------------- selection (Snapshot.profileFor) ------------------------- */
 
     private static Snapshot parseWith(String knockbackYaml, Map<String, Configuration> profiles)
