@@ -1,11 +1,11 @@
 package me.vexmc.mental.v5.feature.damage;
 
-import org.bukkit.Bukkit;
 import me.vexmc.mental.platform.CleavingRegistrar;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import org.bukkit.Bukkit;
 
 /**
  * The Combat Test 8c Cleaving enchantment (spec §2.9). Cleaving is axe-only, max
