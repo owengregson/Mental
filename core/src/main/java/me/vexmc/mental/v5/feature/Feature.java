@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.feature;
 
+import me.vexmc.mental.v5.config.settings.ChargedAttackSettings;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
@@ -15,6 +16,7 @@ import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
+import me.vexmc.mental.v5.config.settings.WeaponSpeedSettings;
 
 /**
  * The single enumerable feature registry (spec §7). One constant per feature,
@@ -113,6 +115,16 @@ public enum Feature {
                     Facets.none("thrown damage is nulled, not shaped")),
             new SettingsKey<>("projectile-knockback", ProjectileKnockbackSettings.class)),
 
+    CT8C_PROJECTILES("ct8c-projectiles", Family.KNOCKBACK, "CT8c Projectiles",
+            "Combat Test 8c ranged rules — snowballs/eggs deal 0 damage but full 0.4 knock, a 4-tick throw gate, bow fatigue after 3s, aim-direction-only momentum.",
+            "SNOWBALL", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("knockback ships through the velocity pipeline; the 2-tick render suppression is client-only"),
+                    Facets.none("no fast-path damage contribution"),
+                    Facets.none("thrown damage is nulled, not shaped")),
+            new SettingsKey<>("ct8c-projectiles", NoSettings.class)),
+
     /* -------------------------------- DAMAGE -------------------------------- */
 
     ARMOUR_STRENGTH("old-armour-strength", Family.DAMAGE, "Old Armour Strength",
@@ -165,6 +177,56 @@ public enum Feature {
                     Facets.handled()),
             new SettingsKey<>("sword-blocking", NoSettings.class)),
 
+    CT8C_DAMAGE("ct8c-damage", Family.DAMAGE, "CT8c Damage",
+            "Combat Test 8c weapon damage tables — player base 2.0 + weapon + tier (one lower than vanilla), hoe/trident flats.",
+            "DIAMOND_AXE", false,
+            new Facets(
+                    Facets.none("a pure weapon-damage composition through the DamageShaper seam, not a Bukkit rule"),
+                    Facets.none("no client-visible change"),
+                    Facets.handled(),
+                    Facets.handled()),
+            new SettingsKey<>("ct8c-damage", NoSettings.class)),
+
+    CT8C_CRITS("ct8c-crits", Family.DAMAGE, "CT8c Critical Hits",
+            "Combat Test 8c crit policy — flat x1.5, sprinting allowed, enchant damage folded into the base BEFORE the multiplier.",
+            "NETHER_STAR", false,
+            new Facets(
+                    Facets.none("a crit multiplier composed into the damage amount, not a Bukkit rule"),
+                    Facets.none("no client-visible change"),
+                    Facets.handled(),
+                    Facets.handled()),
+            new SettingsKey<>("ct8c-crits", NoSettings.class)),
+
+    CT8C_IFRAMES("ct8c-iframes", Family.DAMAGE, "CT8c Invulnerability",
+            "Combat Test 8c i-frames — min(attacker attack-delay, 10) ticks for melee, 0 for every projectile, through the spawn-invuln-safe seam.",
+            "TOTEM_OF_UNDYING", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("no client-visible change"),
+                    Facets.none("gates subsequent hits, not a damage amount"),
+                    Facets.none("gates subsequent hits, not a damage amount")),
+            new SettingsKey<>("ct8c-iframes", NoSettings.class)),
+
+    CT8C_SHIELDS("ct8c-shields", Family.DAMAGE, "CT8c Shields",
+            "Combat Test 8c shields — 148 arc, a 5-damage cap with passthrough, instant + crouch blocking, 0.5 KB resist, axe disable.",
+            "SHIELD", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("the crouch-raised shield pose is a client asset and cannot be reproduced server-side"),
+                    Facets.none("no fast-path damage contribution"),
+                    Facets.handled()),
+            new SettingsKey<>("ct8c-shields", NoSettings.class)),
+
+    CLEAVING("cleaving", Family.DAMAGE, "Cleaving",
+            "The Combat Test 8c axe-only Cleaving enchant — +1+level damage (folded through CT8c Damage) and +10t/level shield disable.",
+            "NETHERITE_AXE", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("no client-visible change"),
+                    Facets.handled(),
+                    Facets.handled()),
+            new SettingsKey<>("cleaving", NoSettings.class)),
+
     /* ------------------------------- CADENCE -------------------------------- */
 
     ATTACK_COOLDOWN("attack-cooldown", Family.CADENCE, "Attack Cooldown",
@@ -196,6 +258,36 @@ public enum Feature {
                     Facets.none("no fast-path contribution"),
                     Facets.handled()),
             new SettingsKey<>("disable-sword-sweep", NoSettings.class)),
+
+    WEAPON_ATTACK_SPEEDS("weapon-attack-speeds", Family.CADENCE, "CT8c Weapon Speeds",
+            "Combat Test 8c melee cadence — recompute the held item's ATTACK_SPEED attribute from the CT8c attacks-per-second table.",
+            "DIAMOND_SWORD", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("the attribute is server-authoritative and client-synced; no packet spoof"),
+                    Facets.none("attack cadence, not a damage amount"),
+                    Facets.none("attack cadence, not a damage amount")),
+            new SettingsKey<>("weapon-attack-speeds", WeaponSpeedSettings.class)),
+
+    CHARGED_ATTACKS("charged-attacks", Family.CADENCE, "CT8c Charged Attacks",
+            "Combat Test 8c charge gate — reject a hit below full charge (bar the 4-tick miss lane), grant reach above 195% charge.",
+            "CLOCK", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("the charge meter is client-authoritative and cannot be rendered server-side"),
+                    Facets.none("gates whether the hit lands, not its amount"),
+                    Facets.none("gates whether the hit lands, not its amount")),
+            new SettingsKey<>("charged-attacks", ChargedAttackSettings.class)),
+
+    CT8C_SWEEP("ct8c-sweep", Family.CADENCE, "CT8c Sweep",
+            "Combat Test 8c sweep rules — Sweeping Edge required AND >=195% charge (plain swords no longer sweep); axes accept the enchant.",
+            "IRON_SWORD", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.handled(),
+                    Facets.none("sweep secondary damage rides the vanilla sweep path"),
+                    Facets.handled()),
+            new SettingsKey<>("ct8c-sweep", NoSettings.class)),
 
     /* ------------------------------- SUSTAIN -------------------------------- */
 
@@ -249,6 +341,36 @@ public enum Feature {
                     Facets.none("mob/vanilla hits keep vanilla values (scope trade-off)")),
             new SettingsKey<>("old-potion-values", NoSettings.class)),
 
+    CT8C_REGEN("ct8c-regen", Family.SUSTAIN, "CT8c Regen",
+            "Combat Test 8c food/regen — heal 1 HP every 40t while food > 6 (50% drain), sprint gated on food > 6, eat-interrupt on a hit.",
+            "GOLDEN_APPLE", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("no client-visible change"),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("ct8c-regen", NoSettings.class)),
+
+    CT8C_CONSUMABLES("ct8c-consumables", Family.SUSTAIN, "CT8c Consumables",
+            "Combat Test 8c consumables — 20-tick drinks, potions stacking to 16 and snowballs to 64 (1.20.5+ item components, loud degrade below).",
+            "MUSHROOM_STEW", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("the stack size / drink duration ride normal item-component sync, not a spoof"),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("ct8c-consumables", NoSettings.class)),
+
+    CT8C_POTIONS("ct8c-potions", Family.SUSTAIN, "CT8c Potions",
+            "Combat Test 8c potion values — Instant Health/Damage 6*2^amp, Strength/Weakness +/-20% per level, tipped-arrow effects x1/8.",
+            "SPLASH_POTION", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.none("no client-visible change"),
+                    Facets.handled(),
+                    Facets.none("mob/vanilla-path hits keep vanilla potion damage (scope trade-off, mirrors old-potion-values)")),
+            new SettingsKey<>("ct8c-potions", NoSettings.class)),
+
     /* ------------------------------- LOADOUT -------------------------------- */
 
     CRAFTING("disable-crafting", Family.LOADOUT, "Disable Crafting",
@@ -280,6 +402,17 @@ public enum Feature {
                     Facets.none("no damage contribution"),
                     Facets.none("no damage contribution")),
             new SettingsKey<>("old-hitboxes", NoSettings.class)),
+
+    CT8C_REACH("ct8c-reach", Family.LOADOUT, "CT8c Reach",
+            "Combat Test 8c melee reach — base 2.5 / sword 3.0 / hoe+trident 3.5 (+ the charged bonus), plus the 0.9 hitbox inflation and"
+                    + " through-non-solid targeting, all inside Mental's own reach validation. 1.20.5+ for 3.5; loud degrade below.",
+            "TARGET", false,
+            new Facets(
+                    Facets.handled(),
+                    Facets.handled(),
+                    Facets.none("no damage contribution"),
+                    Facets.none("no damage contribution")),
+            new SettingsKey<>("ct8c-reach", NoSettings.class)),
 
     /* -------------------------------- COMBO --------------------------------- */
 

@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import me.vexmc.mental.v5.config.settings.AnticheatSettings;
+import me.vexmc.mental.v5.config.settings.ChargedAttackSettings;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
@@ -23,6 +24,7 @@ import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
+import me.vexmc.mental.v5.config.settings.WeaponSpeedSettings;
 import me.vexmc.mental.kernel.math.TargetMode;
 import me.vexmc.mental.v5.feature.Feature;
 import org.bukkit.Material;
@@ -201,6 +203,15 @@ public final class SnapshotParser {
                     effects.damageIndicators(), effectsOverrides(sources, "indicators", issues));
             case DEATH_EFFECTS -> applyDeathOverrides(
                     effects.deathEffects(), effectsOverrides(sources, "death", issues));
+            // The two Combat Test 8c features that carry their own numbers read
+            // top-level config.yml sections. These cases are load-bearing: without
+            // them the switch's NoSettings default would store a NoSettings under a
+            // SettingsKey<WeaponSpeedSettings>/<ChargedAttackSettings>, and the read
+            // would fail the type — the settingsFor-default→NoSettings mistype.
+            case WEAPON_ATTACK_SPEEDS -> parseWeaponSpeeds(
+                    reader(sources.main(), "weapon-attack-speeds", "config.yml", issues));
+            case CHARGED_ATTACKS -> parseChargedAttacks(
+                    reader(sources.main(), "charged-attacks", "config.yml", issues));
             default -> NoSettings.DEFAULTS;
         };
     }
@@ -358,6 +369,53 @@ public final class SnapshotParser {
                 damage.numberAtLeast("snowball", d.snowballDamage(), 0),
                 damage.numberAtLeast("egg", d.eggDamage(), 0),
                 damage.numberAtLeast("ender-pearl", d.enderPearlDamage(), 0));
+    }
+
+    /**
+     * The Combat Test 8c per-class attack speeds ({@code weapon-attack-speeds}
+     * module, spec §2.2). Every class is one flat att/s except the hoe, whose
+     * speed climbs with tier (its own nested block). An absent section or key
+     * reads the code-confirmed default silently, so {@code parse(empty)} equals
+     * {@link WeaponSpeedSettings#DEFAULTS} — the era-exact no-op; a negative
+     * att/s warns and the default stands (a positive floor of 0.0).
+     */
+    private static WeaponSpeedSettings parseWeaponSpeeds(ConfigReader reader) {
+        WeaponSpeedSettings d = WeaponSpeedSettings.DEFAULTS;
+        ConfigReader speeds = reader.sub("attacks-per-second");
+        WeaponSpeedSettings.HoeSpeeds hd = d.hoe();
+        ConfigReader hoe = speeds.sub("hoe");
+        WeaponSpeedSettings.HoeSpeeds hoeSpeeds = new WeaponSpeedSettings.HoeSpeeds(
+                hoe.numberAtLeast("wood", hd.wood(), 0.0),
+                hoe.numberAtLeast("stone", hd.stone(), 0.0),
+                hoe.numberAtLeast("iron", hd.iron(), 0.0),
+                hoe.numberAtLeast("gold", hd.gold(), 0.0),
+                hoe.numberAtLeast("diamond", hd.diamond(), 0.0),
+                hoe.numberAtLeast("netherite", hd.netherite(), 0.0));
+        return new WeaponSpeedSettings(
+                speeds.numberAtLeast("fist", d.fist(), 0.0),
+                speeds.numberAtLeast("sword", d.sword(), 0.0),
+                speeds.numberAtLeast("axe", d.axe(), 0.0),
+                speeds.numberAtLeast("pickaxe", d.pickaxe(), 0.0),
+                speeds.numberAtLeast("shovel", d.shovel(), 0.0),
+                speeds.numberAtLeast("trident", d.trident(), 0.0),
+                hoeSpeeds);
+    }
+
+    /**
+     * The Combat Test 8c charge gate ({@code charged-attacks} module, spec §2.1).
+     * The threshold lives on the 0..2.0 attack scale (1.95 = the ≥195% gate), so
+     * it is confined to that range; miss-recovery ticks and the reach bonus have
+     * a non-negative floor. An absent section reads every code-confirmed default
+     * silently, so {@code parse(empty)} equals {@link ChargedAttackSettings#DEFAULTS}.
+     */
+    private static ChargedAttackSettings parseChargedAttacks(ConfigReader reader) {
+        ChargedAttackSettings d = ChargedAttackSettings.DEFAULTS;
+        return new ChargedAttackSettings(
+                reader.flag("require-full-charge", d.requireFullCharge()),
+                reader.intAtLeast("miss-recovery-ticks", d.missRecoveryTicks(), 0),
+                reader.numberInRange("charged-threshold", d.chargedThreshold(), 0.0, 2.0),
+                reader.numberAtLeast("charged-reach-bonus", d.chargedReachBonus(), 0.0),
+                reader.flag("deny-bonus-while-crouching", d.denyBonusWhileCrouching()));
     }
 
     private static CraftingSettings parseCrafting(ConfigReader reader) {
