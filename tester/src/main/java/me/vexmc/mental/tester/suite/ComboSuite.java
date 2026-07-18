@@ -3,9 +3,17 @@ package me.vexmc.mental.tester.suite;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import me.vexmc.mental.api.ComboView;
+import me.vexmc.mental.api.Mental;
+import me.vexmc.mental.api.MentalCombat;
+import me.vexmc.mental.api.event.ComboChainAbortEvent;
+import me.vexmc.mental.api.event.ComboChainEvent;
 import me.vexmc.mental.api.event.ComboEndEvent;
+import me.vexmc.mental.api.event.ComboHitEvent;
 import me.vexmc.mental.api.event.ComboStartEvent;
+import me.vexmc.mental.api.event.KnockbackApplyEvent;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.math.PocketServo;
 import me.vexmc.mental.kernel.math.PocketServoConfig;
@@ -43,10 +51,14 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerVelocityEvent;
+import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -119,7 +131,25 @@ public final class ComboSuite {
                 new TestCase("combo: reach-handicap backstop rejects a comboed victim's over-reach answer, accepts the honest cap (1.20.5+)",
                         context -> runReachBackstopScenario(mental, tester, context)),
                 new TestCase("combo: reach-handicap wins over the HITBOX ATTACK_RANGE weapon component (1.21.5+)",
-                        context -> runReachHandicapComponentScenario(mental, tester, context)));
+                        context -> runReachHandicapComponentScenario(mental, tester, context)),
+                new TestCase("combo: gen3 lifecycle Chain→Start→Hit→End",
+                        context -> runGen3LifecycleScenario(mental, tester, context)),
+                new TestCase("combo: comboOn observes the pre-hit state (§7)",
+                        context -> runPreHitStateScenario(mental, tester, context)),
+                new TestCase("combo: query surface answers (§6/§11.4)",
+                        context -> runQuerySurfaceScenario(mental, tester, context)),
+                new TestCase("combo: hurtWindowClear pins the §6 expression (§11.3)",
+                        context -> runHurtWindowScenario(mental, tester, context)),
+                new TestCase("combo: a foreign velocity cancel advances nothing (D1/§11.6)",
+                        context -> runForeignCancelScenario(mental, tester, context)),
+                new TestCase("combo: suppress ships zero and outcomes read back (§8)",
+                        context -> runOutcomeMachineScenario(mental, tester, context)),
+                new TestCase("combo: developing aborts surface (§5.2)",
+                        context -> runDevelopingAbortsScenario(mental, tester, context)),
+                new TestCase("combo: module toggle-off fires terminals and defuncts handles (§11.5)",
+                        context -> runModuleToggleTerminalsScenario(mental, tester, context)),
+                new TestCase("combo: natively blocked cadence forms a combo (D2/§11.6)",
+                        context -> runBlockedComboScenario(mental, tester, context)));
     }
 
     /* --------------------------- scenario 1: the chain --------------------------- */
@@ -486,7 +516,7 @@ public final class ComboSuite {
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
         FakePlayer victim = new FakePlayer(tester, mental.scheduling());
-        ComboEventCaptor captor = new ComboEventCaptor();
+        ComboEventCaptor captor = new ComboEventCaptor(victim.uuid());
         try {
             setUp(mental, context, attacker, victim, true);
             context.syncRun(() ->
@@ -827,8 +857,701 @@ public final class ComboSuite {
     }
 
     /* ------------------------------------------------------------------ */
+    /*  Gen-3 acceptance (§5-§11) — the api integration surface, live       */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * §5.1/§5.4/§5.6 (case 1): the full lifecycle on one confirmed-ship chain —
+     * hit 1 opens a developing {@link ComboChainEvent} (hits 1), hit 2 promotes to
+     * {@link ComboStartEvent} ALONE (no CHAIN_ADVANCED at min-hits 2, no
+     * {@link ComboHitEvent} for that knock), hits 3/4 are active
+     * {@link ComboHitEvent}s carrying the effective max-gap window, and the victim's
+     * retaliation closes it with the balanced {@link ComboEndEvent}. The captor is
+     * scoped to the victim so the retaliation's own developing chain (on the
+     * attacker) never contaminates the counts.
+     */
+    private static void runGen3LifecycleScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ComboEventCaptor captor = new ComboEventCaptor(victim.uuid());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+            int effGap = effectiveMaxGap(mental, context);
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(captor, tester));
+
+            for (int hit = 0; hit < 4; hit++) {
+                stageAttack(context, attacker, victim);
+                context.awaitTicks(CADENCE_TICKS);
+            }
+            // Retaliation ends the active combo (RETALIATION). Once its terminal is
+            // captured every prior chain/start/hit for this combo has already fired.
+            context.syncRun(() -> {
+                attacker.player().setNoDamageTicks(0);
+                victim.attack(attacker.player());
+            });
+            context.awaitUntil(() -> !captor.ends.isEmpty(), 40, "the ComboEndEvent terminal");
+
+            context.expect(captor.chains.size() == 1,
+                    "expected exactly one developing ComboChainEvent (the opener), got " + captor.chains.size());
+            ComboChainEvent opener = captor.chains.get(0);
+            context.expect(opener.getHits() == 1,
+                    "the ComboChainEvent must be the chain opening (hits==1), got " + opener.getHits());
+            context.expect(attacker.uuid().equals(opener.getAttackerId()),
+                    "the chain opener must name the attacker UUID");
+            context.expect(opener.getGapDeadlineTick() != MentalCombat.NO_TICK,
+                    "the chain opener must carry a real gap deadline");
+
+            context.expect(captor.starts.size() == 1,
+                    "expected exactly one ComboStartEvent, got " + captor.starts.size());
+            ComboStartEvent start = captor.starts.get(0);
+            context.expect(start.getHits() == 2,
+                    "the start must fire at min-hits 2, got " + start.getHits());
+            context.expect(start.getAttackerId() != null && attacker.uuid().equals(start.getAttackerId()),
+                    "the start must name the attacker UUID");
+            context.expect(start.getStartedTick() != MentalCombat.NO_TICK,
+                    "the start must carry a real started tick");
+
+            for (ComboHitEvent hit : captor.hits) {
+                context.expect(hit.getHits() != 2,
+                        "the promotion knock (hits==2) must be Start alone, never a ComboHitEvent");
+            }
+            context.expect(captor.hits.size() == 2,
+                    "expected two active ComboHitEvents (hits 3,4), got " + captor.hits.size());
+            int prev = 2;
+            for (ComboHitEvent hit : captor.hits) {
+                context.expect(hit.getHits() > prev,
+                        "ComboHitEvent hits must strictly increase (saw " + hit.getHits() + " after " + prev + ")");
+                prev = hit.getHits();
+                long window = hit.getGapDeadlineTick() - hit.getTick();
+                context.expect(window == effGap,
+                        "a ComboHitEvent gap window (" + window + ") must equal the effective max-gap " + effGap);
+            }
+
+            ComboEndEvent end = captor.ends.get(0);
+            context.expect(end.getReason() == ComboEndEvent.Reason.RETALIATION,
+                    "the end reason must be RETALIATION, got " + end.getReason());
+            context.expect(end.getHits() == 4,
+                    "the end must carry the final chain length 4, got " + end.getHits());
+            context.expect(end.getAttackerId() != null && attacker.uuid().equals(end.getAttackerId()),
+                    "the end must name the attacker UUID");
+            context.expect(end.getEndedTick() != MentalCombat.NO_TICK,
+                    "the end must carry a real ended tick");
+        } finally {
+            context.syncRun(() -> HandlerList.unregisterAll(captor));
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * §7 (case 2): a query made from inside an {@code EntityDamageByEntityEvent}
+     * handler observes the PRE-hit combo state, because the chain is fed only at the
+     * later MONITOR confirm of the victim's velocity event. Records
+     * {@code comboOn(victim)} at damage time for three cadence hits: hit 1 → NONE,
+     * hit 2 → DEVELOPING/1 (the §7 fold-eligibility arm — the promotion hit's pre-hit
+     * state), hit 3 → ACTIVE/2.
+     */
+    private static void runPreHitStateScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        PreHitObserver observer = new PreHitObserver(victim.uuid());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(observer, tester));
+
+            for (int hit = 0; hit < 3; hit++) {
+                stageAttack(context, attacker, victim);
+                context.awaitTicks(CADENCE_TICKS);
+            }
+            // Three damage events recorded — one per staged hit.
+            context.awaitUntil(() -> observer.states.size() >= 3, 40, "three pre-hit state samples");
+            context.expect(observer.states.size() == 3,
+                    "expected exactly 3 pre-hit samples, got " + observer.states.size());
+            context.expect(observer.states.get(0) == ComboView.State.NONE && observer.hits.get(0) == 0,
+                    "hit 1 pre-hit state must be NONE/0, got " + observer.states.get(0) + "/" + observer.hits.get(0));
+            context.expect(observer.states.get(1) == ComboView.State.DEVELOPING && observer.hits.get(1) == 1,
+                    "hit 2 pre-hit state must be DEVELOPING/1 (the fold-eligibility arm), got "
+                            + observer.states.get(1) + "/" + observer.hits.get(1));
+            context.expect(observer.states.get(2) == ComboView.State.ACTIVE && observer.hits.get(2) == 2,
+                    "hit 3 pre-hit state must be ACTIVE/2, got "
+                            + observer.states.get(2) + "/" + observer.hits.get(2));
+        } finally {
+            context.syncRun(() -> HandlerList.unregisterAll(observer));
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * §6/§11.4 (case 3): the query surface answers while a combo is active —
+     * {@code combat()} non-null, an unknown victim reads NONE with NO_TICK ticks, a
+     * captured {@link ComboHitEvent}'s tick is not in the future of the frame read
+     * inside its own handler, and an OFF-thread {@code comboOn} returns a non-torn
+     * ACTIVE view whose gap window equals the effective max-gap.
+     */
+    private static void runQuerySurfaceScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ComboEventCaptor captor = new ComboEventCaptor(victim.uuid());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+            int effGap = effectiveMaxGap(mental, context);
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(captor, tester));
+
+            buildActiveCombo(mental, context, attacker, victim);
+            // buildActiveCombo drives three hits, so hit 3 fires an active ComboHitEvent.
+            context.awaitUntil(() -> !captor.hits.isEmpty(), 40, "an active ComboHitEvent");
+
+            // combat() is non-null while detection is live; an unknown victim is NONE.
+            context.expect(context.sync(() -> Mental.get().combat() != null),
+                    "combat() must be non-null while a combo module is running");
+            ComboView unknown = context.sync(() -> Mental.get().combat().comboOn(new UUID(0, 0)));
+            context.expect(unknown.state() == ComboView.State.NONE,
+                    "an unknown victim must read state NONE, got " + unknown.state());
+            context.expect(unknown.attackerId() == null
+                            && unknown.lastKnockTick() == MentalCombat.NO_TICK
+                            && unknown.gapDeadlineTick() == MentalCombat.NO_TICK,
+                    "an unknown victim's view must carry null attacker + NO_TICK ticks");
+
+            // The tick a ComboHitEvent carries is never ahead of the frame sampled
+            // inside its own handler (index-aligned capture).
+            ComboHitEvent hit = captor.hits.get(0);
+            long sampledCurrent = captor.hitCurrentTicks.get(0);
+            context.expect(hit.getTick() <= sampledCurrent,
+                    "a ComboHitEvent tick (" + hit.getTick() + ") must be <= currentTick() ("
+                            + sampledCurrent + ") sampled in its handler");
+
+            // Off-thread (driver-thread) read: a non-torn ACTIVE view.
+            ComboView view = Mental.get().combat().comboOn(victim.uuid());
+            context.expect(view.state() == ComboView.State.ACTIVE,
+                    "an off-thread comboOn must read ACTIVE, got " + view.state());
+            context.expect(attacker.uuid().equals(view.attackerId()),
+                    "the ACTIVE view must name the attacker");
+            context.expect(view.hits() >= 2, "the ACTIVE view must carry hits >= 2, got " + view.hits());
+            long window = view.gapDeadlineTick() - view.lastKnockTick();
+            context.expect(window == effGap,
+                    "the ACTIVE view's gap window (" + window + ") must equal the effective max-gap " + effGap);
+        } finally {
+            context.syncRun(() -> HandlerList.unregisterAll(captor));
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * §6/§11.3 (case 4): the pinned hurt-window admit expression
+     * {@code ndt <= maxNdt / 2}, read on the region thread. Cell (11,20)→false is
+     * the divergence cell versus Mental's internal "+1 staleness" fast-path read.
+     */
+    private static void runHurtWindowScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+            context.syncRun(() -> {
+                MentalCombat combat = Mental.get().combat();
+                context.expect(combat != null, "combat() must be non-null with combo-hold on");
+                victim.player().setMaximumNoDamageTicks(20);
+                int[][] cells = {{0, 1}, {10, 1}, {11, 0}, {20, 0}};
+                for (int[] cell : cells) {
+                    victim.player().setNoDamageTicks(cell[0]);
+                    boolean want = cell[1] == 1;
+                    context.expect(combat.hurtWindowClear(victim.player()) == want,
+                            "hurtWindowClear(ndt=" + cell[0] + ", maxNdt=20) must be " + want);
+                }
+            });
+        } finally {
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * D1/§11.6 (case 5): a foreign plugin cancelling the victim's velocity event at
+     * HIGHEST advances no chain — the feed gates on {@code !isCancelled()} at the
+     * MONITOR confirm. After the canceller is removed the chain opens normally
+     * (recovery), proving the gate is the only thing that was in the way.
+     */
+    private static void runForeignCancelScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ComboEventCaptor captor = new ComboEventCaptor(victim.uuid());
+        VelocityCanceller canceller = new VelocityCanceller(victim.uuid());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+            context.syncRun(() -> {
+                Bukkit.getPluginManager().registerEvents(captor, tester);
+                Bukkit.getPluginManager().registerEvents(canceller, tester);
+            });
+
+            stageAttack(context, attacker, victim);
+            context.awaitTicks(3);
+            context.expect(captor.chains.isEmpty(),
+                    "a foreign-cancelled velocity must advance no chain, got " + captor.chains.size()
+                            + " ComboChainEvents");
+            context.expect(context.sync(() -> Mental.get().combat().comboOn(victim.uuid()).state())
+                            == ComboView.State.NONE,
+                    "a foreign-cancelled hit must leave the victim's combo state NONE");
+
+            // Remove the canceller and re-stage: the chain now opens (recovery).
+            context.syncRun(() -> HandlerList.unregisterAll(canceller));
+            captor.reset();
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, attacker, victim);
+            context.awaitUntil(() -> !captor.chains.isEmpty(), 40, "the chain to open after the cancel is lifted");
+            context.expect(captor.chains.get(0).getHits() == 1,
+                    "recovery must open a fresh developing chain (hits==1), got " + captor.chains.get(0).getHits());
+        } finally {
+            context.syncRun(() -> {
+                HandlerList.unregisterAll(captor);
+                HandlerList.unregisterAll(canceller);
+            });
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * §8 (case 6): the {@link KnockbackApplyEvent} last-writer-wins outcome machine,
+     * live. The machine RESOLUTION (suppress → SUPPRESSED, velocity → SHIP, cancel →
+     * YIELDED) is asserted on every path from the MONITOR read-back, and the one
+     * outcome that changes delivery on ALL desk branches — YIELD (an early
+     * stand-down, no ship) — is asserted directly.
+     *
+     * <p><b>Delivery-path caveat (clientless honesty).</b> The desk consults the
+     * event's mutated velocity ONLY on its PRE_SENT branch (resolution
+     * {@code ship-corrected}/{@code ship-valve}); on the PINNED and region
+     * ({@code ship-formula}) branches it ships the pinned/formula vector and does not
+     * re-read the api mutation (only YIELD's early return is honored there). A
+     * clientless {@link FakePlayer} has no wire to pre-send a burst, so it always
+     * resolves via the pinned/region path — the suppress→zero and modify→exact-vector
+     * VALUES therefore only assert when the running path honors the mutation, and
+     * note the clientless limitation otherwise. Those value semantics are unit-pinned
+     * in {@code KnockbackApplyOutcomeTest}.</p>
+     */
+    private static void runOutcomeMachineScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        OutcomeCaptor outcomes = new OutcomeCaptor(victim.uuid());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(outcomes, tester));
+
+            // Baseline — a plain (unmutated) melee ship: the event fires with the right
+            // provenance, and its journal resolution tells us whether THIS server's
+            // delivery path re-reads the api mutation (PRE_SENT) or not (pinned/region).
+            outcomes.mode = OutcomeCaptor.Mode.NONE;
+            outcomes.recorded = null;
+            int before0 = countShips(mental, victim);
+            stageAttack(context, attacker, victim);
+            JournalEntry baseline = awaitNewShip(context, mental, victim, before0);
+            context.expect(baseline != null && baseline.shipped() != null,
+                    "a plain melee must journal a SHIP (Mental owns the knock)");
+            context.awaitUntil(() -> outcomes.recorded != null, 40, "the MONITOR outcome capture");
+            context.expect(outcomes.recorded == KnockbackApplyEvent.Outcome.SHIP,
+                    "an unmutated melee resolves SHIP, got " + outcomes.recorded);
+            context.expect(attacker.uuid().equals(outcomes.recordedAttacker),
+                    "the outcome capture must carry the attacker UUID");
+            context.expect(outcomes.recordedSource == KnockbackApplyEvent.Source.MELEE,
+                    "the melee ship's source must be MELEE, got " + outcomes.recordedSource);
+            boolean apiHonored = apiHonoredPath(baseline);
+            if (!apiHonored) {
+                context.note("clientless delivery resolved via the pinned/region path (resolution="
+                        + resolutionOf(baseline) + "); the desk ships the pinned/formula vector there and "
+                        + "does not re-read the api mutation — the suppress→zero and modify→exact VALUES are "
+                        + "unit-pinned in KnockbackApplyOutcomeTest and asserted here only on the PRE_SENT path");
+            }
+
+            // Leg 1 — SUPPRESS: the machine resolves SUPPRESSED; on the PRE_SENT path it
+            // ships an explicit zero vector.
+            context.awaitTicks(CADENCE_TICKS);
+            outcomes.mode = OutcomeCaptor.Mode.SUPPRESS;
+            outcomes.recorded = null;
+            int before1 = countShips(mental, victim);
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, attacker, victim);
+            JournalEntry suppressed = awaitNewShip(context, mental, victim, before1);
+            context.expect(suppressed != null && suppressed.shipped() != null,
+                    "a SUPPRESSED melee must still journal a SHIP");
+            context.awaitUntil(() -> outcomes.recorded != null, 40, "the MONITOR SUPPRESS capture");
+            context.expect(outcomes.recorded == KnockbackApplyEvent.Outcome.SUPPRESSED,
+                    "the recorded outcome must be SUPPRESSED, got " + outcomes.recorded);
+            if (apiHonored) {
+                context.expectNear(0.0, suppressed.shipped().x(), VECTOR_EPSILON, "suppressed ship x");
+                context.expectNear(0.0, suppressed.shipped().y(), VECTOR_EPSILON, "suppressed ship y");
+                context.expectNear(0.0, suppressed.shipped().z(), VECTOR_EPSILON, "suppressed ship z");
+            }
+
+            // Leg 2 — cancel → YIELDED → no ship lands (path-independent early stand-down).
+            context.awaitTicks(CADENCE_TICKS);
+            outcomes.mode = OutcomeCaptor.Mode.YIELD;
+            outcomes.recorded = null;
+            int before2 = countShips(mental, victim);
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, attacker, victim);
+            context.awaitTicks(4);
+            context.expect(countShips(mental, victim) == before2,
+                    "a YIELDED knock must journal no new ship (count " + before2 + " changed)");
+            context.awaitUntil(() -> outcomes.recorded != null, 40, "the MONITOR YIELD capture");
+            context.expect(outcomes.recorded == KnockbackApplyEvent.Outcome.YIELDED,
+                    "the recorded outcome must be YIELDED, got " + outcomes.recorded);
+
+            // Leg 3 — cancel then velocity → the machine resolves SHIP; on the PRE_SENT
+            // path it ships the last-written vector.
+            context.awaitTicks(CADENCE_TICKS);
+            outcomes.mode = OutcomeCaptor.Mode.MODIFY;
+            outcomes.recorded = null;
+            int before3 = countShips(mental, victim);
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, attacker, victim);
+            JournalEntry modified = awaitNewShip(context, mental, victim, before3);
+            context.expect(modified != null && modified.shipped() != null,
+                    "a cancel-then-velocity knock must journal a SHIP");
+            context.awaitUntil(() -> outcomes.recorded != null, 40, "the MONITOR SHIP capture");
+            context.expect(outcomes.recorded == KnockbackApplyEvent.Outcome.SHIP,
+                    "the recorded outcome must be SHIP (velocity clears a prior cancel), got " + outcomes.recorded);
+            if (apiHonored) {
+                context.expectNear(0.1, modified.shipped().x(), VECTOR_EPSILON, "last-writer ship x");
+                context.expectNear(0.2, modified.shipped().y(), VECTOR_EPSILON, "last-writer ship y");
+                context.expectNear(0.3, modified.shipped().z(), VECTOR_EPSILON, "last-writer ship z");
+            }
+        } finally {
+            context.syncRun(() -> HandlerList.unregisterAll(outcomes));
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /** Whether the desk branch that journaled {@code entry} re-reads the api-mutated velocity (PRE_SENT). */
+    private static boolean apiHonoredPath(JournalEntry entry) {
+        String resolution = resolutionOf(entry);
+        return "ship-corrected".equals(resolution) || "ship-valve".equals(resolution);
+    }
+
+    /** The desk resolution note the journal recorded, or "unknown" when the F9 capture is absent. */
+    private static String resolutionOf(JournalEntry entry) {
+        if (entry == null || entry.capture() == null || entry.capture().resolution() == null) {
+            return "unknown";
+        }
+        return entry.capture().resolution();
+    }
+
+    /**
+     * §5.2 (case 7): the three developing-chain abort vocabularies, each on a chain
+     * that never activated. (a) gap expiry on the sweep → EXPIRED; (b) an in-window
+     * attacker switch → SWITCHED (naming the OLD attacker), followed by the new
+     * chain's opener; (c) victim retaliation → RETALIATION. Uses the REAL (un-widened)
+     * gap so the live sweep expires the chain by construction — the SWITCHED-wins
+     * coincidence is kernel-pinned, so leg (b) stays inside the gap.
+     */
+    private static void runDevelopingAbortsScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer other = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ComboEventCaptor captor = new ComboEventCaptor(victim.uuid());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ false);
+            // The real gap (un-widened): a one-hit developing chain must expire on the
+            // sweep. Grounded-run is active-only, so it never touches a developing chain.
+            configureRules(mental, context, /*groundedRun=*/ 10, /*maxGap=*/ 20);
+            context.syncRun(() -> {
+                Location centre = victim.player().getLocation();
+                other.spawn(Arena.offset(centre, -3, 0));
+            });
+            context.awaitTicks(5);
+            int effGap = effectiveMaxGap(mental, context);
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(captor, tester));
+
+            // (a) gap expiry → EXPIRED.
+            stageAttack(context, attacker, victim);
+            context.awaitUntil(() -> !captor.aborts.isEmpty(), effGap + 20,
+                    "a developing chain to expire (EXPIRED)");
+            context.expect(captor.aborts.size() == 1,
+                    "gap expiry must fire exactly one ComboChainAbortEvent, got " + captor.aborts.size());
+            context.expect(captor.aborts.get(0).getReason() == ComboChainAbortEvent.Reason.EXPIRED,
+                    "the abort reason must be EXPIRED, got " + captor.aborts.get(0).getReason());
+            context.expect(captor.aborts.get(0).getHits() == 1,
+                    "the expired developing chain length must be 1, got " + captor.aborts.get(0).getHits());
+
+            // (b) in-window attacker switch → SWITCHED (names the OLD attacker) + a new opener.
+            captor.reset();
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, attacker, victim);
+            context.awaitUntil(() -> !captor.chains.isEmpty(), 40, "attacker A's chain to open");
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, other, victim);
+            context.awaitUntil(() -> !captor.aborts.isEmpty(), 40, "the switch abort");
+            context.expect(captor.aborts.get(0).getReason() == ComboChainAbortEvent.Reason.SWITCHED,
+                    "an in-window switch must abort SWITCHED, got " + captor.aborts.get(0).getReason());
+            context.expect(attacker.uuid().equals(captor.aborts.get(0).getAttackerId()),
+                    "the switch abort must name the OLD attacker (A)");
+            context.expect(captor.chains.stream().anyMatch(c -> other.uuid().equals(c.getAttackerId())),
+                    "the switch must open a fresh chain for the new attacker (B)");
+
+            // (c) retaliation on a fresh developing chain → RETALIATION. Let attacker
+            // B's chain settle to NONE FIRST (its gap-expiry EXPIRED abort would land
+            // in the captor otherwise), THEN reset and open a fresh chain.
+            context.awaitUntil(() -> {
+                try {
+                    return context.sync(() -> Mental.get().combat().comboOn(victim.uuid()).state())
+                            == ComboView.State.NONE;
+                } catch (Exception failure) {
+                    return false;
+                }
+            }, 40, "the victim's chain to settle to NONE before leg (c)");
+            captor.reset();
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, attacker, victim);
+            context.awaitUntil(() -> !captor.chains.isEmpty(), 40, "a fresh developing chain for leg (c)");
+            context.syncRun(() -> {
+                attacker.player().setNoDamageTicks(0);
+                victim.attack(attacker.player());
+            });
+            context.awaitUntil(() -> !captor.aborts.isEmpty(), 40, "the retaliation abort");
+            context.expect(captor.aborts.get(0).getReason() == ComboChainAbortEvent.Reason.RETALIATION,
+                    "a developing-chain retaliation must abort RETALIATION, got " + captor.aborts.get(0).getReason());
+        } finally {
+            context.syncRun(() -> HandlerList.unregisterAll(captor));
+            context.syncRun(other::remove);
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * §11.5 (case 8, module-toggle half): turning combo-hold off fires the balanced
+     * DISABLED terminals — a {@link ComboEndEvent} for an active combo, a
+     * {@link ComboChainAbortEvent} for a developing one — and a held
+     * {@link MentalCombat} handle degrades to the NONE/false shapes while the facade's
+     * {@code combat()} answers null (§4). (The plugin-disable half is enforced by
+     * construction — the tester cannot disable Mental mid-run without killing itself.)
+     */
+    private static void runModuleToggleTerminalsScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        ComboEventCaptor captor = new ComboEventCaptor(victim.uuid());
+        try {
+            setUp(mental, context, attacker, victim, /*holdOpenChain=*/ true);
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(captor, tester));
+
+            MentalCombat held = context.sync(() -> Mental.get().combat());
+            context.expect(held != null, "combat() must be non-null with combo-hold on");
+
+            buildActiveCombo(mental, context, attacker, victim);
+
+            // Toggle the module off through the same overlay+converge path setUp used.
+            context.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", false);
+                mental.reloadAll();
+            });
+            context.awaitUntil(() -> captor.ends.stream()
+                            .anyMatch(e -> e.getReason() == ComboEndEvent.Reason.DISABLED), 40,
+                    "a DISABLED ComboEndEvent on module toggle-off");
+
+            // The held handle degrades; the facade signals null.
+            context.expect(context.sync(() -> held.comboOn(victim.uuid()).state()) == ComboView.State.NONE,
+                    "a held handle must read NONE after the module is disabled");
+            context.syncRun(() -> context.expect(!held.hurtWindowClear(victim.player()),
+                    "a held handle's hurtWindowClear must read false after disable (the §4 defunct shape)"));
+            context.expect(context.sync(() -> Mental.get().combat()) == null,
+                    "combat() must be null once combo detection stops");
+
+            // Toggle back on, build a 1-hit DEVELOPING chain, toggle off → DISABLED abort.
+            context.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", true);
+                mental.overlaySet("combo-hold.grounded-run-ticks", 400);
+                mental.overlaySet("combo-hold.max-gap-ticks", 400);
+                mental.reloadAll();
+            });
+            context.awaitTicks(3);
+            captor.reset();
+            context.syncRun(() -> victim.player().setNoDamageTicks(0));
+            stageAttack(context, attacker, victim);
+            context.awaitUntil(() -> !captor.chains.isEmpty(), 40, "a developing chain before the second toggle");
+            context.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", false);
+                mental.reloadAll();
+            });
+            context.awaitUntil(() -> captor.aborts.stream()
+                            .anyMatch(a -> a.getReason() == ComboChainAbortEvent.Reason.DISABLED), 40,
+                    "a DISABLED ComboChainAbortEvent — the terminal the old code never fired");
+        } finally {
+            context.syncRun(() -> HandlerList.unregisterAll(captor));
+            teardown(mental, context, attacker, victim);
+        }
+    }
+
+    /**
+     * D2/§11.6 (case 9): a natively blocked cadence forms a combo. The blocked knock
+     * re-delivers through {@code KnockbackUnit.deliverBlockedKnock}'s authoritative
+     * {@code setVelocity}, which re-enters the desk's velocity seam and feeds the
+     * tracker exactly like an unblocked ship — so blocked hits advance chains. Gated
+     * on the BLOCKS_ATTACKS tier (skipped where absent); reuses the extracted
+     * {@link NativeBlockStaging} to force the clientless native block state.
+     */
+    private static void runBlockedComboScenario(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        if (!NativeBlockStaging.blocksAttacksPresent()) {
+            context.skip("BLOCKS_ATTACKS tier absent — D2 pinned by the desk re-entry funnel");
+            return;
+        }
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer blocker = new FakePlayer(tester, mental.scheduling());
+        ComboEventCaptor captor = new ComboEventCaptor(blocker.uuid());
+        try {
+            setUp(mental, context, attacker, blocker, /*holdOpenChain=*/ true);
+            context.syncRun(() -> {
+                mental.management().setModuleEnabled(
+                        Feature.byModuleId("sword-blocking").orElseThrow(), true);
+                blocker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+            });
+            context.awaitTicks(3);
+            context.expect(mental.featureActive(Feature.SWORD_BLOCKING),
+                    "sword-blocking must be active for the D2 blocked-combo case");
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(captor, tester));
+
+            boolean blocking = NativeBlockStaging.forceNativeBlock(context, blocker);
+            if (!blocking) {
+                context.skip("the clientless fake never entered the native block state — the D2 funnel is "
+                        + "otherwise pinned by BlockingSuite's silent-block-knock case");
+                return;
+            }
+
+            // Drive a cadence of blocked hits — re-forcing the block state before each,
+            // since a clientless use-item may lapse between hits.
+            for (int hit = 0; hit < 3; hit++) {
+                NativeBlockStaging.forceNativeBlock(context, blocker);
+                context.syncRun(() -> blocker.player().setNoDamageTicks(0));
+                stageAttack(context, attacker, blocker);
+                context.awaitTicks(CADENCE_TICKS);
+            }
+            context.awaitUntil(() -> {
+                try {
+                    return context.sync(() -> Mental.get().combat().comboOn(blocker.uuid()).state())
+                            == ComboView.State.ACTIVE;
+                } catch (Exception failure) {
+                    return false;
+                }
+            }, 40, "the blocked cadence to promote to an ACTIVE combo");
+            context.expect(context.sync(() -> Mental.get().combat().comboOn(blocker.uuid()).state())
+                            == ComboView.State.ACTIVE,
+                    "a natively blocked cadence must form an ACTIVE combo (D2)");
+            context.expect(!captor.starts.isEmpty(),
+                    "the blocked delivery path must have fired a ComboStartEvent");
+        } finally {
+            context.syncRun(() -> {
+                HandlerList.unregisterAll(captor);
+                mental.management().setModuleEnabled(
+                        Feature.byModuleId("sword-blocking").orElseThrow(), false);
+            });
+            teardown(mental, context, attacker, blocker);
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  Helpers                                                            */
     /* ------------------------------------------------------------------ */
+
+    /** The effective inter-hit max-gap the tracker is running under (the setUp overlay widens it). */
+    private static int effectiveMaxGap(MentalPluginV5 mental, TestContext context) throws Exception {
+        return context.sync(() -> comboSettings(mental).rules().maxGapTicks());
+    }
+
+    /** Stages one melee attack on the victim (clears its damage window first). */
+    private static void stageAttack(TestContext context, FakePlayer attacker, FakePlayer victim) throws Exception {
+        context.syncRun(() -> {
+            victim.player().setNoDamageTicks(0);
+            attacker.attack(victim.player());
+        });
+    }
+
+    /** Records {@code comboOn(victim)} at EntityDamageByEntityEvent MONITOR — the §7 pre-hit read. */
+    private static final class PreHitObserver implements Listener {
+        private final UUID victimId;
+        final List<ComboView.State> states = new CopyOnWriteArrayList<>();
+        final List<Integer> hits = new CopyOnWriteArrayList<>();
+
+        PreHitObserver(UUID victimId) {
+            this.victimId = victimId;
+        }
+
+        @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+        public void onDamage(EntityDamageByEntityEvent event) {
+            if (!victimId.equals(event.getEntity().getUniqueId())) {
+                return;
+            }
+            MentalCombat combat = Mental.get().combat();
+            if (combat == null) {
+                return;
+            }
+            ComboView view = combat.comboOn(victimId);
+            states.add(view.state());
+            hits.add(view.hits());
+        }
+    }
+
+    /** Cancels the victim's velocity event at HIGHEST — the D1 foreign-cancel stand-in. */
+    private static final class VelocityCanceller implements Listener {
+        private final UUID victimId;
+
+        VelocityCanceller(UUID victimId) {
+            this.victimId = victimId;
+        }
+
+        @EventHandler(priority = EventPriority.HIGHEST)
+        public void onVelocity(PlayerVelocityEvent event) {
+            if (victimId.equals(event.getPlayer().getUniqueId())) {
+                event.setCancelled(true);
+            }
+        }
+    }
+
+    /**
+     * Drives one {@link KnockbackApplyEvent} outcome at NORMAL (per {@link #mode}) and
+     * records the final accumulated outcome + provenance at MONITOR — the §8 machine's
+     * live probe. Last-writer-wins: {@code MODIFY} cancels then re-writes a vector in
+     * one handler, so the final outcome is SHIP.
+     */
+    private static final class OutcomeCaptor implements Listener {
+        enum Mode { NONE, SUPPRESS, YIELD, MODIFY }
+
+        private final UUID victimId;
+        volatile Mode mode = Mode.NONE;
+        volatile KnockbackApplyEvent.Outcome recorded;
+        volatile UUID recordedAttacker;
+        volatile KnockbackApplyEvent.Source recordedSource;
+
+        OutcomeCaptor(UUID victimId) {
+            this.victimId = victimId;
+        }
+
+        @EventHandler(priority = EventPriority.NORMAL)
+        public void act(KnockbackApplyEvent event) {
+            if (!victimId.equals(event.getVictim().getUniqueId())) {
+                return;
+            }
+            switch (mode) {
+                case SUPPRESS -> event.suppress();
+                case YIELD -> event.setCancelled(true);
+                case MODIFY -> {
+                    event.setCancelled(true);
+                    event.velocity(new Vector(0.1, 0.2, 0.3));
+                }
+                case NONE -> { }
+            }
+        }
+
+        @EventHandler(priority = EventPriority.MONITOR)
+        public void record(KnockbackApplyEvent event) {
+            if (!victimId.equals(event.getVictim().getUniqueId())) {
+                return;
+            }
+            recorded = event.getOutcome();
+            recordedAttacker = event.getAttackerId();
+            recordedSource = event.getSource();
+        }
+    }
 
     /** Whether this server exposes the interaction-range attribute lever (1.20.5+). */
     private static boolean reachAttributeSupported() {
@@ -1027,19 +1750,85 @@ public final class ComboSuite {
         });
     }
 
-    /** Captures the api events (MONITOR) for scenario 5. */
+    /**
+     * Captures every gen-3 combo api event (the events fire on the victim's owning
+     * region thread; the lists are concurrent so the off-thread driver can read
+     * them without a hop). For each {@link ComboHitEvent} the captor also records
+     * {@link MentalCombat#currentTick()} sampled INSIDE the handler (index-aligned
+     * with {@link #hits}), so the §11.4 "getTick() ≤ currentTick()" pin reads the
+     * frame as of the fire, not a later driver read.
+     */
     private static final class ComboEventCaptor implements Listener {
+        /**
+         * Only events for this victim are recorded. Load-bearing: a victim
+         * retaliating lands a hit on the attacker, which opens the ATTACKER's own
+         * developing chain and fires its own ComboChainEvent — scoping keeps that
+         * out of the victim's counts.
+         */
+        private final UUID scope;
         final List<ComboStartEvent> starts = new CopyOnWriteArrayList<>();
         final List<ComboEndEvent> ends = new CopyOnWriteArrayList<>();
+        final List<ComboChainEvent> chains = new CopyOnWriteArrayList<>();
+        final List<ComboChainAbortEvent> aborts = new CopyOnWriteArrayList<>();
+        final List<ComboHitEvent> hits = new CopyOnWriteArrayList<>();
+        final List<Long> hitCurrentTicks = new CopyOnWriteArrayList<>();
+
+        ComboEventCaptor(UUID scope) {
+            this.scope = scope;
+        }
+
+        private boolean inScope(UUID victim) {
+            return scope == null || scope.equals(victim);
+        }
 
         @EventHandler
         public void onStart(ComboStartEvent event) {
-            starts.add(event);
+            if (inScope(event.getVictim().getUniqueId())) {
+                starts.add(event);
+            }
         }
 
         @EventHandler
         public void onEnd(ComboEndEvent event) {
-            ends.add(event);
+            if (inScope(event.getVictim().getUniqueId())) {
+                ends.add(event);
+            }
+        }
+
+        @EventHandler
+        public void onChain(ComboChainEvent event) {
+            if (inScope(event.getVictim().getUniqueId())) {
+                chains.add(event);
+            }
+        }
+
+        @EventHandler
+        public void onAbort(ComboChainAbortEvent event) {
+            if (inScope(event.getVictim().getUniqueId())) {
+                aborts.add(event);
+            }
+        }
+
+        @EventHandler
+        public void onHit(ComboHitEvent event) {
+            if (!inScope(event.getVictim().getUniqueId())) {
+                return;
+            }
+            // The current-tick sample must come from the SAME region-thread instant
+            // the hit fired (combat() is non-null here — a combo is active). Recorded
+            // first so hits.get(i) always has a matching hitCurrentTicks.get(i).
+            MentalCombat combat = Mental.get().combat();
+            hitCurrentTicks.add(combat != null ? combat.currentTick() : MentalCombat.NO_TICK);
+            hits.add(event);
+        }
+
+        void reset() {
+            starts.clear();
+            ends.clear();
+            chains.clear();
+            aborts.clear();
+            hits.clear();
+            hitCurrentTicks.clear();
         }
     }
 }

@@ -96,7 +96,21 @@ public final class BootSuite {
                     context.expect(api.moduleEnabled("knockback"), "API reports knockback disabled");
                     context.expect(!api.moduleEnabled("not-a-module"), "API invented a module");
                     context.expect(api.version() != null && !api.version().isEmpty(), "API version empty");
-                    context.expect(api.apiVersion() == 2, "API generation must be 2 (got " + api.apiVersion() + ")");
+                    context.expect(api.apiVersion() == 3, "API generation must be 3 (got " + api.apiVersion() + ")");
+                    // The gen-3 capability roster is static per implementation (§4): every
+                    // shipped capability answers true regardless of module toggles; the one
+                    // deferred to 3.1 answers false. combat() is the runtime signal — null at
+                    // the default-OFF combo modules (detection not running), even though
+                    // COMBO_QUERY the capability stays true.
+                    context.expect(api.has(Mental.MentalApi.Capability.COMBO_EVENTS), "COMBO_EVENTS capability missing");
+                    context.expect(api.has(Mental.MentalApi.Capability.COMBO_CHAIN_EVENTS), "COMBO_CHAIN_EVENTS capability missing");
+                    context.expect(api.has(Mental.MentalApi.Capability.COMBO_HIT_EVENTS), "COMBO_HIT_EVENTS capability missing");
+                    context.expect(api.has(Mental.MentalApi.Capability.COMBO_QUERY), "COMBO_QUERY capability missing");
+                    context.expect(api.has(Mental.MentalApi.Capability.WINDOW_QUERY), "WINDOW_QUERY capability missing");
+                    context.expect(api.has(Mental.MentalApi.Capability.KNOCKBACK_OUTCOMES), "KNOCKBACK_OUTCOMES capability missing");
+                    context.expect(!api.has(Mental.MentalApi.Capability.MITIGATION_PREVIEW),
+                            "MITIGATION_PREVIEW deferred to 3.1 — must be false");
+                    context.expect(api.combat() == null, "combat() must be null with combo modules at default OFF");
                 }),
                 new TestCase("boot: latency probe transport matches the server version", context -> {
                     // The transport is version-determined: below 1.17 the play PING/PONG

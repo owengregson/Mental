@@ -1,8 +1,17 @@
 package me.vexmc.mental.tester.suite;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import me.vexmc.mental.api.ComboView;
+import me.vexmc.mental.api.Mental;
+import me.vexmc.mental.api.MentalCombat;
+import me.vexmc.mental.api.event.ComboChainEvent;
+import me.vexmc.mental.api.event.ComboEndEvent;
+import me.vexmc.mental.api.event.ComboStartEvent;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.math.KnockbackEngine;
 import me.vexmc.mental.kernel.model.EntityState;
@@ -23,6 +32,9 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
 
 /**
  * The Folia combat smoke — the FIRST live combat coverage Mental has ever had
@@ -78,7 +90,9 @@ public final class FoliaCombatSmoke {
                 new TestCase("folia: same-region hit records the canonical standing vector on the victim desk",
                         ctx -> sameRegionHit(mental, tester, ctx)),
                 new TestCase("folia: disabled knockback module records no desk decision (zero-touch)",
-                        ctx -> zeroTouch(mental, tester, ctx)));
+                        ctx -> zeroTouch(mental, tester, ctx)),
+                new TestCase("folia: combo events on the region thread + off-thread query (§11.7)",
+                        ctx -> comboRegionEvents(mental, tester, ctx)));
     }
 
     /* ------------------------------------------------------------------ */
@@ -175,6 +189,141 @@ public final class FoliaCombatSmoke {
         } finally {
             ctx.syncRun(() -> mental.management().setModuleEnabled(kb, true));
             removePair(sched, attacker, victim);
+        }
+    }
+
+    /**
+     * §11.7: the first live Folia coverage of the gen-3 combo surface. Combo events
+     * must fire on the victim's OWNING region thread (not the global thread), and the
+     * {@code comboOn} query must answer an untorn ACTIVE view from OFF a region thread
+     * (the test driver). Every entity interaction stays on its owning region thread
+     * per the smoke's conventions; only the combo query is deliberately off-thread —
+     * that any-thread contract is exactly what §6 promises.
+     */
+    private static void comboRegionEvents(MentalPluginV5 mental, MentalTesterPlugin tester, TestContext ctx)
+            throws Exception {
+        Scheduling sched = mental.scheduling();
+        World world = Bukkit.getWorlds().get(0);
+        FakePlayer attacker = new FakePlayer(tester, sched);
+        FakePlayer victim = new FakePlayer(tester, sched);
+        Location base = buildFloor(sched, world);
+        Feature comboHold = Feature.byModuleId("combo-hold").orElseThrow();
+        RegionCaptor captor = null;
+
+        try {
+            // Enable combo detection through the real overlay path; widen the windows
+            // so a stationary clientless victim never grounds-/gaps-out before we read.
+            ctx.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", true);
+                mental.overlaySet("combo-hold.grounded-run-ticks", 400);
+                mental.overlaySet("combo-hold.max-gap-ticks", 400);
+                mental.reloadAll();
+            });
+            ctx.awaitTicks(2);
+            ctx.expect(mental.featureActive(comboHold), "combo-hold failed to enable on Folia");
+
+            spawnPair(sched, attacker, victim, base);
+            ctx.awaitTicks(6);
+            ctx.expect(mental.sessions().sessionFor(victim.uuid()) != null,
+                    "no victim combat session created on Folia");
+
+            captor = new RegionCaptor(sched, victim.uuid(), victim.player());
+            RegionCaptor registered = captor;
+            ctx.syncRun(() -> Bukkit.getPluginManager().registerEvents(registered, tester));
+
+            // Two same-region hits: hit 1 opens (ComboChainEvent), hit 2 promotes (ComboStartEvent).
+            for (int hit = 0; hit < 2; hit++) {
+                runOnBlocking(sched, victim.player(), () -> victim.player().setNoDamageTicks(0));
+                runOnBlocking(sched, attacker.player(), () -> attacker.attack(victim.player()));
+                ctx.awaitTicks(8);
+            }
+            RegionCaptor observed = captor;
+            ctx.awaitUntil(() -> observed.chainSeen.get() && observed.startSeen.get(), 40,
+                    "both the ComboChainEvent and ComboStartEvent to fire");
+            ctx.expect(observed.chainOnRegion.get(),
+                    "the ComboChainEvent must fire on the victim's owning region thread");
+            ctx.expect(observed.startOnRegion.get(),
+                    "the ComboStartEvent must fire on the victim's owning region thread");
+
+            // Off-thread (the test driver, NOT a region thread) untorn ACTIVE read: the
+            // four facts must be internally consistent as one snapshot.
+            ComboView view = Mental.get().combat().comboOn(victim.uuid());
+            ctx.expect(view.state() == ComboView.State.ACTIVE
+                            && view.attackerId() != null
+                            && view.hits() >= 2
+                            && view.lastKnockTick() != MentalCombat.NO_TICK
+                            && view.gapDeadlineTick() != MentalCombat.NO_TICK,
+                    "an off-thread comboOn must return a non-torn ACTIVE view (state=" + view.state()
+                            + ", attacker=" + view.attackerId() + ", hits=" + view.hits()
+                            + ", lastKnock=" + view.lastKnockTick() + ", deadline=" + view.gapDeadlineTick() + ")");
+            ctx.expect(attacker.uuid().equals(view.attackerId()), "the ACTIVE view must name the attacker");
+
+            // Toggle off and await the balanced DISABLED terminal — leave zero-touch behind.
+            ctx.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", false);
+                mental.reloadAll();
+            });
+            RegionCaptor endObserved = captor;
+            ctx.awaitUntil(() -> endObserved.ends.stream()
+                            .anyMatch(e -> e.getReason() == ComboEndEvent.Reason.DISABLED), 40,
+                    "the DISABLED ComboEndEvent terminal on module toggle-off");
+        } finally {
+            if (captor != null) {
+                RegionCaptor teardownCaptor = captor;
+                ctx.syncRun(() -> HandlerList.unregisterAll(teardownCaptor));
+            }
+            ctx.syncRun(() -> {
+                mental.overlaySet("modules.combo-hold", false);
+                mental.overlaySet("combo-hold.grounded-run-ticks", 10);
+                mental.overlaySet("combo-hold.max-gap-ticks", 20);
+                mental.reloadAll();
+            });
+            removePair(sched, attacker, victim);
+        }
+    }
+
+    /**
+     * Records whether each combo event fired on the victim's owning region thread.
+     * The handlers run on that region thread, so {@code isOwnedByCurrentRegion} reads
+     * true there; the flags let the off-thread driver assert it after the fact.
+     */
+    private static final class RegionCaptor implements Listener {
+        private final Scheduling sched;
+        private final UUID victimId;
+        private final Player victim;
+        final AtomicBoolean chainSeen = new AtomicBoolean();
+        final AtomicBoolean startSeen = new AtomicBoolean();
+        final AtomicBoolean chainOnRegion = new AtomicBoolean();
+        final AtomicBoolean startOnRegion = new AtomicBoolean();
+        final List<ComboEndEvent> ends = new CopyOnWriteArrayList<>();
+
+        RegionCaptor(Scheduling sched, UUID victimId, Player victim) {
+            this.sched = sched;
+            this.victimId = victimId;
+            this.victim = victim;
+        }
+
+        @EventHandler
+        public void onChain(ComboChainEvent event) {
+            if (victimId.equals(event.getVictim().getUniqueId())) {
+                chainOnRegion.set(sched.isOwnedByCurrentRegion(victim));
+                chainSeen.set(true);
+            }
+        }
+
+        @EventHandler
+        public void onStart(ComboStartEvent event) {
+            if (victimId.equals(event.getVictim().getUniqueId())) {
+                startOnRegion.set(sched.isOwnedByCurrentRegion(victim));
+                startSeen.set(true);
+            }
+        }
+
+        @EventHandler
+        public void onEnd(ComboEndEvent event) {
+            if (victimId.equals(event.getVictim().getUniqueId())) {
+                ends.add(event);
+            }
         }
     }
 

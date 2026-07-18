@@ -102,7 +102,7 @@ public final class BlockingSuite {
      */
     private static void runBlockedKnockDelivery(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
-        if (!blocksAttacksPresent()) {
+        if (!NativeBlockStaging.blocksAttacksPresent()) {
             context.note("no BLOCKS_ATTACKS tier on this version — the silent-block-knock bug is "
                     + "component-tier-specific (software tiers fire a velocity event normally; the off-hand "
                     + "shield cannot be raised clientlessly on ≤1.20.6)");
@@ -132,7 +132,7 @@ public final class BlockingSuite {
             }
 
             // Force the genuine native block state (module component + startUsingItem).
-            boolean blocking = forceNativeBlock(context, blocker);
+            boolean blocking = NativeBlockStaging.forceNativeBlock(context, blocker);
             if (!blocking) {
                 context.note("clientless fake never entered the native BLOCKS_ATTACKS block state — the "
                         + "delivery regression needs the forced block state; the knock path is otherwise "
@@ -723,7 +723,7 @@ public final class BlockingSuite {
             // so the observed BASE stays full; the reduction there is native + the
             // value is unit-pinned, so note-skip the damage assertion (knockback is
             // still asserted on every tier below).
-            if (blocksAttacksPresent()) {
+            if (NativeBlockStaging.blocksAttacksPresent()) {
                 context.note("BLOCKS_ATTACKS tier: native reduction lands in getFinalDamage(), not the "
                         + "captured BASE damage — reduction unit-pinned in SwordBlockReductionTest; "
                         + "verifying full knockback only.");
@@ -767,23 +767,6 @@ public final class BlockingSuite {
         }
     }
 
-    /**
-     * Whether this server runs the native BLOCKS_ATTACKS reduction tier — probed
-     * by the same {@code DataComponents.BLOCKS_ATTACKS} field presence the module's
-     * {@code SwordBlockComponents} uses to pick its tier (never a version literal).
-     * On this tier the module applies no software reduction (the component reduces
-     * {@code getFinalDamage()} natively), so the captured BASE damage is unchanged.
-     */
-    private static boolean blocksAttacksPresent() {
-        try {
-            Class<?> dataComponents = Class.forName("net.minecraft.core.component.DataComponents");
-            dataComponents.getField("BLOCKS_ATTACKS");
-            return true;
-        } catch (Throwable absent) {
-            return false;
-        }
-    }
-
     /** Pins the attacker's damage/speed so a held sword lands a well-above-1.0 base at full charge. */
     private static boolean armAttacker(FakePlayer attacker) {
         Attribute damageAttribute = Attributes.attackDamage();
@@ -799,48 +782,6 @@ public final class BlockingSuite {
         attackDamage.setBaseValue(7.0); // diamond-sword-scale base, clearly > 1.0
         attackSpeed.setBaseValue(40.0); // full attack-strength charge on every staged hit
         return true;
-    }
-
-    /**
-     * Puts the clientless fake into the REAL native block state: the module's
-     * interact applies the block component, and a direct {@code startUsingItem}
-     * (the probe technique) raises the use-item — a synthetic player may not do so
-     * from the interact alone (no client confirms the use over the wire). Returns
-     * whether the block state was actually observed.
-     */
-    private static boolean forceNativeBlock(TestContext context, FakePlayer blocker) throws Exception {
-        Boolean staged = context.sync(() -> {
-            try {
-                PlayerInteractEvent event = new PlayerInteractEvent(
-                        blocker.player(),
-                        Action.RIGHT_CLICK_AIR,
-                        blocker.player().getInventory().getItemInMainHand(),
-                        null,
-                        BlockFace.SELF,
-                        EquipmentSlot.HAND);
-                Bukkit.getPluginManager().callEvent(event);
-                startUsingMainHand(blocker.player());
-                return Boolean.TRUE;
-            } catch (Throwable unsupported) {
-                return null;
-            }
-        });
-        if (staged == null) {
-            return false;
-        }
-        context.awaitTicks(3);
-        return context.sync(() ->
-                blocker.player().isBlocking() || HandStates.isHandRaised(blocker.player()));
-    }
-
-    /** {@code LivingEntity#startUsingItem(EquipmentSlot)} is 1.21+; reflect so the 1.17.1 floor compiles. */
-    private static void startUsingMainHand(Player player) {
-        try {
-            player.getClass().getMethod("startUsingItem", EquipmentSlot.class)
-                    .invoke(player, EquipmentSlot.HAND);
-        } catch (Throwable absent) {
-            // Below 1.21 the interact path is the only route; the caller note-skips if unobserved.
-        }
     }
 
     /** The number of journal entries that recorded a SHIP (a delivered vector), read region-safely. */
