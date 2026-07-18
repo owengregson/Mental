@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
@@ -229,7 +230,10 @@ public final class ConfigStore {
                     : profilesDir.resolve(folder).resolve(preset + ".yml");
             extractIfMissing(PROFILES_DIR + "/" + folder + "/" + preset + ".yml", file);
             ensureDeliverySection(preset, file);
-            upgradeSupersededPreset(preset, file);
+            upgradeIfSupersededBundle(
+                    PROFILES_DIR + "/" + preset + ".yml", file,
+                    PROFILES_DIR + "/" + bundledFolder(preset) + "/" + preset + ".yml",
+                    SupersededPresets::isSupersededBundleText, preset);
         }
     }
 
@@ -264,62 +268,29 @@ public final class ConfigStore {
             Path file = dataDir.resolve(EFFECTS_PRESETS_DIR).resolve(preset + ".yml");
             extractIfMissing(EFFECTS_PRESETS_DIR + "/" + preset + ".yml", file);
             if (!custom) {
-                upgradeSupersededEffectsPreset(preset, file);
+                upgradeIfSupersededBundle(
+                        EFFECTS_PRESETS_DIR + "/" + preset + ".yml", file,
+                        EFFECTS_PRESETS_DIR + "/" + preset + ".yml",
+                        SupersededEffectsPresets::isSupersededBundleText, preset);
             }
         }
     }
 
     /**
-     * The effects twin of {@link #upgradeSupersededPreset}: a bundled effects
-     * preset whose RAW BYTES still match a superseded shipped revision is
-     * upgraded in place; any owner edit freezes the file forever. The archive
-     * ({@link SupersededEffectsPresets}) is empty until a research round
-     * corrects a bundled tune.
-     */
-    private void upgradeSupersededEffectsPreset(String preset, Path file) {
-        if (!Files.isRegularFile(file)) {
-            return;
-        }
-        String onDisk;
-        try {
-            onDisk = Files.readString(file, StandardCharsets.UTF_8);
-        } catch (IOException failure) {
-            log.accept("Could not read " + EFFECTS_PRESETS_DIR + "/" + preset + ".yml: " + failure);
-            return;
-        }
-        if (!SupersededEffectsPresets.isSupersededBundleText(preset, onDisk)) {
-            return;
-        }
-        String resource = EFFECTS_PRESETS_DIR + "/" + preset + ".yml";
-        String current = readResource(resource);
-        if (current == null) {
-            log.accept("Bundled resource " + resource + " is missing from the jar");
-            return;
-        }
-        try {
-            Files.writeString(file, current, StandardCharsets.UTF_8);
-            log.accept(resource + " is a superseded bundled revision,"
-                    + " byte-identical and unedited — upgraded to the corrected bundle"
-                    + " (delete the file to regenerate anytime)");
-        } catch (IOException failure) {
-            log.accept("Could not upgrade " + resource + ": " + failure);
-        }
-    }
-
-    /**
      * Replaces a preset file whose RAW BYTES still match a superseded shipped
-     * revision — the owner never touched it, so only research corrections
-     * separate it from the current bundle. Matching on bytes (not parsed values,
-     * as before 2.4.9) is what makes owner edits sacred: value matching reverted
-     * an edit that landed on old values, and the bundled files' own comment
-     * invites exactly one ("Restore -3.9 to unfloor") — such an edit is never
-     * byte-identical to any archived bundle, so it now freezes correctly. It is
-     * also parser-drift-proof. This runs AFTER {@link #ensureDeliverySection}, so
-     * a pre-1.4.0 file has already had its {@code delivery} block inserted and the
-     * archived hashes for those forms are the patched text (see
-     * {@link SupersededPresets}).
+     * revision — the owner never touched it, so only research corrections separate
+     * it from the current bundle. Matching on bytes (not parsed values, as before
+     * 2.4.9) is what makes owner edits sacred and parser drift irrelevant. One
+     * driver serves both preset kinds: the archive predicate is the only thing
+     * that differs (kernel SupersededPresets for knockback, core
+     * SupersededEffectsPresets for effects). For knockback this runs AFTER
+     * {@link #ensureDeliverySection}, so a pre-1.4.0 file has already had its
+     * {@code delivery} block inserted and the archived hashes for those forms are
+     * the patched text (see SupersededPresets).
      */
-    private void upgradeSupersededPreset(String preset, Path file) {
+    private void upgradeIfSupersededBundle(
+            String label, Path file, String resource,
+            BiPredicate<String, String> archive, String preset) {
         if (!Files.isRegularFile(file)) {
             return;
         }
@@ -327,13 +298,12 @@ public final class ConfigStore {
         try {
             onDisk = Files.readString(file, StandardCharsets.UTF_8);
         } catch (IOException failure) {
-            log.accept("Could not read profiles/" + preset + ".yml: " + failure);
+            log.accept("Could not read " + label + ": " + failure);
             return;
         }
-        if (!SupersededPresets.isSupersededBundleText(preset, onDisk)) {
+        if (!archive.test(preset, onDisk)) {
             return;
         }
-        String resource = PROFILES_DIR + "/" + bundledFolder(preset) + "/" + preset + ".yml";
         String current = readResource(resource);
         if (current == null) {
             log.accept("Bundled resource " + resource + " is missing from the jar");
@@ -341,11 +311,11 @@ public final class ConfigStore {
         }
         try {
             Files.writeString(file, current, StandardCharsets.UTF_8);
-            log.accept("profiles/" + preset + ".yml is a superseded bundled revision,"
+            log.accept(label + " is a superseded bundled revision,"
                     + " byte-identical and unedited — upgraded to the corrected bundle"
                     + " (delete the file to regenerate anytime)");
         } catch (IOException failure) {
-            log.accept("Could not upgrade profiles/" + preset + ".yml: " + failure);
+            log.accept("Could not upgrade " + label + ": " + failure);
         }
     }
 
