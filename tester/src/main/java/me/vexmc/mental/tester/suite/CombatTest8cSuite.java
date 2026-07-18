@@ -8,6 +8,7 @@ import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.CleavingHandle;
 import me.vexmc.mental.platform.CleavingRegistrar;
 import me.vexmc.mental.platform.Cooldowns;
+import me.vexmc.mental.platform.MenuMaterials;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -547,13 +548,18 @@ public final class CombatTest8cSuite {
 
             // The throw gate (deterministic): launching a snowball stamps the shooter's cooldown.
             if (Cooldowns.itemCooldownSupported()) {
+                // The cooldown item resolves through the platform inverse material seam — a raw
+                // Material.SNOWBALL getstatic is a NoSuchFieldError on pre-flattening servers
+                // (SNOW_BALL there), and 1.12.2 is the one lane that carries both the item-cooldown
+                // API and pre-flattening names. This is the exact seam production's throw gate uses.
+                Material snowballItem = MenuMaterials.of("SNOWBALL");
                 context.syncRun(() -> {
-                    shooter.player().setCooldown(Material.SNOWBALL, 0);
+                    shooter.player().setCooldown(snowballItem, 0);
                     shooter.player().launchProjectile(Snowball.class, new Vector(0, 0.1, 0.5));
                 });
-                context.awaitUntil(() -> shooter.player().getCooldown(Material.SNOWBALL) > 0, 10,
+                context.awaitUntil(() -> shooter.player().getCooldown(snowballItem) > 0, 10,
                         "the CT8c snowball throw gate to stamp the shooter cooldown");
-                int gate = context.sync(() -> shooter.player().getCooldown(Material.SNOWBALL));
+                int gate = context.sync(() -> shooter.player().getCooldown(snowballItem));
                 context.expect(gate > 0,
                         "launching a snowball must stamp the 4-tick CT8c throw gate — got " + gate);
             } else {

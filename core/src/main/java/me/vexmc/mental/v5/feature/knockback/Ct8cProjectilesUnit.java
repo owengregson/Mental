@@ -6,6 +6,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import me.vexmc.mental.platform.Cooldowns;
+import me.vexmc.mental.platform.MenuMaterials;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.v5.config.Snapshot;
@@ -90,6 +91,18 @@ public final class Ct8cProjectilesUnit implements FeatureUnit, Listener {
 
     /** {@code World#getMinHeight()} (1.17+), for the void floor; {@code null} below where the world floor is 0. */
     private static final @Nullable Method MIN_HEIGHT = probeMinHeight();
+
+    /**
+     * The throw-gate cooldown items, resolved ONCE through the platform's inverse material seam ({@link
+     * MenuMaterials#of}, the same seam the GUI icon path routes snowballs through). A direct {@code
+     * Material.SNOWBALL} getstatic is a sticky {@code NoSuchFieldError} on every pre-flattening server
+     * (1.9.4–1.12.2, where the constant is {@code SNOW_BALL}) — and 1.12.2 is the only lane that carries
+     * BOTH the 1.11+ item-cooldown API and pre-flattening names, so the throw-gate path is exactly where it
+     * bites. Routing the modern name through the seam maps it to the era spelling (identity on 1.13+).
+     * {@code EGG} never renamed, but resolves through the same seam so both items share one resolution point.
+     */
+    private static final Material SNOWBALL_ITEM = MenuMaterials.of("SNOWBALL");
+    private static final Material EGG_ITEM = MenuMaterials.of("EGG");
 
     private final Plugin plugin;
     private final Scheduling scheduling;
@@ -234,9 +247,18 @@ public final class Ct8cProjectilesUnit implements FeatureUnit, Listener {
         if (!Cooldowns.itemCooldownSupported()) {
             return; // the boot report already announced the pre-1.11.2 no-op
         }
-        Material material = projectile instanceof Snowball ? Material.SNOWBALL : Material.EGG;
+        Material material = throwGateItem(projectile instanceof Snowball);
         scheduling.runOn(shooter,
                 () -> shooter.setCooldown(material, Ct8cProjectilePolicy.THROW_GATE_TICKS), () -> {});
+    }
+
+    /**
+     * The cooldown item a thrown projectile gates on: the era-resolved snowball item for a snowball, the egg
+     * item otherwise. Both are resolved once through {@link MenuMaterials} (see the field notes) — package-
+     * private so the resolution decision is unit-pinned without a live server.
+     */
+    static Material throwGateItem(boolean snowball) {
+        return snowball ? SNOWBALL_ITEM : EGG_ITEM;
     }
 
     /* --------------------------------- Loyalty void-return --------------------------------- */
