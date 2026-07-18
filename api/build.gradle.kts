@@ -1,3 +1,7 @@
+plugins {
+    `maven-publish`
+}
+
 /* ────────────────────────────────────────────────────────────────────────
  *  API binary-compatibility gate (R12).
  *
@@ -22,6 +26,25 @@ dependencies {
     // The version lives in the catalog; the classifier cannot (TOML catalogs
     // carry no classifier), so the coordinate is assembled here.
     japicmp("com.github.siom79.japicmp:japicmp:${libs.versions.japicmp.get()}:jar-with-dependencies")
+}
+
+java {
+    withSourcesJar()
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("mentalApi") {
+            from(components["java"])
+            groupId = "me.vexmc"
+            artifactId = "mental-api"
+            version = providers.gradleProperty("apiVersion").get()
+            pom {
+                name.set("mental-api")
+                description.set("Mental's public combat-integration surface (API generation 3)")
+            }
+        }
+    }
 }
 
 val apiBaselineJar = rootProject.layout.projectDirectory.file("gradle/api-baseline/api-2.2.2.jar").asFile

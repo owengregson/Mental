@@ -1,5 +1,7 @@
 package me.vexmc.mental.api.event;
 
+import java.util.UUID;
+import me.vexmc.mental.api.MentalCombat;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
@@ -10,12 +12,19 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Fired on the victim's owning region thread the instant an active combo held
  * against {@code victim} ends (combo-hold §3.1). A pure notification (not
- * cancellable). Balanced with {@link ComboStartEvent}: exactly one end follows
- * each start. The {@link #getReason()} names why the pocket broke.
+ * cancellable). Balanced with {@link ComboStartEvent}: <b>exactly one</b> end
+ * follows each start, for every reason — including DISABLED on both module
+ * toggle-off and plugin disable. The {@link #getReason()} names why the pocket
+ * broke.
  *
- * <p>The {@code attacker} is the party that had held the combo, resolved
- * best-effort (may be null off-region on Folia); the {@code victim} is always
- * present.</p>
+ * <p>An attacker-switch restart fires this terminal for the old sequence
+ * <b>before</b> the new opening event, in that order, same thread, same tick. A
+ * developing chain that never activated ends via {@link ComboChainAbortEvent}
+ * instead, never here. No combo state survives a server restart.</p>
+ *
+ * <p>The {@code attacker} entity is the party that had held the combo, resolved
+ * best-effort (may be null off-region on Folia); {@link #getAttackerId()} and
+ * {@link #getVictim()} are always present.</p>
  */
 public final class ComboEndEvent extends Event {
 
@@ -39,12 +48,31 @@ public final class ComboEndEvent extends Event {
 
     private final Player victim;
     private final LivingEntity attacker;
+    private final UUID attackerId;
     private final Reason reason;
+    private final int hits;
+    private final long endedTick;
 
-    public ComboEndEvent(@NotNull Player victim, @Nullable LivingEntity attacker, @NotNull Reason reason) {
+    public ComboEndEvent(@NotNull Player victim, @Nullable LivingEntity attacker,
+                         @NotNull UUID attackerId, @NotNull Reason reason, int hits, long endedTick) {
         this.victim = victim;
         this.attacker = attacker;
+        this.attackerId = attackerId;
         this.reason = reason;
+        this.hits = hits;
+        this.endedTick = endedTick;
+    }
+
+    /**
+     * Constructor kept for binary compatibility; events Mental fires always
+     * carry a non-null attacker id (derived here from the entity when present),
+     * the final chain length, and a real ended tick.
+     *
+     * @deprecated use {@link #ComboEndEvent(Player, LivingEntity, UUID, Reason, int, long)}.
+     */
+    @Deprecated
+    public ComboEndEvent(@NotNull Player victim, @Nullable LivingEntity attacker, @NotNull Reason reason) {
+        this(victim, attacker, attacker != null ? attacker.getUniqueId() : null, reason, 0, MentalCombat.NO_TICK);
     }
 
     /** The player who was being combo'd. */
@@ -57,9 +85,24 @@ public final class ComboEndEvent extends Event {
         return attacker;
     }
 
+    /** The attacker's UUID — always present on events Mental fires. */
+    public @NotNull UUID getAttackerId() {
+        return attackerId;
+    }
+
     /** Why the combo ended. */
     public @NotNull Reason getReason() {
         return reason;
+    }
+
+    /** The final chain length at the moment the combo ended. */
+    public int getHits() {
+        return hits;
+    }
+
+    /** The Mental-clock tick (see {@link MentalCombat}) the combo ended on. */
+    public long getEndedTick() {
+        return endedTick;
     }
 
     @Override
