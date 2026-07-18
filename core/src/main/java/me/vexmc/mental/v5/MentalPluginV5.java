@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
@@ -45,9 +46,12 @@ import me.vexmc.mental.v5.gui.ChatPrompt;
 import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.v5.gui.MenuManager;
 import me.vexmc.mental.v5.manage.Management;
+import me.vexmc.mental.v5.config.ConfigIssues;
 import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Migrations;
 import me.vexmc.mental.v5.config.Overlay;
+import me.vexmc.mental.v5.config.RulesBundle;
+import me.vexmc.mental.v5.config.RulesBundleParser;
 import me.vexmc.mental.v5.config.ProbeStrategy;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
@@ -701,9 +705,37 @@ public final class MentalPluginV5 extends JavaPlugin {
         overlay.set(key, value);
     }
 
+    /**
+     * Writes a whole batch of machine-overlay keys in ONE persist — the single
+     * write behind {@code Management.applyBundle}, so a rules bundle's dozens of
+     * keys land atomically (the caller reloads once to pick them up). An empty
+     * batch is a no-op.
+     */
+    public void overlaySetAll(@NotNull Map<String, Object> entries) {
+        overlay.setAll(entries);
+    }
+
     /** Clears one machine-overlay key (reset to the human file / preset value); persists. */
     public void overlayRemove(@NotNull String key) {
         overlay.remove(key);
+    }
+
+    /**
+     * The rules-bundle library, parsed fresh from {@code bundles/*.yml} — the
+     * whole-ruleset macros the Combat Presets GUI lists and {@code
+     * Management.applyBundle} validates against. Read on demand (the files are tiny
+     * and reads are rare — a GUI open or an apply), so the listing always reflects
+     * the disk, and an owner who drops a bundle in sees it immediately. Parse
+     * issues (a malformed bundle) surface loudly through the log once per read.
+     */
+    public @NotNull Map<String, RulesBundle> bundles() {
+        ConfigIssues issues = new ConfigIssues();
+        Map<String, RulesBundle> parsed =
+                RulesBundleParser.parseLibrary(configStore.loadBundles(), issues);
+        for (String issue : issues.all()) {
+            getLogger().warning("rules bundle — " + issue);
+        }
+        return parsed;
     }
 
     /** True when {@code feature} has an open scope right now (the tester's module-active check). */
