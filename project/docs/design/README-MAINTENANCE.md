@@ -50,10 +50,14 @@ dead time, TPS-independent registration). **No fabricated screenshots — all ar
   (`docs/*.md`, `LICENSE`, `THIRD-PARTY-NOTICES.md`, `../../releases{,/latest}`, `#faster-than-vanilla`).
 
 ## Release notes
-Fill `.github/RELEASE-TEMPLATE.md` per its comments: headline bullets under CHANGES, full
-changelog inside the collapsed `<details>`, FIXES section, banner via `<picture>` (absolute
-raw.githubusercontent URLs — release pages don't resolve relative paths). Footer:
-`<sub><b>MENTAL</b> by <a href="https://github.com/owengregson">@owengregson</a></sub>`.
+Release notes are generated automatically by `.github/workflows/release.yml`, which reads
+`.github/RELEASE-TEMPLATE.md` (the styling: banner, ⌖ badges, section header, footer) and
+fills three per-release tokens — `{{VERSION}}`, `{{HIGHLIGHTS}}` (from
+`.github/release-highlights.md`, whose first line must be `<!-- vX.Y.Z -->` to match the
+tag), and `{{CHANGELOG}}` (every commit since the last release).
+- **Per-release copy** → edit `.github/release-highlights.md` on the release branch.
+- **Format / styling** → edit `.github/RELEASE-TEMPLATE.md`; keep the three tokens and the
+  absolute raw.githubusercontent image URLs (release pages don't resolve relative paths).
 
 ## Player chart
 `project/scripts/render-bstats-chart.mjs` renders `project/assets/stats/players{,-dark}.svg` (players only, last
