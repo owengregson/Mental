@@ -44,7 +44,9 @@ VERSIONS_DEFAULT="$(jq -r '[.entries[] | select(.platform=="paper") | .version] 
 JAR_CACHE="$HOME/.gradle/caches/run-task-jars/paper/jars"
 LIVE="$PWD/run/matrix-live.log"
 VERDICTS="$PWD/run/matrix-verdicts.txt"
-SERVER_TIMEOUT_SECONDS=420
+# Stays above the tester's 600s wedge watchdog plus boot+settle, so a slow (not
+# dead) suite always gets to write its own verdict before the hard kill.
+SERVER_TIMEOUT_SECONDS=720
 BASE_PORT=25600
 
 VERSIONS="$VERSIONS_DEFAULT"

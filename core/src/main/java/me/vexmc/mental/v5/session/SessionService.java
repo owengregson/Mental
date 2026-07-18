@@ -2,6 +2,7 @@ package me.vexmc.mental.v5.session;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -12,6 +13,7 @@ import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.combo.ComboEndReason;
 import me.vexmc.mental.kernel.combo.ComboRules;
 import me.vexmc.mental.kernel.combo.ComboTracker;
+import me.vexmc.mental.kernel.combo.ComboTransition;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.Directive;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
@@ -41,6 +43,7 @@ import me.vexmc.mental.v5.feature.SettingsKey;
 import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.rim.ConnectionDomains;
 import me.vexmc.mental.v5.config.Snapshot;
+import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -222,6 +225,44 @@ public final class SessionService implements Listener, SessionAccess {
         this.comboKeepers.decrementAndGet();
     }
 
+    /**
+     * Whether combo detection is running (either combo-family keeper open) —
+     * the gen-3 {@code combat()} nullness gate. Any thread (atomic read).
+     */
+    public boolean comboDetectionLive() {
+        return comboKeepers.get() > 0;
+    }
+
+    /**
+     * Disable-time terminal drain (gen-3 §11.5): fire the balanced DISABLED
+     * terminal for every live tracker BEFORE the api facade unregisters. Runs
+     * synchronously on the disabling thread — the one documented exception to the
+     * region-thread firing contract; per-session isolation so one bad listener
+     * cannot starve the rest of the drain.
+     */
+    public void drainComboTerminals() {
+        for (Map.Entry<UUID, CombatSession> entry : sessions.entrySet()) {
+            try {
+                CombatSession session = entry.getValue();
+                ComboTracker tracker = session.comboTracker();
+                if (tracker == null) {
+                    continue;
+                }
+                ComboTransition terminal = tracker.reset(ComboEndReason.DISABLED, clock.current());
+                session.clearComboTracker();
+                Player player = Bukkit.getPlayer(entry.getKey());
+                if (player != null) {
+                    comboEvents.fire(player, tracker.view(), terminal);
+                } else {
+                    // No live player to fire against — just drop the published view.
+                    comboEvents.views().forget(entry.getKey());
+                }
+            } catch (Throwable t) {
+                // one session's listener failure must not starve the drain
+            }
+        }
+    }
+
     /* --------------------------- rim read seams --------------------------- */
 
     /** The last published view for {@code id}, or null before its first tick — the rim's only read. */
@@ -266,7 +307,11 @@ public final class SessionService implements Listener, SessionAccess {
         // balanced; the session (and its tracker) is then discarded by forget.
         CombatSession session = sessions.get(event.getPlayer().getUniqueId());
         if (session != null && session.comboTracker() != null) {
-            comboEvents.fire(event.getPlayer(), session.comboTracker().reset(ComboEndReason.RETIRED));
+            // Mutate-then-fire: reset stamps the terminal into a local, THEN view()
+            // reads the post-reset (NONE) state that publishes the removal.
+            ComboTracker tracker = session.comboTracker();
+            ComboTransition terminal = tracker.reset(ComboEndReason.RETIRED, clock.current());
+            comboEvents.fire(event.getPlayer(), tracker.view(), terminal);
         }
         forget(event.getPlayer().getUniqueId());
     }
@@ -372,6 +417,11 @@ public final class SessionService implements Listener, SessionAccess {
             playerIdByEntityId.remove(entityId, id);
         }
         positions.forget(id);
+        // Drop any published combo view for this victim (gen-3 §6). Defensive
+        // hygiene — the quit path's RETIRED terminal already publishes the NONE
+        // removal — but a forget without a prior terminal (a keeperless session)
+        // must not leave a stale view behind.
+        comboEvents.views().forget(id);
         for (Consumer<UUID> hook : forgetHooks) {
             try {
                 hook.accept(id);
@@ -721,8 +771,11 @@ public final class SessionService implements Listener, SessionAccess {
         ComboTracker tracker = session.comboTracker();
         if (comboKeepers.get() <= 0) {
             if (tracker != null) {
-                comboEvents.fire(player, tracker.reset(ComboEndReason.DISABLED));
+                // Mutate-then-fire: reset stamps the terminal into a local, THEN view()
+                // reads the post-reset NONE state (published as the removal).
+                ComboTransition terminal = tracker.reset(ComboEndReason.DISABLED, clock.current());
                 session.clearComboTracker();
+                comboEvents.fire(player, tracker.view(), terminal);
             }
             return;
         }
@@ -732,7 +785,8 @@ public final class SessionService implements Listener, SessionAccess {
         } else if (!tracker.rules().equals(rules)) {
             // A reload changed the detector thresholds: end any active combo cleanly
             // and rebuild with the new rules (rare — a deliberate admin action).
-            comboEvents.fire(player, tracker.reset(ComboEndReason.RETIRED));
+            ComboTransition retuned = tracker.reset(ComboEndReason.RETIRED, clock.current());
+            comboEvents.fire(player, tracker.view(), retuned);
             tracker = session.installComboTracker(rules);
         }
         // The grounded-run end reads the combat grounded truth (the packetless
@@ -740,7 +794,10 @@ public final class SessionService implements Listener, SessionAccess {
         // packetless victim's flag lies airborne forever on the 1.9/1.10 NMS, so
         // the run never accumulated and a held combo never released.
         double separation = separationTo(player.getUniqueId(), tracker.activeAttacker());
-        comboEvents.fire(player, tracker.onTick(clock.current(), combatGrounded, separation));
+        // Mutate-then-fire: onTick stamps the swept transition into a local, THEN
+        // view() publishes this tick's post-sweep state.
+        ComboTransition swept = tracker.onTick(clock.current(), combatGrounded, separation);
+        comboEvents.fire(player, tracker.view(), swept);
     }
 
     /**

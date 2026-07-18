@@ -1,14 +1,17 @@
 package me.vexmc.mental.v5.delivery;
 
+import java.util.List;
 import java.util.UUID;
 import me.vexmc.mental.api.event.KnockbackApplyEvent;
 import me.vexmc.mental.kernel.combo.ComboTracker;
+import me.vexmc.mental.kernel.combo.ComboTransition;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.Directive;
 import me.vexmc.mental.kernel.delivery.ValvePayload;
 import me.vexmc.mental.kernel.model.HitContext;
 import me.vexmc.mental.kernel.model.HitSource;
 import me.vexmc.mental.kernel.model.KnockbackVector;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.kernel.port.TickClock;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.VelocityValve;
@@ -49,6 +52,14 @@ public final class DeskRouter implements Listener {
     private record PendingArm(PlayerVelocityEvent event, UUID victim, ValvePayload payload) {}
 
     /**
+     * One velocity dispatch's combo-feed intent, stashed at HIGH and fed at the
+     * MONITOR confirm — the D1 ruling: a chain advances only for a knock the
+     * client actually received (the dead-arm lesson, applied to the feed).
+     */
+    private record PendingFeed(PlayerVelocityEvent event, CombatSession session, Player victim,
+                               UUID attackerId, TickStamp tick) {}
+
+    /**
      * The HIGH handler's arm intent, awaiting the MONITOR confirm. A ThreadLocal
      * because nested {@code PlayerVelocityEvent} dispatches (a plugin calling
      * {@code setVelocity} inside our {@code KnockbackApplyEvent}) fully complete
@@ -57,6 +68,15 @@ public final class DeskRouter implements Listener {
      * both safe (one entry per region thread, overwritten by the next intent).
      */
     private final ThreadLocal<PendingArm> pendingArm = new ThreadLocal<>();
+
+    /**
+     * The HIGH handler's combo-feed intent, awaiting the MONITOR confirm. Its own
+     * ThreadLocal beside {@link #pendingArm} for the same nested-dispatch reason:
+     * a re-entrant velocity dispatch (e.g. the blocked path's authoritative
+     * {@code setVelocity}) gets its own identity-checked stash, one entry per
+     * region thread.
+     */
+    private final ThreadLocal<PendingFeed> pendingFeed = new ThreadLocal<>();
 
     public DeskRouter(SessionService sessions, VelocityValve valve, TickClock clock, ComboEvents comboEvents) {
         this.sessions = sessions;
@@ -79,17 +99,24 @@ public final class DeskRouter implements Listener {
         }
         HitContext context = desk.pendingContext();
         KnockbackApplyEvent api = new KnockbackApplyEvent(
-                victim, resolveAttacker(context), Vectors.toBukkit(formula));
+                victim, resolveAttacker(context), Vectors.toBukkit(formula),
+                context == null ? null : context.attackerId(), sourceOf(context));
         Bukkit.getPluginManager().callEvent(api);
-        if (api.isCancelled()) {
-            // A third party wants vanilla velocity to stand: withdraw the exact
-            // decision (by HitId — never withdraw-all, B4) and leave the event.
+        if (api.getOutcome() == KnockbackApplyEvent.Outcome.YIELDED) {
+            // Yield: vanilla's own velocity stands; withdraw so the desk forgets the
+            // decision (by HitId — never withdraw-all, B4) and leave the event. A
+            // yielded knock never advances a combo chain — Mental did not ship it.
             if (context != null) {
                 desk.withdraw(context.id());
             }
             return;
         }
-        Vector velocity = api.velocity();
+        // SUPPRESSED ships an explicit zero vector (distinct from YIELDED — a
+        // zero-velocity melee still shipped, so it advances the chain, §8); SHIP
+        // ships the last-written vector.
+        Vector velocity = api.getOutcome() == KnockbackApplyEvent.Outcome.SUPPRESSED
+                ? new Vector(0, 0, 0)
+                : api.velocity();
         Directive directive = desk.resolve(velocity.getX(), velocity.getY(), velocity.getZ());
         ValvePayload armIntent = DirectiveExecutor.apply(directive, sinkFor(event));
         if (armIntent != null) {
@@ -100,12 +127,18 @@ public final class DeskRouter implements Listener {
         }
         if (context != null && directive.ship() != null) {
             Deliveries.recordDelivered(session, context.source(), directive.ship());
-            // The combo detector's shipped-hit feed (combo-hold §3.1): a melee knock
-            // that actually shipped to this victim advances the chain on its attacker.
-            // This is the ONE ship seam every melee delivery funnels through — the
-            // region path, the pre-sent/pinned adopt, and the blocked re-delivery all
-            // resolve here — so it needs no per-path duplication.
-            feedComboOnShip(session, victim, context);
+            // The combo feed (gen-3 D1): stashed here, fed at the MONITOR confirm so a
+            // chain only advances for a knock that survived every listener. This is
+            // still the ONE ship seam every melee delivery funnels through — the
+            // region path, the pre-sent/pinned adopt, AND the blocked re-delivery
+            // (KnockbackUnit.deliverBlockedKnock's authoritative setVelocity fires a
+            // real PlayerVelocityEvent that re-enters this handler) — so it needs no
+            // per-path duplication. The ledger record and desk journal above remain
+            // decision-time (HIGH) by design; the valve and the combo feed are the
+            // two confirmed-ship artifacts.
+            if (session.comboTracker() != null && isMelee(context.source()) && context.attackerId() != null) {
+                pendingFeed.set(new PendingFeed(event, session, victim, context.attackerId(), clock.current()));
+            }
         }
     }
 
@@ -120,6 +153,21 @@ public final class DeskRouter implements Listener {
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerVelocityConfirm(PlayerVelocityEvent event) {
+        // The combo feed (D1), consumed first and independently of the arm confirm:
+        // both are identity-checked stashes keyed on THIS dispatch. The feed gate is
+        // !isCancelled() ONLY — a foreign MODIFY still ships a knock (unlike the arm,
+        // which also demands the wire encoding still quantize to the planned payload).
+        PendingFeed feed = pendingFeed.get();
+        if (feed != null && feed.event() == event) {
+            pendingFeed.remove();
+            if (!event.isCancelled()) {
+                ComboTracker tracker = feed.session().comboTracker();
+                if (tracker != null) {
+                    List<ComboTransition> transitions = tracker.onKnockShipped(feed.attackerId(), feed.tick());
+                    comboEvents.fire(feed.victim(), tracker.view(), transitions);
+                }
+            }
+        }
         PendingArm intent = pendingArm.get();
         if (intent == null || intent.event() != event) {
             return; // no arm planned for THIS dispatch (identity, not equality)
@@ -138,21 +186,35 @@ public final class DeskRouter implements Listener {
                 && ValvePayload.of(planned.entityId(), new KnockbackVector(x, y, z)).equals(planned);
     }
 
-    /** Feeds the victim's combo tracker one shipped melee knock; fires any transition. Owning thread. */
-    private void feedComboOnShip(CombatSession session, Player victim, HitContext context) {
-        ComboTracker tracker = session.comboTracker();
-        if (tracker == null) {
-            return; // module off — zero-touch
-        }
-        if (!isMelee(context.source()) || context.attackerId() == null) {
-            return; // rods/projectiles/self-launches never form combos
-        }
-        comboEvents.fire(victim, tracker.onKnockShipped(context.attackerId(), clock.current()));
-    }
-
     private static boolean isMelee(HitSource source) {
         return source instanceof HitSource.Melee
                 || (source instanceof HitSource.Vanilla vanilla && "ENTITY_ATTACK".equals(vanilla.damageCause()));
+    }
+
+    /**
+     * The api {@link KnockbackApplyEvent.Source} for this hit's kernel provenance,
+     * mapped exhaustively over the real {@link HitSource} constants: everything
+     * {@link #isMelee} already treats as a melee ship (a direct {@code Melee} or a
+     * vanilla {@code ENTITY_ATTACK}) is MELEE; the two fishing-rod sources
+     * ({@code RodPull}, {@code Bobber}) are ROD; the projectiles ({@code Arrow},
+     * {@code Thrown}) are PROJECTILE; every other vanilla/environmental cause is
+     * OTHER. A null context (no Mental provenance) degrades to OTHER.
+     */
+    private static KnockbackApplyEvent.Source sourceOf(HitContext context) {
+        if (context == null) {
+            return KnockbackApplyEvent.Source.OTHER;
+        }
+        HitSource source = context.source();
+        if (isMelee(source)) {
+            return KnockbackApplyEvent.Source.MELEE;
+        }
+        if (source instanceof HitSource.RodPull || source instanceof HitSource.Bobber) {
+            return KnockbackApplyEvent.Source.ROD;
+        }
+        if (source instanceof HitSource.Arrow || source instanceof HitSource.Thrown) {
+            return KnockbackApplyEvent.Source.PROJECTILE;
+        }
+        return KnockbackApplyEvent.Source.OTHER;
     }
 
     private static VelocitySink sinkFor(PlayerVelocityEvent event) {

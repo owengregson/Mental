@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.kernel.combo.ComboTracker;
+import me.vexmc.mental.kernel.combo.ComboTransition;
 import me.vexmc.mental.kernel.delivery.DeliveryDesk;
 import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.delivery.ValvePayload;
@@ -491,7 +492,11 @@ public final class KnockbackUnit implements FeatureUnit, Listener {
         // own session (same region as the victim for melee), so it stamps the
         // right tracker regardless of whether the hit carried a sprint bonus.
         if (attackerSession != null && attackerSession.comboTracker() != null) {
-            comboEvents.fire(player, attackerSession.comboTracker().onOwnHitLanded(clock.current()));
+            // Mutate-then-fire: onOwnHitLanded stamps the terminal into a local, THEN
+            // view() reads the post-reset NONE state (published as the removal).
+            ComboTracker tracker = attackerSession.comboTracker();
+            ComboTransition retaliated = tracker.onOwnHitLanded(clock.current());
+            comboEvents.fire(player, tracker.view(), retaliated);
         }
         boolean bonus = sprinting || heldKnockbackLevel(player) > 0;
         if (!bonus) {

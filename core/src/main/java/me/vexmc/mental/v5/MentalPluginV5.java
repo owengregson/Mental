@@ -34,6 +34,8 @@ import me.vexmc.mental.platform.SchedulingFactory;
 import me.vexmc.mental.platform.debug.DebugCategory;
 import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.api.Mental;
+import me.vexmc.mental.api.MentalCombat;
+import me.vexmc.mental.v5.api.MentalCombatService;
 import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.command.MentalCommand;
@@ -77,6 +79,7 @@ import me.vexmc.mental.v5.feature.combo.ComboEvents;
 import me.vexmc.mental.v5.feature.combo.ComboHoldUnit;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
+import me.vexmc.mental.v5.feature.combo.ComboViewBook;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicapUnit;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
@@ -111,6 +114,7 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.command.PluginCommand;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The v5 plugin entry point (spec §7; the retired v4 core's boot ordering
@@ -170,6 +174,8 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** The combo-hold reach handicap (design §1) and the transition dispatcher that drives it. */
     private ComboReachHandicap comboReachHandicap;
     private ComboEvents comboEvents;
+    /** The gen-3 combat-state query service, backing the facade's {@code combat()}. */
+    private MentalCombatService combatService;
     private LatencyModel latency;
     private LatencyCompensationUnit latencyCompensation;
     /** The effective latency-probe transport for this server version, resolved at parse. */
@@ -296,7 +302,11 @@ public final class MentalPluginV5 extends JavaPlugin {
         // thread. Constructed before the session/delivery routers so all three
         // transition-firing sites share the one dispatcher instance.
         this.comboReachHandicap = new ComboReachHandicap(this, scheduling, this::snapshot);
-        this.comboEvents = new ComboEvents(comboReachHandicap);
+        // The gen-3 published-view map: ComboEvents writes it at every transition
+        // (on the victim's session thread) and the combat query service reads it
+        // from any thread. One instance shared by both.
+        ComboViewBook comboViews = new ComboViewBook();
+        this.comboEvents = new ComboEvents(comboReachHandicap, comboViews);
         // The per-hit delivery journal capture (F9): formats one greppable line per
         // journaled hit into the JOURNAL debug channel — zero cost until the channel
         // is on. The desk stays the sole journal writer; this only reads each entry.
@@ -304,6 +314,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         this.sessions = new SessionService(
                 scheduling, clock, viewBuilder, valve, this::snapshot, positions, domains,
                 comboEvents, journalCapture, getLogger());
+        // The gen-3 combat-state query service (§6): reads the published view map and
+        // the session detection-live gate; the facade's combat() delegates to it via
+        // combatQuery(), which returns null while no combo keeper is open.
+        this.combatService = new MentalCombatService(sessions, comboViews, clock);
         sessions.start(this);
 
         // The packet rim (spec §6): the netty realm's only Bukkit-adjacent code —
@@ -373,6 +387,10 @@ public final class MentalPluginV5 extends JavaPlugin {
         // Mental holder and the Bukkit ServicesManager.
         this.management = new Management(this);
         this.facade = new MentalFacade(this, management, latency);
+        // Registration lands after converge but BEFORE any gen-3 event can fire —
+        // combo events dispatch only from session ticks and velocity events, none of
+        // which run during onEnable — so a consumer that grabs the facade the instant
+        // it appears never misses a balanced opening (§4).
         Mental.register(facade);
         getServer().getServicesManager().register(Mental.MentalApi.class, facade, this, ServicePriority.Normal);
 
@@ -433,12 +451,6 @@ public final class MentalPluginV5 extends JavaPlugin {
                 metrics = null;
             }
         });
-        isolate("api facade unregister", () -> {
-            Mental.register(null);
-            if (facade != null) {
-                getServer().getServicesManager().unregister(Mental.MentalApi.class, facade);
-            }
-        });
         isolate("menu manager shutdown", () -> {
             if (menuManager != null) {
                 menuManager.shutdown();
@@ -452,6 +464,23 @@ public final class MentalPluginV5 extends JavaPlugin {
         isolate("reconciler.closeAll", () -> {
             if (reconciler != null) {
                 reconciler.closeAll();
+            }
+        });
+        // The disable-time terminal drain (gen-3 §11.5): fire every live tracker's
+        // balanced DISABLED terminal BEFORE the api facade unregisters, so a consumer
+        // never sees register(null) with an unbalanced combo still open. Ordered after
+        // reconciler.closeAll (the keepers are already released) and before the api
+        // unregister below — these terminals fire on this (disabling) thread, the one
+        // documented exception to the region-thread firing contract.
+        isolate("combo terminal drain", () -> {
+            if (sessions != null) {
+                sessions.drainComboTerminals();
+            }
+        });
+        isolate("api facade unregister", () -> {
+            Mental.register(null);
+            if (facade != null) {
+                getServer().getServicesManager().unregister(Mental.MentalApi.class, facade);
             }
         });
         isolate("sessions.shutdown", () -> {
@@ -534,6 +563,16 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** The tick clock backing every {@code TickStamp} — Paper authoritative, Folia counter. */
     public @NotNull TickClock clock() {
         return clock;
+    }
+
+    /**
+     * The gen-3 combat-state query service (§6), or null while no combo-family
+     * module is enabled (combo detection not running) — the facade's
+     * {@code combat()} nullness signal. Keyed on detection-live, not COMBO_HOLD
+     * alone: the reach handicap can hold detection open on its own.
+     */
+    public @Nullable MentalCombat combatQuery() {
+        return sessions != null && sessions.comboDetectionLive() ? combatService : null;
     }
 
     /** The region-correct scheduling surface (reused from {@code common}). */

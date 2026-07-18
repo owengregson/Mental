@@ -91,43 +91,62 @@ public final class ComboTracker {
     }
 
     /**
+     * The full immutable view of this tracker — the gen-3 publish value (unlike
+     * {@link #snapshot()}, the DEVELOPING attacker and the gap clock are visible).
+     */
+    public ComboViewState view() {
+        if (attackerId == null) {
+            return ComboViewState.NONE;
+        }
+        return new ComboViewState(attackerId, hits, active, lastHitTick, gapDeadline());
+    }
+
+    /**
      * A melee knock from {@code attacker} shipped to this victim at {@code tick}
      * (fed from the delivery fold). Continues the chain when the attacker is the
      * same and the gap holds; a different attacker or an expired gap abandons the
-     * old chain (an END if it was active) and starts a fresh one on {@code
-     * attacker}. Returns the transitions this hit produced, in fire order: the
-     * abandoned combo's END first (if any), then the fresh chain's START (if this
-     * hit activated it) — zero, one, or (at {@code minHits == 1}) two.
+     * old chain and starts a fresh one on {@code attacker}. Every knock now yields
+     * an advancing transition — CHAIN_OPENED on a chain's first hit, CHAIN_ADVANCED
+     * on each pre-activation hit after it, STARTED at the min-hits promotion, HIT on
+     * every active continuation — so no developing edge is silent (gen-3 §5).
      *
-     * <p>The two-transition case IS reachable: at {@code minHits == 1} a single hit
-     * that switches attacker (or restarts after gap expiry) both ends the old active
-     * combo AND immediately activates the new one. Returning only the END there (the
-     * old behaviour) swallowed the START — the new combo then ran with no
-     * {@code ComboStartEvent} fired and the reach handicap never re-applied. The core
-     * fires {@link ComboEvents} per transition, so a balanced END-then-START pair
-     * keeps the api events balanced and re-applies the handicap.</p>
+     * <p>Returns the transitions this hit produced in fire order: an abandoned
+     * chain's terminal first (ENDED if it was active, CHAIN_ABORTED if it was still
+     * developing — SWITCHED-wins per §5.2), then the fresh chain's advancing
+     * transition. The result is a single advance normally, or a balanced
+     * terminal-then-advance pair when this hit abandons a prior chain (including the
+     * {@code minHits == 1} restart, where the pair is terminal-then-STARTED). The
+     * core's ComboEvents fires per transition, so the pair keeps the api
+     * events balanced and re-applies the reach handicap on the new combo.</p>
      */
     public List<ComboTransition> onKnockShipped(UUID attacker, TickStamp tick) {
         if (attacker == null) {
             return List.of();
         }
-        ComboEndReason abandonedReason = null;
-        UUID abandonedAttacker = attackerId;
+        ComboTransition terminal = null;
         if (attackerId != null) {
             boolean expired = gapExceeded(tick);
             boolean switched = !attacker.equals(attackerId);
             if (expired || switched) {
-                // The old chain is over; note the END only if it had gone active
-                // (so a developing chain drops silently and events stay balanced).
                 if (active) {
-                    abandonedReason = ComboEndReason.EXPIRED;
+                    // The public end vocabulary is frozen (gen-3 §5.5): an active
+                    // takeover still reports EXPIRED, matching every release before it.
+                    terminal = ComboTransition.ended(attackerId, hits, ComboEndReason.EXPIRED, tick);
+                } else {
+                    // Developing chains DO distinguish the cause — SWITCHED wins
+                    // whenever the terminating hit's attacker differs (§5.2 pin),
+                    // so the "new attacker after the gap already lapsed" hit is stable.
+                    terminal = ComboTransition.chainAborted(attackerId, hits,
+                            switched ? ComboAbortReason.SWITCHED : ComboAbortReason.EXPIRED, tick);
                 }
                 resetChain();
             }
         }
+        boolean opened = false;
         if (attackerId == null) {
             attackerId = attacker;
             hits = 0;
+            opened = true;
         } else if (lastHitTick.known() && tick.known() && tick.value() > lastHitTick.value()) {
             // A continuation hit (the reset block above kept the chain): fold its
             // gap into the observed cadence. Gaps here are structurally within
@@ -137,33 +156,42 @@ public final class ComboTracker {
         hits++;
         lastHitTick = tick;
         groundedRun = 0; // a fresh knock re-launches the victim
-        boolean started = false;
+        ComboTransition advance;
         if (!active && hits >= rules.minHits()) {
             active = true;
             activeSince = tick;
-            started = true;
+            advance = ComboTransition.started(attackerId, hits, tick, gapDeadline());
+        } else if (!active) {
+            advance = opened
+                    ? ComboTransition.chainOpened(attackerId, tick, gapDeadline())
+                    : ComboTransition.chainAdvanced(attackerId, hits, tick, gapDeadline());
+        } else {
+            advance = ComboTransition.hit(attackerId, hits, tick, gapDeadline());
         }
-        if (abandonedReason == null) {
-            return started ? List.of(ComboTransition.started(attackerId, hits)) : List.of();
-        }
-        ComboTransition end = ComboTransition.ended(abandonedAttacker, abandonedReason);
-        return started
-                ? List.of(end, ComboTransition.started(attackerId, hits))
-                : List.of(end);
+        return terminal == null ? List.of(advance) : List.of(terminal, advance);
     }
 
     /**
      * The victim (this tracker's owner) landed a melee hit of their own — a
-     * retaliation that ends any combo held against them (combo-hold §3.1). Resets
-     * the chain unconditionally; returns ENDED(RETALIATION) only when a combo was
-     * active (to balance a prior START), else NONE. The tick is unused today but
-     * kept for signal symmetry.
+     * retaliation that ends any chain held against them (combo-hold §3.1). Resets
+     * the chain unconditionally; returns ENDED(RETALIATION) for an active combo (to
+     * balance a prior START), CHAIN_ABORTED(RETALIATION) for a developing chain (the
+     * gen-3 surface — this edge used to drop silently), else NONE. The tick stamps
+     * the terminal.
      */
     public ComboTransition onOwnHitLanded(TickStamp tick) {
         boolean wasActive = active;
+        boolean wasDeveloping = attackerId != null && !active;
         UUID endedAttacker = attackerId;
+        int endedHits = hits;
         resetChain();
-        return wasActive ? ComboTransition.ended(endedAttacker, ComboEndReason.RETALIATION) : ComboTransition.NONE;
+        if (wasActive) {
+            return ComboTransition.ended(endedAttacker, endedHits, ComboEndReason.RETALIATION, tick);
+        }
+        if (wasDeveloping) {
+            return ComboTransition.chainAborted(endedAttacker, endedHits, ComboAbortReason.RETALIATION, tick);
+        }
+        return ComboTransition.NONE;
     }
 
     /**
@@ -178,8 +206,11 @@ public final class ComboTracker {
         if (attackerId != null && gapExceeded(now)) {
             boolean wasActive = active;
             UUID endedAttacker = attackerId;
+            int endedHits = hits;
             resetChain();
-            return wasActive ? ComboTransition.ended(endedAttacker, ComboEndReason.EXPIRED) : ComboTransition.NONE;
+            return wasActive
+                    ? ComboTransition.ended(endedAttacker, endedHits, ComboEndReason.EXPIRED, now)
+                    : ComboTransition.chainAborted(endedAttacker, endedHits, ComboAbortReason.EXPIRED, now);
         }
         // 2. Grounded run — count consecutive grounded ticks; a real touchdown ends it.
         if (grounded) {
@@ -189,14 +220,16 @@ public final class ComboTracker {
         }
         if (active && groundedRun >= effectiveGroundedRunTicks()) {
             UUID endedAttacker = attackerId;
+            int endedHits = hits;
             resetChain();
-            return ComboTransition.ended(endedAttacker, ComboEndReason.GROUNDED);
+            return ComboTransition.ended(endedAttacker, endedHits, ComboEndReason.GROUNDED, now);
         }
         // 3. Blowout — a knock past the reach envelope ends it (NaN never does).
         if (active && !Double.isNaN(separation) && separation > rules.blowoutBlocks()) {
             UUID endedAttacker = attackerId;
+            int endedHits = hits;
             resetChain();
-            return ComboTransition.ended(endedAttacker, ComboEndReason.BLOWOUT);
+            return ComboTransition.ended(endedAttacker, endedHits, ComboEndReason.BLOWOUT, now);
         }
         return ComboTransition.NONE;
     }
@@ -205,13 +238,33 @@ public final class ComboTracker {
      * An explicit end for a reason the tracker cannot observe on its own —
      * {@link ComboEndReason#RETIRED} (session forget/quit) or
      * {@link ComboEndReason#DISABLED} (module turned off). Resets the chain;
-     * returns ENDED only when a combo was active, else NONE.
+     * returns ENDED for an active combo, CHAIN_ABORTED with the mapped reason for a
+     * developing chain (the gen-3 surface), else NONE. The tick stamps the terminal.
      */
-    public ComboTransition reset(ComboEndReason reason) {
+    public ComboTransition reset(ComboEndReason reason, TickStamp tick) {
         boolean wasActive = active;
+        boolean wasDeveloping = attackerId != null && !active;
         UUID endedAttacker = attackerId;
+        int endedHits = hits;
         resetChain();
-        return wasActive ? ComboTransition.ended(endedAttacker, reason) : ComboTransition.NONE;
+        if (wasActive) {
+            return ComboTransition.ended(endedAttacker, endedHits, reason, tick);
+        }
+        if (wasDeveloping) {
+            return ComboTransition.chainAborted(endedAttacker, endedHits, abortFor(reason), tick);
+        }
+        return ComboTransition.NONE;
+    }
+
+    private static ComboAbortReason abortFor(ComboEndReason reason) {
+        return switch (reason) {
+            case RETIRED -> ComboAbortReason.RETIRED;
+            case DISABLED -> ComboAbortReason.DISABLED;
+            case RETALIATION -> ComboAbortReason.RETALIATION;
+            // GROUNDED/BLOWOUT can never reach a developing chain (active-only
+            // guards); EXPIRED is the defensive mapping, not a reachable path.
+            case EXPIRED, GROUNDED, BLOWOUT -> ComboAbortReason.EXPIRED;
+        };
     }
 
     /** The chain's observed inter-hit cadence EMA, or {@link Double#NaN} before the second hit. */
@@ -242,6 +295,13 @@ public final class ComboTracker {
         }
         int scaled = (int) Math.round(cadenceEmaTicks) + CADENCE_RUN_SLACK;
         return Math.max(rules.groundedRunTicks(), Math.min(rules.maxGapTicks(), scaled));
+    }
+
+    /** The tick by which the next qualifying knock must ship, or NO_TICK with no chain clock. */
+    private TickStamp gapDeadline() {
+        return lastHitTick.known()
+                ? new TickStamp(lastHitTick.value() + rules.maxGapTicks())
+                : TickStamp.NO_TICK;
     }
 
     /** True when both stamps are known and the gap strictly exceeds {@code maxGapTicks}. */

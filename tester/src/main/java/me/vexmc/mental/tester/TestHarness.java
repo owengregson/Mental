@@ -15,7 +15,11 @@ import org.jetbrains.annotations.NotNull;
  */
 final class TestHarness {
 
-    private static final long WATCHDOG_SECONDS = 300;
+    // Wedge detector, not a performance budget: sized so the FULL suite fits on
+    // the slowest legacy entry under the 15-way concurrent local matrix (the
+    // gen-3 combo cases grew the suite past the old 300s there — every case was
+    // green when that watchdog fired). A genuinely wedged driver still FAILs.
+    private static final long WATCHDOG_SECONDS = 600;
 
     private final JavaPlugin plugin;
     private final Scheduling scheduling;

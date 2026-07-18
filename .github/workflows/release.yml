@@ -277,6 +277,35 @@ jobs:
           echo "path=$jar" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$jar")" >> "$GITHUB_OUTPUT"
 
+      # The public api artifact (me.vexmc:mental-api) rides along with every
+      # release so integrators can grab the exact surface this build ships. The
+      # release build already produced api/build/libs/api-<pluginVersion>.jar;
+      # withSourcesJar() also emits an api-<pluginVersion>-sources.jar, so filter
+      # the -sources classifier out and fail LOUDLY unless exactly one binary jar
+      # remains. Rename it to the api's OWN publication semver (apiVersion,
+      # independent of the plugin version) so the asset reads mental-api-3.0.0.jar.
+      - name: Locate and name the api jar
+        id: apijar
+        run: |
+          shopt -s nullglob
+          mains=()
+          for j in api/build/libs/api-*.jar; do
+            case "$j" in
+              *-sources.jar) ;;
+              *) mains+=("$j") ;;
+            esac
+          done
+          if [ "${#mains[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one api binary jar in api/build/libs, found ${#mains[@]}: ${mains[*]:-none}"
+            exit 1
+          fi
+          api_version=$(grep -m1 -E '^apiVersion=' gradle.properties | sed -E 's/^apiVersion=//')
+          dest="mental-api-${api_version}.jar"
+          cp "${mains[0]}" "$dest"
+          echo "Named ${mains[0]} → $dest"
+          echo "path=$dest" >> "$GITHUB_OUTPUT"
+          echo "name=$dest" >> "$GITHUB_OUTPUT"
+
       - name: Compose release notes
         env:
           TAG: ${{ needs.detect.outputs.tag }}
@@ -338,7 +367,9 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Mental ${{ needs.detect.outputs.tag }}
           body_path: release-notes.md
-          files: ${{ steps.jar.outputs.path }}
+          files: |
+            ${{ steps.jar.outputs.path }}
+            ${{ steps.apijar.outputs.path }}
           fail_on_unmatched_files: true
           draft: true
           prerelease: ${{ needs.detect.outputs.prerelease == 'true' }}
