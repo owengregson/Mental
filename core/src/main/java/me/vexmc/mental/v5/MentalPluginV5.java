@@ -21,6 +21,7 @@ import me.vexmc.mental.platform.CleavingRegistrar;
 import me.vexmc.mental.platform.Cooldowns;
 import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.HandStates;
+import me.vexmc.mental.platform.NaturalRegen;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.platform.PotionEffects;
@@ -456,7 +457,8 @@ public final class MentalPluginV5 extends JavaPlugin {
                 + ", crit-posture[" + CritPosture.describe() + "]"
                 + ", hand-raised=" + HandStates.describe()
                 + ", recipe-keys=" + Recipes.describe()
-                + ", sweep-cause=" + SweepCauses.describe());
+                + ", sweep-cause=" + SweepCauses.describe()
+                + ", natural-regen=" + NaturalRegen.describe());
     }
 
     @Override

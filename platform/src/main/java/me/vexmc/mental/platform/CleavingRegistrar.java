@@ -33,13 +33,36 @@ import org.jetbrains.annotations.Nullable;
  * its {@code frozen} field) and only writes when every link resolves. Where the
  * chain is incomplete the probe misses and the seam degrades loud.
  *
- * <p><b>Provenance note.</b> The exact NMS shape here is the modern Mojang-mapped
- * layout (1.20.5+ mappings); it could not be javap-pinned against a cached live
- * jar in this worktree, so the injection is a guarded best-effort verified by the
- * integration matrix (1.21.4 / 1.21.11). The seam's <em>contract</em> — resolve
- * an already-present {@code cleaving} enchant, else attempt the write, else
- * degrade loud, and expose {@link CleavingHandle#levelOf} either way — holds
- * regardless of whether the write lands.</p>
+ * <p><b>Provenance note (26.1.2 javap-pinned).</b> The injection is a guarded
+ * best-effort; the seam's <em>contract</em> — resolve an already-present
+ * {@code cleaving} enchant, else attempt the write, else degrade loud, and expose
+ * {@link CleavingHandle#levelOf} either way — holds regardless of whether the write
+ * lands. On the year-scheme ceiling (26.1.2) the write deliberately does <b>not</b>
+ * land, for reasons now read off the live server jar rather than guessed:
+ * <ul>
+ *   <li>{@code MinecraftServer#registryAccess()} is <em>present</em> (returns
+ *       {@code RegistryAccess$Frozen}) — it is NOT the break. The degrade is a clean
+ *       {@code null} return (never a {@code NoSuchMethodException}), confirmed by the
+ *       boot log carrying the "modern shape did not resolve" text rather than an
+ *       "injection failed" one.</li>
+ *   <li>The resolution stalls at the registry <em>lookup</em>: the parameter type is
+ *       taken as {@code enchantmentKey.getClass().getSuperclass()}, and
+ *       {@code net.minecraft.resources.ResourceKey} extends {@code Object}, so the
+ *       probe searches for {@code lookup(Object)} / {@code lookupOrThrow(Object)} —
+ *       the real overloads take {@code ResourceKey} — and every candidate misses.</li>
+ *   <li>Even past that, the frozen-registry <em>write shape</em> has drifted on the
+ *       year scheme: {@code net.minecraft.resources.ResourceLocation} is renamed to
+ *       {@code net.minecraft.resources.Identifier} (the old class is absent) and
+ *       {@code ResourceKey#create} now takes {@code Identifier}. Landing the write
+ *       would mean a speculative mutation of the frozen enchantment registry against
+ *       an unverified year-scheme shape, so the seam STOPS at the honest degrade —
+ *       {@code ct8c-damage}/shield fold Cleaving in as level {@code 0} (spec §5 gap).</li>
+ * </ul>
+ * The registry {@code MappedRegistry} internals that a future adaptation would need
+ * ({@code frozen} field, {@code register(ResourceKey, T, RegistrationInfo)},
+ * {@code Iterable} values, {@code RegistrationInfo.BUILT_IN}) are all still present —
+ * the sole blocker to a real 26.x write is the unverifiable {@code Identifier}
+ * rename, not a missing registry surface.</p>
  */
 public final class CleavingRegistrar {
 

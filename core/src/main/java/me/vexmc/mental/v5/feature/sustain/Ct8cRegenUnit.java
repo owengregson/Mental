@@ -4,8 +4,10 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.DoubleSupplier;
+import java.util.function.Predicate;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.HandStates;
+import me.vexmc.mental.platform.NaturalRegen;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.v5.MentalPluginV5;
@@ -15,7 +17,7 @@ import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.sustain.Ct8cRegenDriver.Outcome;
 import org.bukkit.Bukkit;
-import org.bukkit.GameRule;
+import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -70,6 +72,15 @@ public final class Ct8cRegenUnit implements FeatureUnit, Listener {
     private Scheduling scheduling;
     private ConsumeInterrupt interrupt;
 
+    /**
+     * The naturalRegeneration-gamerule read, resolved ONCE at assemble by the
+     * platform presence probe and cached as a predicate so the per-tick hot path
+     * never re-resolves the typed-vs-legacy decision (and never names the 1.13+
+     * {@code org.bukkit.GameRule} type in this listener class — the 2.4.1 GAP-1
+     * rule; the typed constant lives only behind {@link NaturalRegen}).
+     */
+    private Predicate<World> naturalRegen;
+
     @Override
     public Feature descriptor() {
         return Feature.CT8C_REGEN;
@@ -83,6 +94,12 @@ public final class Ct8cRegenUnit implements FeatureUnit, Listener {
         MentalPluginV5 plugin = (MentalPluginV5) JavaPlugin.getProvidingPlugin(getClass());
         this.scheduling = plugin.scheduling();
         this.interrupt = ConsumeInterrupt.probe(plugin.environment(), plugin.getLogger()::warning);
+        // Resolve the gamerule read once, here, and cache it as a predicate — the
+        // per-tick heal loop calls the cached seam, never a per-tick re-probe. The
+        // boot-selected path is logged honestly (B10): typed on 1.13+, the String
+        // overload below, where a direct GameRule read would NoClassDefFoundError.
+        this.naturalRegen = NaturalRegen::isEnabled;
+        plugin.getLogger().info(() -> "ct8c-regen: naturalRegeneration gamerule read via " + NaturalRegen.describe());
 
         scope.listen(this);
         scope.task(() -> {
@@ -165,9 +182,8 @@ public final class Ct8cRegenUnit implements FeatureUnit, Listener {
         int foodLevel = player.getFoodLevel();
         double health = player.getHealth();
         double maxHealth = Attributes.valueOr(player, Attributes.maxHealth(), 20.0);
-        boolean naturalRegen = Boolean.TRUE.equals(
-                player.getWorld().getGameRuleValue(GameRule.NATURAL_REGENERATION));
-        Outcome outcome = driver.tick(foodLevel, health, maxHealth, naturalRegen);
+        boolean naturalRegenOn = naturalRegen.test(player.getWorld());
+        Outcome outcome = driver.tick(foodLevel, health, maxHealth, naturalRegenOn);
         if (outcome == Outcome.NONE) {
             return;
         }

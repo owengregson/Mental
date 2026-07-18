@@ -2,6 +2,7 @@ package me.vexmc.mental.v5.feature.sustain;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import me.vexmc.mental.platform.NaturalRegen;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.math.RegenMath;
@@ -11,7 +12,6 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import org.bukkit.Bukkit;
-import org.bukkit.GameRule;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -121,8 +121,10 @@ public final class RegenUnit implements FeatureUnit, Listener {
         int foodLevel = player.getFoodLevel();
         double health = player.getHealth();
         double maxHealth = Attributes.valueOr(player, Attributes.maxHealth(), 20.0);
-        boolean naturalRegen = Boolean.TRUE.equals(
-                player.getWorld().getGameRuleValue(GameRule.NATURAL_REGENERATION));
+        // The naturalRegeneration read routes through the platform seam: a direct
+        // GameRule.NATURAL_REGENERATION getstatic NoClassDefFoundErrors below 1.13
+        // (the class lands 1.13), the same sticky per-tick crash as ct8c-regen had.
+        boolean naturalRegen = NaturalRegen.isEnabled(player.getWorld());
         if (!RegenMath.shouldHeal(foodLevel, health, maxHealth, naturalRegen)) {
             return;
         }
