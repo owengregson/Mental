@@ -69,6 +69,17 @@ public final class SupersededEffectsPresets {
         return hashes.contains(sha256Hex(normalized));
     }
 
+    /**
+     * The archived hash set for {@code preset} (empty when none) — package-private
+     * test seam for the completeness guard: the hash-archive test asserts these
+     * EXACTLY equal the recomputed hashes of the texts under
+     * {@code superseded-effects-bundles/}, so a constant can never exist without
+     * its verbatim historical text (nor the reverse).
+     */
+    static Set<String> archivedHashes(String preset) {
+        return ARCHIVED_HASHES.getOrDefault(preset, Set.of());
+    }
+
     private static String sha256Hex(String text) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
