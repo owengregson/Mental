@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import me.vexmc.mental.platform.debug.DebugCategory;
+import me.vexmc.mental.v5.feature.Family;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -42,6 +44,22 @@ class LayoutTest {
     @Test
     void contentRowRejectsMoreThanSeven() {
         assertThrows(IllegalArgumentException.class, () -> Layout.contentRow(9, 8));
+    }
+
+    @Test
+    void contentRowCapacityHoldsForEveryLiveCaller() {
+        // Layout.contentRow throws past 7 by design, and the headless boot self-test
+        // never exercises draw()'s layout math — so an 8th feature in a family (FamilyMenu
+        // lays its cards with ONE content row) or a 15th debug channel (DebugMenu's two
+        // rows are 7 + 7) would surface only as a crash on the first LIVE open. These
+        // pins turn that would-be runtime crash into a build failure that names the
+        // layout decision the addition needs (a second row, a page, a different grid).
+        for (Family family : Family.values()) {
+            assertTrue(DashboardModel.entries(family).size() <= 7,
+                    () -> family + " has more than 7 features — FamilyMenu's single content row overflows");
+        }
+        assertTrue(DebugCategory.values().length <= 14,
+                "more than 14 debug channels — DebugMenu's two content rows (7 + 7) overflow");
     }
 
     @Test

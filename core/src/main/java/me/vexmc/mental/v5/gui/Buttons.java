@@ -3,6 +3,7 @@ package me.vexmc.mental.v5.gui;
 import java.util.ArrayList;
 import java.util.List;
 import me.vexmc.mental.platform.MenuMaterials;
+import me.vexmc.mental.v5.preset.PresetCatalog;
 import me.vexmc.mental.v5.text.Brand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -43,15 +44,14 @@ final class Buttons {
                 .build();
     }
 
-    /** 3-decimal rounding for previews — THE shared round, killing two copies. */
+    /** Delegates to {@link PresetCatalog#round} — one rounding rule for every preview. */
     static @NotNull String round(double value) {
-        return String.valueOf(Math.round(value * 1000.0) / 1000.0);
+        return PresetCatalog.round(value);
     }
 
     /** A navigation tile: wrapped grey blurb + "▸ Click to open". */
     static @NotNull ItemStack nav(
-            @NotNull String materialName, @NotNull String title, @NotNull TextColor accent,
-            @NotNull String blurb) {
+            @NotNull String materialName, @NotNull String title, @NotNull String blurb) {
         Icon icon = title(materialName, title, Brand.TEXT);
         wrap(blurb).forEach(line -> icon.lore(line, Brand.MUTED));
         icon.blank();
@@ -83,7 +83,7 @@ final class Buttons {
 
     /** A boolean knob tile. {@code overridden} renders the ⚑ line + Q-reset hint. */
     static @NotNull ItemStack toggle(
-            @NotNull String materialName, @NotNull String title, @NotNull TextColor accent,
+            @NotNull String materialName, @NotNull String title,
             boolean enabled, @NotNull String blurb, boolean overridden) {
         Icon icon = title(materialName, title, Brand.TEXT);
         wrap(blurb).forEach(line -> icon.lore(line, Brand.MUTED));
@@ -118,7 +118,7 @@ final class Buttons {
      * right cycles back.
      */
     static @NotNull ItemStack cycle(
-            @NotNull String materialName, @NotNull String title, @NotNull TextColor accent,
+            @NotNull String materialName, @NotNull String title,
             @NotNull List<String> options, @NotNull String selected, @NotNull String blurb,
             boolean overridden) {
         Icon icon = title(materialName, title, Brand.TEXT);

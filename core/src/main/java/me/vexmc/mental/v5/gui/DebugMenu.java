@@ -10,7 +10,6 @@ import me.vexmc.mental.v5.text.Brand;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.entity.Player;
-import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
@@ -79,7 +78,7 @@ public final class DebugMenu extends Menu {
         paintChrome(Palette.system().pane());
 
         boolean masterOn = ctx.plugin().snapshot().debug().enabled();
-        set(MASTER_SLOT, Buttons.toggle("REDSTONE_TORCH", "Debug logging", Brand.TEXT, masterOn,
+        set(MASTER_SLOT, Buttons.toggle("REDSTONE_TORCH", "Debug logging", masterOn,
                 "Master switch for verbose logging. Enable it, then pick channels below.",
                 ctx.plugin().overlayHas(ENABLED_KEY)),
                 toggleClick(viewer, ENABLED_KEY, masterOn));
@@ -123,7 +122,7 @@ public final class DebugMenu extends Menu {
     public @NotNull List<ItemStack> selfTestIcons() {
         List<ItemStack> icons = new ArrayList<>();
         boolean masterOn = ctx.plugin().snapshot().debug().enabled();
-        icons.add(Buttons.toggle("REDSTONE_TORCH", "Debug logging", Brand.TEXT, masterOn,
+        icons.add(Buttons.toggle("REDSTONE_TORCH", "Debug logging", masterOn,
                 "Master switch for verbose logging. Enable it, then pick channels below.",
                 ctx.plugin().overlayHas(ENABLED_KEY)));
         Set<String> active = ctx.plugin().snapshot().debug().categories();
@@ -143,12 +142,12 @@ public final class DebugMenu extends Menu {
 
     private @NotNull ItemStack channelTile(@NotNull DebugCategory category, boolean on) {
         return Buttons.toggle(ICONS.getOrDefault(category, "PAPER"), "Channel: " + category.key(),
-                Brand.TEXT, on, "Verbose " + category.key() + " logging.",
+                on, "Verbose " + category.key() + " logging.",
                 ctx.plugin().overlayHas(CATEGORY_PREFIX + category.key()));
     }
 
     private @NotNull ItemStack subscribeTile(boolean subscribed) {
-        return Buttons.toggle("NAME_TAG", "Stream to my chat", Brand.TEXT, subscribed,
+        return Buttons.toggle("NAME_TAG", "Stream to my chat", subscribed,
                 "Send the active debug channels to your own chat. Per-session — cleared when you quit.",
                 false);
     }
@@ -160,11 +159,7 @@ public final class DebugMenu extends Menu {
     private @NotNull Consumer<InventoryClickEvent> toggleClick(
             @NotNull Player viewer, @NotNull String key, boolean current) {
         return event -> {
-            ClickType click = event.getClick();
-            if (click == ClickType.DROP || click == ClickType.CONTROL_DROP) {
-                if (ctx.plugin().overlayHas(key)) {
-                    apply(viewer, () -> ctx.management().clearOverlay(key));
-                }
+            if (consumeReset(viewer, event, key)) {
                 return;
             }
             apply(viewer, () -> ctx.management().setOverlay(key, !current));

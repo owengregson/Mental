@@ -149,7 +149,9 @@ public final class MentalPluginV5 extends JavaPlugin {
     private Scheduling scheduling;
 
     private ConfigStore configStore;
-    private Overlay overlay;
+    // reloadAll swaps this on the global thread while region threads read through
+    // overlayHas() during draw() — volatile publishes the new overlay safely.
+    private volatile Overlay overlay;
     private volatile Snapshot snapshot;
 
     /** The verbose debug seam (zero-cost when off) — config-driven, re-applied on reload. */

@@ -11,7 +11,6 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.entity.Player;
-import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
@@ -103,12 +102,12 @@ public final class SettingsMenu extends Menu {
         TextColor accent = theme.accent();
         boolean overridden = knob.key() != null && ctx.plugin().overlayHas(knob.key());
         return switch (knob.kind()) {
-            case TOGGLE -> Buttons.toggle(knob.materialName(), knob.label(), accent,
+            case TOGGLE -> Buttons.toggle(knob.materialName(), knob.label(),
                     (Boolean) knob.reader().apply(snapshot), knob.blurb(), overridden);
             case STEP_INT, STEP_DOUBLE -> Buttons.stepper(knob.materialName(), knob.label(), accent,
                     displayValue(knob, (Number) knob.reader().apply(snapshot)), knob.blurb(),
                     displayStep(knob), overridden);
-            case CYCLE -> Buttons.cycle(knob.materialName(), knob.label(), accent,
+            case CYCLE -> Buttons.cycle(knob.materialName(), knob.label(),
                     knob.options(), (String) knob.reader().apply(snapshot), knob.blurb(), overridden);
             case TEXT -> Buttons.editText(knob.materialName(), knob.label(), accent,
                     String.valueOf(knob.reader().apply(snapshot)), knob.blurb(), overridden);
@@ -130,11 +129,7 @@ public final class SettingsMenu extends Menu {
 
     private void handleKnob(
             @NotNull Player viewer, @NotNull SettingsCatalog.Knob knob, @NotNull InventoryClickEvent event) {
-        ClickType click = event.getClick();
-        if (click == ClickType.DROP || click == ClickType.CONTROL_DROP) {
-            if (ctx.plugin().overlayHas(knob.key())) {
-                apply(viewer, () -> ctx.management().clearOverlay(knob.key()));
-            }
+        if (consumeReset(viewer, event, knob.key())) {
             return;
         }
         Snapshot snapshot = ctx.plugin().snapshot();
@@ -148,10 +143,23 @@ public final class SettingsMenu extends Menu {
                 double delta = knob.step() * (event.isShiftClick() ? 10 : 1) * (event.isRightClick() ? -1 : 1);
                 double next = Math.max(knob.min(), Math.min(knob.max(), current + delta));
                 Object typed;
+                Object currentTyped;
                 if (knob.kind() == SettingsCatalog.Kind.STEP_INT) {
                     typed = (int) Math.round(next);
+                    currentTyped = (int) Math.round(current);
                 } else {
                     typed = round4(next);
+                    currentTyped = round4(current);
+                }
+                // A clamped click at the ceiling (or floor) leaves the value where it
+                // already sits; writing an overlay key for an unchanged value would
+                // materialise a spurious ⚑ override and trigger a needless reload.
+                // Compare the TYPED value that would actually be written — so a
+                // STEP_DOUBLE that rounds back onto the current value is a no-op too —
+                // and skip the write when nothing moved (restoring the retired
+                // steppers' `next != current` guard).
+                if (typed.equals(currentTyped)) {
+                    return;
                 }
                 apply(viewer, () -> ctx.management().setOverlay(knob.key(), typed));
             }

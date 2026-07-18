@@ -61,10 +61,10 @@ public final class DashboardMenu extends Menu {
 
         drawFamilyRows(viewer);
 
-        set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility", Palette.system().accent(),
+        set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility",
                 "Anticheat posture — how Mental yields to a prediction anticheat."),
                 click -> navigate(viewer, new CompatibilityMenu(ctx)));
-        set(DEBUG_SLOT, Buttons.nav("REPEATER", "Debug", Palette.system().accent(),
+        set(DEBUG_SLOT, Buttons.nav("REPEATER", "Debug",
                 "Verbose logging channels, streamed to console or your own chat."),
                 click -> navigate(viewer, new DebugMenu(ctx)));
 
@@ -86,8 +86,7 @@ public final class DashboardMenu extends Menu {
             List<Tile> tiles = new ArrayList<>();
             for (Family family : rows.get(r)) {
                 tiles.add(Tile.of(
-                        Buttons.nav(family.iconName(), family.displayName(),
-                                Palette.of(family).accent(), family.blurb()),
+                        Buttons.nav(family.iconName(), family.displayName(), family.blurb()),
                         click -> navigate(viewer, new FamilyMenu(ctx, family))));
             }
             placeCentered(FAMILY_ROW_BASES[r], tiles);

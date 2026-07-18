@@ -1,7 +1,7 @@
 package me.vexmc.mental.v5.gui;
 
-import java.util.EnumMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.platform.MenuMaterials;
 import me.vexmc.mental.platform.PaneColor;
 import me.vexmc.mental.v5.text.TextPort;
@@ -18,7 +18,10 @@ import org.jetbrains.annotations.NotNull;
  */
 final class Chrome {
 
-    private static final Map<PaneColor, ItemStack> CACHE = new EnumMap<>(PaneColor.class);
+    // draw() runs on each viewer's OWN region thread (Folia), so two regions can
+    // race the first build of a given colour; a ConcurrentHashMap (the MenuMaterials
+    // .CACHE precedent) gives safe publication of the finished, never-mutated stack.
+    private static final Map<PaneColor, ItemStack> CACHE = new ConcurrentHashMap<>();
 
     private Chrome() {}
 

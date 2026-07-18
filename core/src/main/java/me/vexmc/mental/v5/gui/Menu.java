@@ -8,6 +8,7 @@ import me.vexmc.mental.platform.PaneColor;
 import me.vexmc.mental.v5.text.TextPort;
 import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.inventory.Inventory;
@@ -142,6 +143,25 @@ public abstract class Menu implements InventoryHolder {
     /** Opens another screen for the viewer (navigation). */
     protected final void navigate(@NotNull Player viewer, @NotNull Menu destination) {
         destination.open(viewer);
+    }
+
+    /**
+     * The one Q-reset gesture, shared so Settings and Debug can never drift: the
+     * drop key (Q / Ctrl+Q) clears {@code overlayKey} back to its file value when
+     * that key is overridden in-GUI. Returns {@code true} when the click was a drop
+     * (consumed — the caller must not fall through to its own click handling), and
+     * {@code false} for every other click so the caller proceeds with its edit.
+     */
+    protected final boolean consumeReset(
+            @NotNull Player viewer, @NotNull InventoryClickEvent event, @NotNull String overlayKey) {
+        ClickType click = event.getClick();
+        if (click != ClickType.DROP && click != ClickType.CONTROL_DROP) {
+            return false;
+        }
+        if (ctx.plugin().overlayHas(overlayKey)) {
+            apply(viewer, () -> ctx.management().clearOverlay(overlayKey));
+        }
+        return true;
     }
 
     /**

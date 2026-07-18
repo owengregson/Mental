@@ -77,16 +77,20 @@ public final class PresetGalleryMenu extends Menu {
         paintChrome(theme.pane());
         Snapshot snapshot = ctx.plugin().snapshot();
 
-        List<PresetInfo> filtered = filteredInfos(snapshot, tab);
+        // ONE catalog build per repaint: the active tab's slice AND both tab
+        // counts are all derived from this single list — no second/third
+        // PresetCatalog.infos(...) call remains on any draw path.
+        List<PresetInfo> all = PresetCatalog.infos(kind, snapshot);
+        List<PresetInfo> filtered = filterByTab(all, tab);
         Layout.Page window = Layout.page(filtered.size(), PAGE_SIZE, page);
         this.page = window.page();
 
         set(HEADER_SLOT, headerCard(snapshot, window));
 
         if (kind == PresetKind.KNOCKBACK) {
-            set(TAB_LEGACY_SLOT, tabTile(MeleeFormula.LEGACY, snapshot, tab),
+            set(TAB_LEGACY_SLOT, tabTile(MeleeFormula.LEGACY, tab, countFor(all, MeleeFormula.LEGACY)),
                     click -> selectTab(viewer, MeleeFormula.LEGACY));
-            set(TAB_MODERN_SLOT, tabTile(MeleeFormula.MODERN, snapshot, tab),
+            set(TAB_MODERN_SLOT, tabTile(MeleeFormula.MODERN, tab, countFor(all, MeleeFormula.MODERN)),
                     click -> selectTab(viewer, MeleeFormula.MODERN));
         }
 
@@ -129,13 +133,14 @@ public final class PresetGalleryMenu extends Menu {
      */
     public @NotNull List<ItemStack> selfTestIcons(@NotNull MeleeFormula which) {
         Snapshot snapshot = ctx.plugin().snapshot();
-        List<PresetInfo> filtered = filteredInfos(snapshot, which);
+        List<PresetInfo> all = PresetCatalog.infos(kind, snapshot);
+        List<PresetInfo> filtered = filterByTab(all, which);
         Layout.Page window = Layout.page(filtered.size(), PAGE_SIZE, 0);
         List<ItemStack> icons = new ArrayList<>();
         icons.add(headerCard(snapshot, window));
         if (kind == PresetKind.KNOCKBACK) {
-            icons.add(tabTile(MeleeFormula.LEGACY, snapshot, which));
-            icons.add(tabTile(MeleeFormula.MODERN, snapshot, which));
+            icons.add(tabTile(MeleeFormula.LEGACY, which, countFor(all, MeleeFormula.LEGACY)));
+            icons.add(tabTile(MeleeFormula.MODERN, which, countFor(all, MeleeFormula.MODERN)));
         }
         for (int i = window.fromIndex(); i < window.toIndex(); i++) {
             icons.add(presetTile(filtered.get(i)));
@@ -150,9 +155,12 @@ public final class PresetGalleryMenu extends Menu {
         refresh(viewer);
     }
 
-    /** The current-page slice of the kind's presets, filtered by the active tab for KNOCKBACK. */
-    private @NotNull List<PresetInfo> filteredInfos(@NotNull Snapshot snapshot, @NotNull MeleeFormula activeTab) {
-        List<PresetInfo> all = PresetCatalog.infos(kind, snapshot);
+    /**
+     * The active tab's slice of an ALREADY-built catalog list — a pure filter, no
+     * catalog rebuild. KNOCKBACK partitions by formula; EFFECTS shows the list
+     * as-is (the tab is inert there).
+     */
+    private @NotNull List<PresetInfo> filterByTab(@NotNull List<PresetInfo> all, @NotNull MeleeFormula activeTab) {
         if (kind != PresetKind.KNOCKBACK) {
             return all;
         }
@@ -180,14 +188,19 @@ public final class PresetGalleryMenu extends Menu {
     }
 
     private @NotNull ItemStack tabTile(
-            @NotNull MeleeFormula formula, @NotNull Snapshot snapshot, @NotNull MeleeFormula activeTab) {
+            @NotNull MeleeFormula formula, @NotNull MeleeFormula activeTab, int count) {
         boolean active = activeTab == formula;
-        String material = formula == MeleeFormula.LEGACY ? "STONE_SWORD" : "NETHERITE_SWORD";
+        // The material is the formula enum's own icon — one source of truth for the
+        // formula glyph (STONE_SWORD / NETHERITE_SWORD). The LABEL stays deliberate
+        // gallery copy ("Legacy formula" / "Modern formula"): the enum's displayName
+        // is the long-form name ("Legacy (1.7 / 1.8)") used elsewhere, and the
+        // gallery wants the short heading here.
+        String material = formula.iconName();
         String name = formula == MeleeFormula.LEGACY ? "Legacy formula" : "Modern formula";
         Icon icon = Buttons.title(material, name, active ? theme.accent() : Brand.TEXT);
         Buttons.wrap(formula.blurb()).forEach(line -> icon.lore(line, Brand.MUTED));
         icon.blank();
-        icon.lore(Buttons.kv("Presets", String.valueOf(presetCount(formula, snapshot)), theme.accent()));
+        icon.lore(Buttons.kv("Presets", String.valueOf(count), theme.accent()));
         if (active) {
             icon.lore(Component.text("● SHOWING", Brand.SUCCESS).decoration(TextDecoration.BOLD, true));
         } else {
@@ -196,9 +209,10 @@ public final class PresetGalleryMenu extends Menu {
         return icon.glow(active).build();
     }
 
-    private int presetCount(@NotNull MeleeFormula formula, @NotNull Snapshot snapshot) {
+    /** Count of an already-built catalog list belonging to {@code formula} — no catalog rebuild. */
+    private static int countFor(@NotNull List<PresetInfo> all, @NotNull MeleeFormula formula) {
         int count = 0;
-        for (PresetInfo info : PresetCatalog.infos(PresetKind.KNOCKBACK, snapshot)) {
+        for (PresetInfo info : all) {
             if (info.modernFormula() == (formula == MeleeFormula.MODERN)) {
                 count++;
             }

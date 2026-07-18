@@ -184,7 +184,12 @@ public final class PresetCatalog {
         return lines;
     }
 
-    private static String round(double value) {
+    /**
+     * The catalog owns preview number formatting (3 decimals); the GUI delegates
+     * to it ({@code Buttons.round}) so gallery previews and settings tiles can
+     * never round a value differently.
+     */
+    public static String round(double value) {
         return String.valueOf(Math.round(value * 1000.0) / 1000.0);
     }
 }
