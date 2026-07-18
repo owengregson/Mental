@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Rules bundle: Vanilla (transparent)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  A rules bundle is a MACRO, not a mode. Applying it writes every toggle below
+#  into Mental's machine overlay in one atomic reload; editing this file changes
+#  what a FUTURE apply does, not the running server.
+#
+#  This bundle turns EVERYTHING off — all 44 toggleable modules, including the
+#  delivery engine — and selects the `modern-vanilla` knockback profile (vanilla's
+#  own two-stage formula, no Mental shaping). By the zero-touch invariant a
+#  disabled feature does NOTHING to the game, so applying this makes Mental
+#  effectively transparent: the server plays as if Mental were not installed
+#  (bar the always-on management surface). Use it as a clean baseline before
+#  layering a ruleset back on, or to hand the server back to vanilla combat.
+
+display-name: "Vanilla"
+description: "Everything off — Mental effectively transparent, vanilla combat restored (modern-vanilla knockback)."
+
+# Vanilla's own knockback (the modern two-stage formula, unshaped).
+knockback-profile: modern-vanilla
+
+# effects-preset: (unset) — the cosmetic modules are off, so no tune is selected.
+
+modules:
+  # ── The 13 Combat Test 8c rule features — all OFF ─────────────────────────
+  weapon-attack-speeds: false
+  charged-attacks: false
+  ct8c-damage: false
+  ct8c-crits: false
+  ct8c-sweep: false
+  ct8c-iframes: false
+  ct8c-shields: false
+  ct8c-regen: false
+  ct8c-consumables: false
+  ct8c-potions: false
+  ct8c-reach: false
+  ct8c-projectiles: false
+  cleaving: false
+
+  # ── The 24 classic 1.7/1.8 rule features — all OFF ────────────────────────
+  old-armour-strength: false
+  old-armour-durability: false
+  old-critical-hits: false
+  old-tool-durability: false
+  sword-blocking: false
+  attack-cooldown: false
+  disable-attack-sounds: false
+  disable-sword-sweep: false
+  old-golden-apples: false
+  disable-enderpearl-cooldown: false
+  old-player-regen: false
+  old-potion-durations: false
+  old-potion-values: false
+  disable-crafting: false
+  disable-offhand: false
+  old-hitboxes: false
+  combo-hold: false
+  combo-reach-handicap: false
+  pot-fill: false
+  fast-pots: false
+  hit-feedback: false
+  damage-indicators: false
+  death-effects: false
+  drop-protection: false
+
+  # ── The 7 delivery ENGINE features — all OFF ──────────────────────────────
+  # Unlike every other bundle, vanilla turns the delivery pipeline off too — the
+  # point is a server that plays exactly like no-Mental.
+  hit-registration: false
+  wtap-registration: false
+  knockback: false
+  latency-compensation: false
+  fishing-knockback: false
+  rod-velocity: false
+  projectile-knockback: false
+
+# settings: (unset) — nothing to tune when everything is off.

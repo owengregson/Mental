@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout (full history + tags)
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -75,9 +75,9 @@ jobs:
           fi
 
           # The full integration matrix (every paper entry) comes from
-          # support-matrix.json — the same single source of truth the build,
+          # project/support-matrix.json — the same single source of truth the build,
           # the local script, and the PR workflow read.
-          matrix=$(jq -c '[.entries[] | select(.platform=="paper") | .version]' support-matrix.json)
+          matrix=$(jq -c '[.entries[] | select(.platform=="paper") | .version]' project/support-matrix.json)
 
           {
             echo "version=$version"
@@ -94,9 +94,9 @@ jobs:
           # auto-provisioned on demand by the Gradle foojay toolchain resolver,
           # exactly as it is locally. (Temurin does not even publish 13/14/16,
           # so installing the full matrix set here is both unnecessary and
-          # impossible.) No JDK literal lives in this workflow — support-matrix.json
+          # impossible.) No JDK literal lives in this workflow — project/support-matrix.json
           # is the only home.
-          echo "build_jdk=$(jq '[.entries[].jdk] | max' support-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "build_jdk=$(jq '[.entries[].jdk] | max' project/support-matrix.json)" >> "$GITHUB_OUTPUT"
 
   unit:
     needs: detect
@@ -105,10 +105,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions JDK 8 for verifyJdk8Api.
@@ -116,16 +116,16 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       # Cache the foojay-provisioned toolchain JDKs (e.g. the JDK 8 verifyJdk8Api
       # resolves) so they are not re-downloaded every run. gradle/actions caches
       # ~/.gradle/caches, not ~/.gradle/jdks.
       - name: Cache foojay-provisioned JDKs
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/jdks
-          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
+          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('project/support-matrix.json') }}
           restore-keys: |
             gradle-jdks-${{ runner.os }}-
 
@@ -144,10 +144,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions this entry's server JDK.
@@ -155,7 +155,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       # The expensive part of booting a version is downloading paperclip and
       # patching the server. Restore the newest cache for this version and
@@ -163,7 +163,7 @@ jobs:
       # new Paper builds keep flowing into the cache). ~/.gradle/jdks rides
       # along so this entry's foojay-provisioned server JDK is cached too.
       - name: Cache the Paper server runtime
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             run/${{ matrix.version }}/cache
@@ -183,12 +183,12 @@ jobs:
 
       - name: Upload server log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-integration-log-${{ matrix.version }}
-          path: core/build/integration-test-logs/${{ matrix.version }}.log
+          path: modules/core/build/integration-test-logs/${{ matrix.version }}.log
 
-  # The Folia gate — release-only (ci: "release" in support-matrix.json). Boots
+  # The Folia gate — release-only (ci: "release" in project/support-matrix.json). Boots
   # a real Folia server (fetched from the Folia project on the PaperMC API by the
   # RunServer's Folia downloads service) with Mental + the tester, which
   # runtime-detects Folia and runs the boot suite + the Folia combat smoke (a
@@ -204,10 +204,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions the Folia server JDK.
@@ -215,13 +215,13 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       - name: Cache foojay-provisioned JDKs
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/jdks
-          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
+          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('project/support-matrix.json') }}
           restore-keys: |
             gradle-jdks-${{ runner.os }}-
 
@@ -230,10 +230,10 @@ jobs:
 
       - name: Upload Folia server logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-folia-logs
-          path: core/build/integration-test-logs/folia-*.log
+          path: modules/core/build/integration-test-logs/folia-*.log
 
   release:
     needs: [detect, unit, integration, folia]
@@ -244,12 +244,12 @@ jobs:
 
     steps:
       - name: Checkout (full history + tags for the changelog)
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions JDK 8 for verifyJdk8Api.
@@ -257,13 +257,13 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       - name: Cache foojay-provisioned JDKs
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/jdks
-          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
+          key: gradle-jdks-${{ runner.os }}-${{ hashFiles('project/support-matrix.json') }}
           restore-keys: |
             gradle-jdks-${{ runner.os }}-
 
@@ -273,13 +273,13 @@ jobs:
       - name: Locate jar
         id: jar
         run: |
-          jar=$(ls core/build/libs/Mental-*.jar | head -n1)
+          jar=$(ls modules/core/build/libs/Mental-*.jar | head -n1)
           echo "path=$jar" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$jar")" >> "$GITHUB_OUTPUT"
 
       # The public api artifact (me.vexmc:mental-api) rides along with every
       # release so integrators can grab the exact surface this build ships. The
-      # release build already produced api/build/libs/api-<pluginVersion>.jar;
+      # release build already produced modules/api/build/libs/api-<pluginVersion>.jar;
       # withSourcesJar() also emits an api-<pluginVersion>-sources.jar, so filter
       # the -sources classifier out and fail LOUDLY unless exactly one binary jar
       # remains. Rename it to the api's OWN publication semver (apiVersion,
@@ -289,14 +289,14 @@ jobs:
         run: |
           shopt -s nullglob
           mains=()
-          for j in api/build/libs/api-*.jar; do
+          for j in modules/api/build/libs/api-*.jar; do
             case "$j" in
               *-sources.jar) ;;
               *) mains+=("$j") ;;
             esac
           done
           if [ "${#mains[@]}" -ne 1 ]; then
-            echo "::error::expected exactly one api binary jar in api/build/libs, found ${#mains[@]}: ${mains[*]:-none}"
+            echo "::error::expected exactly one api binary jar in modules/api/build/libs, found ${#mains[@]}: ${mains[*]:-none}"
             exit 1
           fi
           api_version=$(grep -m1 -E '^apiVersion=' gradle.properties | sed -E 's/^apiVersion=//')
@@ -310,61 +310,32 @@ jobs:
         env:
           TAG: ${{ needs.detect.outputs.tag }}
           PREVIOUS_TAG: ${{ needs.detect.outputs.previous_tag }}
-          JAR_NAME: ${{ steps.jar.outputs.name }}
         run: |
           if [ -n "$PREVIOUS_TAG" ]; then
             range="$PREVIOUS_TAG..HEAD"
-            since="since $PREVIOUS_TAG"
           else
             range="HEAD"
-            since="full history"
           fi
           changelog=$(git log "$range" --no-merges --pretty='- %s (`%h`)')
-          count=$(printf '%s\n' "$changelog" | grep -c '^- ' || true)
 
-          # The supported range (floor → ceiling) comes from support-matrix.json.
-          support_range=$(jq -r '[.entries[] | select(.platform=="paper") | .version] | .[0] + " → " + .[-1]' support-matrix.json)
-
-          # Human-written, player-facing highlights: each release branch updates
-          # .github/release-highlights.md with a version marker on its first
-          # line (<!-- vX.Y.Z -->). The section is injected only when the
-          # marker matches THIS tag — a stale file from an earlier release is
-          # silently skipped, so forgetting to update it degrades gracefully to
-          # the commit changelog instead of shipping the wrong highlights.
+          # Player-facing highlights: injected only when .github/release-highlights.md's
+          # first-line marker matches THIS tag (a stale/absent file degrades to a
+          # generic line, never the wrong copy).
           highlights=""
           if [ -f .github/release-highlights.md ] \
             && head -1 .github/release-highlights.md | grep -q "<!-- $TAG -->"; then
             highlights=$(tail -n +2 .github/release-highlights.md)
           fi
+          [ -n "$highlights" ] || highlights="This release rolls up the changes listed below."
 
-          {
-            echo "**Runs on** every Paper server $support_range (plus Folia) — one jar, no other plugins needed, Java 8 or newer."
-            echo
-            if [ -n "$highlights" ]; then
-              echo "### What's new for your server"
-              echo
-              echo "$highlights"
-              echo
-            fi
-            echo "### Install or update"
-            echo
-            echo "1. Download \`$JAR_NAME\` below and drop it into your server's \`plugins/\` folder (replacing the old jar if you're updating — your config is kept)."
-            echo "2. Restart the server. That's it — the defaults are the classic combat, no setup required."
-            echo
-            echo "Configuration is generated under \`plugins/Mental/\`, every option documented inside its own file. Pick a knockback preset in-game with \`/mental\` or in \`knockback.yml\`. Upgrading from a very old single-file config? It migrates automatically and your original is kept as \`config-v1-backup.yml\`."
-            echo
-            echo "> **One jar, every version.** Modern Java reads Mental's Java-17 build, older Java reads the Java-8 build packed in the same file — no flags, no per-version downloads, 1.14.4 included."
-            echo
-            echo "<details>"
-            echo "<summary>Full changelog — $count commits $since</summary>"
-            echo
-            echo "$changelog"
-            echo
-            echo "</details>"
-            echo
-            echo "---"
-            echo "_Published automatically only after unit tests and live integration runs on real servers of all ${{ join(fromJSON(needs.detect.outputs.matrix), ', ') }} passed._"
-          } > release-notes.md
+          # The release-notes STYLING lives entirely in .github/RELEASE-TEMPLATE.md —
+          # the tag-description template. The workflow only fills that template's
+          # per-release tokens ({{VERSION}} / {{HIGHLIGHTS}} / {{CHANGELOG}}) and
+          # strips its usage comment; no layout is duplicated here. python does
+          # literal (regex-free) substitution, so backticks, braces or $ in a commit
+          # message are never mangled.
+          export TAG HIGHLIGHTS="$highlights" CHANGELOG="$changelog"
+          python3 -c 'import os,re,sys; t=open(".github/RELEASE-TEMPLATE.md",encoding="utf-8").read(); t=re.sub(r"^<!--.*?-->\s*","",t,flags=re.DOTALL); t=t.replace("{{VERSION}}",os.environ["TAG"]).replace("{{HIGHLIGHTS}}",os.environ["HIGHLIGHTS"]).replace("{{CHANGELOG}}",os.environ["CHANGELOG"]); sys.stdout.write(t.strip()+"\n")' > release-notes.md
 
           echo "── release-notes.md ──"
           cat release-notes.md
@@ -375,7 +346,7 @@ jobs:
       # v2.5.3-beta failure). A draft accepts the jar, and the publish
       # step below flips it live with the asset already attached.
       - name: Tag the release as a draft with the jar attached
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.detect.outputs.tag }}
           target_commitish: ${{ github.sha }}

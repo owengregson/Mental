@@ -14,7 +14,7 @@
 #     the shaded copy is API-identical to what core compiles against.
 #   * io.papermc.paper:paper-api: the three catalog entries are deliberate
 #     compile-API levels (floor / Folia / modern), never "latest wins" — the
-#     runtime versions live in support-matrix.json.
+#     runtime versions live in project/support-matrix.json.
 version: 2
 updates:
   - package-ecosystem: gradle

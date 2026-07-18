@@ -68,13 +68,13 @@ description: Use when changing the knockback engine, profile schema, presets, or
 
 1. Default must be an era-exact no-op; `parse(empty) == LEGACY_17` stays true.
 2. Knob goes in `KnockbackProfile.parse` + ALL preset yml files + custom.yml
-   with full comments + docs/knockback-profiles.md.
+   with full comments + project/docs/knockback-profiles.md.
 3. Unit-pin the math in KnockbackEngineTest (hand-computed expectations) AND
    the no-op-at-default property.
 4. Preset era pins live in the kernel `PresetsTest` + core `ProfileParserTest`
    (each bundled file parses to its `Presets` constant) — a regenerated preset
    can never drift; the docs-cannot-drift `KnockbackDocsTest` pins every schema
-   knob into docs/knockback-profiles.md.
+   knob into project/docs/knockback-profiles.md.
 5. Provenance: every fork preset is ported from ARCHIVED server configs
    (two independent archives, byte-identical where they overlap; kohi also
    confirmed ×3 + matches the archive). Lineage (verified round 2):
@@ -89,8 +89,8 @@ description: Use when changing the knockback engine, profile schema, presets, or
    is also a MineHQ dev-host convention). Fork presets ship
    armor-resistance: none (era pools couldn't trigger the roll; legacy
    randomizes zero-knocks on modern gear). Cite in the preset header.
-   Research base: docs/research/2026-06-04-improved-knockback.md +
-   docs/research/2026-06-12-archived-server-values.md (the porting and
+   Research base: project/docs/research/2026-06-04-improved-knockback.md +
+   project/docs/research/2026-06-12-archived-server-values.md (the porting and
    lineage decisions, the measured before/after).
 
 ## The delivery knobs (1.4.0; semantics corrected 1.5.0)

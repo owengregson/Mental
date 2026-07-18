@@ -88,12 +88,12 @@ The FakePlayer NMS bootstrap has a legacy branch, boot-selected by versioned
 packages (`net.minecraft.server.<rev>` / `org.bukkit.craftbukkit.<rev>`,
 `ReflectionRemapper.noop()` — spigot names ARE the runtime names pre-1.17). All
 per-revision NMS shapes are javap-pinned in
-`docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md` (with the
-1.14.4 straddle rows in `docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md`)
+`project/docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md` (with the
+1.14.4 straddle rows in `project/docs/superpowers/research/2026-07-03-v1_14_R1-shapes.md`)
 — read them, don't guess. The whole legacy backport is documented in
-`docs/superpowers/plans/2026-07-02-mental-legacy-backport.md`; the full-range
+`project/docs/superpowers/plans/2026-07-02-mental-legacy-backport.md`; the full-range
 campaign (1.14.4 + the mega-jar) in
-`docs/superpowers/plans/2026-07-03-mental-full-range.md`.
+`project/docs/superpowers/plans/2026-07-03-mental-full-range.md`.
 
 - **Synchronous join below the chunk-gated async path — the split is 1.15.2+,
   NOT 1.14.** 1.15.2+ join is async/chunk-gated
@@ -190,7 +190,7 @@ suppression, pre-send bundles, actual shipped values, hint behavior at real
 ping — are verified with `legacy-lab/harness/measure.js`: protocol fake
 clients against a real local server (vanilla 1.7.10/1.8.9 for era ground
 truth, Paper+Mental for acceptance), with injectable ping via delayed pong
-responses. See docs/research/2026-06-05-era-wire-measurements.md for the
+responses. See project/docs/research/2026-06-05-era-wire-measurements.md for the
 measured era values and the harness's protocol traps.
 
 - `chain-plain` (N plain hits at gap G + per-hit wire vy + per-flight

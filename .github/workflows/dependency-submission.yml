@@ -1,0 +1,66 @@
+# The Gradle dependency graph, submitted explicitly — and filtered to what
+# Mental actually ships.
+#
+# This workflow replaces GitHub's "automatic dependency submission" repo
+# setting (now disabled). That resolver walked EVERY resolvable configuration,
+# so the graph was dominated by dependencies that never reach a server:
+# paper-api is compileOnly, and its transitives (netty 4.1.x, snakeyaml 1.28,
+# guava 21.0, gson 2.8.8, commons-lang 2.6) are the SERVER's own libraries —
+# Mental compiles against them and shares the live server's copies at runtime,
+# never bundles them (the relocation/verifyJdk8Api gates assert exactly that).
+# Every CVE published against those server-owned versions opened a Dependabot
+# alert Mental can do nothing about (61 of them at cleanup time), drowning the
+# signal for dependencies we DO ship.
+#
+# DEPENDENCY_GRAPH_INCLUDE_CONFIGURATIONS=runtimeClasspath keeps the graph to
+# the shipped surface: the shaded packetevents/bstats/adventure line and the
+# project modules, per subproject. compileOnly (paper-api and friends),
+# test configurations, and buildscript/plugin internals (plexus, junit 4)
+# stay out — so Dependabot alerts from here on mean "a library inside
+# Mental-<version>.jar is vulnerable", which is precisely the alert worth
+# waking up for.
+name: dependency-submission
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-submission
+  cancel-in-progress: true
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the Dependency Submission API stores snapshots via the repo contents scope
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # The BUILD JDK = the newest JDK the matrix targets (jq max), same rule
+      # as build.yml/release.yml — project/support-matrix.json is the only home for
+      # JDK literals. Resolution never compiles, so no other toolchains are
+      # provisioned.
+      - name: Read the build JDK from project/support-matrix.json
+        id: facts
+        run: echo "build_jdk=$(jq '[.entries[].jdk] | max' project/support-matrix.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up the build JDK (Temurin)
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          java-version: ${{ steps.facts.outputs.build_jdk }}
+          distribution: 'temurin'
+
+      - name: Resolve and submit the runtime dependency graph
+        uses: gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        env:
+          # Full-match regex on configuration names: each subproject's
+          # runtimeClasspath IS the shipped surface (shadow folds it into the
+          # mega-jar); everything else is compile-time or harness scaffolding.
+          DEPENDENCY_GRAPH_INCLUDE_CONFIGURATIONS: runtimeClasspath

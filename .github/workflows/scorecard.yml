@@ -4,12 +4,11 @@
 # checks; results land in Security → Code scanning, and publish_results feeds
 # the public OpenSSF REST API / badge.
 #
-# Note: actions here are pinned by major tag like the rest of this repo's
-# workflows. Scorecard's own Pinned-Dependencies check prefers SHA pins and
-# will dock points for that — a deliberate consistency trade-off. The one
-# exception is scorecard-action itself: OSSF publishes NO floating major tag
-# (@v2 does not resolve — "Unable to resolve action"), only full release
-# tags, so it is pinned to its latest release.
+# Note: actions here are pinned to full commit SHAs (with the resolved
+# release in a trailing comment) like the rest of this repo's workflows —
+# what Scorecard's own Pinned-Dependencies check requires. Dependabot's
+# github-actions ecosystem understands SHA pins and keeps both the SHA and
+# the comment current in its weekly grouped PR.
 name: scorecard
 
 on:
@@ -30,12 +29,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Run Scorecard analysis
-        uses: ossf/scorecard-action@v2.4.3
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
           results_file: results.sarif
           results_format: sarif
@@ -43,13 +42,13 @@ jobs:
 
       # The SARIF rides along as an artifact for offline inspection.
       - name: Upload Scorecard artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-sarif
           path: results.sarif
           retention-days: 5
 
       - name: Upload to code scanning
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
         with:
           sarif_file: results.sarif

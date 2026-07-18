@@ -12,7 +12,7 @@ cancel the vanilla packet, optionally pre-send feedback), DAMAGE on the
 victim's owning thread (re-resolve, re-validate, `damage(amount, attacker)` —
 the full vanilla event chain). This is the surviving conclusion of the
 async-knockback fork lineage; full-async entity mutation was abandoned by
-everyone who tried it. Pipeline walk-through: docs/fast-path.md.
+everyone who tried it. Pipeline walk-through: project/docs/fast-path.md.
 
 ## Folia: the netty thread may NOT read live entity state (cost a deep round)
 
@@ -265,7 +265,7 @@ it did server-side must be re-implemented or it silently vanishes:
   bit (0x40, raw `keySprint.isDown()` intent — false for double-tap sprinters,
   true for stationary ctrl-holders; the server ignores it) — the block door's
   entry-gate corroborator only, never a verdict source (empirical 1.21.11
-  extraction, `docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`).
+  extraction, `project/docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`).
   This is the measured era server contract: real 1.8.9 consumed the flag inside
   every bonus attack and re-armed only on a client START — a no-w-tap double flew
   7.2 blocks where a w-tap double flew 11.4; the 2.5.0 auto re-arm collapsed that

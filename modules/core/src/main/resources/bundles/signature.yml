@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Rules bundle: Signature (classic 1.7/1.8 feel)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  A rules bundle is a MACRO, not a mode. Applying it writes every toggle below
+#  into Mental's machine overlay in one atomic reload; editing this file changes
+#  what a FUTURE apply does, not the running server.
+#
+#  This is Mental's own headline configuration: the full classic 1.7/1.8 combat
+#  rule set turned ON, the delivery ENGINE turned ON (stated explicitly, so the
+#  bundle lands the server in a fully-known state regardless of what preceded it),
+#  and every Combat Test 8c feature turned OFF. It selects the `signature`
+#  knockback profile and the `signature` Combat Effects tune to complete the feel.
+#
+#  Unlike the ct8c bundle, this one lists the seven engine keys: enabling the
+#  classic feel means the delivery pipeline should be on. If you keep the engine
+#  configured your own way, delete those seven lines — a key absent from a bundle
+#  is left exactly as configured.
+
+display-name: "Signature"
+description: "Mental's classic 1.7/1.8 combat feel — every era rule on, the full delivery engine on, CT8c off."
+
+# The knockback feel and cosmetic tune the classic experience ships with.
+knockback-profile: signature
+effects-preset: signature
+
+modules:
+  # ── The 24 classic 1.7/1.8 rule features — all ON ─────────────────────────
+  old-armour-strength: true       # 1.8 flat armour reduction (4%/point, no toughness)
+  old-armour-durability: true     # 1.8 armour-durability Unbreaking skip
+  old-critical-hits: true         # 1.8 crit rule (x1.5, no sprint/cooldown gate)
+  old-tool-durability: true       # restore weapon durability loss on fast-path hits
+  sword-blocking: true            # 1.7/1.8 right-click sword blocking
+  attack-cooldown: true           # remove the 1.9 attack cooldown (full-charge every swing)
+  disable-attack-sounds: true     # suppress the 1.9 swing-result sounds
+  disable-sword-sweep: true       # disable the 1.9 sweep attack
+  old-golden-apples: true         # 1.8.9 golden-apple effects and the notch recipe
+  disable-enderpearl-cooldown: true  # remove the 1.9 ender-pearl throw cooldown
+  old-player-regen: true          # 1.8 natural regen (1 HP / 4s at food 18+)
+  old-potion-durations: true      # restore the pre-1.9 potion durations
+  old-potion-values: true         # restore the pre-1.9 Strength/Weakness values
+  disable-crafting: true          # make the configured items uncraftable (shield default)
+  disable-offhand: true           # block the off-hand slot (it did not exist pre-1.9)
+  old-hitboxes: true              # 1.7/1.8 melee reach (3.0) and hitbox margin
+  combo-hold: true                # solve the fresh horizontal knock into the combo pocket
+  combo-reach-handicap: true      # shorten a juggled victim's reach while combo'd
+  pot-fill: true                  # the /potfill command (splash Instant Health II)
+  fast-pots: true                 # re-aim a steep splash at the thrower's feet, sped up
+  hit-feedback: true              # the layered hit sound + particles (the signature tune)
+  damage-indicators: true         # pop a damage number on the attacker's screen
+  death-effects: true             # a cosmetic strike on player death
+  drop-protection: true           # lock a slain player's drops to their killer
+
+  # ── The 7 delivery ENGINE features — all ON (stated explicitly) ───────────
+  # These default ON already; the bundle names them so applying it guarantees a
+  # fully-known state. Delete these lines to keep your own engine configuration.
+  hit-registration: true          # async netty-thread hit registration
+  wtap-registration: true         # arrival-order sprint reads for w-taps
+  knockback: true                 # melee knockback through the velocity pipeline
+  latency-compensation: true      # ping-aware vertical-knockback correction
+  fishing-knockback: true         # 1.7 rod combat — hooks are zero-damage knocks
+  rod-velocity: true              # 1.7 rod cast feel (launch speed, spread, gravity)
+  projectile-knockback: true      # 1.7 projectile knockback (snowballs, eggs, pearls, arrows)
+
+  # ── The 13 Combat Test 8c rule features — all OFF ─────────────────────────
+  weapon-attack-speeds: false
+  charged-attacks: false
+  ct8c-damage: false
+  ct8c-crits: false
+  ct8c-sweep: false
+  ct8c-iframes: false
+  ct8c-shields: false
+  ct8c-regen: false
+  ct8c-consumables: false
+  ct8c-potions: false
+  ct8c-reach: false
+  ct8c-projectiles: false
+  cleaving: false
+
+# settings: (unset) — each module's own config file carries its tuning.
