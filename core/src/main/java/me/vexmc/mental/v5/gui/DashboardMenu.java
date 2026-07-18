@@ -32,7 +32,8 @@ public final class DashboardMenu extends Menu {
     /** The first-slot of each of the three grouped family rows (rows 1–3). */
     private static final int[] FAMILY_ROW_BASES = {9, 18, 27};
 
-    /** Row-4 nav tiles (compatibility / debug), aligned above reload / close. */
+    /** Row-4 nav tiles (combat presets / compatibility / debug), aligned above reload / close. */
+    private static final int PRESETS_SLOT = 37;
     private static final int COMPAT_SLOT = 39;
     private static final int DEBUG_SLOT = 41;
 
@@ -60,6 +61,9 @@ public final class DashboardMenu extends Menu {
 
         drawFamilyRows(viewer);
 
+        set(PRESETS_SLOT, Buttons.nav("CHEST", "Combat Presets",
+                "Apply a whole ruleset at once — CT8c, the classic 1.7 feel, or vanilla."),
+                click -> navigate(viewer, new CombatPresetsMenu(ctx)));
         set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility",
                 "Anticheat posture."),
                 click -> navigate(viewer, new CompatibilityMenu(ctx)));
