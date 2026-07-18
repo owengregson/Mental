@@ -2,7 +2,7 @@
 # deliberately disabled (the two are mutually exclusive: default setup rejects
 # SARIF from workflow-based analyses). Coverage matches what default setup
 # scanned, minus its noise: java-kotlin for the plugin, javascript-typescript
-# for the legacy-lab harness scripts, actions for the workflows themselves.
+# for the project/legacy-lab harness scripts, actions for the workflows themselves.
 #
 # build-mode: none scans sources without invoking Gradle at all — the right
 # choice here, because a full build would drag the whole mega-jar pipeline

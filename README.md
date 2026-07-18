@@ -1,14 +1,14 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/hero-dark.svg">
-    <img src="assets/hero.svg" width="860" alt="Mental — classic combat, engineered">
+    <source media="(prefers-color-scheme: dark)" srcset="project/assets/hero-dark.svg">
+    <img src="project/assets/hero.svg" width="860" alt="Mental — classic combat, engineered">
   </picture>
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><img src="assets/buttons/download.svg" height="46" alt="Download latest"></a>
+  <a href="../../releases/latest"><img src="project/assets/buttons/download.svg" height="46" alt="Download latest"></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="../../releases"><img src="assets/buttons/releases.svg" height="46" alt="All releases"></a>
+  <a href="../../releases"><img src="project/assets/buttons/releases.svg" height="46" alt="All releases"></a>
 </p>
 
 <p align="center">
@@ -29,20 +29,20 @@
 <br>
 
 <p align="center">
-  <img src="assets/headers/features.svg" height="54" alt="Features">
+  <img src="project/assets/headers/features.svg" height="54" alt="Features">
 </p>
 
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src="assets/icons/knockback.svg" width="40" alt=""><br>
+<img src="project/assets/icons/knockback.svg" width="40" alt=""><br>
 <b>Precision-tuned Knockback</b><br>
 Choose the legacy 1.7.10 formula or the modern one, with presets for both.
 <code>signature</code>, Mental's own, feels like <code>mmc</code> knockback, perfect for practice
 servers.
 </td>
 <td width="50%" valign="top">
-<img src="assets/icons/hitreg.svg" width="40" alt=""><br>
+<img src="project/assets/icons/hitreg.svg" width="40" alt=""><br>
 <b>Async Hit Registration &amp; Knockback</b><br>
 Attacks are intercepted on the netty thread and register <b>sub-tick</b>, in packet-arrival
 order — combat runs <b>faster than vanilla</b>.
@@ -50,13 +50,13 @@ order — combat runs <b>faster than vanilla</b>.
 </tr>
 <tr>
 <td width="50%" valign="top">
-<img src="assets/icons/latency.svg" width="40" alt=""><br>
+<img src="project/assets/icons/latency.svg" width="40" alt=""><br>
 <b>Fair at any ping</b><br>
 Latency compensation keeps knockback and combos identical at 5&nbsp;ms or 150&nbsp;ms — all
 server-authoritative, so anticheats verify it cleanly.
 </td>
 <td width="50%" valign="top">
-<img src="assets/icons/jar.svg" width="40" alt=""><br>
+<img src="project/assets/icons/jar.svg" width="40" alt=""><br>
 <b>One jar, every server</b><br>
 One download covers every Paper build from 1.9.4 to 26.x plus Folia, on <b>Java 8+</b> with no
 flags. Every release passes a <b>live test matrix across every supported server</b>.
@@ -64,13 +64,13 @@ flags. Every release passes a <b>live test matrix across every supported server<
 </tr>
 <tr>
 <td width="50%" valign="top">
-<img src="assets/icons/ruleset.svg" width="40" alt=""><br>
+<img src="project/assets/icons/ruleset.svg" width="40" alt=""><br>
 <b>The full 1.8 ruleset — optional</b><br>
 A library of <b>switchable modules</b>: old armour, no attack cooldown, 1.8 crits, golden apples,
 sword blocking, and more. <i>All OFF by default.</i>
 </td>
 <td width="50%" valign="top">
-<img src="assets/icons/gui.svg" width="40" alt=""><br>
+<img src="project/assets/icons/gui.svg" width="40" alt=""><br>
 <b>Run it from in-game</b><br>
 <code>/mental</code> opens a full management menu — flip modules and switch presets live, no
 restart. Everything is still plain, documented YAML.
@@ -81,7 +81,7 @@ restart. Everything is still plain, documented YAML.
 <br>
 
 <p align="center">
-  <img src="assets/headers/getting-started.svg" height="54" alt="Getting started">
+  <img src="project/assets/headers/getting-started.svg" height="54" alt="Getting started">
 </p>
 
 1. **Download** `Mental-<version>.jar` from [the latest release](../../releases/latest).
@@ -99,7 +99,7 @@ original is kept as `config-v1-backup.yml`.
 <br>
 
 <p align="center">
-  <img src="assets/headers/modern-legacy.svg" height="54" alt="Modern or legacy knockback">
+  <img src="project/assets/headers/modern-legacy.svg" height="54" alt="Modern or legacy knockback">
 </p>
 
 Mental runs two complete knockback calculations — choose the one your server should feel like:
@@ -116,7 +116,7 @@ bonuses — so `custom` can start from either world.
 <br>
 
 <p align="center">
-  <img src="assets/headers/presets.svg" height="54" alt="Knockback presets">
+  <img src="project/assets/headers/presets.svg" height="54" alt="Knockback presets">
 </p>
 
 The knockback profile is one server-wide setting — pick it in-game or in `knockback.yml`.
@@ -131,13 +131,13 @@ The knockback profile is one server-wide setting — pick it in-game or in `knoc
 More ship alongside: `kohi`, `minehq`, `mmc`, `legacy-1.7`, `legacy-1.8`, `custom`
 (yours to edit) in `profiles/legacy/`, and `modern-vanilla`, `modern-uplift`, `modern-combo`,
 `ct8c` in `profiles/modern/` for servers on the modern knockback formula. The full guide to what
-each knob does lives in [docs/knockback-profiles.md](docs/knockback-profiles.md).
+each knob does lives in [project/docs/knockback-profiles.md](project/docs/knockback-profiles.md).
 
 <br>
 
 <a id="faster-than-vanilla"></a>
 <p align="center">
-  <img src="assets/headers/faster.svg" height="54" alt="Faster than vanilla">
+  <img src="project/assets/headers/faster.svg" height="54" alt="Faster than vanilla">
 </p>
 
 **Vanilla waits twice.** An attack packet queues for the next tick, then the knockback waits
@@ -157,12 +157,12 @@ Mental removes both waits:
 - **Still authoritative.** Damage runs on the main thread through the full vanilla event
   chain, and the pre-send uses the same profile math — prediction and truth never disagree.
 
-The full pipeline, edge cases included: [docs/fast-path.md](docs/fast-path.md).
+The full pipeline, edge cases included: [project/docs/fast-path.md](project/docs/fast-path.md).
 
 <br>
 
 <p align="center">
-  <img src="assets/headers/ingame.svg" height="54" alt="In-game management">
+  <img src="project/assets/headers/ingame.svg" height="54" alt="In-game management">
 </p>
 
 `/mental` (or `/mtl`) opens the management suite — operators only, by default. Redesigned in
@@ -184,7 +184,7 @@ so comments and formatting in the files you maintain stay exactly as you left th
 <br>
 
 <p align="center">
-  <img src="assets/headers/configuration.svg" height="54" alt="Configuration">
+  <img src="project/assets/headers/configuration.svg" height="54" alt="Configuration">
 </p>
 
 Everything lives under `plugins/Mental/`, split by topic — each file documents every key it holds:
@@ -206,7 +206,7 @@ Everything lives under `plugins/Mental/`, split by topic — each file documents
 <br>
 
 <p align="center">
-  <img src="assets/headers/ruleset.svg" height="54" alt="The 1.8 ruleset">
+  <img src="project/assets/headers/ruleset.svg" height="54" alt="The 1.8 ruleset">
 </p>
 
 Mental always owns hit delivery and knockback. Everything below is **opt-in** — all OFF by
@@ -234,7 +234,7 @@ default, each a one-line toggle, grouped by family:
 <br>
 
 <p align="center">
-  <img src="assets/headers/faq.svg" height="54" alt="FAQ">
+  <img src="project/assets/headers/faq.svg" height="54" alt="FAQ">
 </p>
 
 **Does it work with anticheats?**
@@ -264,7 +264,7 @@ in real time — or open the **Debug** screen in `/mental` and hit *Stream to my
 <br>
 
 <p align="center">
-  <img src="assets/headers/compatibility.svg" height="54" alt="Compatibility">
+  <img src="project/assets/headers/compatibility.svg" height="54" alt="Compatibility">
 </p>
 
 | | |
@@ -282,7 +282,7 @@ motion) — gameplay is unaffected.
 <br>
 
 <p align="center">
-  <img src="assets/headers/developers.svg" height="54" alt="For developers">
+  <img src="project/assets/headers/developers.svg" height="54" alt="For developers">
 </p>
 
 Modules: `api` (public surface) · `kernel` (pure-JDK combat model) · `platform` (Bukkit seam)
@@ -291,17 +291,17 @@ Modules: `api` (public surface) · `kernel` (pure-JDK combat model) · `platform
 **Public API** — `me.vexmc:mental-api` (generation 3): combo lifecycle events, an
 authoritative combat-state query service, capability discovery, and knockback outcome
 control. The jar ships with every release; the contract lives in
-[docs/api-gen3-integration-surface.md](docs/api-gen3-integration-surface.md) with rulings in
-[docs/api-gen3-rulings.md](docs/api-gen3-rulings.md).
+[project/docs/api-gen3-integration-surface.md](project/docs/api-gen3-integration-surface.md) with rulings in
+[project/docs/api-gen3-rulings.md](project/docs/api-gen3-rulings.md).
 
 ```bash
 ./gradlew build                  # unit tests + compatibility gates
 ./gradlew integrationTestMatrix  # every supported server, live
 ```
 
-Deep dives: [fast path](docs/fast-path.md) · [knockback profiles](docs/knockback-profiles.md)
-· [combo hold](docs/combo-hold.md) · [legacy tier](docs/legacy-combat.md) · the combat
-research ledger in [docs/research/](docs/research/).
+Deep dives: [fast path](project/docs/fast-path.md) · [knockback profiles](project/docs/knockback-profiles.md)
+· [combo hold](project/docs/combo-hold.md) · [legacy tier](project/docs/legacy-combat.md) · the combat
+research ledger in [project/docs/research/](project/docs/research/).
 
 Licensed [MIT](LICENSE) · third-party notices [here](THIRD-PARTY-NOTICES.md) · anonymous
 usage metrics via bStats (opt out in `config.yml`).
@@ -309,7 +309,7 @@ usage metrics via bStats (opt out in `config.yml`).
 <br>
 
 <p align="center">
-  <img src="assets/divider.svg" height="22" alt="">
+  <img src="project/assets/divider.svg" height="22" alt="">
 </p>
 
 <p align="center"><sub><b>MENTAL</b> by <a href="https://github.com/owengregson">@owengregson</a></sub></p>

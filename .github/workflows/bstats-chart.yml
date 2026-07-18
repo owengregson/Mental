@@ -1,6 +1,6 @@
 name: refresh-bstats-chart
 
-# Renders the live bStats player chart (scripts/render-bstats-chart.mjs) and
+# Renders the live bStats player chart (project/scripts/render-bstats-chart.mjs) and
 # publishes assets/stats/players{,-dark}.svg as ONE orphan commit force-pushed
 # to the unprotected `bstats-charts` data branch. The README embeds the charts
 # from that branch via raw.githubusercontent URLs.
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - run: node scripts/render-bstats-chart.mjs
+      - run: node project/scripts/render-bstats-chart.mjs
       - name: Publish to the bstats-charts data branch
         run: |
           git config user.name "github-actions[bot]"
@@ -46,7 +46,7 @@ jobs:
           # rendered charts. --cached keeps the working tree intact; -f is
           # needed because the render just modified the two SVGs vs the index.
           tmp="$(mktemp -d)"
-          cp assets/stats/players.svg assets/stats/players-dark.svg "$tmp"/
+          cp project/assets/stats/players.svg project/assets/stats/players-dark.svg "$tmp"/
           git checkout --orphan chart-refresh
           git rm -r -f -q --cached .
           mkdir -p assets/stats

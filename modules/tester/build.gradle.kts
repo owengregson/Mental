@@ -7,12 +7,12 @@ plugins {
 }
 
 // The tester must load on every supported server, so its plugin.yml api-version follows the SAME floor as
-// Mental's — read from support-matrix.json (the single source), not hardcoded. On 1.13.2 the server rejects
+// Mental's — read from project/support-matrix.json (the single source), not hardcoded. On 1.13.2 the server rejects
 // any plugin whose api-version isn't exactly the floor (CraftMagicNumbers.checkSupported), so a stale "1.17"
 // here would fail the whole legacy boot.
 @Suppress("UNCHECKED_CAST")
 val floorApi: String =
-    (JsonSlurper().parse(rootProject.layout.projectDirectory.file("support-matrix.json").asFile)
+    (JsonSlurper().parse(rootProject.layout.projectDirectory.file("project/support-matrix.json").asFile)
         as Map<String, Any>)["floorApi"] as String
 
 dependencies {

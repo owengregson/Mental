@@ -3,12 +3,12 @@
 // All text is drawn as vector paths (no fonts). Run from repo root.
 //
 //   node scripts/generate-brand-assets.mjs all                      # heroes, release banners, buttons, divider, social SVG
-//   node scripts/generate-brand-assets.mjs header <slug> "TEXT"     # assets/headers/<slug>.svg   (54px README section header)
-//   node scripts/generate-brand-assets.mjs release-header <slug> "TEXT"  # assets/release/headers/<slug>.svg (42px)
-//   node scripts/generate-brand-assets.mjs button <slug> "TEXT" [filled] # assets/buttons/<slug>.svg (46px)
+//   node scripts/generate-brand-assets.mjs header <slug> "TEXT"     # project/assets/headers/<slug>.svg   (54px README section header)
+//   node scripts/generate-brand-assets.mjs release-header <slug> "TEXT"  # project/assets/release/headers/<slug>.svg (42px)
+//   node scripts/generate-brand-assets.mjs button <slug> "TEXT" [filled] # project/assets/buttons/<slug>.svg (46px)
 //
-// assets/social-preview.png must be re-rasterized after `all` (any SVG->PNG at 1280x640),
-// e.g.: npx @resvg/resvg-js-cli assets/social-preview.src.svg -o assets/social-preview.png
+// project/assets/social-preview.png must be re-rasterized after `all` (any SVG->PNG at 1280x640),
+// e.g.: npx @resvg/resvg-js-cli project/assets/social-preview.src.svg -o project/assets/social-preview.png
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 export const ACC = '#FF4655';                 // Mental ember/red accent (static, both themes)
@@ -147,12 +147,12 @@ export function divider(){
 const [,,cmd,a,b,c] = process.argv;
 const put=(p,s)=>{mkdirSync(p.replace(/\/[^/]+$/,''),{recursive:true});writeFileSync(p,s);console.log('wrote',p);};
 if (cmd==='all'){
-  put('assets/hero-dark.svg',hero(DARK)); put('assets/hero.svg',hero(LIGHT));
-  put('assets/release/banner-dark.svg',banner(DARK)); put('assets/release/banner.svg',banner(LIGHT));
-  put('assets/buttons/download.svg',button('DOWNLOAD LATEST',true)); put('assets/buttons/releases.svg',button('ALL RELEASES',false));
-  put('assets/divider.svg',divider()); put('assets/social-preview.src.svg',social());
-  console.log('NOTE: rasterize assets/social-preview.src.svg -> assets/social-preview.png (1280x640)');
-} else if (cmd==='header' && a && b) put(`assets/headers/${a}.svg`, header(b.toUpperCase()));
-else if (cmd==='release-header' && a && b) put(`assets/release/headers/${a}.svg`, releaseHeader(b.toUpperCase()));
-else if (cmd==='button' && a && b) put(`assets/buttons/${a}.svg`, button(b.toUpperCase(), c==='filled'));
+  put('project/assets/hero-dark.svg',hero(DARK)); put('project/assets/hero.svg',hero(LIGHT));
+  put('project/assets/release/banner-dark.svg',banner(DARK)); put('project/assets/release/banner.svg',banner(LIGHT));
+  put('project/assets/buttons/download.svg',button('DOWNLOAD LATEST',true)); put('project/assets/buttons/releases.svg',button('ALL RELEASES',false));
+  put('project/assets/divider.svg',divider()); put('project/assets/social-preview.src.svg',social());
+  console.log('NOTE: rasterize project/assets/social-preview.src.svg -> project/assets/social-preview.png (1280x640)');
+} else if (cmd==='header' && a && b) put(`project/assets/headers/${a}.svg`, header(b.toUpperCase()));
+else if (cmd==='release-header' && a && b) put(`project/assets/release/headers/${a}.svg`, releaseHeader(b.toUpperCase()));
+else if (cmd==='button' && a && b) put(`project/assets/buttons/${a}.svg`, button(b.toUpperCase(), c==='filled'));
 else { console.log('usage: all | header <slug> "TEXT" | release-header <slug> "TEXT" | button <slug> "TEXT" [filled]'); process.exit(1); }

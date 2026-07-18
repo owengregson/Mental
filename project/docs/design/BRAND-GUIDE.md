@@ -1,7 +1,7 @@
 # Mental brand guide (README + release assets)
 
 Everything user-facing in this repo is drawn from one visual system. This file is the contract;
-`scripts/generate-brand-assets.mjs` is its executable form. **Never hand-tweak a generated SVG —
+`project/scripts/generate-brand-assets.mjs` is its executable form. **Never hand-tweak a generated SVG —
 change the generator (or use its CLI) and regenerate**, so the system stays deterministic.
 
 ## Direction
@@ -44,11 +44,11 @@ machine-regenerated stats charts use `<text>` with a generic monospace stack).
 
 ## Regeneration
 ```bash
-node scripts/generate-brand-assets.mjs all                          # fixed surfaces
-node scripts/generate-brand-assets.mjs header faq "FAQ"             # new/changed section header
-node scripts/generate-brand-assets.mjs release-header fixes "FIXES"
-node scripts/generate-brand-assets.mjs button download "DOWNLOAD LATEST" filled
+node project/scripts/generate-brand-assets.mjs all                          # fixed surfaces
+node project/scripts/generate-brand-assets.mjs header faq "FAQ"             # new/changed section header
+node project/scripts/generate-brand-assets.mjs release-header fixes "FIXES"
+node project/scripts/generate-brand-assets.mjs button download "DOWNLOAD LATEST" filled
 ```
-`all` writes `assets/social-preview.src.svg`; rasterize it to `assets/social-preview.png`
-(1280×640), e.g. `npx @resvg/resvg-js-cli assets/social-preview.src.svg -o assets/social-preview.png`.
-The stats charts are owned by `scripts/render-bstats-chart.mjs` (see workflow) — not this generator.
+`all` writes `project/assets/social-preview.src.svg`; rasterize it to `project/assets/social-preview.png`
+(1280×640), e.g. `npx @resvg/resvg-js-cli project/assets/social-preview.src.svg -o project/assets/social-preview.png`.
+The stats charts are owned by `project/scripts/render-bstats-chart.mjs` (see workflow) — not this generator.

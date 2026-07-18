@@ -75,7 +75,12 @@ class KnockbackDocsTest {
     private static String readDoc() {
         Path dir = Path.of("").toAbsolutePath();
         for (int i = 0; i < 8 && dir != null; i++, dir = dir.getParent()) {
-            Path doc = dir.resolve("docs/knockback-profiles.md");
+            // The docs tree lives under project/ (repo-root declutter); fall back to
+            // the pre-move location so the pin holds regardless of where it runs.
+            Path doc = dir.resolve("project/docs/knockback-profiles.md");
+            if (!Files.isRegularFile(doc)) {
+                doc = dir.resolve("docs/knockback-profiles.md");
+            }
             if (Files.isRegularFile(doc)) {
                 try {
                     return Files.readString(doc, StandardCharsets.UTF_8);
@@ -84,7 +89,7 @@ class KnockbackDocsTest {
                 }
             }
         }
-        return fail("docs/knockback-profiles.md not found walking up from "
+        return fail("project/docs/knockback-profiles.md not found walking up from "
                 + Path.of("").toAbsolutePath());
     }
 
@@ -93,7 +98,7 @@ class KnockbackDocsTest {
         String doc = readDoc();
         for (String key : KNOB_KEYS) {
             assertTrue(doc.contains(key),
-                    "docs/knockback-profiles.md must document the '" + key
+                    "project/docs/knockback-profiles.md must document the '" + key
                             + "' knob (schema key present in KnockbackProfile) — the doc drifted from the schema.");
         }
     }
@@ -102,6 +107,6 @@ class KnockbackDocsTest {
     void schemaShapeIsPinnedToTheDocumentedVocabulary() {
         assertEquals(EXPECTED_COMPONENTS, KnockbackProfile.class.getRecordComponents().length,
                 "KnockbackProfile gained or lost a component — a schema change. Document any new knob in "
-                        + "docs/knockback-profiles.md, add its YAML key to KNOB_KEYS, and update this pin.");
+                        + "project/docs/knockback-profiles.md, add its YAML key to KNOB_KEYS, and update this pin.");
     }
 }

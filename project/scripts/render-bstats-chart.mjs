@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Renders Mental's bStats player chart (last 14 days) into assets/stats/{players.svg,players-dark.svg}.
+// Renders Mental's bStats player chart (last 14 days) into project/assets/stats/{players.svg,players-dark.svg}.
 // Run from repo root: node scripts/render-bstats-chart.mjs
 // The README's <picture> paths never change — this script just refreshes the files.
 const PLUGIN_ID = 31788;
@@ -67,7 +67,7 @@ const cutoff = Date.now() - DAYS*86400000;
 data = data.filter(p => Array.isArray(p) && p[0] >= cutoff && Number.isFinite(p[1])).sort((a,b)=>a[0]-b[0]);
 if (data.length < 2) { console.error('not enough datapoints:', data.length); process.exit(1); }
 const { writeFileSync, mkdirSync } = await import('node:fs');
-mkdirSync('assets/stats', { recursive: true });
-writeFileSync('assets/stats/players-dark.svg', renderChart(data, DARK));
-writeFileSync('assets/stats/players.svg', renderChart(data, LIGHT));
+mkdirSync('project/assets/stats', { recursive: true });
+writeFileSync('project/assets/stats/players-dark.svg', renderChart(data, DARK));
+writeFileSync('project/assets/stats/players.svg', renderChart(data, LIGHT));
 console.log(`rendered ${data.length} datapoints, latest=${Math.round(data[data.length-1][1])}`);

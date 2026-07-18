@@ -21,13 +21,13 @@ plugins {
 evaluationDependsOn(":tester")
 
 /* ────────────────────────────────────────────────────────────────────────
- *  support-matrix.json — THE single machine-readable source of truth for the
+ *  project/support-matrix.json — THE single machine-readable source of truth for the
  *  supported platform matrix. Every version, its JDK, its CI lane, and the
  *  plugin.yml api-version floor come from here; no Minecraft
  *  version or JDK literal lives anywhere else in the build (Task 5.3).
  * ──────────────────────────────────────────────────────────────────────── */
 
-/** One supported-platform row from support-matrix.json. */
+/** One supported-platform row from project/support-matrix.json. */
 class SupportEntry(
     val version: String,
     val jdk: Int,
@@ -37,7 +37,7 @@ class SupportEntry(
     val bytecodeTier: Int,
 )
 
-val supportMatrixFile = rootProject.layout.projectDirectory.file("support-matrix.json").asFile
+val supportMatrixFile = rootProject.layout.projectDirectory.file("project/support-matrix.json").asFile
 
 @Suppress("UNCHECKED_CAST")
 val supportMatrix: Map<String, Any> =
@@ -96,7 +96,7 @@ dependencies {
 }
 
 tasks.processResources {
-    // api-version derives from support-matrix.json's floorApi — the descriptor
+    // api-version derives from project/support-matrix.json's floorApi — the descriptor
     // owns the Bukkit compatibility floor, not a hardcoded plugin.yml literal.
     val props = mapOf(
         "version" to project.version.toString(),
@@ -341,7 +341,7 @@ tasks.named("check") {
 /* ────────────────────────────────────────────────────────────────────────
  *  Real-server integration matrix
  *
- *  For every paper entry in support-matrix.json, a real Paper server boots
+ *  For every paper entry in project/support-matrix.json, a real Paper server boots
  *  with the Mental and MentalTester jars installed; the tester runs its suite
  *  in-process, writes "PASS nonce=<n>", and shuts the server down; the paired
  *  check task fails the build unless the result carries THIS run's nonce and
@@ -410,8 +410,8 @@ val verifyJdk8Api = tasks.register("verifyJdk8Api") {
     dependsOn(megaJar, testerMegaJar)
     val coreJar = megaJar.flatMap { it.archiveFile }
     val testerJar = testerMegaJar.flatMap { it.archiveFile }
-    val toolSrc = rootProject.layout.projectDirectory.file("scripts/tools/Jdk8ApiGate.java")
-    val allowFile = rootProject.layout.projectDirectory.file("scripts/tools/jdk8-api-gate.allow")
+    val toolSrc = rootProject.layout.projectDirectory.file("project/scripts/tools/Jdk8ApiGate.java")
+    val allowFile = rootProject.layout.projectDirectory.file("project/scripts/tools/jdk8-api-gate.allow")
     val jdk8Home = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(8)) }
         .map { it.metadata.installationPath.asFile }
     val classesDir = layout.buildDirectory.dir("jdk8-gate/classes")
@@ -889,12 +889,12 @@ tasks.register("integrationTest") {
 
 tasks.register("integrationTestMatrix") {
     group = "mental integration"
-    description = "Runs the suite on every paper AND folia entry in support-matrix.json."
+    description = "Runs the suite on every paper AND folia entry in project/support-matrix.json."
     dependsOn(checkTasks + foliaCheckTasks)
 }
 
 tasks.register("integrationTestFolia") {
     group = "mental integration"
-    description = "Runs the suite on every folia entry in support-matrix.json."
+    description = "Runs the suite on every folia entry in project/support-matrix.json."
     dependsOn(foliaCheckTasks)
 }

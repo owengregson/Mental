@@ -55,7 +55,7 @@ replay_pid*.log
 !.claude/skills/
 
 # legacy-lab: measurement harness is tracked; servers, worlds, decompiles are not
-legacy-lab/*
-!legacy-lab/harness/
-legacy-lab/harness/node_modules/
-legacy-lab/harness/package-lock.json
+project/legacy-lab/*
+!project/legacy-lab/harness/
+project/legacy-lab/harness/node_modules/
+project/legacy-lab/harness/package-lock.json

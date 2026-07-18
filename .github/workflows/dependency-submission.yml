@@ -44,12 +44,12 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # The BUILD JDK = the newest JDK the matrix targets (jq max), same rule
-      # as build.yml/release.yml — support-matrix.json is the only home for
+      # as build.yml/release.yml — project/support-matrix.json is the only home for
       # JDK literals. Resolution never compiles, so no other toolchains are
       # provisioned.
-      - name: Read the build JDK from support-matrix.json
+      - name: Read the build JDK from project/support-matrix.json
         id: facts
-        run: echo "build_jdk=$(jq '[.entries[].jdk] | max' support-matrix.json)" >> "$GITHUB_OUTPUT"
+        run: echo "build_jdk=$(jq '[.entries[].jdk] | max' project/support-matrix.json)" >> "$GITHUB_OUTPUT"
 
       - name: Set up the build JDK (Temurin)
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0

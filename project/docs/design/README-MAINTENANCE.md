@@ -5,7 +5,7 @@ How to change `README.md` without breaking the system. Read `docs/design/BRAND-G
 ## Structure (in order)
 1. Hero (`<picture>` dark/light) + download/releases buttons
 2. Positioning paragraph ("Classic 1.7.10 combat…")
-3. Live player chart (`<picture>` → `assets/stats/players{,-dark}.svg`, linked to bStats)
+3. Live player chart (`<picture>` → `project/assets/stats/players{,-dark}.svg`, linked to bStats)
 4. FEATURES — 2×3 card table
 5. GETTING STARTED — 3 steps + config/migration paragraph + no-dependencies blockquote
 6. MODERN OR LEGACY — the two knockback calculations
@@ -33,17 +33,17 @@ Paper 1.9.4 → 26.x one jar no flags · Folia supported, release-gated · Java 
 `profiles/modern/` (modern-vanilla, modern-uplift, modern-combo) · era modules all default OFF ·
 modules: api/kernel/platform/core/compat-folia/tester · public API `me.vexmc:mental-api` (gen 3),
 jar attached to every release · MIT · bStats metrics, opt-out in `config.yml` · fast-path claims
-per `docs/fast-path.md` (netty-thread read, sub-tick, pre-send, 1.19.4+ bundle, 10–50 ms vanilla
+per `project/docs/fast-path.md` (netty-thread read, sub-tick, pre-send, 1.19.4+ bundle, 10–50 ms vanilla
 dead time, TPS-independent registration). **No fabricated screenshots — all art is vector.**
 
 ## Common edits
-- **Add a section**: `node scripts/generate-brand-assets.mjs header <slug> "TITLE"`, then insert
-  `<p align="center"><img src="assets/headers/<slug>.svg" height="54" alt="Title"></p>` + content
+- **Add a section**: `node project/scripts/generate-brand-assets.mjs header <slug> "TITLE"`, then insert
+  `<p align="center"><img src="project/assets/headers/<slug>.svg" height="54" alt="Title"></p>` + content
   + `<br>`. Same pattern for release headers at `height="42"`.
 - **Feature card**: `<img icons/x.svg width="40"><br><b>Bold noun-phrase title</b><br>` + 1–2
   sentences. New icon → author per BRAND-GUIDE icon rules.
 - **Rename a section**: regenerate its header SVG (same slug), update `alt`.
-- **Wordmark/hero/banner/buttons/divider change**: edit `scripts/generate-brand-assets.mjs`
+- **Wordmark/hero/banner/buttons/divider change**: edit `project/scripts/generate-brand-assets.mjs`
   (tokens or geometry), run `all`, re-rasterize the social PNG, and remind the owner to re-upload
   the social preview in repo settings.
 - **Links**: relative to repo root; before committing, verify each target exists
@@ -56,7 +56,7 @@ raw.githubusercontent URLs — release pages don't resolve relative paths). Foot
 `<sub><b>MENTAL</b> by <a href="https://github.com/owengregson">@owengregson</a></sub>`.
 
 ## Player chart
-`scripts/render-bstats-chart.mjs` renders `assets/stats/players{,-dark}.svg` (players only, last
+`project/scripts/render-bstats-chart.mjs` renders `project/assets/stats/players{,-dark}.svg` (players only, last
 14 days). `.github/workflows/bstats-chart.yml` re-renders them every 6 hours and force-pushes the
 result as a single orphan commit to the `bstats-charts` data branch; the README embeds the charts
 from that branch by absolute raw.githubusercontent URL (main is branch-protected, so the refresh
