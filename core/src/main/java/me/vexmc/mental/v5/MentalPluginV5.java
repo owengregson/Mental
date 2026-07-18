@@ -880,7 +880,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new Ct8cConsumablesUnit());
         reconciler.register(new Ct8cPotionsUnit());
         reconciler.register(new Ct8cReachUnit());
-        reconciler.register(new Ct8cProjectilesUnit());
+        reconciler.register(new Ct8cProjectilesUnit(this, scheduling));
     }
 
     private Snapshot parseSnapshot() {
