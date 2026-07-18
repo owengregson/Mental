@@ -6,6 +6,7 @@ import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.tester.suite.BlockingSuite;
 import me.vexmc.mental.tester.suite.BootSuite;
+import me.vexmc.mental.tester.suite.CombatTest8cSuite;
 import me.vexmc.mental.tester.suite.CommandSuite;
 import me.vexmc.mental.tester.suite.ConsumableRulesSuite;
 import me.vexmc.mental.tester.suite.ComboSuite;
@@ -23,6 +24,7 @@ import me.vexmc.mental.tester.suite.PotsSuite;
 import me.vexmc.mental.tester.suite.ProfileSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
 import me.vexmc.mental.tester.suite.ReloadSuite;
+import me.vexmc.mental.tester.suite.RulesBundleSuite;
 import me.vexmc.mental.tester.suite.ZeroTouchSuite;
 import me.vexmc.mental.v5.MentalPluginV5;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -38,7 +40,8 @@ import org.bukkit.plugin.java.JavaPlugin;
  * <p>On a plain server the active list is
  * {@code Boot, Knockback, Profile, Fishing, Projectile, EraParity, DamageRules,
  * Blocking, ConsumableRules, CosmeticSmoke, Feedback, FeedbackCoherence, Hitbox,
- * InventoryRules, Pots, Command, Combo, Reload, ZeroTouch}.</p>
+ * InventoryRules, Pots, Command, Combo, Reload, ZeroTouch, CombatTest8c,
+ * RulesBundle}.</p>
  */
 public final class MentalTesterPlugin extends JavaPlugin {
 
@@ -102,6 +105,12 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 suite.addAll(ComboSuite.tests(mental, this));
                 suite.addAll(ReloadSuite.tests(mental));
                 suite.addAll(ZeroTouchSuite.tests(mental, this));
+                // The CT8c import suites run LAST: they enable/assert/teardown every
+                // CT8c feature and apply whole rules bundles (the vanilla one turns the
+                // delivery engine off), each self-restoring — kept last so the
+                // established suites run first on the known-good default state.
+                suite.addAll(CombatTest8cSuite.tests(mental, this));
+                suite.addAll(RulesBundleSuite.tests(mental, this));
             }
             new TestHarness(this, scheduling, nonce).run(suite);
         });
