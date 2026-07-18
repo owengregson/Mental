@@ -16,6 +16,7 @@ import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import me.vexmc.mental.platform.Absorptions;
 import me.vexmc.mental.platform.Capabilities;
+import me.vexmc.mental.platform.CleavingRegistrar;
 import me.vexmc.mental.platform.Cooldowns;
 import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.HandStates;
@@ -874,7 +875,14 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new Ct8cDamageUnit());
         reconciler.register(new Ct8cCritsUnit());
         reconciler.register(new Ct8cIframesUnit());
-        reconciler.register(new Ct8cShieldUnit());
+        // Task INT wire 1: feed Task D's platform Cleaving handle into the shield unit
+        // so an axe with Cleaving disables the shield the extra +10 ticks/level (Task E
+        // shipped the ToIntFunction ctor). A LIVE lookup, not a captured snapshot — the
+        // handle is installed later, only when the CLEAVING feature enables (idempotent,
+        // cached), and this reconciler.register runs once at boot. Absent handle ⇒ 0
+        // (E's no-arg default), never a throw. The exact idiom Ct8cDamageUnit uses.
+        reconciler.register(new Ct8cShieldUnit(
+                stack -> CleavingRegistrar.handle().map(handle -> handle.levelOf(stack)).orElse(0)));
         reconciler.register(new CleavingUnit());
         reconciler.register(new Ct8cRegenUnit());
         reconciler.register(new Ct8cConsumablesUnit());
