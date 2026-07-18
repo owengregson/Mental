@@ -323,8 +323,9 @@ always the legacy positional push — unchanged by the melee formula.
 ## Runtime control
 
 Management is in-game. `/mental` (permission `mental.command.use`) opens the
-management menu; its **Knockback** screen lists every loaded profile and the
-server-wide default and switches it. A switch writes the machine-owned overlay
+management menu; its **Knockback** screen opens the **Preset Gallery**
+(legacy/modern tabs), which lists every loaded profile and the server-wide
+default and switches it. A switch writes the machine-owned overlay
 (`state/overrides.yml`) and reloads — the human `knockback.yml` is never
 re-serialized, and the effective default is shown with the overridden key
 marked. `/mental reload` (console, permission `mental.command.reload`) re-reads

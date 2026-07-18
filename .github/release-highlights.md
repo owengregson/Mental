@@ -1,19 +1,14 @@
-<!-- v0.0.0-template -->
-<!--
-Player-facing release highlights, injected into the GitHub release body as
-"What's new for your server" by release.yml's Compose step.
-
-How to use, per release branch:
-1. Change the FIRST line's marker to exactly the tag being cut, e.g. <!-- v2.9.0 -->.
-2. Replace the bullets below with 2-5 plain-language lines: what a server owner
-   or player NOTICES, not what the code does. Name the module/preset to touch
-   if there is one. No commit jargon — the raw changelog is appended anyway.
-3. Commit it with the version bump.
-
-If the marker does not match the tag being released, this file is skipped
-entirely (stale highlights never ship). Example bullets:
-
-- Sword blocking plays its hurt sound again while blocking.
-- The damage indicator's critical flash now triggers on a share of max health,
-  so it means the same thing for every player.
--->
+<!-- v2.9.0-beta -->
+- The /mental menu is redesigned end-to-end: every family gets its own colour
+  identity on woven glass chrome, and every screen speaks one click grammar —
+  left-click toggles, right-click configures, Q resets a knob to your file.
+- One preset gallery now holds both knockback profiles AND combat-effects
+  tunes — legacy/modern is a tab, every tile previews its exact values, and
+  one click applies server-wide.
+- Nearly every scalar knob is now editable in-game: hit registration, latency
+  compensation, the combo solver, fast pots, rods and projectiles, loadout
+  rules, indicators, death effects and drop protection — applied atomically,
+  no restart.
+- On 1.9.4–1.12.2 the menus finally render in full colour: stained-pane
+  backgrounds and ten previously-grey icons now resolve to their real
+  pre-flattening glyphs.

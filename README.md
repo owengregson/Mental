@@ -38,7 +38,7 @@ Mental ships the **real archived knockback configs** of the era's best servers (
 | **`badlion`** | Badlion's archived NoDebuff values — soft base, strong sprint differential, true 1.7 ledger combos. W-tapping decides trades. |
 | **`velt`** | VeltPvP's archived HCF values — a near-total residual wipe, so every hit lands identically. The "dead consistent" practice feel. |
 
-Pick one in-game under **`/mental` → Knockback**, or set `knockback.profile` in `knockback.yml`. The full list (`legacy-1.7`, `legacy-1.8`, `kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar`, `signature`, `custom`) with provenance is in the [profile guide](docs/knockback-profiles.md).
+Pick one in-game under **`/mental` → Knockback → Preset Gallery**, or set `knockback.profile` in `knockback.yml`. The full list (`legacy-1.7`, `legacy-1.8`, `kohi`, `minehq`, `badlion`, `velt`, `mmc`, `lunar`, `signature`, `custom`) with provenance is in the [profile guide](docs/knockback-profiles.md).
 
 ## Compatibility
 
@@ -77,14 +77,14 @@ That's it — the defaults already give you the classic combat. Everything else 
 
 ## Management
 
-Run **`/mental`** (or `/mtl`) to open one unified, hand-designed menu — it works on every supported version and on Folia. Changes apply atomically the instant you click: no restart, safe mid-combat.
+Run **`/mental`** (or `/mtl`) to open the redesigned management suite — it works on every supported version (full colour down to 1.9.4) and on Folia. Changes apply atomically the instant you click: no restart, safe mid-combat.
 
-The dashboard shows a live status plate (version, platform, scheduling backend, active profile, modules, anticheat posture) and one screen per area:
+Every screen shares one visual language — each feature family has its own colour identity on patterned glass chrome — and one click grammar: **left-click** toggles or applies, **right-click** opens a module's settings, steppers ride left/right (shift for ×10), and **Q** resets any in-GUI edit back to your file's value. Read-only tiles are visibly distinct and point at the exact file and section to edit for the few list-valued options the GUI deliberately leaves in YAML.
 
-- **Knockback** — pick the server-wide profile (the active one glows, each tile previews its values) and toggle the sources (fishing, projectile, rod).
-- **Hit Registration · Combat Rules · Damage · Potions & Food · Player** — flip any module on or off live.
-- **Compatibility** — cycle the anticheat posture.
-- **Debug** — toggle any of ten verbose-logging channels and stream them to your chat.
+- **The dashboard** — a live status plate (version, platform, scheduling, active knockback profile, active effects preset, modules, anticheat posture) and one tile per family: Hit Delivery, Knockback, Damage, Combat Cadence, Sustain, Loadout, Combo Solver, Potions, Combat Effects, and Loot Protection.
+- **The preset galleries** — one gallery for knockback feels (legacy/modern as a tab, every tile previews its exact engine values) and one for combat-effects tunes, both applied server-wide in a click. The active preset glows.
+- **Settings screens** — every overlay-safe knob is editable in-game, from reach validation and latency probes to the combo servo, fast pots, damage indicators and drop protection. Edits land in Mental's machine overlay; your hand-written YAML is never rewritten.
+- **Compatibility** and **Debug** — the anticheat posture as three radio tiles, and eleven verbose logging channels you can stream to your own chat.
 
 Prefer YAML? Editing the files by hand still works — the one surviving command is **`/mental reload`** (the console can't open a menu), mirrored by the dashboard's reload button.
 
@@ -103,7 +103,7 @@ Split by concern under `plugins/Mental/`, every option explained in its file:
 | `combo.yml` | The Combo Solver family — the combo-hold pocket servo and the combo reach handicap. |
 | `pots.yml` | The POTS family — `/potfill` and steep-throw fast pots. |
 | `loadout.yml` | Off-hand and crafting restrictions. |
-| `effects.yml` | Which Combat Effects preset applies — `vanilla` (default), `signature`, `custom`, or any file you drop into `effects/presets/`. |
+| `effects.yml` | Which Combat Effects preset applies — `signature` (default), `custom`, or any file you drop into `effects/presets/`. |
 | `effects/presets/*.yml` | One complete Combat Effects tune per file — hit feedback, damage indicators, death effects. Presets regenerate when deleted; your edits stay (`custom` starts as a copy of `signature`). |
 | `profiles/*.yml` | One knockback feel per file. Presets regenerate when deleted; your edits stay. |
 
@@ -164,7 +164,7 @@ Because it doesn't need to — Mojang restored projectile knockback against play
 Yes — Mental is natively region-aware.
 
 **Something feels off. How do I see what's happening?**
-Open `/mental` → **Debug**, enable logging and click **Receive in chat** to stream diagnostics in-game. If it looks like a bug, [open an issue](../../issues) with what you find.
+Open `/mental` → **Debug**, enable logging and click **Stream to my chat** to stream diagnostics in-game. If it looks like a bug, [open an issue](../../issues) with what you find.
 
 ## For developers
 
