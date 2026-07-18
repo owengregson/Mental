@@ -357,12 +357,77 @@ public record RulesBundle(String name, String displayName, String description,
 
 Bundle YAML schema (`display-name`, `description`, `knockback-profile`,
 `effects-preset`, `modules:` map, `settings:` map) — files exhaustively
-commented; contents per spec §3.3 (ct8c: 13 new ON + every classic toggle OFF
-+ FEEDBACK OFF + profile ct8c; signature: classics/FEEDBACK/LOOT/COMBO/POTS ON
-+ ct8c set OFF + profile signature + effects signature; vanilla: every
-yamlKey'd module OFF + profile modern-vanilla).
+commented. EXACT module maps (yamlKeys; ANTICHEAT_COMPAT has no yamlKey and
+never appears; a key absent from a bundle's map is left untouched by apply):
+
+- The 13 CT8C KEYS: `weapon-attack-speeds, charged-attacks, ct8c-damage,
+  ct8c-crits, ct8c-sweep, ct8c-iframes, ct8c-shields, ct8c-regen,
+  ct8c-consumables, ct8c-potions, ct8c-reach, ct8c-projectiles, cleaving`.
+- The 24 CLASSIC KEYS: `old-armour-strength, old-armour-durability,
+  old-critical-hits, old-tool-durability, sword-blocking, attack-cooldown,
+  disable-attack-sounds, disable-sword-sweep, old-golden-apples,
+  disable-enderpearl-cooldown, old-player-regen, old-potion-durations,
+  old-potion-values, disable-crafting, disable-offhand, old-hitboxes,
+  combo-hold, combo-reach-handicap, pot-fill, fast-pots, hit-feedback,
+  damage-indicators, death-effects, drop-protection`.
+- The 7 ENGINE KEYS: `hit-registration, wtap-registration, knockback,
+  latency-compensation, fishing-knockback, rod-velocity,
+  projectile-knockback`.
+
+**ct8c.yml**: all 13 CT8C KEYS true; all 24 CLASSIC KEYS false; ENGINE KEYS
+omitted (the delivery engine stays as configured — it is why Mental is
+installed); `knockback-profile: ct8c`; no `effects-preset` key; no
+`settings` entries (defaults ARE the CT8c values).
+**signature.yml**: all 24 CLASSIC KEYS true; all 7 ENGINE KEYS true
+(explicit); all 13 CT8C KEYS false; `knockback-profile: signature`;
+`effects-preset: signature`.
+**vanilla.yml**: all 44 keys (13+24+7) false; `knockback-profile:
+modern-vanilla`; no `effects-preset` key.
 
 - [ ] TDD: parser (parse(empty) fails validation loudly — a bundle without modules is invalid, this mechanism has no LEGACY default), applyBundle atomic-reject, extraction-when-missing, superseded-hash upgrade, japicmp green for the api addition → implement → `./gradlew :core:test :api:test build -x integrationTest` green → commits
+
+### Task INT: Cross-cluster integration (post-wave-2, before Task I)
+
+**Skills:** `mental-conventions`, `netty-fast-path` (ReachValidator lives on
+the fast path), `paper-cross-version`. **Owns exactly:** kernel
+`ReachValidator` (additive), the hit-registration wiring that freezes reach
+inputs into the per-hit context, `MentalPluginV5.registerUnits` (the two
+constructor-wiring lines below), `DamageShaper` (one addition, reconciled
+with Task D's final shape), and its tests. The wave-2 reports (quoted in the
+dispatch prompt) are part of this contract.
+
+1. **CleavingHandle → shields wire**: in `registerUnits`, swap
+   `new Ct8cShieldUnit()` for the `Ct8cShieldUnit(ToIntFunction<ItemStack>)`
+   constructor Task E shipped, passing Task D's platform Cleaving lookup
+   (exact expression per D's final API — spliced into the dispatch prompt);
+   absent handle ⇒ constant 0 (E's default), never a throw.
+2. **Reach validation feed** (zero-touch: every piece below activates only
+   while its owning feature is enabled, and the disabled path is
+   byte-identical to today): (a) when CT8C_REACH is enabled, the per-hit max
+   reach comes from `Ct8cReachTable` for the attacker's held weapon instead
+   of the flat hit-registration `maxReach`; (b) when CHARGED_ATTACKS is also
+   enabled, add `Ct8cChargeView.INSTANCE.chargedReach(uuid)` (0.0 or +1.0)
+   at freeze time; (c) 0.9 hitbox inflation: inflate the rewound victim AABB
+   to min 0.9 on its largest horizontal dimension before the intersect test
+   — kernel-additive, a new `ReachValidator` parameter defaulting to
+   no-inflation; (d) through-non-solid: where the current validation
+   line-of-sight test rejects on transparent occluders, accept them when
+   CT8C_REACH is on (if today's validator has no occluder test, (d) is a
+   no-op — verify and document which). Values frozen into the hit context on
+   the region thread; the netty pre-send reads published state only.
+3. **Strength/Weakness percentage wire**: add the CT8c branch to
+   `DamageShaper` composition calling `Ct8cPotionValues.apply(base, sAmp,
+   wAmp)` when CT8C_POTIONS is active (toggle passed the same way Task D
+   passes its ct8c-damage toggle through `HitRegistrationUnit`'s composed
+   amount), reconciled with D's final `composeLegacy`/ct8c-ordering shape.
+   Hand-pin: base 7, Strength I ⇒ 8.4; Weakness I ⇒ 5.6; both ⇒ 6.72.
+4. Run the deprecation note in `Ct8cProjectilesUnit` to ground (fix or
+   justify-and-suppress with a why-comment).
+
+- [ ] TDD each wire (reach table selection per weapon incl. charged +1.0;
+  inflation pin: a 0.6-wide victim accepts a hit that today misses by
+  0.14; potion pins above) → implement → `./gradlew build -x
+  integrationTest` green → conventional commits.
 
 ### Task I: Tester suites
 
