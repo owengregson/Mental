@@ -1,0 +1,56 @@
+name: refresh-bstats-chart
+
+# Renders the live bStats player chart (scripts/render-bstats-chart.mjs) and
+# publishes assets/stats/players{,-dark}.svg as ONE orphan commit force-pushed
+# to the unprotected `bstats-charts` data branch. The README embeds the charts
+# from that branch via raw.githubusercontent URLs.
+#
+# Why a data branch instead of committing to main:
+#   - main is protected (PR required + the ci-ok check, admins included), so a
+#     direct GITHUB_TOKEN push is rejected outright.
+#   - a bot PR cannot work either: PRs created with GITHUB_TOKEN never trigger
+#     pull_request workflows (GitHub's recursion guard), so the required ci-ok
+#     check would sit "expected" forever and auto-merge would never fire.
+#   - it also keeps release.yml's per-commit changelog free of six-hourly
+#     "refresh chart" noise on main.
+# Force-pushing a fresh orphan commit keeps the branch at exactly one commit —
+# no unbounded history from a cron job.
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # every 6 hours
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# One refresh at a time: a manual dispatch must not race the cron tick over
+# the same force-pushed branch.
+concurrency:
+  group: refresh-bstats-chart
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/render-bstats-chart.mjs
+      - name: Publish to the bstats-charts data branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Rebuild the data branch as a single orphan commit holding only the
+          # rendered charts. --cached keeps the working tree intact; -f is
+          # needed because the render just modified the two SVGs vs the index.
+          tmp="$(mktemp -d)"
+          cp assets/stats/players.svg assets/stats/players-dark.svg "$tmp"/
+          git checkout --orphan chart-refresh
+          git rm -r -f -q --cached .
+          mkdir -p assets/stats
+          cp "$tmp"/players.svg "$tmp"/players-dark.svg assets/stats/
+          git add assets/stats
+          git commit -m "chore: refresh bStats player chart"
+          git push --force origin HEAD:bstats-charts
