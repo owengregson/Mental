@@ -459,7 +459,24 @@ public final class CombatTest8cSuite {
             victim.player().teleport(facing);
             victim.player().setSneaking(true);
         });
-        context.awaitTicks(3);
+        // The teleport un-grounds the clientless fake for a few physics ticks. Ct8cShieldUnit's block gate
+        // (isBlockingPosture) reads onGround && sneaking && offhand SHIELD and the axe disable is written
+        // SYNCHRONOUSLY inside the damage event, so a strike before the fake re-settles finds no block and the
+        // disable never fires — waiting longer AFTER the strike cannot recover it. A fixed 3-tick settle raced
+        // the slower legacy NMS ground-settle (1.13.2/1.15.2 lost it even at light load; 1.17.1 only under the
+        // 15-JVM matrix), a staging race, not a product gap. First let the un-grounding register, then anchor to
+        // the real precondition — the grounded crouch-to-shield posture — before any strike is staged.
+        context.awaitTicks(2);
+        context.awaitUntil(() -> blockPostureHeld(victim), 20,
+                "the victim to re-settle into the grounded crouch-to-shield posture before the strike");
+    }
+
+    /** The live crouch-to-shield precondition Ct8cShieldUnit gates on: grounded, sneaking, offhand SHIELD. */
+    @SuppressWarnings("deprecation") // the client-reported onGround flag is the block gate's own precondition
+    private static boolean blockPostureHeld(FakePlayer victim) {
+        Player player = victim.player();
+        return player.isOnGround() && player.isSneaking()
+                && player.getInventory().getItemInOffHand().getType() == Material.SHIELD;
     }
 
     /** Lands one hit and returns the victim's final damage (after every modifier, incl. the shield cap). */
