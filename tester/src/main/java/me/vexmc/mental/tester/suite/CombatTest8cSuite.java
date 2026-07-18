@@ -469,17 +469,12 @@ public final class CombatTest8cSuite {
     private static void runRegen(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         // Ct8cRegenUnit's per-tick heal reads the naturalRegeneration gamerule
-        // through the typed org.bukkit.GameRule API (1.13+). Below that the regen
-        // TASK throws NoClassDefFoundError every tick (a Task F product degrade bug,
-        // reported to the orchestrator) — so the live heal is un-observable on
-        // pre-1.13 and staging it would spam the log the D-9 gate scans. The cadence
-        // itself is unit-pinned in Ct8cRegenTest; skip the live heal below 1.13.
-        if (!gameRuleApiPresent()) {
-            context.note("skipped: Ct8cRegenUnit reads the naturalRegeneration gamerule via org.bukkit.GameRule "
-                    + "(1.13+), which NoClassDefFoundErrors the regen tick on " + mental.environment().describe()
-                    + " (a Task F product degrade bug — reported); the 40-tick cadence is unit-pinned in Ct8cRegenTest");
-            return;
-        }
+        // through the platform NaturalRegen seam: the typed org.bukkit.GameRule API
+        // on 1.13+, the deprecated String overload below (the typed constant is
+        // never linked pre-1.13). The seam closed the every-tick NoClassDefFoundError
+        // that previously made the legacy heal un-observable, so the live cadence is
+        // now exercised on every version — including 1.9.4, where zero GameRule
+        // linkage errors is the fix's acceptance bar.
         FakePlayer victim = new FakePlayer(tester, mental.scheduling());
 
         try {
@@ -757,15 +752,5 @@ public final class CombatTest8cSuite {
             MentalPluginV5 mental, TestContext context, Feature feature, boolean enabled) throws Exception {
         context.syncRun(() -> mental.management().setModuleEnabled(feature, enabled));
         context.awaitTicks(1);
-    }
-
-    /** Whether the typed {@code org.bukkit.GameRule} API (1.13+) is present on this runtime. */
-    private static boolean gameRuleApiPresent() {
-        try {
-            Class.forName("org.bukkit.GameRule");
-            return true;
-        } catch (Throwable absent) {
-            return false;
-        }
     }
 }
