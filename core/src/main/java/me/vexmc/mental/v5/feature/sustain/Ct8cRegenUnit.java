@@ -1,22 +1,74 @@
 package me.vexmc.mental.v5.feature.sustain;
 
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.DoubleSupplier;
+import me.vexmc.mental.platform.Attributes;
+import me.vexmc.mental.platform.HandStates;
+import me.vexmc.mental.platform.Scheduling;
+import me.vexmc.mental.platform.TaskHandle;
+import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.feature.sustain.Ct8cRegenDriver.Outcome;
+import org.bukkit.Bukkit;
+import org.bukkit.GameRule;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityRegainHealthEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.jetbrains.annotations.NotNull;
 
 /**
- * SKELETON — Combat Test 8c food/regen ({@code ct8c-regen}, design spec §2.7).
- * Wave-2 <b>Task F</b> (the sustain cluster) fills this body, mirroring {@code
- * RegenUnit} with {@code Ct8cRegenMath}: heal 1 HP every 40 ticks while
- * {@code foodLevel > 6} (50% chance to drain 1 hunger per heal), starvation
- * cadence, sprint gated on {@code foodLevel > 6}, and eating/drinking
- * interrupted when hit by a player or mob.
+ * Combat Test 8c food/regen ({@code ct8c-regen}, design spec §2.7) — the
+ * 1.8-style {@code FoodData}. Mirrors {@code RegenUnit}'s structure with the CT8c
+ * cadence ({@link Ct8cRegen}/{@link Ct8cRegenDriver}, kernel {@link
+ * me.vexmc.mental.kernel.math.Ct8cRegenMath}):
  *
- * <p>Until then this is a genuine zero-touch no-op: the module defaults OFF, so
- * the reconciler never assembles it, and even assembled it registers nothing.</p>
+ * <ul>
+ *   <li>the modern {@code SATIATED} natural-regen path is suppressed for players
+ *       (both the fast and slow satiated heals), so only the era cadence heals;</li>
+ *   <li>a per-player 1-tick task drives the {@link Ct8cRegenDriver}: on every
+ *       40-tick boundary it heals 1 HP while {@code foodLevel > 6} and hurt, with
+ *       a 50% chance to drain 1 hunger per heal (a seeded {@link DoubleSupplier}
+ *       hook — {@code ThreadLocalRandom} live);</li>
+ *   <li>an eat/drink in progress is interrupted when the player is hit by a
+ *       player or a mob ({@link Ct8cRegen#interruptsConsume}, applied through the
+ *       {@link ConsumeInterrupt} seam — 1.20.5+, loud degrade below).</li>
+ * </ul>
+ *
+ * <p><b>Sprint gate.</b> CT8c requires {@code foodLevel > 6} to sprint, which is
+ * exactly vanilla across the range — no enforcement is needed (a documented
+ * vanilla-equal no-op).</p>
+ *
+ * <p><b>Starvation.</b> Left vanilla-owned. CT8c's 40-tick starvation cadence
+ * diverges from vanilla's, but reimplementing it means suppressing vanilla's
+ * difficulty-correct starvation damage and reproducing the per-difficulty health
+ * floors — disproportionate for the fidelity gained. The regen cadence (the
+ * primary, well-defined CT8c change) is what this unit owns; the divergence is a
+ * documented limitation (spec §7 gap list territory).</p>
+ *
+ * <p>Zero-touch when disabled: the reconciler never assembles a disabled unit,
+ * every per-player task is cancelled on quit and on scope close, and the {@code
+ * NATURAL_REGENERATION} gamerule is still honoured (a server that turns natural
+ * regen off keeps it off — the {@code RegenUnit} posture).</p>
  */
-public final class Ct8cRegenUnit implements FeatureUnit {
+public final class Ct8cRegenUnit implements FeatureUnit, Listener {
+
+    private final ConcurrentHashMap<UUID, TaskHandle> handles = new ConcurrentHashMap<>();
+    private final DoubleSupplier drainRoll = () -> ThreadLocalRandom.current().nextDouble();
+
+    private Scheduling scheduling;
+    private ConsumeInterrupt interrupt;
 
     @Override
     public Feature descriptor() {
@@ -25,6 +77,103 @@ public final class Ct8cRegenUnit implements FeatureUnit {
 
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
-        // Wave-2 (Task F) fills this. A scaffold registers nothing — zero-touch.
+        // The skeleton is registered no-arg (Task B owns registerUnits), so the
+        // scheduling/interrupt dependencies are resolved from the plugin singleton
+        // here at enable rather than injected through the constructor.
+        MentalPluginV5 plugin = (MentalPluginV5) JavaPlugin.getProvidingPlugin(getClass());
+        this.scheduling = plugin.scheduling();
+        this.interrupt = ConsumeInterrupt.probe(plugin.environment(), plugin.getLogger()::warning);
+
+        scope.listen(this);
+        scope.task(() -> {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                startTask(player);
+            }
+            return this::cancelAll;
+        });
+    }
+
+    /* ------------------------------ suppression --------------------------- */
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onNaturalRegen(@NotNull EntityRegainHealthEvent event) {
+        if (event.getEntity() instanceof Player
+                && event.getRegainReason() == EntityRegainHealthEvent.RegainReason.SATIATED) {
+            event.setCancelled(true); // the per-player driver owns the 1.8 cadence
+        }
+    }
+
+    /* ------------------------------ interrupt ----------------------------- */
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onCombatHit(@NotNull EntityDamageByEntityEvent event) {
+        if (!(event.getEntity() instanceof Player victim)) {
+            return;
+        }
+        boolean damagerLiving = event.getDamager() instanceof LivingEntity;
+        if (Ct8cRegen.interruptsConsume(HandStates.isHandRaised(victim), damagerLiving)) {
+            interrupt.interrupt(victim);
+        }
+    }
+
+    /* ------------------------------ lifecycle ----------------------------- */
+
+    @EventHandler
+    public void onJoin(@NotNull PlayerJoinEvent event) {
+        startTask(event.getPlayer());
+    }
+
+    @EventHandler
+    public void onQuit(@NotNull PlayerQuitEvent event) {
+        cancelTask(event.getPlayer().getUniqueId());
+    }
+
+    /* --------------------------- task management -------------------------- */
+
+    private void startTask(@NotNull Player player) {
+        UUID uuid = player.getUniqueId();
+        if (handles.containsKey(uuid)) {
+            return; // already tracked
+        }
+        Ct8cRegenDriver driver = new Ct8cRegenDriver(drainRoll);
+        TaskHandle[] holder = new TaskHandle[1];
+        holder[0] = scheduling.repeatOn(
+                player, 1L, 1L,
+                () -> tick(player, driver),
+                () -> {
+                    if (holder[0] != null) {
+                        handles.remove(uuid, holder[0]);
+                    }
+                });
+        handles.put(uuid, holder[0]);
+    }
+
+    private void cancelTask(@NotNull UUID uuid) {
+        TaskHandle handle = handles.remove(uuid);
+        if (handle != null) {
+            handle.cancel();
+        }
+    }
+
+    private void cancelAll() {
+        handles.values().forEach(TaskHandle::cancel);
+        handles.clear();
+    }
+
+    /** One CT8c regen tick — owning-thread only (the repeatOn callback). */
+    private void tick(@NotNull Player player, @NotNull Ct8cRegenDriver driver) {
+        int foodLevel = player.getFoodLevel();
+        double health = player.getHealth();
+        double maxHealth = Attributes.valueOr(player, Attributes.maxHealth(), 20.0);
+        boolean naturalRegen = Boolean.TRUE.equals(
+                player.getWorld().getGameRuleValue(GameRule.NATURAL_REGENERATION));
+        Outcome outcome = driver.tick(foodLevel, health, maxHealth, naturalRegen);
+        if (outcome == Outcome.NONE) {
+            return;
+        }
+        player.setHealth(Math.min(health + 1.0, maxHealth));
+        if (outcome == Outcome.HEAL_AND_DRAIN) {
+            player.setFoodLevel(Math.max(0, foodLevel - 1));
+        }
     }
 }
