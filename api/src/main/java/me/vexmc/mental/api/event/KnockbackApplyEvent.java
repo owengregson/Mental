@@ -36,6 +36,22 @@ import org.jetbrains.annotations.Nullable;
  * <p>{@link Outcome#YIELDED} knocks do not advance combo chains (Mental did not
  * ship them); {@link Outcome#SUPPRESSED} knocks do (a zero-velocity melee still
  * shipped).</p>
+ *
+ * <p><b>Known limitation (3.0.0).</b> {@link Outcome#YIELDED}
+ * ({@code setCancelled(true)}) is honored on EVERY delivery path — Mental always
+ * stands down and lets vanilla's velocity apply. The SHIP-vector override
+ * ({@link #velocity(Vector)}) and {@link Outcome#SUPPRESSED} ({@link #suppress()}),
+ * however, are only guaranteed to be applied on the wire fast path — the
+ * pre-sent-hit branch that serves the normal real-player delivery. On the
+ * pinned and region/live fallback branches the mutated vector is currently NOT
+ * read: a pinned knock ships the transaction's carried era values and a live
+ * knock ships the desk-computed formula, regardless of any vector the handler
+ * wrote. This is a pre-existing property of {@link #velocity(Vector)}, inherited
+ * by {@link #suppress()} in this generation. It touches the frozen delivery core
+ * and is slated for a validated fix in 3.0.1; until then, integrators that must
+ * reshape (not merely cancel) a knock should treat the override as best-effort
+ * off the fast path, or use {@code setCancelled(true)} for a guaranteed
+ * stand-down.</p>
  */
 public final class KnockbackApplyEvent extends Event implements Cancellable {
 
