@@ -168,7 +168,9 @@ public final class MentalPluginV5 extends JavaPlugin {
     private Scheduling scheduling;
 
     private ConfigStore configStore;
-    private Overlay overlay;
+    // reloadAll swaps this on the global thread while region threads read through
+    // overlayHas() during draw() — volatile publishes the new overlay safely.
+    private volatile Overlay overlay;
     private volatile Snapshot snapshot;
 
     /** The verbose debug seam (zero-cost when off) — config-driven, re-applied on reload. */
@@ -721,6 +723,16 @@ public final class MentalPluginV5 extends JavaPlugin {
     /** Clears one machine-overlay key (reset to the human file / preset value); persists. */
     public void overlayRemove(@NotNull String key) {
         overlay.remove(key);
+    }
+
+    /**
+     * Whether one machine-overlay key currently wins over its human file value —
+     * the GUI's read-only "overridden in-GUI?" probe, additive beside
+     * {@link #overlaySet}/{@link #overlayRemove} (both untouched). Powers the
+     * settings screens' ⚑ marker and Q-to-reset affordance.
+     */
+    public boolean overlayHas(@NotNull String key) {
+        return overlay.has(key);
     }
 
     /**

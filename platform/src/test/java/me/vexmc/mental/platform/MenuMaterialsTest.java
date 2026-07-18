@@ -52,6 +52,16 @@ class MenuMaterialsTest {
         assertEquals("GOLD_SWORD", MenuMaterials.legacyAlias("GOLDEN_SWORD"));
         assertEquals("EYE_OF_ENDER", MenuMaterials.legacyAlias("ENDER_EYE"));
         assertEquals("STAINED_GLASS_PANE", MenuMaterials.legacyAlias("GRAY_STAINED_GLASS_PANE"));
+        assertEquals("REDSTONE_COMPARATOR", MenuMaterials.legacyAlias("COMPARATOR"));
+        assertEquals("WORKBENCH", MenuMaterials.legacyAlias("CRAFTING_TABLE"));
+        assertEquals("GOLDEN_APPLE", MenuMaterials.legacyAlias("ENCHANTED_GOLDEN_APPLE"));
+        assertEquals("FIREWORK", MenuMaterials.legacyAlias("FIREWORK_ROCKET"));
+        assertEquals("SPECKLED_MELON", MenuMaterials.legacyAlias("GLISTERING_MELON_SLICE"));
+        assertEquals("SKULL_ITEM", MenuMaterials.legacyAlias("PLAYER_HEAD"));
+        assertEquals("DIAMOND_SWORD", MenuMaterials.legacyAlias("NETHERITE_SWORD"));
+        assertEquals("DIAMOND_AXE", MenuMaterials.legacyAlias("NETHERITE_AXE"));
+        assertEquals("GOLD_SWORD", MenuMaterials.legacyAlias("TRIDENT"));
+        assertEquals("SLIME_BALL", MenuMaterials.legacyAlias("TARGET"));
     }
 
     /** Icon names that survived the flattening unchanged must NOT carry an alias. */

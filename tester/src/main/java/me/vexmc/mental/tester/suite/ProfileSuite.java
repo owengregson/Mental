@@ -16,6 +16,8 @@ import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.EntityStates;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.manage.Management;
+import me.vexmc.mental.v5.preset.PresetCatalog;
+import me.vexmc.mental.v5.preset.PresetKind;
 import me.vexmc.mental.tester.Arena;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
@@ -373,6 +375,22 @@ public final class ProfileSuite {
                 context.expect(management.setGlobalProfile("mmc"), "switch to mmc");
                 context.expect("mmc".equals(mental.snapshot().defaultProfile()),
                         "the global default must reflect the last selection");
+
+                // §6.3: the unified PresetCatalog is a pure delegate over the SAME Management write seam —
+                // pin catalog-through-management live so a second overlay path can never grow. The active
+                // profile is 'mmc' here; re-applying it is a no-op success that fires no transition (the
+                // event list below stays exact), and 'signature' is the default effects selection, an
+                // equally eventless no-op.
+                context.expect(!PresetCatalog.apply(PresetKind.KNOCKBACK, "minemen-exact", management),
+                        "the catalog must reject an unknown knockback preset name");
+                context.expect(PresetCatalog.apply(PresetKind.KNOCKBACK,
+                                mental.snapshot().defaultProfile(), management),
+                        "re-applying the active knockback preset through the catalog is a no-op success");
+                context.expect(PresetCatalog.selected(PresetKind.KNOCKBACK, mental.snapshot())
+                                .equals(mental.snapshot().defaultProfile()),
+                        "the catalog's selected knockback preset must equal the snapshot's default profile");
+                context.expect(PresetCatalog.apply(PresetKind.EFFECTS, "signature", management),
+                        "applying the default effects preset (signature) through the catalog is a no-op success");
             });
 
             context.expect(List.of(DEFAULT_PROFILE + "->kohi", "kohi->mmc").equals(transitions),

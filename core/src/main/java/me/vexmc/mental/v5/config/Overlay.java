@@ -7,9 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * The machine-owned configuration overlay (spec §10): a flat
@@ -28,6 +30,13 @@ public final class Overlay {
     private final Path stateFile;
     private final Map<String, Object> overrides = new LinkedHashMap<>();
 
+    // The overridden keys as an immutable snapshot, refreshed on every mutation.
+    // Overlay mutations happen on the global thread (reload / GUI writes), but
+    // has(...) is read from viewers' region threads during draw(); a volatile
+    // immutable view is the same publish-don't-share discipline as PlayerView —
+    // readers never touch the LinkedHashMap the writer is mutating.
+    private volatile Set<String> keyView = Set.of();
+
     public Overlay(Path stateFile) {
         this.stateFile = stateFile;
         load();
@@ -36,6 +45,16 @@ public final class Overlay {
     /** The overridden keys, in insertion order (for the GUI's "modified" marks). */
     public Map<String, Object> overrides() {
         return Map.copyOf(overrides);
+    }
+
+    /**
+     * The GUI's "is this knob overridden in-GUI?" probe — true when {@code key}
+     * has a machine-overlay value winning over the human file. Read-only and
+     * additive; it powers the settings screens' ⚑ marker and the Q-to-reset
+     * affordance ({@code Management.clearOverlay} only makes sense when this holds).
+     */
+    public boolean has(@NotNull String key) {
+        return keyView.contains(key);
     }
 
     /**
@@ -55,15 +74,16 @@ public final class Overlay {
             case "knockback", "fishing-knockback", "projectile-knockback" -> sources.knockback();
             case "hit-registration" -> sources.hitReg();
             case "latency-compensation" -> sources.latency();
-            // The 2.5.2 per-concern splits: an override on a moved section rides
-            // the split root, so it wins over the split FILE exactly as it wins
-            // over config.yml (effective = overlay ?? file ?? default). On an
-            // install still reading the old location, the override materialises
-            // the split section and the parser names the shadowed config.yml
-            // section loudly — precedence shifts are never silent.
-            case "combo-hold", "combo-reach-handicap" -> sources.combo();
-            case "pot-fill", "fast-pots" -> sources.pots();
-            case "disable-offhand", "disable-crafting" -> sources.loadout();
+            // The 2.5.2 per-concern splits route to their split root — UNLESS the
+            // split file never carried the section and config.yml still does, in
+            // which case the write lands on config.yml (the shadow trap; see
+            // splitOrHonouredMain).
+            case "combo-hold", "combo-reach-handicap" ->
+                    splitOrHonouredMain(sources.combo(), sources.main(), section);
+            case "pot-fill", "fast-pots" ->
+                    splitOrHonouredMain(sources.pots(), sources.main(), section);
+            case "disable-offhand", "disable-crafting" ->
+                    splitOrHonouredMain(sources.loadout(), sources.main(), section);
             // The 2.7.0 Loot Protection tunables (seconds, glow-color): an
             // in-GUI edit rides the drop-protection.yml root, winning over the
             // file exactly as every other split override does.
@@ -78,9 +98,34 @@ public final class Overlay {
         };
     }
 
+    /**
+     * Routes a split-managed section's override to the root the parser actually
+     * reads. Normally that is the split root, so the override wins over the split
+     * FILE exactly as it wins over config.yml (effective = overlay ?? file ??
+     * default).
+     *
+     * <p>The shadow trap it guards against: on a pre-2.5.2 install whose split
+     * file was never extracted, config.yml still carries the section and
+     * {@code SnapshotParser.movedSection} HONOURS that old location. Routing a
+     * lone overlay write to the EMPTY split root would materialise the section
+     * there, flip movedSection to split-wins, and SILENTLY revert every other
+     * value the owner had tuned in config.yml. So when the split root has no such
+     * section but config.yml does, the override lands on config.yml — exactly
+     * where the parser reads — and precedence never shifts behind the owner's
+     * back. Once the split file carries the section, the split root wins (the
+     * byte-identical common case, matching {@code movedSection}).</p>
+     */
+    private static Configuration splitOrHonouredMain(
+            Configuration splitRoot, Configuration main, String head) {
+        boolean inSplit = splitRoot.getConfigurationSection(head) != null;
+        boolean inMain = main.getConfigurationSection(head) != null;
+        return !inSplit && inMain ? main : splitRoot;
+    }
+
     /** Records an override and persists the overlay file (only). */
     public void set(String key, Object value) {
         overrides.put(key, value);
+        keyView = Set.copyOf(overrides.keySet());
         persist();
     }
 
@@ -97,12 +142,14 @@ public final class Overlay {
             return;
         }
         overrides.putAll(entries);
+        keyView = Set.copyOf(overrides.keySet());
         persist();
     }
 
     /** Clears an override and persists the overlay file (only). */
     public void remove(String key) {
         overrides.remove(key);
+        keyView = Set.copyOf(overrides.keySet());
         persist();
     }
 
@@ -123,6 +170,7 @@ public final class Overlay {
                 overrides.put(key, yaml.get(key));
             }
         }
+        keyView = Set.copyOf(overrides.keySet());
     }
 
     private void persist() {

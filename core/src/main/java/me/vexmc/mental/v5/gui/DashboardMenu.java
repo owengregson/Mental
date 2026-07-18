@@ -57,6 +57,7 @@ public final class DashboardMenu extends Menu {
 
     @Override
     protected void draw(@NotNull Player viewer) {
+        paintChrome(Palette.home().pane());
         set(STATUS_SLOT, statusPlate());
 
         drawFamilyRows(viewer);
@@ -65,10 +66,10 @@ public final class DashboardMenu extends Menu {
                 "Apply a whole ruleset at once — CT8c, the classic 1.7 feel, or vanilla."),
                 click -> navigate(viewer, new CombatPresetsMenu(ctx)));
         set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility",
-                "Anticheat posture."),
+                "Anticheat posture — how Mental yields to a prediction anticheat."),
                 click -> navigate(viewer, new CompatibilityMenu(ctx)));
         set(DEBUG_SLOT, Buttons.nav("REPEATER", "Debug",
-                "Verbose logging channels for operators."),
+                "Verbose logging channels, streamed to console or your own chat."),
                 click -> navigate(viewer, new DebugMenu(ctx)));
 
         set(RELOAD_SLOT, reloadButton(), click -> apply(viewer, () -> ctx.management().reload()));
@@ -78,10 +79,10 @@ public final class DashboardMenu extends Menu {
     /**
      * Renders the family tiles grouped into centred rows off
      * {@link DashboardModel#homeRows()} — the engine, the era rules, then the
-     * cosmetic/loot pair. Each tile opens its destination: the FEEDBACK tile the
-     * dedicated Combat Effects hub, the LOOT tile the Loot Protection screen, and
-     * every other family the generic {@link FamilyMenu}. Adding a family means
-     * adding it to a home row (pinned by {@code DashboardModelTest}).
+     * cosmetic/loot pair. Every tile opens the generic {@link FamilyMenu} for its
+     * family (the KNOCKBACK and FEEDBACK screens carry their preset-gallery hero
+     * there); adding a family means adding it to a home row (pinned by
+     * {@code DashboardModelTest}).
      */
     private void drawFamilyRows(@NotNull Player viewer) {
         List<List<Family>> rows = DashboardModel.homeRows();
@@ -90,19 +91,10 @@ public final class DashboardMenu extends Menu {
             for (Family family : rows.get(r)) {
                 tiles.add(Tile.of(
                         Buttons.nav(family.iconName(), family.displayName(), family.blurb()),
-                        click -> navigate(viewer, homeDestination(family))));
+                        click -> navigate(viewer, new FamilyMenu(ctx, family))));
             }
             placeCentered(FAMILY_ROW_BASES[r], tiles);
         }
-    }
-
-    /** The screen a home family tile opens — dedicated for FEEDBACK and LOOT, generic otherwise. */
-    private @NotNull Menu homeDestination(@NotNull Family family) {
-        return switch (family) {
-            case FEEDBACK -> new EffectsMenu(ctx);
-            case LOOT -> new LootProtectionMenu(ctx);
-            default -> new FamilyMenu(ctx, family);
-        };
     }
 
     /**
@@ -129,16 +121,18 @@ public final class DashboardMenu extends Menu {
                 enabled++;
             }
         }
+        Palette.Theme home = Palette.home();
         Icon plate = Buttons.title("NETHER_STAR", "Mental");
         plate.lore("Latency-compensated 1.7.10 combat", Brand.MUTED);
         plate.blank();
-        plate.lore(kv("Version", ctx.plugin().getDescription().getVersion()));
-        plate.lore(kv("Server", ctx.plugin().environment().describe()));
-        plate.lore(kv("Scheduling", ctx.plugin().scheduling().describe()));
-        plate.lore(kv("Knockback", ctx.plugin().snapshot().defaultProfile()));
-        plate.lore(kv("Modules", enabled + " / " + total + " active"));
-        plate.lore(kv("Anticheat", ctx.plugin().snapshot().anticheat().mode()
-                .name().toLowerCase(Locale.ROOT)));
+        plate.lore(Buttons.kv("Version", ctx.plugin().getDescription().getVersion(), home.accent()));
+        plate.lore(Buttons.kv("Server", ctx.plugin().environment().describe(), home.accent()));
+        plate.lore(Buttons.kv("Scheduling", ctx.plugin().scheduling().describe(), home.accent()));
+        plate.lore(Buttons.kv("Knockback", ctx.plugin().snapshot().defaultProfile(), home.accent()));
+        plate.lore(Buttons.kv("Effects", ctx.plugin().snapshot().selectedEffectsPreset(), home.accent()));
+        plate.lore(Buttons.kv("Modules", enabled + " / " + total + " active", home.accent()));
+        plate.lore(Buttons.kv("Anticheat", ctx.plugin().snapshot().anticheat().mode()
+                .name().toLowerCase(Locale.ROOT), home.accent()));
         return plate.build();
     }
 
@@ -155,13 +149,6 @@ public final class DashboardMenu extends Menu {
         return Icon.of(MenuMaterials.of("BARRIER"))
                 .name(Component.text("Close", Brand.FAILURE).decoration(TextDecoration.BOLD, true))
                 .lore("Close this menu.", Brand.MUTED)
-                .build();
-    }
-
-    private static @NotNull Component kv(@NotNull String label, @NotNull String value) {
-        return Component.text()
-                .append(Component.text(label + ": ", Brand.MUTED))
-                .append(Component.text(value, Brand.ACCENT))
                 .build();
     }
 }

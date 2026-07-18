@@ -229,6 +229,57 @@ class EffectsPresetParserTest {
     }
 
     @Test
+    void indicatorScalarOverridesLayerOverThePreset() throws Exception {
+        // The GUI's three indicator scalars ride effects.indicators.<field> on the
+        // effects.yml root, layered over the selected preset (§7.4) — an overridden
+        // scalar wins, every other indicator field (the templates and the ballistics
+        // geometry) keeps the preset value.
+        YamlConfiguration effects = new YamlConfiguration();
+        effects.loadFromString("effects:\n  preset: signature\n");
+        effects.set("effects.indicators.lifetime-ticks", 60);
+        effects.set("effects.indicators.crit-threshold-percent", 40);
+        effects.set("effects.indicators.roll-hold-ticks", 0);
+        SnapshotParser.Result result = SnapshotParser.parse(new ConfigStore.Sources(
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(),
+                effects, bundledPresetSources(), Map.of()));
+        DamageIndicatorsSettings indicators = settings(result.snapshot(), Feature.DAMAGE_INDICATORS);
+
+        assertEquals(60, indicators.lifetimeTicks(), "the lifetime override wins");
+        assertEquals(40.0, indicators.critThresholdPercent(), 0.0, "the crit-threshold override wins");
+        assertEquals(0, indicators.rollHoldTicks(), "the roll-hold override wins");
+        assertEquals(SIGNATURE_INDICATORS.text(), indicators.text(), "un-overridden text keeps the preset");
+        assertEquals(SIGNATURE_INDICATORS.critText(), indicators.critText(),
+                "un-overridden crit-text keeps the preset");
+        assertEquals(SIGNATURE_INDICATORS.healText(), indicators.healText(),
+                "un-overridden heal-text keeps the preset");
+        assertEquals(SIGNATURE_INDICATORS.ringRadius(), indicators.ringRadius(), 1e-9,
+                "the ballistics geometry stays preset/YAML-only");
+        assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
+    }
+
+    @Test
+    void indicatorScalarOverridesClampLoudly() throws Exception {
+        // A hand-edited out-of-range overlay scalar is corrected INSIDE the parse
+        // contract and says so — never silently, so a GUI write (which clamps at
+        // the widget) can never surprise a reload either.
+        YamlConfiguration effects = new YamlConfiguration();
+        effects.loadFromString("effects:\n  preset: signature\n");
+        effects.set("effects.indicators.lifetime-ticks", 9999);
+        SnapshotParser.Result result = SnapshotParser.parse(new ConfigStore.Sources(
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(), new YamlConfiguration(),
+                new YamlConfiguration(), new YamlConfiguration(),
+                effects, bundledPresetSources(), Map.of()));
+        DamageIndicatorsSettings indicators = settings(result.snapshot(), Feature.DAMAGE_INDICATORS);
+        assertEquals(DamageIndicatorsSettings.MAX_LIFETIME, indicators.lifetimeTicks(),
+                "lifetime clamps to the 200-tick ceiling");
+        assertEquals(1, result.issues().size(), () -> "issues: " + result.issues());
+        assertTrue(result.issues().get(0).contains("lifetime-ticks"), () -> result.issues().get(0));
+    }
+
+    @Test
     void unknownSelectionWarnsOnceAndSignatureStandsIn() throws Exception {
         SnapshotParser.Result result = parseSelection(
                 "effects:\n  preset: sinature\n", bundledPresetSources());

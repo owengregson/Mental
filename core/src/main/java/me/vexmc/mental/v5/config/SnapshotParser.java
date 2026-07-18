@@ -245,19 +245,28 @@ public final class SnapshotParser {
                 preset.sounds(), preset.particles(), preset.fireworkColors(), title);
     }
 
-    /** Layers the GUI-editable indicator label templates over the preset. */
+    /**
+     * Layers the GUI-editable indicator fields over the preset: the three label
+     * templates and the three scalar knobs the settings screen exposes
+     * (lifetime, crit threshold, roll-hold). Each scalar clamps INSIDE the parse
+     * contract's legal range, so a GUI write can never produce a reload warning;
+     * the ballistics geometry stays preset/YAML-only.
+     */
     private static DamageIndicatorsSettings applyIndicatorOverrides(
             DamageIndicatorsSettings preset, ConfigReader reader) {
         if (reader.section() == null) {
             return preset;
         }
         return new DamageIndicatorsSettings(
-                preset.lifetimeTicks(), preset.ringRadius(), preset.heightJitter(),
+                reader.intClamped("lifetime-ticks", preset.lifetimeTicks(),
+                        DamageIndicatorsSettings.MIN_LIFETIME, DamageIndicatorsSettings.MAX_LIFETIME),
+                preset.ringRadius(), preset.heightJitter(),
                 preset.launchVertical(), preset.launchOutward(), preset.gravity(), preset.drag(),
                 reader.text("text", preset.text()),
                 reader.text("crit-text", preset.critText()),
-                preset.critThresholdPercent(),
-                preset.rollHoldTicks(),
+                reader.numberClamped("crit-threshold-percent", preset.critThresholdPercent(), 0.0, 100.0),
+                reader.intClamped("roll-hold-ticks", preset.rollHoldTicks(),
+                        DamageIndicatorsSettings.MIN_ROLL_HOLD, DamageIndicatorsSettings.MAX_ROLL_HOLD),
                 reader.text("heal-text", preset.healText()));
     }
 
