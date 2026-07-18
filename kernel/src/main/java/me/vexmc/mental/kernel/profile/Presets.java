@@ -345,6 +345,45 @@ public final class Presets {
             new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, false));
 
     /**
+     * The Java Edition <b>Combat Test 8c</b> knockback — the modern two-stage
+     * formula wearing the {@code CT8C_SPLIT} vertical shape (spec §2.5,
+     * code-confirmed against the decompiled {@code 1_16_combat-6}
+     * {@code LivingEntity.knockback}). A grounded victim gets {@code min(0.4,
+     * 0.75·strength)} (a re-stamp, no vy dependence), an airborne victim {@code
+     * min(0.4, vyIn + 0.5·strength)} (an ADD, capped — a deep fall still ships
+     * net-downward, so {@code vertical-min −3.9} is REQUIRED). Residuals 0.5/0.5
+     * and the sprint/enchant bonuses are the vanilla-1.16 numbers; delivery is
+     * immediate/tracker (send-then-restore, like the modern presets); resistance
+     * NONE because the modern branch owns the scalar {@code (1 − r)} itself; and
+     * {@code shield-blocking-cancels false} because the 50% shield knockback
+     * resistance lives in the {@code ct8c-shields} rule feature, not the profile.
+     * The companion of the {@code ct8c} rules bundle.
+     */
+    public static final KnockbackProfile CT8C = new KnockbackProfile(
+            "ct8c",
+            "Combat Test 8c",
+            "Java Edition Combat Test 8c knockback — the modern two-stage math with"
+                    + " the split vertical (grounded 0.75×strength, airborne ADD-capped).",
+            new Push(0.4, 0.4),
+            VerticalMode.ADD,
+            new Push(0.5, 0.1),
+            new WtapExtra(false, 0.5, 0.1),
+            new Friction(0.5, 0.5, 0.5),
+            new Limits(0.4, -3.9, -1.0), // −3.9 REQUIRED: the airborne split can ship a net-downward knock
+            new Push(1.0, 1.0),
+            new Push(0.0, 0.0),
+            RangeReduction.DISABLED,
+            1.0,
+            false,
+            KnockbackDelivery.IMMEDIATE,
+            KnockbackDelivery.TRACKER,
+            ResistancePolicy.NONE,
+            false, // shield-blocking-cancels: the 50% shield KB resist is ct8c-shields' job
+            PaceScaling.OFF,
+            new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true,
+                    VerticalShape.CT8C_SPLIT, 0.75, 0.5));
+
+    /**
      * Ships as legacy-1.7 values — selecting it changes nothing until the
      * owner edits the file.
      */
@@ -372,7 +411,7 @@ public final class Presets {
     public static final Map<String, KnockbackProfile> ALL = List.of(
                     KnockbackProfile.LEGACY_17, LEGACY_18, KOHI, MMC, LUNAR,
                     MINEHQ, BADLION, VELT, SIGNATURE,
-                    MODERN_VANILLA, MODERN_UPLIFT, MODERN_COMBO, CUSTOM)
+                    MODERN_VANILLA, MODERN_UPLIFT, MODERN_COMBO, CT8C, CUSTOM)
             .stream()
             .collect(Collectors.toUnmodifiableMap(KnockbackProfile::name, Function.identity()));
 }

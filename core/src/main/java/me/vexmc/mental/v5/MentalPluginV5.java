@@ -11,14 +11,17 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.SimplePie;
 import me.vexmc.mental.platform.Absorptions;
 import me.vexmc.mental.platform.Capabilities;
+import me.vexmc.mental.platform.CleavingRegistrar;
 import me.vexmc.mental.platform.Cooldowns;
 import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.HandStates;
+import me.vexmc.mental.platform.NaturalRegen;
 import me.vexmc.mental.platform.PersistentData;
 import me.vexmc.mental.platform.Pings;
 import me.vexmc.mental.platform.PotionEffects;
@@ -45,9 +48,12 @@ import me.vexmc.mental.v5.gui.ChatPrompt;
 import me.vexmc.mental.v5.gui.MenuContext;
 import me.vexmc.mental.v5.gui.MenuManager;
 import me.vexmc.mental.v5.manage.Management;
+import me.vexmc.mental.v5.config.ConfigIssues;
 import me.vexmc.mental.v5.config.ConfigStore;
 import me.vexmc.mental.v5.config.Migrations;
 import me.vexmc.mental.v5.config.Overlay;
+import me.vexmc.mental.v5.config.RulesBundle;
+import me.vexmc.mental.v5.config.RulesBundleParser;
 import me.vexmc.mental.v5.config.ProbeStrategy;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.SnapshotParser;
@@ -62,7 +68,12 @@ import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.Reconciler;
 import me.vexmc.mental.v5.feature.damage.ArmourDurabilityUnit;
 import me.vexmc.mental.v5.feature.damage.ArmourStrengthUnit;
+import me.vexmc.mental.v5.feature.damage.CleavingUnit;
 import me.vexmc.mental.v5.feature.damage.CritFallbackUnit;
+import me.vexmc.mental.v5.feature.damage.Ct8cCritsUnit;
+import me.vexmc.mental.v5.feature.damage.Ct8cDamageUnit;
+import me.vexmc.mental.v5.feature.damage.Ct8cIframesUnit;
+import me.vexmc.mental.v5.feature.damage.Ct8cShieldUnit;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.damage.PotionValuesUnit;
 import me.vexmc.mental.v5.feature.damage.SwordBlockingUnit;
@@ -70,7 +81,10 @@ import me.vexmc.mental.v5.feature.damage.ToolDurabilityUnit;
 import me.vexmc.mental.v5.feature.damage.ToolWear;
 import me.vexmc.mental.v5.feature.cadence.AttackCooldownUnit;
 import me.vexmc.mental.v5.feature.cadence.AttackSoundsUnit;
+import me.vexmc.mental.v5.feature.cadence.ChargedAttackUnit;
+import me.vexmc.mental.v5.feature.cadence.Ct8cSweepUnit;
 import me.vexmc.mental.v5.feature.cadence.SweepUnit;
+import me.vexmc.mental.v5.feature.cadence.WeaponSpeedUnit;
 import me.vexmc.mental.v5.feature.feedback.DamageIndicatorsUnit;
 import me.vexmc.mental.v5.feature.feedback.DeathEffectsUnit;
 import me.vexmc.mental.v5.feature.feedback.FeedbackTrace;
@@ -81,11 +95,15 @@ import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.feature.combo.ComboViewBook;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicapUnit;
+import me.vexmc.mental.v5.feature.sustain.Ct8cConsumablesUnit;
+import me.vexmc.mental.v5.feature.sustain.Ct8cPotionsUnit;
+import me.vexmc.mental.v5.feature.sustain.Ct8cRegenUnit;
 import me.vexmc.mental.v5.feature.sustain.EnderPearlCooldownUnit;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
 import me.vexmc.mental.v5.feature.sustain.PotionDurationsUnit;
 import me.vexmc.mental.v5.feature.sustain.RegenUnit;
 import me.vexmc.mental.v5.feature.loadout.CraftingUnit;
+import me.vexmc.mental.v5.feature.loadout.Ct8cReachUnit;
 import me.vexmc.mental.v5.feature.loadout.HitboxUnit;
 import me.vexmc.mental.v5.feature.loadout.OffhandUnit;
 import me.vexmc.mental.v5.feature.loot.DropProtectionUnit;
@@ -97,6 +115,7 @@ import me.vexmc.mental.v5.feature.delivery.AnticheatCompatUnit;
 import me.vexmc.mental.v5.feature.delivery.HitRegistrationUnit;
 import me.vexmc.mental.v5.feature.delivery.WtapRegistrationUnit;
 import me.vexmc.mental.v5.feature.knockback.BlockResetTap;
+import me.vexmc.mental.v5.feature.knockback.Ct8cProjectilesUnit;
 import me.vexmc.mental.v5.feature.knockback.FishingKnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.KnockbackUnit;
 import me.vexmc.mental.v5.feature.knockback.LatencyCompensationUnit;
@@ -438,7 +457,8 @@ public final class MentalPluginV5 extends JavaPlugin {
                 + ", crit-posture[" + CritPosture.describe() + "]"
                 + ", hand-raised=" + HandStates.describe()
                 + ", recipe-keys=" + Recipes.describe()
-                + ", sweep-cause=" + SweepCauses.describe());
+                + ", sweep-cause=" + SweepCauses.describe()
+                + ", natural-regen=" + NaturalRegen.describe());
     }
 
     @Override
@@ -688,9 +708,37 @@ public final class MentalPluginV5 extends JavaPlugin {
         overlay.set(key, value);
     }
 
+    /**
+     * Writes a whole batch of machine-overlay keys in ONE persist — the single
+     * write behind {@code Management.applyBundle}, so a rules bundle's dozens of
+     * keys land atomically (the caller reloads once to pick them up). An empty
+     * batch is a no-op.
+     */
+    public void overlaySetAll(@NotNull Map<String, Object> entries) {
+        overlay.setAll(entries);
+    }
+
     /** Clears one machine-overlay key (reset to the human file / preset value); persists. */
     public void overlayRemove(@NotNull String key) {
         overlay.remove(key);
+    }
+
+    /**
+     * The rules-bundle library, parsed fresh from {@code bundles/*.yml} — the
+     * whole-ruleset macros the Combat Presets GUI lists and {@code
+     * Management.applyBundle} validates against. Read on demand (the files are tiny
+     * and reads are rare — a GUI open or an apply), so the listing always reflects
+     * the disk, and an owner who drops a bundle in sees it immediately. Parse
+     * issues (a malformed bundle) surface loudly through the log once per read.
+     */
+    public @NotNull Map<String, RulesBundle> bundles() {
+        ConfigIssues issues = new ConfigIssues();
+        Map<String, RulesBundle> parsed =
+                RulesBundleParser.parseLibrary(configStore.loadBundles(), issues);
+        for (String issue : issues.all()) {
+            getLogger().warning("rules bundle — " + issue);
+        }
+        return parsed;
     }
 
     /** True when {@code feature} has an open scope right now (the tester's module-active check). */
@@ -848,6 +896,33 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new PotFillUnit(this, this::snapshot, scheduling,
                 message -> getLogger().info(message)));
         reconciler.register(new FastPotsUnit(this::snapshot, positions));
+
+        // The Combat Test 8c scaffolding (Task B of the CT8c import). Thirteen
+        // default-OFF rule units, registered here so the reconciler converges them;
+        // wave-2 tasks C–G fill each body (each unit's javadoc names its task). As
+        // SKELETONS they assemble to nothing, so registering them is a strict
+        // zero-touch no-op — the modules default OFF and the reconciler never even
+        // calls assemble.
+        reconciler.register(new WeaponSpeedUnit());
+        reconciler.register(new ChargedAttackUnit());
+        reconciler.register(new Ct8cSweepUnit());
+        reconciler.register(new Ct8cDamageUnit());
+        reconciler.register(new Ct8cCritsUnit());
+        reconciler.register(new Ct8cIframesUnit());
+        // Task INT wire 1: feed Task D's platform Cleaving handle into the shield unit
+        // so an axe with Cleaving disables the shield the extra +10 ticks/level (Task E
+        // shipped the ToIntFunction ctor). A LIVE lookup, not a captured snapshot — the
+        // handle is installed later, only when the CLEAVING feature enables (idempotent,
+        // cached), and this reconciler.register runs once at boot. Absent handle ⇒ 0
+        // (E's no-arg default), never a throw. The exact idiom Ct8cDamageUnit uses.
+        reconciler.register(new Ct8cShieldUnit(
+                stack -> CleavingRegistrar.handle().map(handle -> handle.levelOf(stack)).orElse(0)));
+        reconciler.register(new CleavingUnit());
+        reconciler.register(new Ct8cRegenUnit());
+        reconciler.register(new Ct8cConsumablesUnit());
+        reconciler.register(new Ct8cPotionsUnit());
+        reconciler.register(new Ct8cReachUnit());
+        reconciler.register(new Ct8cProjectilesUnit(this, scheduling));
     }
 
     private Snapshot parseSnapshot() {

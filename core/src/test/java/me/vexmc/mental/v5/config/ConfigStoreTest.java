@@ -496,6 +496,56 @@ class ConfigStoreTest {
                 () -> "expected a loud resource-fallback line, logged: " + logged);
     }
 
+    /* ------------------------------------------------------------------ */
+    /*  The rules-bundle library (2.8.x)                                   */
+    /* ------------------------------------------------------------------ */
+
+    private Path bundle(String name) {
+        return dataFolder.resolve(ConfigStore.BUNDLES_DIR).resolve(name + ".yml");
+    }
+
+    @Test
+    void everyBundleExtractsOnceOwnerEditsSurviveAndDeletedBundlesRegenerate() throws Exception {
+        // The rules-bundle library rides the exact profiles/effects contract:
+        // extracted only when missing, owner edits sacred, deleting regenerates.
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+
+        for (String name : ConfigStore.BUNDLED_BUNDLES) {
+            assertTrue(Files.isRegularFile(bundle(name)), name + " bundle not extracted");
+        }
+
+        Files.writeString(bundle("ct8c"), "display-name: Mine\n", StandardCharsets.UTF_8);
+        Files.delete(bundle("vanilla"));
+
+        store.ensureDefaultFiles();
+
+        assertEquals("display-name: Mine\n", Files.readString(bundle("ct8c"), StandardCharsets.UTF_8),
+                "an owner-edited bundle must never be overwritten");
+        assertTrue(Files.isRegularFile(bundle("vanilla")), "a deleted bundle must regenerate");
+        assertEquals(resource(ConfigStore.BUNDLES_DIR + "/vanilla.yml"),
+                Files.readString(bundle("vanilla"), StandardCharsets.UTF_8),
+                "the regenerated bundle is the resource byte-for-byte");
+    }
+
+    @Test
+    void loadBundlesServesEveryBundleByStem() throws Exception {
+        ConfigStore store = store();
+        store.ensureDefaultFiles();
+        // A hand-added bundle joins the library by dropping a file in.
+        Files.writeString(bundle("mine"), "display-name: Mine\nmodules:\n  knockback: false\n",
+                StandardCharsets.UTF_8);
+
+        var bundles = store.loadBundles();
+
+        assertEquals(ConfigStore.BUNDLED_BUNDLES.size() + 1, bundles.size());
+        assertNotNull(bundles.get("ct8c"));
+        assertNotNull(bundles.get("signature"));
+        assertNotNull(bundles.get("vanilla"));
+        assertNotNull(bundles.get("mine"));
+        assertEquals("ct8c", bundles.get("ct8c").getString("knockback-profile"));
+    }
+
     @Test
     void loadSourcesTreatsUnparseableFilesAsEmptyAndReportsThem() throws Exception {
         ConfigStore store = store();

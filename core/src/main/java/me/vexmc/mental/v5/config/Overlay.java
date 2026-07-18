@@ -84,6 +84,22 @@ public final class Overlay {
         persist();
     }
 
+    /**
+     * Records a whole batch of overrides and persists the overlay file exactly
+     * ONCE — the single write behind {@code Management.applyBundle}, where a rules
+     * bundle flips dozens of keys atomically: the disk is touched one time, not
+     * once per key, so no half-written overlay is ever readable. An empty batch is
+     * a no-op (no write). Insertion order is preserved, so a caller passing a
+     * {@code LinkedHashMap} gets a deterministic on-disk key order.
+     */
+    public void setAll(Map<String, ?> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        overrides.putAll(entries);
+        persist();
+    }
+
     /** Clears an override and persists the overlay file (only). */
     public void remove(String key) {
         overrides.remove(key);

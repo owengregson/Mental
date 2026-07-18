@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Rules bundle: Combat Test 8c
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  A rules bundle is a MACRO, not a mode. Applying it (the Combat Presets screen
+#  in /mental, or the API) writes every toggle below into Mental's machine overlay
+#  in one atomic reload — nothing here runs on its own, and there is no live
+#  "active bundle" afterward. Editing this file changes what a FUTURE apply does;
+#  it does not change the running server until you apply the bundle again.
+#
+#  This bundle turns on the full server-side Combat Test 8c mechanic set (the
+#  1.16_combat-6 experimental snapshot) and turns OFF every classic 1.7/1.8 rule,
+#  so the two never fight. The delivery ENGINE (hit registration, w-tap reads,
+#  the knockback pipeline, latency compensation, the rod/projectile knocks) is
+#  deliberately NOT listed — that machinery is why Mental is installed, and a
+#  bundle never reaches in to disable it. The CT8c defaults ARE the CT8c values,
+#  so there are no `settings:` overrides to carry.
+#
+#  Full experience on 1.20.5+ (the reach attribute and item components) and
+#  1.21.3+ (the real Cleaving enchant); below those floors the version-gated
+#  pieces degrade to their era-correct fallback with one loud boot line each.
+
+display-name: "Combat Test 8c"
+description: "The full server-side Combat Test 8c mechanic set — CT8c damage, charge, shields, reach, regen, and projectiles."
+
+# The knockback feel CT8c ships with: the modern formula with the CT8c vertical
+# split (grounded 0.75 / airborne add 0.5, capped 0.4). Applying the bundle
+# selects it server-wide.
+knockback-profile: ct8c
+
+# effects-preset: (unset) — CT8c is a pure snapshot experience, so the cosmetic
+# FEEDBACK modules stay off (below) and no effects tune is selected.
+
+modules:
+  # ── The 13 Combat Test 8c rule features — all ON ──────────────────────────
+  # Every era-exact-no-op default flips on together; each still honours the
+  # zero-touch and graceful-degradation contracts individually.
+  weapon-attack-speeds: true      # recompute ATTACK_SPEED from the CT8c att/s table
+  charged-attacks: true           # full-charge gate + the 4-tick miss lane + >195% reach
+  ct8c-damage: true               # CT8c weapon-damage tables (fist 2, tiers one lower)
+  ct8c-crits: true                # flat x1.5, sprint allowed, enchant folded before the crit
+  ct8c-sweep: true                # Sweeping-Edge-required, >=195% charge, axes eligible
+  ct8c-iframes: true              # min(attacker delay, 10) melee, 0 for projectiles
+  ct8c-shields: true              # 148 arc, 5-cap passthrough, instant/crouch, axe disable
+  ct8c-regen: true                # 40t/+1HP food>6, sprint gate, eat-interrupt on a hit
+  ct8c-consumables: true          # 20-tick drinks, potion stack 16, snowball stack 64
+  ct8c-potions: true              # Instant Health/Damage 6*2^amp, Strength/Weakness +/-20%
+  ct8c-reach: true                # base 2.5 / sword 3.0 / hoe+trident 3.5, 0.9 hitbox inflation
+  ct8c-projectiles: true          # snowball/egg 0-dmg knock, 4-tick gate, bow fatigue
+  cleaving: true                  # the axe-only Cleaving enchant (probe-gated ~1.21.3+)
+
+  # ── The 24 classic 1.7/1.8 rule features — all OFF ────────────────────────
+  # These are the "signature" 1.7 feel; CT8c replaces every one of them, so the
+  # bundle states them explicitly OFF rather than leaving stale toggles behind.
+  old-armour-strength: false
+  old-armour-durability: false
+  old-critical-hits: false
+  old-tool-durability: false
+  sword-blocking: false
+  attack-cooldown: false
+  disable-attack-sounds: false
+  disable-sword-sweep: false
+  old-golden-apples: false
+  disable-enderpearl-cooldown: false
+  old-player-regen: false
+  old-potion-durations: false
+  old-potion-values: false
+  disable-crafting: false
+  disable-offhand: false
+  old-hitboxes: false
+  combo-hold: false
+  combo-reach-handicap: false
+  pot-fill: false
+  fast-pots: false
+  hit-feedback: false
+  damage-indicators: false
+  death-effects: false
+  drop-protection: false
+
+# settings: (unset) — the CT8c defaults already ARE the CT8c values.

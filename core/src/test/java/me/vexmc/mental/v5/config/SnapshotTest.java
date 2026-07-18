@@ -2,6 +2,7 @@ package me.vexmc.mental.v5.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import me.vexmc.mental.kernel.profile.KnockbackProfile;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
+import me.vexmc.mental.v5.config.settings.ChargedAttackSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.CraftingSettings;
 import me.vexmc.mental.v5.config.settings.DropProtectionSettings;
@@ -27,6 +29,7 @@ import me.vexmc.mental.v5.config.settings.OffhandSettings;
 import me.vexmc.mental.v5.config.settings.PotFillSettings;
 import me.vexmc.mental.v5.config.settings.ProjectileKnockbackSettings;
 import me.vexmc.mental.v5.config.settings.ReachHandicapSettings;
+import me.vexmc.mental.v5.config.settings.WeaponSpeedSettings;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.SettingsKey;
 import org.bukkit.configuration.Configuration;
@@ -140,6 +143,11 @@ class SnapshotTest {
         // Drop protection defaults to the shipped 15-second gold-glow window
         // (inert while the module is OFF, which is the default).
         assertEquals(DropProtectionSettings.DEFAULTS, settings(snapshot, Feature.DROP_PROTECTION));
+        // The two Combat Test 8c settings-carrying features parse-empty to their
+        // code-confirmed DEFAULTS (spec §2.1/§2.2) — the era-exact no-op, inert
+        // while the modules are OFF (the default).
+        assertEquals(WeaponSpeedSettings.DEFAULTS, settings(snapshot, Feature.WEAPON_ATTACK_SPEEDS));
+        assertEquals(ChargedAttackSettings.DEFAULTS, settings(snapshot, Feature.CHARGED_ATTACKS));
         // Toggle-only features share the NoSettings singleton default.
         for (Feature feature : Feature.values()) {
             if (feature.settingsKey().type() == NoSettings.class) {
@@ -186,6 +194,59 @@ class SnapshotTest {
         assertEquals(DropProtectionSettings.GlowColor.GOLD, dp.glowColor(),
                 "an unknown glow colour falls back to the GOLD default");
         assertEquals(2, result.issues().size(), () -> "issues: " + result.issues());
+    }
+
+    @Test
+    void ct8cWeaponSpeedsAndChargedAttacksParseFromTheConfig() throws Exception {
+        // The two settings-carrying CT8c features read top-level config.yml
+        // sections; a set key overrides its default, an unset key keeps it.
+        SnapshotParser.Result result = parse("""
+                weapon-attack-speeds:
+                  attacks-per-second:
+                    sword: 3.5
+                    hoe:
+                      netherite: 4.0
+                charged-attacks:
+                  require-full-charge: false
+                  miss-recovery-ticks: 6
+                  charged-threshold: 1.8
+                  charged-reach-bonus: 0.5
+                  deny-bonus-while-crouching: false
+                """, "", "", "");
+        assertTrue(result.issues().isEmpty(), () -> "issues: " + result.issues());
+
+        WeaponSpeedSettings speeds = settings(result.snapshot(), Feature.WEAPON_ATTACK_SPEEDS);
+        assertEquals(3.5, speeds.sword(), "the set class speed overrides the default");
+        assertEquals(2.5, speeds.fist(), "an untouched class keeps its default");
+        assertEquals(4.0, speeds.hoe().netherite(), "the set hoe tier overrides its default");
+        assertEquals(3.0, speeds.hoe().iron(), "an untouched hoe tier keeps its default");
+
+        ChargedAttackSettings charged = settings(result.snapshot(), Feature.CHARGED_ATTACKS);
+        assertFalse(charged.requireFullCharge());
+        assertEquals(6, charged.missRecoveryTicks());
+        assertEquals(1.8, charged.chargedThreshold());
+        assertEquals(0.5, charged.chargedReachBonus());
+        assertFalse(charged.denyBonusWhileCrouching());
+    }
+
+    @Test
+    void ct8cSettingsFeaturesResolveToTheirTypedRecordsNeverNoSettings() throws Exception {
+        // The settingsFor-default→NoSettings mistype guard: the two settings-carrying
+        // CT8c features must resolve to their real record TYPES — a NoSettings under a
+        // SettingsKey<WeaponSpeedSettings> would be a silent type mismatch. The eleven
+        // toggle-only CT8c features correctly share the NoSettings singleton.
+        Snapshot snapshot = parse("", "", "", "").snapshot();
+        assertInstanceOf(WeaponSpeedSettings.class,
+                settings(snapshot, Feature.WEAPON_ATTACK_SPEEDS));
+        assertInstanceOf(ChargedAttackSettings.class,
+                settings(snapshot, Feature.CHARGED_ATTACKS));
+        for (Feature toggleOnly : List.of(Feature.CT8C_DAMAGE, Feature.CT8C_CRITS, Feature.CT8C_SWEEP,
+                Feature.CT8C_IFRAMES, Feature.CT8C_SHIELDS, Feature.CT8C_REGEN,
+                Feature.CT8C_CONSUMABLES, Feature.CT8C_POTIONS, Feature.CT8C_REACH,
+                Feature.CT8C_PROJECTILES, Feature.CLEAVING)) {
+            assertSame(NoSettings.DEFAULTS, settings(snapshot, toggleOnly),
+                    () -> toggleOnly + " is toggle-only and must carry NoSettings.DEFAULTS");
+        }
     }
 
     @Test

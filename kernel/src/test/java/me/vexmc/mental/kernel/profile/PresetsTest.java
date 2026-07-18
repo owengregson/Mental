@@ -171,6 +171,27 @@ class PresetsTest {
         assertEquals(KnockbackDelivery.TRACKER, modernCombo.meleeDelivery());
         assertEquals(0.0, modernCombo.limits().verticalMin());
 
+        // ct8c — the Combat Test 8c knockback: the modern two-stage math with the
+        // SPLIT vertical shape (spec §2.5). Grounded/airborne factors 0.75/0.5,
+        // cap 0.4, residuals 0.5/0.5; immediate/tracker delivery, resistance NONE
+        // (the scalar resistance is the engine's own (1 − r) step), combos false,
+        // shield-blocking-cancels FALSE (the 50% shield KB lives in ct8c-shields),
+        // vertical-min −3.9 REQUIRED (a deep-fall airborne knock can go negative).
+        KnockbackProfile ct8c = profiles.get("ct8c");
+        assertNotNull(ct8c);
+        assertTrue(ct8c.modern().enabled());
+        assertEquals(
+                new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true,
+                        VerticalShape.CT8C_SPLIT, 0.75, 0.5),
+                ct8c.modern());
+        assertEquals(VerticalShape.CT8C_SPLIT, ct8c.modern().verticalShape());
+        assertFalse(ct8c.combos());
+        assertEquals(KnockbackDelivery.IMMEDIATE, ct8c.meleeDelivery());
+        assertEquals(KnockbackDelivery.TRACKER, ct8c.projectileDelivery());
+        assertEquals(ResistancePolicy.NONE, ct8c.resistance());
+        assertFalse(ct8c.shieldBlockingCancels());
+        assertEquals(-3.9, ct8c.limits().verticalMin());
+
         // The era/legacy presets carry the OFF modern component (the era-exact no-op).
         assertEquals(ModernKnockback.OFF, legacy17.modern());
         assertEquals(ModernKnockback.OFF, signature.modern());

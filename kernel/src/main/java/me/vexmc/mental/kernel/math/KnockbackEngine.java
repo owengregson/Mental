@@ -10,6 +10,7 @@ import me.vexmc.mental.kernel.profile.ModernKnockback;
 import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
+import me.vexmc.mental.kernel.profile.VerticalShape;
 
 /**
  * Pure knockback math, parameterized by a {@link KnockbackProfile}. With the
@@ -534,9 +535,7 @@ public final class KnockbackEngine {
         double strengthOne = m.baseStrength() * (1.0 - resistance);
         hx += (deltaX / magnitude) * strengthOne;
         hz += (deltaZ / magnitude) * strengthOne;
-        double y = liftsVertical
-                ? cappedVertical(vy * m.residualVertical() + strengthOne, m.verticalCap())
-                : vy;
+        double y = shapedVertical(m, grounded, liftsVertical, vy, strengthOne);
 
         // Stage 2 — extra knock, directed along the attacker's facing (yaw). The
         // sprint bonus rides the same InputLedger verdict the legacy path reads
@@ -549,9 +548,7 @@ public final class KnockbackEngine {
             double yawRadians = Math.toRadians(attacker.yaw());
             hx = hx * m.residualHorizontal() - Math.sin(yawRadians) * strengthTwo;
             hz = hz * m.residualHorizontal() + Math.cos(yawRadians) * strengthTwo;
-            y = liftsVertical
-                    ? cappedVertical(y * m.residualVertical() + strengthTwo, m.verticalCap())
-                    : y;
+            y = shapedVertical(m, grounded, liftsVertical, y, strengthTwo);
         }
 
         // Shared post-pipeline (finish() minus the resistance-policy multiply).
@@ -571,6 +568,38 @@ public final class KnockbackEngine {
     /** The modern grounded vertical ceiling: {@code min(cap, v)} when the cap is positive, else uncapped. */
     private static double cappedVertical(double value, double cap) {
         return cap > 0.0 ? Math.min(cap, value) : value;
+    }
+
+    /**
+     * One knockback application's vertical, shaped by the profile's {@link
+     * VerticalShape}. Applied per stage (base then extra), so {@code vyIn} is the
+     * victim's input vy for stage 1 and the stage-1 result for stage 2 — the
+     * sequential-application semantics both shapes share.
+     *
+     * <ul>
+     *   <li>{@link VerticalShape#VANILLA} — the pre-shape engine, bit-for-bit: a
+     *       lifting victim gets {@code min(cap, vyIn·residualVertical + strength)},
+     *       a non-lifting (airborne, downward toggle on) victim keeps {@code
+     *       vyIn}. {@code liftsVertical} is {@code grounded || !downwardKnockback}.</li>
+     *   <li>{@link VerticalShape#CT8C_SPLIT} — the Combat Test 8c split (spec §2.5):
+     *       grounded {@code min(cap, groundedVerticalFactor·strength)} (no vy
+     *       dependence — a re-stamp, matching the decompiled grounded branch that
+     *       overwrites motY), airborne {@code min(cap, vyIn +
+     *       airborneVerticalFactor·strength)} (an ADD, capped — a deep fall still
+     *       ships net-downward). The {@code downwardKnockback} toggle is inert
+     *       here; the split owns both ground states.</li>
+     * </ul>
+     */
+    private static double shapedVertical(
+            ModernKnockback m, boolean grounded, boolean liftsVertical, double vyIn, double strength) {
+        if (m.verticalShape() == VerticalShape.CT8C_SPLIT) {
+            return grounded
+                    ? cappedVertical(m.groundedVerticalFactor() * strength, m.verticalCap())
+                    : cappedVertical(vyIn + m.airborneVerticalFactor() * strength, m.verticalCap());
+        }
+        return liftsVertical
+                ? cappedVertical(vyIn * m.residualVertical() + strength, m.verticalCap())
+                : vyIn;
     }
 
     private static double[] base(

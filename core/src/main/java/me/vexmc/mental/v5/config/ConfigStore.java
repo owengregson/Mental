@@ -53,6 +53,8 @@ public final class ConfigStore {
     /** One Combat Effects preset per file, the profiles/ model mirrored. */
     public static final String EFFECTS_PRESETS_DIR = EFFECTS_DIR + "/presets";
     public static final String PROFILES_DIR = "profiles";
+    /** One rules bundle per file — the whole-ruleset macro library (2.8.x). */
+    public static final String BUNDLES_DIR = "bundles";
     public static final String STATE_DIR = "state";
     public static final String OVERRIDES_FILE = "overrides.yml";
 
@@ -118,7 +120,19 @@ public final class ConfigStore {
     public static final List<String> BUNDLED_PROFILES = List.of(
             "legacy-1.7", "legacy-1.8", "kohi", "minehq", "badlion", "velt",
             "mmc", "lunar", "signature",
-            "modern-vanilla", "modern-uplift", "modern-combo", "custom");
+            "modern-vanilla", "modern-uplift", "modern-combo", "ct8c", "custom");
+
+    /**
+     * The rules bundles shipped in the jar; regenerated individually when missing,
+     * on the exact profiles/effects contract (extracted only when missing, owner
+     * edits sacred, deleting regenerates pristine, a byte-identical superseded
+     * revision upgraded in place). Unlike profiles there is no formula folder — the
+     * library is one flat directory, discovery a plain listing by stem. {@code ct8c}
+     * turns on the full Combat Test 8c surface; {@code signature} turns on the
+     * classic 1.7-feel rule set; {@code vanilla} turns everything off (Mental
+     * transparent).
+     */
+    public static final List<String> BUNDLED_BUNDLES = List.of("ct8c", "signature", "vanilla");
 
     /**
      * The formula-category folder a bundled preset lives in — derived from the
@@ -231,6 +245,24 @@ public final class ConfigStore {
             ensureDeliverySection(preset, file);
             upgradeSupersededPreset(preset, file);
         }
+        ensureBundleLibrary();
+    }
+
+    /**
+     * The rules-bundle library (2.8.x): one file per bundled bundle under
+     * {@code bundles/}, each on the extracted-only-when-missing contract with the
+     * {@link SupersededBundles} pristine upgrade — the exact profiles/effects
+     * shape, minus the formula folder (bundles are one flat directory) and the
+     * delivery-section back-fill (bundles have no such legacy). The archive is
+     * empty at 2.8.x, so no bundle upgrades yet; the wiring is in place for the
+     * first corrected revision.
+     */
+    private void ensureBundleLibrary() {
+        for (String bundle : BUNDLED_BUNDLES) {
+            Path file = dataDir.resolve(BUNDLES_DIR).resolve(bundle + ".yml");
+            extractIfMissing(BUNDLES_DIR + "/" + bundle + ".yml", file);
+            upgradeSupersededBundle(bundle, file);
+        }
     }
 
     /**
@@ -291,6 +323,42 @@ public final class ConfigStore {
             return;
         }
         String resource = EFFECTS_PRESETS_DIR + "/" + preset + ".yml";
+        String current = readResource(resource);
+        if (current == null) {
+            log.accept("Bundled resource " + resource + " is missing from the jar");
+            return;
+        }
+        try {
+            Files.writeString(file, current, StandardCharsets.UTF_8);
+            log.accept(resource + " is a superseded bundled revision,"
+                    + " byte-identical and unedited — upgraded to the corrected bundle"
+                    + " (delete the file to regenerate anytime)");
+        } catch (IOException failure) {
+            log.accept("Could not upgrade " + resource + ": " + failure);
+        }
+    }
+
+    /**
+     * The rules-bundle twin of {@link #upgradeSupersededEffectsPreset}: a bundled
+     * bundle whose RAW BYTES still match a superseded shipped revision is upgraded
+     * in place; any owner edit freezes the file forever. The archive
+     * ({@link SupersededBundles}) is empty until a round corrects a bundled ruleset.
+     */
+    private void upgradeSupersededBundle(String bundle, Path file) {
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
+        String onDisk;
+        try {
+            onDisk = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException failure) {
+            log.accept("Could not read " + BUNDLES_DIR + "/" + bundle + ".yml: " + failure);
+            return;
+        }
+        if (!SupersededBundles.isSupersededBundleText(bundle, onDisk)) {
+            return;
+        }
+        String resource = BUNDLES_DIR + "/" + bundle + ".yml";
         String current = readResource(resource);
         if (current == null) {
             log.accept("Bundled resource " + resource + " is missing from the jar");
@@ -479,6 +547,38 @@ public final class ConfigStore {
             }
         }
         return presets;
+    }
+
+    /**
+     * Every {@code bundles/*.yml} keyed by stem — a flat directory (like the
+     * effects presets), so discovery is a plain sorted listing; any bundle an
+     * owner drops in becomes selectable by its stem. Bundles are read straight
+     * from disk with NO overlay applied — they are static reference macros, not
+     * live config the overlay wins over — and an unparseable file is reported and
+     * served empty (it will simply carry no modules, which {@code RulesBundleParser}
+     * flags loudly). The library is read fresh on each call (boot, reload, GUI
+     * open, apply); it is three tiny files, so re-reading is negligible and keeps
+     * the listing honest to the disk.
+     */
+    public Map<String, Configuration> loadBundles() {
+        Map<String, Configuration> bundles = new TreeMap<>();
+        Path bundlesDir = dataDir.resolve(BUNDLES_DIR);
+        if (Files.isDirectory(bundlesDir)) {
+            try (var stream = Files.list(bundlesDir)) {
+                stream.filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString()
+                                .toLowerCase(Locale.ROOT).endsWith(".yml"))
+                        .sorted()
+                        .forEach(path -> {
+                            String fileName = path.getFileName().toString();
+                            String stem = fileName.substring(0, fileName.length() - 4);
+                            bundles.put(stem, loadYaml(path, BUNDLES_DIR + "/" + fileName));
+                        });
+            } catch (IOException failure) {
+                log.accept("Could not list " + bundlesDir + ": " + failure);
+            }
+        }
+        return bundles;
     }
 
     /** The bundled YAML text of {@code resource} parsed into a configuration root, or null. */

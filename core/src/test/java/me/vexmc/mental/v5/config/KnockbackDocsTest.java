@@ -58,7 +58,10 @@ class KnockbackDocsTest {
             "enchant-bonus",
             "residual",
             "vertical-cap",
-            "downward-knockback");
+            "downward-knockback",
+            "vertical-shape",
+            "vertical-grounded-factor",
+            "vertical-airborne-factor");
 
     /**
      * KnockbackProfile's components: 3 identity fields (name, displayName,

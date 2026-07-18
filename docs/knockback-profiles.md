@@ -59,6 +59,7 @@ file forever.
 | `modern-vanilla` | The byte-exact **Paper 26.1.2** melee formula (`formula: modern`) — a two-stage knock (positional base then yaw-directed sprint/enchant extra) with the mid-air slam on and vanilla send-then-restore delivery. The modern server feel. | Decompiled Paper 26.1.2 (constants read from bytecode) |
 | `modern-uplift` | **Mental's own** — the modern 26.1.2 math **without** the mid-air slam (`downward-knockback: false`, so airborne victims lift like grounded ones) and the vertical floored at 0.0. | Original Mental tuning (a modern derivative) |
 | `modern-combo` | **Mental's own** — the modern 26.1.2 math with **1.7-style residual compounding** (combos on, tracker wire) and no mid-air slam. | Original Mental tuning (a modern derivative) |
+| `ct8c` | Java Edition **Combat Test 8c** knockback (`formula: modern`, `vertical-shape: ct8c-split`): the two-stage modern horizontal with CT8c's split vertical — grounded `min(0.4, 0.75×strength)`, airborne `min(0.4, vy + 0.5×strength)`. The knockback companion of the `ct8c` rules bundle (the combat *rules* live in the `ct8c-*` features). | Decompiled `1_16_combat-6` client (Combat Test 8c, spec §2.5) |
 | `custom` | Yours. Ships as legacy-1.7 values with every knob documented in the file (including the `formula`/`modern` block). | — |
 
 The full research trail behind these numbers — fork lineage, formula
@@ -160,7 +161,12 @@ knockback:
                             # + strength); <= 0 = off
     downward-knockback: true  # true = an AIRBORNE victim keeps its own vy (zero
                             # lift — the modern mid-air slam); false = it lifts
-                            # like a grounded victim
+                            # like a grounded victim. INERT under ct8c-split.
+    vertical-shape: vanilla # vanilla (above) | ct8c-split (Combat Test 8c §2.5):
+                            # grounded  vy = min(vertical-cap, grounded-factor × strength)
+                            # airborne  vy = min(vertical-cap, vy + airborne-factor × strength)
+    vertical-grounded-factor: 0.75  # ct8c-split grounded multiplier (inert under vanilla)
+    vertical-airborne-factor: 0.5   # ct8c-split airborne ADD multiplier (inert under vanilla)
 ```
 
 ### Blocked hits still knock (the `BLOCKS_ATTACKS` silent-knock trap)
@@ -295,6 +301,29 @@ toggle:
 - `downward-knockback: false` — the airborne victim lifts like a grounded one
   (Mental's `modern-uplift`/`modern-combo` tunings, floored at `0.0`).
 
+**The Combat Test 8c vertical (`vertical-shape: ct8c-split`).** The `1.16_combat-6`
+snapshot rewrote the knockback vertical (spec §2.5, decompiled). Selecting
+`vertical-shape: ct8c-split` swaps the vanilla vertical (above) for the split —
+the horizontal two-stage knock is unchanged:
+
+- **grounded** — `vy = min(vertical-cap, vertical-grounded-factor × strength)`,
+  a re-stamp with *no dependence on the victim's own vy* (the decompiled
+  grounded branch overwrites `motY`). A standing hit at the `0.4` base ships
+  `min(0.4, 0.75 × 0.4) = 0.30`.
+- **airborne** — `vy = min(vertical-cap, vy + vertical-airborne-factor × strength)`,
+  an ADD then a cap. A victim already falling fast can be knocked
+  *net-downward* (`vy −1.0`, strength `0.4` → `−0.8`), so `ct8c` keeps
+  `limits.vertical-min: -3.9` or that knock is clamped away.
+
+Because Mental models the modern sprint knock as a *second* full knockback
+application, the split lands on both stages — exactly the CT8c behavior, whose
+sprint push runs through the same modified `knockback()` and re-stamps the
+grounded vertical. The `downward-knockback` toggle is **inert** under
+`ct8c-split` (the split owns both ground states), and
+`vertical-grounded-factor` / `vertical-airborne-factor` are inert under
+`vanilla`. Both default to the vanilla `0.75` / `0.5`, so a profile that omits
+them (every non-`ct8c` preset) is byte-identical to the pre-shape engine.
+
 **Inert under `modern`.** The legacy knobs do nothing while the modern formula
 is selected: `base`, `vertical-mode`, `extra`, `wtap-extra`, `friction`,
 `limits.vertical`/`limits.horizontal`, `range-reduction`, `modifiers.sprint`,
@@ -316,7 +345,8 @@ scope.
 
 Which presets opt in: `modern-vanilla` (the byte-exact port, mid-air slam on),
 `modern-uplift` (no slam, floored), `modern-combo` (no slam, floored,
-1.7-style residual compounding). Formula is a **per-profile** property, so
+1.7-style residual compounding), and `ct8c` (the Combat Test 8c split vertical).
+Formula is a **per-profile** property, so
 worlds can mix formulas via `per-world`. Snowball/rod/projectile knockback is
 always the legacy positional push — unchanged by the melee formula.
 

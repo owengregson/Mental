@@ -342,6 +342,133 @@ modules:
   # Only PvP kills trigger it; mob/environmental deaths drop normally. Default OFF.
   drop-protection: false
 
+  # ── Combat Test 8c ───────────────────────────────────────────────────────────
+  # Thirteen modules that import Java Edition's Combat Test 8c (the 1.16_combat-6
+  # experimental snapshot) server-side — see docs/superpowers/specs/
+  # 2026-07-18-combat-test-8c-design.md. Every one defaults OFF (era-exact no-op
+  # when disabled) and is combat-rules-plugin-agnostic (enabling the same rule in
+  # two plugins double-applies — pick one). The two that carry their own numbers
+  # read the weapon-attack-speeds / charged-attacks sections below; the rest are
+  # toggle-only (the CT8c values ARE the behavior). Apply them together with the
+  # `ct8c` rules bundle rather than one at a time.
+  #
+  # weapon-attack-speeds: rewrite the held item's ATTACK_SPEED attribute to the
+  # CT8c attacks-per-second table (spec §2.2), so the client renders the true
+  # cooldown. Works to 1.9.4 (the attribute has existed since 1.9). In spirit
+  # mutually exclusive with attack-cooldown (the 1024-spoof removal): if both are
+  # on the cooldown spoof wins and this no-ops, decided once at enable. Per-class
+  # speeds live in weapon-attack-speeds below. Default OFF (era-exact no-op).
+  weapon-attack-speeds: false
+  # charged-attacks: a server-side charge ledger (from attack timestamps × the
+  # current attack speed). Rejects a landed hit below full charge except the
+  # lenient 4-tick miss-recovery lane, and grants +1.0 reach above 195% charge
+  # unless crouching. Publishes the charge for ct8c-sweep. Tuned in
+  # charged-attacks below. Default OFF (era-exact no-op).
+  charged-attacks: false
+  # ct8c-damage: the CT8c weapon damage tables (spec §2.2) — player base 2.0 +
+  # weapon-type bonus + tier bonus (tiers one lower than vanilla across the board),
+  # with hoe/trident flats. Default OFF (era-exact no-op).
+  ct8c-damage: false
+  # ct8c-crits: the CT8c crit policy — a flat x1.5, sprinting allowed, and enchant
+  # damage folded into the base BEFORE the multiplier (vanilla adds it after).
+  # Default OFF (era-exact no-op).
+  ct8c-crits: false
+  # ct8c-sweep: sweep requires Sweeping Edge AND >=195% charge (plain swords no
+  # longer sweep); ratios 0.25/0.333/0.375, and axes accept Sweeping Edge via
+  # book+anvil. Reads the charge from charged-attacks when that module is on, else
+  # gates on the enchant alone. Default OFF (era-exact no-op).
+  ct8c-sweep: false
+  # ct8c-iframes: invulnerability = min(attacker attack-delay, 10) ticks for melee
+  # and 0 for every projectile (arrows, snowballs, eggs re-hit freely). Applied
+  # only through the spawn-invuln-safe platform seam (never a raw positive
+  # setNoDamageTicks, the 1.16.5–1.20.6 total-invuln trap). Default OFF (era-exact
+  # no-op).
+  ct8c-iframes: false
+  # ct8c-shields: the CT8c shield model — a 148° frontal arc, a hardcoded 5-damage
+  # block cap with the excess passing through, instant (no 5-tick raise) and
+  # crouch-to-shield blocking, 0.5 knockback resistance while blocking, and an axe
+  # hit always disabling the shield for 1.6s (+0.5s per Cleaving level). Banner
+  # shields are intentionally omitted (spec §5). Default OFF (era-exact no-op).
+  ct8c-shields: false
+  # ct8c-regen: the 1.8-style food/regen model — heal 1 HP every 40 ticks while
+  # food > 6 (50% chance to drain 1 hunger per heal), starvation every 40 ticks,
+  # sprint gated on food > 6, and eating/drinking interrupted by a player or mob
+  # hit. Default OFF (era-exact no-op).
+  ct8c-regen: false
+  # ct8c-consumables: 20-tick drink durations, drinkable potions stacking to 16,
+  # and snowballs to 64 — via 1.20.5+ item components (a loud boot degrade below
+  # that floor). Default OFF (era-exact no-op).
+  ct8c-consumables: false
+  # ct8c-potions: Instant Health/Damage heal-or-hurt 6·2^amp (I=6, II=12),
+  # Strength/Weakness +/-20% per level (replacing vanilla's flat +3/-4), and
+  # tipped-arrow instantaneous effects scaled x1/8. Default OFF (era-exact no-op).
+  ct8c-potions: false
+  # ct8c-reach: base reach 2.5 / sword 3.0 / hoe + trident 3.5 (plus the charged
+  # bonus from charged-attacks) via the 1.20.5+ interaction-range attribute and
+  # item components; below that floor, reach <= 3.0 is enforced by Mental's own
+  # reach validation and 3.5 is impossible (loud degrade). Also carries the CT8c
+  # targeting assists — the 0.9-block hitbox inflation and through-non-solid
+  # acceptance, inside Mental's rewound reach validation (never mutating entities).
+  # Default OFF (era-exact no-op).
+  ct8c-reach: false
+  # ct8c-projectiles: snowballs and eggs deal 0 damage but full 0.4 knockback to
+  # players, on a 4-tick throw gate; bow fatigue after 3s of draw (spread + no
+  # critical arrow); projectiles inherit only the thrower's aim-direction momentum.
+  # (Projectile i-frames live in ct8c-iframes.) Default OFF (era-exact no-op).
+  ct8c-projectiles: false
+  # cleaving: the CT8c axe-only Cleaving enchantment (max 3, incompatible with
+  # Sharpness/Smite/Bane) — +1+level damage folded through ct8c-damage and
+  # +10 ticks/level of shield disable consumed by ct8c-shields. A real enchantment
+  # injected via a platform registry seam on modern Paper (~1.21.3+); a loud
+  # degrade below that floor. Default OFF (era-exact no-op).
+  cleaving: false
+
+# ── Combat Test 8c settings ────────────────────────────────────────────────
+# The two CT8c modules above that carry their own numbers. Each section is read
+# only when its module is enabled; the values below ARE the code-confirmed
+# defaults (design spec §2.1/§2.2, decompiled from the 1_16_combat-6 client), so
+# leaving them untouched reproduces 8c exactly.
+
+# weapon-attack-speeds: the per-class attacks-per-second the module writes to the
+# held item's ATTACK_SPEED attribute (the attribute value is this + 1.5). Only
+# hoes vary by tier in 8c; every other class is one flat value. Numbers are
+# code-confirmed from CT8c's WeaponType/Tiers (spec §2.2).
+weapon-attack-speeds:
+  attacks-per-second:
+    fist: 2.5
+    sword: 3.0
+    axe: 2.0
+    pickaxe: 2.5
+    shovel: 2.0
+    trident: 2.0
+    # Hoes are the one 8c class whose speed climbs with material tier.
+    hoe:
+      wood: 2.0
+      stone: 2.5
+      iron: 3.0
+      gold: 3.5
+      diamond: 3.5
+      netherite: 3.5
+
+# charged-attacks: the server-side charge gate. The attack scale ramps 0 → 2.0
+# across the full attack delay (100% at the halfway point); a landed hit below
+# full charge is rejected unless the miss-recovery lane allows it, and a charge
+# at or above the threshold grants the reach bonus. Numbers are code-confirmed
+# from CT8c's getAttackStrengthScale (spec §2.1).
+charged-attacks:
+  # Reject a hit landed below 100% charge (a landed hit needs a full recharge).
+  require-full-charge: true
+  # The lenient miss-recovery lane: after an air swing, a re-attack is allowed
+  # once more than this many ticks have passed (not a hard lockout).
+  miss-recovery-ticks: 4
+  # The charge scale (0..2.0) at or above which a hit counts as "charged" and
+  # earns the reach bonus: 1.95 = 195%.
+  charged-threshold: 1.95
+  # Extra reach, in blocks, granted to a charged hit.
+  charged-reach-bonus: 1.0
+  # Deny the charged reach bonus while the attacker is crouching (8c behavior).
+  deny-bonus-while-crouching: true
+
 # Coexistence with movement-prediction anticheats.
 #   auto       — when a listed plugin is installed, suppress the risky
 #                behaviors (pre-sent velocity packets, Mental's own reach
