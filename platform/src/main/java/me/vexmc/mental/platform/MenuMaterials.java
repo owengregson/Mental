@@ -3,6 +3,7 @@ package me.vexmc.mental.platform;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -53,7 +54,17 @@ public final class MenuMaterials {
             Map.entry("REDSTONE_TORCH", "REDSTONE_TORCH_ON"),
             Map.entry("GOLDEN_SWORD", "GOLD_SWORD"),
             Map.entry("ENDER_EYE", "EYE_OF_ENDER"),
-            Map.entry("GRAY_STAINED_GLASS_PANE", "STAINED_GLASS_PANE"));
+            Map.entry("GRAY_STAINED_GLASS_PANE", "STAINED_GLASS_PANE"),
+            Map.entry("COMPARATOR", "REDSTONE_COMPARATOR"),
+            Map.entry("CRAFTING_TABLE", "WORKBENCH"),
+            Map.entry("ENCHANTED_GOLDEN_APPLE", "GOLDEN_APPLE"),
+            Map.entry("FIREWORK_ROCKET", "FIREWORK"),
+            Map.entry("GLISTERING_MELON_SLICE", "SPECKLED_MELON"),
+            Map.entry("PLAYER_HEAD", "SKULL_ITEM"),
+            Map.entry("NETHERITE_SWORD", "DIAMOND_SWORD"),
+            Map.entry("NETHERITE_AXE", "DIAMOND_AXE"),
+            Map.entry("TRIDENT", "GOLD_SWORD"),
+            Map.entry("TARGET", "SLIME_BALL"));
 
     private static final ConcurrentHashMap<String, Material> CACHE = new ConcurrentHashMap<>();
 
@@ -74,6 +85,28 @@ public final class MenuMaterials {
             }
             return FALLBACK;
         });
+    }
+
+    /**
+     * A stained-glass background pane of the given colour, era-correct: the
+     * per-colour material on 1.13+, or STAINED_GLASS_PANE with the colour's data
+     * value below (the deprecated data ctor is the ONLY way to colour a pane
+     * there; it is verified present on the 1.17.1 compile floor and the legacy
+     * branch can never execute on a modern server because the per-colour name
+     * resolves first — data is never passed on the modern path). Returns a fresh
+     * stack each call so callers may attach meta without aliasing.
+     */
+    @SuppressWarnings("deprecation")
+    public static @NotNull ItemStack pane(@NotNull PaneColor color) {
+        Material modern = Material.getMaterial(color.modernName());
+        if (modern != null) {
+            return new ItemStack(modern);            // modern path: no data value, ever
+        }
+        Material legacy = Material.getMaterial("STAINED_GLASS_PANE");
+        if (legacy != null) {
+            return new ItemStack(legacy, 1, color.legacyData());  // pre-1.13 colour-by-data
+        }
+        return new ItemStack(FALLBACK);              // unreachable in the range; boot test screams
     }
 
     /** The pre-flattening spelling for a renamed icon name, or {@code null} — test seam. */
