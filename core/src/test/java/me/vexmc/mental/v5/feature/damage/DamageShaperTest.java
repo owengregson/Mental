@@ -29,4 +29,68 @@ class DamageShaperTest {
         // Strength I (amp 0) ×3.5 on the base 8 = 28, + Sharpness 6.25 = 34.25.
         assertEquals(34.25, DamageShaper.composeLegacy(8.0, 0, -1, true, false, 5), 1e-9);
     }
+
+    /* --------------------------- CT8c composition pins (Task D) --------------------------- */
+
+    @Test
+    void ct8cToolBaseReadsTheCt8cTableFromTheEffectiveMaterialName() {
+        // Spec §2.2: netherite sword 7 (2 base + 2 sword + 3 netherite tier),
+        // diamond hoe 3 (2 base + 1 hoe-diamond flat), fist 2 (bare base).
+        assertEquals(7.0, DamageShaper.ct8cToolBase("NETHERITE_SWORD"), 1e-9);
+        assertEquals(3.0, DamageShaper.ct8cToolBase("DIAMOND_HOE"), 1e-9);
+        assertEquals(2.0, DamageShaper.ct8cToolBase("AIR"), 1e-9);
+    }
+
+    @Test
+    void ct8cToolBaseDisambiguatesPickaxeFromAxeBySuffixOrder() {
+        // "_PICKAXE" also ends with "_AXE" — the pickaxe suffix must be tested
+        // first. Diamond pickaxe 5 (2+1+2), diamond axe 7 (2+3+2), spec §2.2.
+        assertEquals(5.0, DamageShaper.ct8cToolBase("DIAMOND_PICKAXE"), 1e-9);
+        assertEquals(7.0, DamageShaper.ct8cToolBase("DIAMOND_AXE"), 1e-9);
+    }
+
+    @Test
+    void ct8cAttackSpeedIsTheWeaponAttributeValue() {
+        // Spec §2.2 attribute column: sword 4.5, fist 4.0, diamond hoe 5.0.
+        assertEquals(4.5, DamageShaper.ct8cAttackSpeed("DIAMOND_SWORD"), 1e-9);
+        assertEquals(4.0, DamageShaper.ct8cAttackSpeed("AIR"), 1e-9);
+        assertEquals(5.0, DamageShaper.ct8cAttackSpeed("DIAMOND_HOE"), 1e-9);
+    }
+
+    @Test
+    void ct8cFoldsSharpnessIntoTheBaseBeforeTheFlatCritMultiplier() {
+        // The plan's crit-ordering pin: Sharpness V iron sword crit =
+        // (2 + 1 + 2 + 3) × 1.5 = 12 — enchant added BEFORE the ×1.5 (spec §2.3,
+        // "vanilla adds it after"). Iron sword base 5, Sharpness V modern bonus 3.
+        assertEquals(8.0, DamageShaper.composeCt8c(5.0, -1, -1, false, 5, 0, 0.0), 1e-9,
+                "no crit: base 5 + Sharpness V 3 = 8");
+        assertEquals(12.0, DamageShaper.composeCt8c(5.0, -1, -1, true, 5, 0, 0.0), 1e-9,
+                "crit: (5 + 3) × 1.5 = 12");
+    }
+
+    @Test
+    void ct8cFoldsCleavingAsEnchantDamageBeforeCrit() {
+        // Cleaving damage bonus 1+level (spec §2.9): netherite axe base 8 +
+        // Cleaving III (+4) = 12, no crit; ×1.5 under crit = 18.
+        assertEquals(12.0, DamageShaper.composeCt8c(8.0, -1, -1, false, 0, 3, 0.0), 1e-9);
+        assertEquals(18.0, DamageShaper.composeCt8c(8.0, -1, -1, true, 0, 3, 0.0), 1e-9);
+    }
+
+    @Test
+    void ct8cAppliesStrengthAndWeaknessAsPercentMultipliersOnTheWeaponBase() {
+        // Spec §2.8: Strength +20%/level, Weakness −20%/level, MULTIPLY_TOTAL on
+        // the ATTACK_DAMAGE (weapon base) — before the enchant additive.
+        assertEquals(6.0, DamageShaper.composeCt8c(5.0, 0, -1, false, 0, 0, 0.0), 1e-9,
+                "Strength I: 5 × 1.2 = 6");
+        assertEquals(4.0, DamageShaper.composeCt8c(5.0, -1, 0, false, 0, 0, 0.0), 1e-9,
+                "Weakness I: 5 × 0.8 = 4");
+    }
+
+    @Test
+    void ct8cAddsTheImpalingBonusAsEnchantDamageOnAWetVictim() {
+        // Spec §2.9: Impaling now hits ALL wet victims; the wet predicate lives
+        // in the unit, the already-resolved 2.5×level bonus folds in here.
+        assertEquals(9.5, DamageShaper.composeCt8c(7.0, -1, -1, false, 0, 0, 2.5), 1e-9,
+                "trident base 7 + Impaling I (2.5) on a wet victim");
+    }
 }
