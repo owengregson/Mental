@@ -5,11 +5,11 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
 
 # Era accuracy: ground truths, contracts, and anti-features
 
-## Ground truths (decompiled, in-repo: SYNOPSIS.md + docs/legacy-combat.md)
+## Ground truths (decompiled, in-repo: project/docs/SYNOPSIS.md + project/docs/legacy-combat.md)
 
 - 1.7.10 and 1.8.9 knockback MATH is byte-identical; the era differences are
   DELIVERY, measured on the real servers
-  (docs/research/2026-06-05-era-wire-measurements.md, esp. ADDENDUM 2):
+  (project/docs/research/2026-06-05-era-wire-measurements.md, esp. ADDENDUM 2):
   1.7.10's tracker wire was **JOIN-ORDER BIMODAL** — a victim who joined
   before their attacker received the FULL stamp (identical to 1.8.9:
   standing (0.4, 0.3608) ≈ 1.99 blocks, sprint (0.9, 0.4607) ≈ 4.95), a
@@ -40,7 +40,7 @@ description: Use when a change claims 1.7.10/1.8.9 authenticity or could affect 
 - Legacy damage: sharpness 1.25/level, crit-before-enchant with no sprint
   exclusion, pre-1.9 tool tables (diamond sword = 8), rod/projectile knocks
   from the SHOOTER'S POSITION, probabilistic armor resistance.
-- The combat compendium (docs/research/2026-06-06-combat-compendium.md) is
+- The combat compendium (project/docs/research/2026-06-06-combat-compendium.md) is
   the authoritative mechanic-by-mechanic reference: knockBack ignores its
   strength param (0.4 hardcoded); sprint and KB-enchant are LEVELS of one
   extra (0.5 h/level + flat 0.1 v — KB II ships 1.4, sprint+KB II 1.9);
@@ -131,7 +131,7 @@ engagement). PLAYER_INPUT on 1.21.2+ DOES carry a sprint bit (0x40, raw
 `keySprint.isDown()` intent — false for double-tap sprinters, true for stationary
 ctrl-holders; the server ignores it) — the block door's entry-gate corroborator
 only, never a verdict source (empirical 1.21.11 extraction,
-`docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`); the raw
+`project/docs/superpowers/research/2026-07-10-modern-client-sprint-wire.md`); the raw
 byte still rides the ledger ring as `KEY_INPUT` evidence. Never re-add the
 deferred `setSprinting(false)`.
 

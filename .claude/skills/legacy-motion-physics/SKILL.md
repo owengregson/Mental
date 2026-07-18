@@ -39,7 +39,7 @@ description: Use when reasoning about knockback, velocity, trajectories, player 
   still true today). The CLIENT integrates the trajectory. Server-side motion
   of a player victim after a melee hit is NOT the trajectory.
 - **Knockback math never changed; the WIRE did** (measured on real vanilla:
-  docs/research/2026-06-05-era-wire-measurements.md). 1.7.10 shipped knocks
+  project/docs/research/2026-06-05-era-wire-measurements.md). 1.7.10 shipped knocks
   via the next tick's tracker, and the wire was **JOIN-ORDER BIMODAL**
   (addendum 2, measured both orders): the tracker runs BEFORE the
   per-connection phase, whose slots run in join order with each player's
@@ -103,4 +103,4 @@ description: Use when reasoning about knockback, velocity, trajectories, player 
 - Mental's `friction` knobs are SURVIVING-FRACTION multipliers (vanilla ÷2 ≡
   0.5, the NachoSpigot convention). Forks publishing divisors (Panda/Sport/
   Wind, typically 2.0) port as 1/d — pasting a divisor unchanged inverts the
-  feel. Full research: docs/research/2026-06-04-improved-knockback.md.
+  feel. Full research: project/docs/research/2026-06-04-improved-knockback.md.

@@ -17,7 +17,7 @@ scripts/integration-matrix.sh --versions 1.17.1,26.1.2            # targeted
 ```
 
 The script exists because Gradle serializes tasks within a project. Every
-version, its JDK, and its CI lane come from `support-matrix.json`
+version, its JDK, and its CI lane come from `project/support-matrix.json`
 (the single source the build, the script, both workflows, and the release notes
 read). `integrationTestMatrix` now covers **paper + folia** — the Folia entry
 (26.x) is a first-class matrix entry that boots a real Folia server and runs the
@@ -46,7 +46,7 @@ range-wide).
   Java-13 cap, closing the range's last hole. `serverFlags`/`IgnoreJavaVersion`
   are DEAD everywhere.
 - **Per-entry native-era JDK (no flags).** Each legacy Paper build runs on the
-  NEWEST Java it boots FLAGLESS — `jdk` per entry in `support-matrix.json`:
+  NEWEST Java it boots FLAGLESS — `jdk` per entry in `project/support-matrix.json`:
   1.9.4–1.12.2 → 21, 1.13.2/1.14.4 → 13, 1.15.2 → 14, 1.16.5 → 16 (modern
   entries 17/25). CI installs ONLY the build JDK (`jq '[.entries[].jdk] | max'`
   = 25) via setup-java and the **Gradle foojay toolchain auto-provisions** every
@@ -76,7 +76,7 @@ range-wide).
   stay `release`. On CI, the PR lane runs only when the change class warrants
   it: build.yml's `context` job diffs the branch against main — docs-only
   changes boot nothing, code changes run the `ci: "pr"` lanes, and
-  build-toolchain changes (gradle files, `support-matrix.json`, `scripts/`,
+  build-toolchain changes (gradle files, `project/support-matrix.json`, `scripts/`,
   workflows) run the FULL paper fan-out. Pushes to main never run build.yml
   at all (release.yml owns them); `ci-ok` is the single fan-in status check
   branch protection requires.

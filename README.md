@@ -303,7 +303,7 @@ Deep dives: [fast path](project/docs/fast-path.md) · [knockback profiles](proje
 · [combo hold](project/docs/combo-hold.md) · [legacy tier](project/docs/legacy-combat.md) · the combat
 research ledger in [project/docs/research/](project/docs/research/).
 
-Licensed [MIT](LICENSE) · third-party notices [here](THIRD-PARTY-NOTICES.md) · anonymous
+Licensed [MIT](LICENSE) · third-party notices [here](project/THIRD-PARTY-NOTICES.md) · anonymous
 usage metrics via bStats (opt out in `config.yml`).
 
 <br>

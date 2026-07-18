@@ -15,7 +15,7 @@ description: Use when writing or changing code that must run across Mental's who
   a Multi-Release mega-jar — downgraded to class v52 (Java 8) as the base tree,
   the original v61 kept under `META-INF/versions/17` — so it classloads on any
   JVM from Java 8 up. Each server runs its **native-era Java** (per-entry `jdk`
-  in `support-matrix.json`); the integration build foojay-provisions every
+  in `project/support-matrix.json`); the integration build foojay-provisions every
   toolchain automatically.
 - `api-version: '1.17'` in plugin.yml; one universal jar serves the whole range.
 - **Runtime floor is Paper 1.9.4** (legacy backport, below the 1.17.1 compile
@@ -51,7 +51,7 @@ description: Use when writing or changing code that must run across Mental's who
 - Reflection helpers must try the Mojang name through the remapper FIRST, then
   the raw name as fallback, and degrade gracefully (best-effort) when a field
   genuinely doesn't exist on a version.
-- When adding a matrix version: add the entry to `support-matrix.json` (the
+- When adding a matrix version: add the entry to `project/support-matrix.json` (the
   single source — version, jdk (its native-era Java, the newest it boots
   flagless), platform, suites, ci, bytecodeTier); the build task, both
   workflows, the local script, and the release-notes range all derive from it.
@@ -126,7 +126,7 @@ under its Java-13 cap; the v52 base fixes exactly that.
   `v1_9_R2` … `v1_16_R3`) — `ReflectionRemapper.noop()`, the spigot names ARE the
   runtime names (no reobf parse). The legacy tooltip-strip and the tester
   FakePlayer branch resolve per-revision NMS; shapes are javap-pinned in
-  `docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md`.
+  `project/docs/superpowers/research/2026-07-02-legacy-fakeplayer-nms-shapes.md`.
 - **javap-only floor claims (nms-archaeology).** NEVER claim a method/field exists
   on a version from memory — read the actual server jar with javap against the
   cached `run/legacy-probe/<v>/cache/patched_<v>.jar`. The backport corrected three
@@ -179,4 +179,4 @@ by the tester). Fix = distinct shade prefixes (above) PLUS a Java-8-native
 additive overload `computeBase(…, java.util.Random)` in the kernel so no stub
 type crosses a plugin boundary. **Rule: no post-Java-8 JDK type in any
 cross-plugin API descriptor.** Full campaign:
-`docs/superpowers/plans/2026-07-03-mental-full-range.md`.
+`project/docs/superpowers/plans/2026-07-03-mental-full-range.md`.
