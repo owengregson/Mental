@@ -216,6 +216,9 @@ public final class Ct8cProjectilesUnit implements FeatureUnit, Listener {
     }
 
     /** Aim-direction-only momentum, vertical inherited zeroed (§2.10) — a pure launch-velocity rewrite. */
+    @SuppressWarnings("deprecation") // Player#isOnGround() is the client-reported flag CT8c's launch physics
+    // wants (the same one the knockback/shield gates use) — not the server truth; the deprecation is Bukkit
+    // steering API users toward the server-side check, which is the wrong ground state here.
     private void rewriteMomentum(Projectile projectile, Player shooter) {
         Vector projectileVelocity = projectile.getVelocity();
         Vector shooterVelocity = shooter.getVelocity();
