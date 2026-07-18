@@ -15,6 +15,7 @@ import me.vexmc.mental.kernel.profile.ModernKnockback;
 import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
+import me.vexmc.mental.kernel.profile.VerticalShape;
 import org.bukkit.configuration.ConfigurationSection;
 
 /**
@@ -109,7 +110,12 @@ public final class ProfileParser {
                         residual.numberAtLeast("horizontal", offModern.residualHorizontal(), 0),
                         residual.numberAtLeast("vertical", offModern.residualVertical(), 0),
                         modern.number("vertical-cap", offModern.verticalCap()),
-                        modern.flag("downward-knockback", offModern.downwardKnockback())));
+                        modern.flag("downward-knockback", offModern.downwardKnockback()),
+                        modern.oneOf("vertical-shape", offModern.verticalShape(), VerticalShape.class),
+                        modern.numberAtLeast(
+                                "vertical-grounded-factor", offModern.groundedVerticalFactor(), 0),
+                        modern.numberAtLeast(
+                                "vertical-airborne-factor", offModern.airborneVerticalFactor(), 0)));
     }
 
     /**

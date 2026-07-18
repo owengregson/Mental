@@ -27,6 +27,17 @@ package me.vexmc.mental.kernel.profile;
  * record as the 20th component behind the same delegating-constructor seam
  * {@link PaceScaling} used, so every pre-modern preset, superseded revision,
  * and unit pin constructs unchanged and resolves to {@link #OFF}.</p>
+ *
+ * <p><b>Vertical shape (additive within this family).</b> The
+ * {@link #verticalShape} + {@link #groundedVerticalFactor} +
+ * {@link #airborneVerticalFactor} trio is an era-exact-no-op extension: an
+ * eight-argument delegating constructor fills {@code (VerticalShape.VANILLA,
+ * 0.75, 0.5)}, so every existing preset and unit pin constructs the byte-exact
+ * vanilla shape and the two factors are carried-but-inert under it. Only the
+ * {@code ct8c} preset ({@code vertical-shape: ct8c-split}) reads them, applying
+ * the Combat Test 8c split (spec §2.5): grounded {@code min(cap,
+ * groundedVerticalFactor·strength)}, airborne {@code min(cap, vyIn +
+ * airborneVerticalFactor·strength)}. See {@link VerticalShape}.</p>
  */
 public record ModernKnockback(
         boolean enabled,
@@ -36,7 +47,32 @@ public record ModernKnockback(
         double residualHorizontal,
         double residualVertical,
         double verticalCap,
-        boolean downwardKnockback) {
+        boolean downwardKnockback,
+        VerticalShape verticalShape,
+        double groundedVerticalFactor,
+        double airborneVerticalFactor) {
+
+    /**
+     * The pre-shape convenience constructor (every existing preset's arity):
+     * defaults {@link #verticalShape} to {@link VerticalShape#VANILLA} and the
+     * two CT8c factors to the vanilla {@code 0.75} / {@code 0.5} — carried but
+     * inert under the vanilla shape, so the modern output is byte-identical to
+     * the pre-shape engine. Only the {@code ct8c} preset and the parser reach for
+     * the eleven-argument canonical constructor.
+     */
+    public ModernKnockback(
+            boolean enabled,
+            double baseStrength,
+            double sprintBonus,
+            double enchantBonus,
+            double residualHorizontal,
+            double residualVertical,
+            double verticalCap,
+            boolean downwardKnockback) {
+        this(enabled, baseStrength, sprintBonus, enchantBonus, residualHorizontal,
+                residualVertical, verticalCap, downwardKnockback,
+                VerticalShape.VANILLA, 0.75, 0.5);
+    }
 
     /**
      * The era-exact no-op default: the vanilla 26.1.2 constants with the formula

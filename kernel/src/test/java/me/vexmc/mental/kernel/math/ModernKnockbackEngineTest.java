@@ -13,6 +13,7 @@ import me.vexmc.mental.kernel.profile.ModernKnockback;
 import me.vexmc.mental.kernel.profile.PaceScaling;
 import me.vexmc.mental.kernel.profile.ResistancePolicy;
 import me.vexmc.mental.kernel.profile.VerticalMode;
+import me.vexmc.mental.kernel.profile.VerticalShape;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -216,6 +217,90 @@ class ModernKnockbackEngineTest {
         assertTrue(vector.x() > 0, "knock must point +x, was " + vector.x());
         assertEquals(0.4, vector.x(), EPSILON);
         assertEquals(0.0, vector.z(), EPSILON);
+    }
+
+    /* ------------------------------- CT8c split-vertical shape ------------------------- */
+
+    /**
+     * A CT8c-split modern component with the given base strength, the vanilla
+     * grounded/airborne factors 0.75/0.5, cap 0.4, and no sprint/enchant (so the
+     * whole knock is stage 1 — the base positional knock at {@code strength =
+     * baseStrength·(1 − r)}).
+     */
+    private static ModernKnockback ct8c(double baseStrength) {
+        return new ModernKnockback(true, baseStrength, 0.5, 0.5, 0.5, 0.5, 0.4, true,
+                VerticalShape.CT8C_SPLIT, 0.75, 0.5);
+    }
+
+    @Test
+    void ct8cGroundedVerticalIsGroundedFactorTimesStrengthCapped() {
+        // grounded: vy = min(cap, 0.75·strength), independent of the victim's own vy.
+        KnockbackVector low = computed(
+                attacker(0.0f, false, 0), groundedVictim(0, 4, -0.0784, 0), modern(ct8c(0.4)), null);
+        assertEquals(0.30, low.y(), EPSILON); // min(0.4, 0.75·0.4)
+        assertEquals(0.4, low.z(), EPSILON);
+
+        KnockbackVector capped = computed(
+                attacker(0.0f, false, 0), groundedVictim(0, 4, -0.0784, 0), modern(ct8c(0.9)), null);
+        assertEquals(0.40, capped.y(), EPSILON); // min(0.4, 0.75·0.9 = 0.675) → cap
+        assertEquals(0.9, capped.z(), EPSILON);
+    }
+
+    @Test
+    void ct8cAirborneVerticalAddsAirborneFactorTimesStrengthToTheInputVyThenCaps() {
+        // airborne: vy = min(cap, vyIn + 0.5·strength). strength 0.4 throughout.
+        assertEquals(0.00, computed(attacker(0.0f, false, 0),
+                airborneVictim(0, 4, 0, -0.20, 0), modern(ct8c(0.4)), null).y(), EPSILON); // −0.20 + 0.20
+        assertEquals(0.40, computed(attacker(0.0f, false, 0),
+                airborneVictim(0, 4, 0, 0.30, 0), modern(ct8c(0.4)), null).y(), EPSILON); // min(0.4, 0.50)
+        assertEquals(-0.80, computed(attacker(0.0f, false, 0),
+                airborneVictim(0, 4, 0, -1.00, 0), modern(ct8c(0.4)), null).y(), EPSILON); // −1.00 + 0.20
+    }
+
+    @Test
+    void theEightArgConstructorDefaultsToTheVanillaShapeAndInertFactors() {
+        // The delegating ctor fills VerticalShape.VANILLA, 0.75, 0.5 — the factors
+        // are carried but inert under VANILLA, so a modern-vanilla component built
+        // the short way equals the long VANILLA-shape spelling exactly.
+        ModernKnockback viaShort = new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true);
+        assertEquals(VerticalShape.VANILLA, viaShort.verticalShape());
+        assertEquals(0.75, viaShort.groundedVerticalFactor(), 0.0);
+        assertEquals(0.5, viaShort.airborneVerticalFactor(), 0.0);
+        assertEquals(
+                new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true,
+                        VerticalShape.VANILLA, 0.75, 0.5),
+                viaShort);
+    }
+
+    @Test
+    void vanillaShapeIsBitIdenticalRegardlessOfTheInertCt8cFactors() {
+        // The no-op-at-default proof for the shape knob: changing ONLY the (inert)
+        // CT8c factors while the shape stays VANILLA cannot move a single vector.
+        ModernKnockback stock = new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true);
+        ModernKnockback wildFactors = new ModernKnockback(true, 0.4, 0.5, 0.5, 0.5, 0.5, 0.4, true,
+                VerticalShape.VANILLA, 9.9, -9.9);
+
+        EntityState atk = new EntityState(0, 0, 0, 15.0f, 0, 0, 0, true, true, 1, 0);
+        EntityState vic = new EntityState(0, 0, 4, 0.0f, 0.2, 0.3, -0.4, false, false, 0, 0);
+        KnockbackVector a = computed(atk, vic, modern(stock), null);
+        KnockbackVector b = computed(atk, vic, modern(wildFactors), null);
+        assertEquals(a.x(), b.x(), 0.0);
+        assertEquals(a.y(), b.y(), 0.0);
+        assertEquals(a.z(), b.z(), 0.0);
+    }
+
+    @Test
+    void switchingOnlyTheShapeToCt8cSplitChangesTheGroundedVertical() {
+        // Proves the branch is wired AND that VANILLA is untouched: the same plain
+        // grounded hit ships 0.3608 under VANILLA (vy·0.5 + strength, capped) and
+        // 0.30 under CT8C_SPLIT (0.75·strength) — everything else identical.
+        KnockbackVector vanilla = computed(
+                attacker(0.0f, false, 0), groundedVictim(0, 4, -0.0784, 0), modern(VANILLA), null);
+        KnockbackVector split = computed(
+                attacker(0.0f, false, 0), groundedVictim(0, 4, -0.0784, 0), modern(ct8c(0.4)), null);
+        assertEquals(0.3608, vanilla.y(), EPSILON);
+        assertEquals(0.30, split.y(), EPSILON);
+        assertEquals(vanilla.z(), split.z(), EPSILON); // horizontal unchanged by the shape
     }
 
     @Test
