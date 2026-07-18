@@ -54,6 +54,9 @@ replay_pid*.log
 .claude/*
 !.claude/skills/
 
+# Superpowers — local SDD session artifacts (briefs/reports/diffs), never tracked
+.superpowers/
+
 # legacy-lab: measurement harness is tracked; servers, worlds, decompiles are not
 project/legacy-lab/*
 !project/legacy-lab/harness/
