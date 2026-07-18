@@ -3,6 +3,7 @@ package me.vexmc.mental.tester.suite;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.CleavingHandle;
@@ -18,6 +19,7 @@ import me.vexmc.mental.tester.fake.FakePlayer;
 import me.vexmc.mental.v5.MentalPluginV5;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.cadence.Ct8cChargeLedger;
+import me.vexmc.mental.v5.feature.cadence.Ct8cChargeView;
 import me.vexmc.mental.v5.feature.damage.Ct8cIframesUnit;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.loadout.Ct8cReachTable;
@@ -151,23 +153,42 @@ public final class CombatTest8cSuite {
                             + ") — the count discriminator is not wired");
 
             // Test: with charged-attacks ON the sub-charge follow-up is denied (count 0).
+            //
+            // The gap between the opener (which resets the charge ledger) and the follow-up is pinned
+            // to EXACTLY 2 server ticks by scheduling the follow-up from inside the opener's tick via
+            // runOnLater — NOT the wall-clock-drifting awaitTicks(2)+syncRun pair the case used before.
+            // The ledger measures charge in game ticks the TickClock reads at each hit; awaitTicks starts
+            // counting only once the tester thread re-reads the tick AFTER the opener's syncRun returns,
+            // and each syncRun then waits for a free main-tick — so under 15-JVM matrix load the opener→
+            // follow-up gap drifted well past the fist's 8-tick full-charge point, the follow-up genuinely
+            // recharged, and the deny correctly did NOT fire (landed 1 — a suite anchoring bug, not a
+            // product bug; matrix-gate concurrency-flake doctrine). runOnLater makes the gap load-invariant:
+            // a 2-tick follow-up is unambiguously sub-charge (scale 0.25), and the published charge view
+            // proves it was sub-charge before we assert the deny, so the case can never pass vacuously on a
+            // hit that had actually recharged.
             setFeature(mental, context, Feature.CHARGED_ATTACKS, true);
             context.expect(mental.featureActive(Feature.CHARGED_ATTACKS),
                     "charged-attacks did not converge active");
+            AtomicBoolean followUpFired = new AtomicBoolean();
             context.syncRun(() -> {
                 victim.player().setNoDamageTicks(0);
-                attacker.attack(victim.player()); // opener — fully charged ⇒ lands + resets the ledger
+                attacker.attack(victim.player()); // opener — fully charged ⇒ lands + resets the ledger THIS tick
+                mental.scheduling().runOnLater(attacker.player(), 2L, () -> {
+                    landed.set(0);
+                    victim.player().setNoDamageTicks(0);
+                    attacker.attack(victim.player()); // exactly 2 ticks later ⇒ scale 0.25 ⇒ denied at LOW
+                    followUpFired.set(true);
+                }, () -> followUpFired.set(true)); // retired ⇒ no follow-up published; the scale guard below fails loud, not vacuous
             });
-            context.awaitTicks(2);
-            landed.set(0);
-            context.syncRun(() -> {
-                victim.player().setNoDamageTicks(0);
-                attacker.attack(victim.player()); // ~2 ticks later ⇒ scale < 1 ⇒ denied at LOW
-            });
-            context.awaitTicks(3);
+            context.awaitUntil(followUpFired::get, 60, "the sub-charge follow-up to fire");
+            context.awaitTicks(2); // let any MONITOR dispatch settle
+            double followUpScale = Ct8cChargeView.INSTANCE.currentScale(attacker.uuid());
+            context.expect(followUpScale < 1.0,
+                    "the staged follow-up was not sub-charge (scale " + followUpScale + " ≥ 1.0) — the 2-tick "
+                            + "gate pin regressed, so the deny assertion below would be vacuous");
             context.expect(landed.get() == 0,
-                    "the sub-charge follow-up was not denied (landed " + landed.get()
-                            + ") — the CT8c full-recharge gate regressed");
+                    "the sub-charge follow-up was not denied (landed " + landed.get() + ", scale "
+                            + followUpScale + ") — the CT8c full-recharge gate regressed");
 
             // The miss-recovery lane over the production ledger (a fake emits no swing
             // packet to arm it live — the deny above is the live half).
