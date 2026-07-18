@@ -4,20 +4,43 @@ import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityRegainHealthEvent;
+import org.bukkit.event.entity.EntityRegainHealthEvent.RegainReason;
+import org.jetbrains.annotations.NotNull;
 
 /**
- * SKELETON — Combat Test 8c potion values ({@code ct8c-potions}, design spec
- * §2.8). Wave-2 <b>Task F</b> (the sustain cluster) fills this body: intercept
- * Instant Health/Damage to the CT8c values ({@code 6·2^amp}, the
- * {@code PotionValuesUnit} substitution pattern), feed Strength/Weakness
- * ±20%/level into the {@code DamageShaper} composition (this unit consumes
- * {@code Ct8cPotionMath} and owns no shaper edits), and scale tipped-arrow
- * instantaneous effects ×1/8.
+ * Combat Test 8c potion values ({@code ct8c-potions}, design spec §2.8).
  *
- * <p>Until then this is a genuine zero-touch no-op: the module defaults OFF, so
- * the reconciler never assembles it, and even assembled it registers nothing.</p>
+ * <p>Two halves, both default-OFF and zero-touch when disabled (the reconciler
+ * never assembles a disabled unit):</p>
+ *
+ * <ul>
+ *   <li><b>Instant Health</b> — a listener substitutes the CT8c value
+ *       ({@code 6·2^amp}, {@link Ct8cInstantHeal}) into the {@code MAGIC}
+ *       {@link EntityRegainHealthEvent}. Vanilla heals {@code 4·2^amp}; CT8c
+ *       raises it to mirror Instant Damage. <b>Instant Damage is NOT
+ *       intercepted</b>: vanilla harm is already {@code 6·2^amp}, so the CT8c
+ *       "mirror" is a byte-identical no-op there, and touching the broad
+ *       {@code MAGIC} damage cause would risk mis-scaling unrelated sources.</li>
+ *   <li><b>Strength / Weakness</b> — the {@code ±20%·level} MULTIPLY_TOTAL
+ *       melee factors ({@link Ct8cPotionValues}) apply in the fast-path
+ *       {@code DamageShaper} composition (the CT8c damage cluster's file), gated
+ *       on {@code featureActive(CT8C_POTIONS)} — so this unit is <b>presence-only</b>
+ *       for that half, exactly like {@code PotionValuesUnit}. Its being assembled
+ *       is the signal; it registers no resource of its own for it.</li>
+ * </ul>
+ *
+ * <p>Tipped-arrow instantaneous effects ×1/8 (spec §2.8/§2.10) are a documented
+ * gap on the Bukkit surface: an arrow-sourced instant effect reaches the victim
+ * through the same amplifier-less {@code MAGIC} regain/damage event as a potion
+ * one, with no way to distinguish the source or read the ×1/8 scale — the pure
+ * scale lives in {@code Ct8cPotionMath.tippedArrowScale()} for a future NMS seam.</p>
  */
-public final class Ct8cPotionsUnit implements FeatureUnit {
+public final class Ct8cPotionsUnit implements FeatureUnit, Listener {
 
     @Override
     public Feature descriptor() {
@@ -26,6 +49,21 @@ public final class Ct8cPotionsUnit implements FeatureUnit {
 
     @Override
     public void assemble(Scope scope, Snapshot snapshot) {
-        // Wave-2 (Task F) fills this. A scaffold registers nothing — zero-touch.
+        // Instant Health substitution. The Strength/Weakness half needs no
+        // resource — DamageShaper reads featureActive(CT8C_POTIONS) on the fast
+        // path (presence-only, mirroring PotionValuesUnit).
+        scope.listen(this);
+    }
+
+    /**
+     * Substitutes the CT8c Instant Health value into a {@code MAGIC} regain (the
+     * cause vanilla uses for instant-health potions). Owning-thread only — the
+     * event fires on the victim's region.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onInstantHealth(@NotNull EntityRegainHealthEvent event) {
+        if (event.getEntity() instanceof Player && event.getRegainReason() == RegainReason.MAGIC) {
+            event.setAmount(Ct8cInstantHeal.substituted(event.getAmount()));
+        }
     }
 }
