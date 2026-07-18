@@ -4,7 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import me.vexmc.mental.platform.MenuMaterials;
+import me.vexmc.mental.platform.PaneColor;
 import me.vexmc.mental.v5.text.TextPort;
 import net.kyori.adventure.text.Component;
 import org.bukkit.entity.Player;
@@ -96,14 +96,30 @@ public abstract class Menu implements InventoryHolder {
         }
     }
 
-    /** Fills every still-empty slot with the decorative border pane. */
+    /**
+     * Paints the house background frame ({@link PanePattern#frame}) in the
+     * screen's {@code accent} colour across every slot. Every screen calls this
+     * FIRST in {@link #draw}; the content {@link #set} calls that follow overwrite
+     * their slots, so the chrome always reads as a deliberate frame behind the
+     * tiles rather than filler leaking through.
+     */
+    protected final void paintChrome(@NotNull PaneColor accent) {
+        PaneColor[] frame = PanePattern.frame(rows(), accent);
+        for (int slot = 0; slot < frame.length; slot++) {
+            set(slot, Chrome.pane(frame[slot]));
+        }
+    }
+
+    /**
+     * Fills every still-empty slot with the neutral grey pane — a pure safety net
+     * behind {@link #paintChrome}, visually identical to the retired filler. Runs
+     * after {@link #draw}.
+     */
     private void fillEmpty() {
         if (inventory == null) {
             return;
         }
-        ItemStack filler = Icon.of(MenuMaterials.of("GRAY_STAINED_GLASS_PANE"))
-                .name(Component.empty())
-                .build();
+        ItemStack filler = Chrome.pane(PaneColor.GRAY);
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             if (inventory.getItem(slot) == null) {
                 inventory.setItem(slot, filler);
@@ -159,11 +175,10 @@ public abstract class Menu implements InventoryHolder {
      * the row width are dropped (the caller sizes its rows).
      */
     protected final void placeCentered(int rowBase, @NotNull List<Tile> tiles) {
-        int count = tiles.size();
-        int start = rowBase + Math.max(0, (9 - count) / 2);
-        for (int i = 0; i < count && start + i <= rowBase + 8; i++) {
+        int[] slots = Layout.centeredRow(rowBase, tiles.size());
+        for (int i = 0; i < slots.length; i++) {
             Tile tile = tiles.get(i);
-            set(start + i, tile.item(), tile.onClick());
+            set(slots[i], tile.item(), tile.onClick());
         }
     }
 
