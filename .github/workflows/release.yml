@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout (full history + tags)
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
@@ -105,10 +105,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions JDK 8 for verifyJdk8Api.
@@ -116,13 +116,13 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       # Cache the foojay-provisioned toolchain JDKs (e.g. the JDK 8 verifyJdk8Api
       # resolves) so they are not re-downloaded every run. gradle/actions caches
       # ~/.gradle/caches, not ~/.gradle/jdks.
       - name: Cache foojay-provisioned JDKs
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/jdks
           key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
@@ -144,10 +144,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions this entry's server JDK.
@@ -155,7 +155,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       # The expensive part of booting a version is downloading paperclip and
       # patching the server. Restore the newest cache for this version and
@@ -163,7 +163,7 @@ jobs:
       # new Paper builds keep flowing into the cache). ~/.gradle/jdks rides
       # along so this entry's foojay-provisioned server JDK is cached too.
       - name: Cache the Paper server runtime
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             run/${{ matrix.version }}/cache
@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload server log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-integration-log-${{ matrix.version }}
           path: core/build/integration-test-logs/${{ matrix.version }}.log
@@ -204,10 +204,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions the Folia server JDK.
@@ -215,10 +215,10 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       - name: Cache foojay-provisioned JDKs
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/jdks
           key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
@@ -230,7 +230,7 @@ jobs:
 
       - name: Upload Folia server logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-folia-logs
           path: core/build/integration-test-logs/folia-*.log
@@ -244,12 +244,12 @@ jobs:
 
     steps:
       - name: Checkout (full history + tags for the changelog)
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           # Only the build JDK (the newest matrix JDK, jq max in detect); the
           # Gradle foojay toolchain auto-provisions JDK 8 for verifyJdk8Api.
@@ -257,10 +257,10 @@ jobs:
           distribution: 'temurin'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       - name: Cache foojay-provisioned JDKs
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.gradle/jdks
           key: gradle-jdks-${{ runner.os }}-${{ hashFiles('support-matrix.json') }}
@@ -375,7 +375,7 @@ jobs:
       # v2.5.3-beta failure). A draft accepts the jar, and the publish
       # step below flips it live with the asset already attached.
       - name: Tag the release as a draft with the jar attached
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.detect.outputs.tag }}
           target_commitish: ${{ github.sha }}
