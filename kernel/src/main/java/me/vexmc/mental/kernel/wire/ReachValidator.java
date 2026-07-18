@@ -35,20 +35,45 @@ public final class ReachValidator {
             List<PositionRing.Sample> history,
             double liveX, double liveY, double liveZ,
             double maxReach, double leniency) {
+        // The native 0.6-wide victim box, no targeting inflation — byte-identical
+        // to the pre-2.8 gate (a width of 0 leaves the {@link #HALF_WIDTH} floor).
+        return validate(eyeX, eyeY, eyeZ, history, liveX, liveY, liveZ, maxReach, leniency, 0.0);
+    }
 
-        double best = distanceToBox(eyeX, eyeY, eyeZ, liveX, liveY, liveZ);
+    /**
+     * As {@link #validate(double, double, double, List, double, double, double,
+     * double, double)}, additionally inflating the victim's horizontal footprint to
+     * at least {@code minVictimWidth} before the intersect test — the CT8c §2.11
+     * targeting assist (entities under 0.9 blocks wide are widened to 0.9 for attack
+     * targeting). A {@code minVictimWidth} at or below the native 0.6 leaves the box
+     * untouched, so the whole gate stays byte-identical when the assist is off.
+     */
+    public static Verdict validate(
+            double eyeX, double eyeY, double eyeZ,
+            List<PositionRing.Sample> history,
+            double liveX, double liveY, double liveZ,
+            double maxReach, double leniency, double minVictimWidth) {
+
+        double halfWidth = Math.max(HALF_WIDTH, minVictimWidth / 2.0);
+        double best = distanceToBox(halfWidth, eyeX, eyeY, eyeZ, liveX, liveY, liveZ);
         for (PositionRing.Sample sample : history) {
             best = Math.min(best,
-                    distanceToBox(eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z()));
+                    distanceToBox(halfWidth, eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z()));
         }
         return new Verdict(best <= maxReach + leniency, best);
     }
 
-    /** Eye to the closest point of the victim AABB whose feet sit at (x, y, z). */
+    /** Eye to the closest point of the native 0.6-wide victim AABB whose feet sit at (x, y, z). */
     static double distanceToBox(double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
-        double dx = axisDistance(eyeX, x - HALF_WIDTH, x + HALF_WIDTH);
+        return distanceToBox(HALF_WIDTH, eyeX, eyeY, eyeZ, x, y, z);
+    }
+
+    /** Eye to the closest point of a victim AABB of the given half-width whose feet sit at (x, y, z). */
+    static double distanceToBox(
+            double halfWidth, double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
+        double dx = axisDistance(eyeX, x - halfWidth, x + halfWidth);
         double dy = axisDistance(eyeY, y, y + BOX_HEIGHT);
-        double dz = axisDistance(eyeZ, z - HALF_WIDTH, z + HALF_WIDTH);
+        double dz = axisDistance(eyeZ, z - halfWidth, z + halfWidth);
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
