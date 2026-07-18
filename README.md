@@ -191,16 +191,17 @@ Everything lives under `plugins/Mental/`, split by topic — each file documents
 
 | File | What it controls |
 |---|---|
-| `config.yml` | Module toggles, metrics, debug. |
+| `config.yml` | Module toggles (incl. the 1.8 &amp; Combat Test 8c ruleset), metrics, debug, anticheat. |
 | `knockback.yml` | The selected knockback profile. |
 | `profiles/` | The preset library (`legacy/` and `modern/`) — add your own here. |
 | `bundles/` | Rules bundles — apply a whole ruleset (`ct8c`, `signature`, `vanilla`) at once. |
-| `combat.yml` | Hit registration, reach, latency compensation. |
+| `hit-registration.yml` | Hit registration, the fast path, and reach validation. |
+| `latency-compensation.yml` | Ping measurement and latency correction. |
 | `combo.yml` | The combo solver family. |
-| `rules.yml` | The optional 1.8 ruleset modules. |
+| `loadout.yml` | Off-hand &amp; crafting restrictions, era hitboxes &amp; reach. |
 | `effects.yml` + `effects/presets/` | Combat effects and their presets. |
 | `pots.yml` | Splash-potion utilities. |
-| `loot.yml` | Loot protection. |
+| `drop-protection.yml` | Loot protection. |
 
 <br>
 

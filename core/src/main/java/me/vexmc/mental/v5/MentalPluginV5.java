@@ -909,12 +909,11 @@ public final class MentalPluginV5 extends JavaPlugin {
                 message -> getLogger().info(message)));
         reconciler.register(new FastPotsUnit(this::snapshot, positions));
 
-        // The Combat Test 8c scaffolding (Task B of the CT8c import). Thirteen
-        // default-OFF rule units, registered here so the reconciler converges them;
-        // wave-2 tasks C–G fill each body (each unit's javadoc names its task). As
-        // SKELETONS they assemble to nothing, so registering them is a strict
-        // zero-touch no-op — the modules default OFF and the reconciler never even
-        // calls assemble.
+        // The thirteen Combat Test 8c rule units — each a fully-implemented,
+        // default-OFF rule feature, registered here so the reconciler tracks it.
+        // Because the modules default OFF, the reconciler never calls assemble, so
+        // registering them is a strict zero-touch no-op until an operator turns the
+        // matching module on.
         reconciler.register(new WeaponSpeedUnit());
         reconciler.register(new ChargedAttackUnit());
         reconciler.register(new Ct8cSweepUnit());

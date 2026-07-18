@@ -40,8 +40,9 @@ public final class DashboardModel {
      * The home renders one centred row per group. Every {@link Family} appears in
      * exactly one row — {@code DashboardModelTest} pins that, so a new family can
      * never be silently unreachable from the home (the reachability guarantee at
-     * the home layer). The FEEDBACK and LOOT tiles open dedicated screens; the
-     * rest open the generic {@link FamilyMenu}.
+     * the home layer). Every family tile opens the generic {@link FamilyMenu};
+     * the KNOCKBACK and FEEDBACK screens additionally carry a hero row into their
+     * preset gallery.
      */
     public static List<List<Family>> homeRows() {
         return List.of(
