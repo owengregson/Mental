@@ -42,6 +42,7 @@ import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
+import me.vexmc.mental.v5.feature.cadence.Ct8cChargeView;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
@@ -87,6 +88,9 @@ public final class HitRegistrationUnit implements FeatureUnit {
     private static final double REACH_LENIENCY = 1.0;
     private static final double MAX_REACH_SQUARED =
             (VANILLA_REACH + REACH_LENIENCY) * (VANILLA_REACH + REACH_LENIENCY);
+
+    /** The CT8c §2.11 attack-targeting inflation: victim boxes under 0.9 wide widen to 0.9 (Task INT wire 2c). */
+    private static final double CT8C_TARGETING_WIDTH = 0.9;
 
     private final SessionService sessions;
     private final ConnectionDomains domains;
@@ -805,11 +809,28 @@ public final class HitRegistrationUnit implements FeatureUnit {
         // Null when the handicap is off, unsupported, or no combo is held against this
         // attacker — then ReachClamp is the byte-identical plain eye-to-box window.
         Double handicapScale = comboReachHandicapScale(attackerView);
+        // CT8c reach feed (Task INT wire 2), active only while ct8c-reach is enabled —
+        // otherwise the max reach and the inflation stay today's values, byte-identical.
+        Snapshot current = snapshot.get();
+        boolean ct8cReach = current.enabled(Feature.CT8C_REACH);
+        // (a)+(b) The gate's max reach. The netty thread cannot read the attacker's held
+        // weapon (Folia), so the gate uses the CT8c per-weapon CEILING (3.5) — the right
+        // bound for a lenient blatant-reach filter that must never over-reject a legit
+        // long-reach weapon; honest per-weapon precision is Ct8cReachUnit's client-synced
+        // interaction-range attribute. +1.0 when this attacker's last hit was ≥195% charged
+        // AND charged-attacks is on — read from the published, netty-safe Ct8cChargeView.
+        boolean chargedReach = ct8cReach
+                && current.enabled(Feature.CHARGED_ATTACKS)
+                && Ct8cChargeView.INSTANCE.chargedReach(attackerId);
+        double maxReach = ct8cReach ? Ct8cReachGate.gateReach(null, chargedReach) : reach.maxReach();
+        // (c) The 0.9 victim-AABB targeting inflation (spec §2.11); (d) through-non-solid is
+        // a no-op — this rewound validator has no line-of-sight/occluder test to relax.
+        double minVictimWidth = ct8cReach ? CT8C_TARGETING_WIDTH : 0.0;
         return ReachClamp.passes(
                 attackerPos.x(), attackerPos.y() + ReachClamp.EYE_HEIGHT, attackerPos.z(),
                 sessions.positions().samplesAround(victimId, instantNanos, 75_000_000L),
                 victimPos.x(), victimPos.y(), victimPos.z(),
-                reach.maxReach(), reach.leniency(), handicapScale);
+                maxReach, reach.leniency(), handicapScale, minVictimWidth);
     }
 
     /**

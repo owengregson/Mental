@@ -147,6 +147,29 @@ class ReachClampTest {
                 "the old eye-to-box clamp (3.01) sat above the 2.7 over-reach — the no-op the fix closes");
     }
 
+    /* ----------------------- victim-AABB inflation (CT8c §2.11, wire 2c) ----------------------- */
+
+    @Test
+    void inflatingTheVictimBoxAcceptsAPlainHitThatMissesByPointOneFour() {
+        // The CT8c targeting assist mirrors the kernel ReachValidator inflation: victim
+        // feet 3.84 out on +z, the plain 0.6-wide box faces at 3.54 (0.14 beyond the 3.4
+        // window) MISSES; inflated to 0.9 (half 0.45) the face is 3.39, inside 3.4.
+        assertFalse(ReachClamp.passes(0, EYE, 3.84, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, null),
+                "the 0.6-wide box misses by 0.14");
+        assertTrue(ReachClamp.passes(0, EYE, 3.84, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, null, 0.9),
+                "inflating the box to 0.9 lands the same hit");
+    }
+
+    @Test
+    void theInflationOverloadDefaultsToNoInflationByteIdentically() {
+        // The new width overload with 0.0 (or the native 0.6) reproduces the plain and
+        // handicap windows exactly — the zero-touch default when ct8c-reach is off.
+        assertFalse(ReachClamp.passes(0, EYE, 3.84, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, null, 0.0));
+        assertFalse(ReachClamp.passes(0, EYE, 3.84, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, null, 0.6));
+        // Handicap path unchanged at width 0.0: the 2.7 over-reach the backstop rejects.
+        assertFalse(ReachClamp.passes(0, EYE, 3.0, NO_HISTORY, 0, 0, 0, MAX_REACH, LENIENCY, 0.87, 0.0));
+    }
+
     @Test
     void handicapHonoursTheClosestRewoundCandidate() {
         // Attacker eye at the origin; the victim's live position has fled to 8 blocks

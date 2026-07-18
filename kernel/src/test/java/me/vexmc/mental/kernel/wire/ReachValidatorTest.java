@@ -71,4 +71,40 @@ class ReachValidatorTest {
                 0, EYE, 0, List.of(), 0, 0, 5, 4.5, 0.4);
         assertTrue(extended.valid());
     }
+
+    /* ------------------- victim-AABB inflation (CT8c §2.11, Task INT wire 2c) ------------------- */
+
+    @Test
+    void inflatingTheVictimBoxAcceptsAHitThatMissesByPointOneFour() {
+        // The CT8c targeting assist (spec §2.11): entities under 0.9 blocks wide are
+        // inflated to 0.9 for attack targeting. Victim feet 3.84 out on +z; the plain
+        // 0.6-wide box (half 0.3) puts the face at 3.54 — 0.14 beyond the 3.4 window,
+        // so it MISSES today. Inflated to 0.9 (half 0.45) the face is at 3.39, inside
+        // 3.4, so the same hit lands.
+        ReachValidator.Verdict plain = ReachValidator.validate(
+                0, EYE, 0, List.of(), 0, 0, 3.84, 3.0, 0.4);
+        assertFalse(plain.valid(), "the 0.6-wide box misses by 0.14 (3.54 > 3.4)");
+        assertEquals(3.54, plain.bestDistance(), 1.0e-9);
+
+        ReachValidator.Verdict inflated = ReachValidator.validate(
+                0, EYE, 0, List.of(), 0, 0, 3.84, 3.0, 0.4, 0.9);
+        assertTrue(inflated.valid(), "inflating the box to 0.9 brings the face to 3.39, inside 3.4");
+        assertEquals(3.39, inflated.bestDistance(), 1.0e-9);
+    }
+
+    @Test
+    void theInflationParameterDefaultsToNoInflationByteIdentically() {
+        // The additive overload with width 0.0 (and any width <= 0.6, the native box)
+        // is byte-identical to the pre-inflation validate — the zero-touch default.
+        ReachValidator.Verdict legacy = ReachValidator.validate(
+                0, EYE, 0, List.of(), 0, 0, 3.84, 3.0, 0.4);
+        ReachValidator.Verdict noInflation = ReachValidator.validate(
+                0, EYE, 0, List.of(), 0, 0, 3.84, 3.0, 0.4, 0.0);
+        ReachValidator.Verdict nativeWidth = ReachValidator.validate(
+                0, EYE, 0, List.of(), 0, 0, 3.84, 3.0, 0.4, 0.6);
+        assertEquals(legacy.bestDistance(), noInflation.bestDistance(), 1.0e-12);
+        assertEquals(legacy.bestDistance(), nativeWidth.bestDistance(), 1.0e-12);
+        assertEquals(legacy.valid(), noInflation.valid());
+        assertEquals(legacy.valid(), nativeWidth.valid());
+    }
 }

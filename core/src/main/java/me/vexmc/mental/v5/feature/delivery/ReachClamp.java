@@ -107,14 +107,35 @@ public final class ReachClamp {
             List<PositionRing.Sample> history,
             double liveX, double liveY, double liveZ,
             double maxReach, double leniency, Double handicapScale) {
+        // Native 0.6-wide box, no CT8c targeting inflation — byte-identical.
+        return passes(eyeX, eyeY, eyeZ, history, liveX, liveY, liveZ,
+                maxReach, leniency, handicapScale, 0.0);
+    }
+
+    /**
+     * As {@link #passes(double, double, double, List, double, double, double, double,
+     * double, Double)}, additionally inflating the victim's horizontal footprint to at
+     * least {@code minVictimWidth} before the intersect test — the CT8c §2.11 targeting
+     * assist (Task INT wire 2c), mirroring the kernel {@code ReachValidator}. A width at
+     * or below the native 0.6 leaves every box distance untouched, so both the plain and
+     * the handicap windows stay byte-identical when the assist is off. The inflation
+     * widens the eye-to-BOX terms only; the handicap eye-to-CENTRE threshold is a
+     * point distance and is unaffected (the box floor it OR-passes with does inflate).
+     */
+    public static boolean passes(
+            double eyeX, double eyeY, double eyeZ,
+            List<PositionRing.Sample> history,
+            double liveX, double liveY, double liveZ,
+            double maxReach, double leniency, Double handicapScale, double minVictimWidth) {
+        double halfWidth = Math.max(HALF_WIDTH, minVictimWidth / 2.0);
         if (handicapScale == null) {
             // Plain window: full unscaled leniency, eye-to-box — the pre-backstop shape.
             double threshold = maxReach + leniency;
-            if (distanceToBox(eyeX, eyeY, eyeZ, liveX, liveY, liveZ) <= threshold) {
+            if (distanceToBox(halfWidth, eyeX, eyeY, eyeZ, liveX, liveY, liveZ) <= threshold) {
                 return true;
             }
             for (PositionRing.Sample sample : history) {
-                if (distanceToBox(eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z()) <= threshold) {
+                if (distanceToBox(halfWidth, eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z()) <= threshold) {
                     return true;
                 }
             }
@@ -122,12 +143,13 @@ public final class ReachClamp {
         }
         double centreThreshold = handicapScale * (maxReach + leniency); // scale BOTH terms
         double boxFloor = handicapScale * maxReach;                     // the honest self-limit
-        if (handicappedCandidatePasses(centreThreshold, boxFloor, eyeX, eyeY, eyeZ, liveX, liveY, liveZ)) {
+        if (handicappedCandidatePasses(
+                centreThreshold, boxFloor, halfWidth, eyeX, eyeY, eyeZ, liveX, liveY, liveZ)) {
             return true;
         }
         for (PositionRing.Sample sample : history) {
-            if (handicappedCandidatePasses(
-                    centreThreshold, boxFloor, eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z())) {
+            if (handicappedCandidatePasses(centreThreshold, boxFloor, halfWidth,
+                    eyeX, eyeY, eyeZ, sample.x(), sample.y(), sample.z())) {
                 return true;
             }
         }
@@ -143,21 +165,28 @@ public final class ReachClamp {
      * eye-to-box by construction, passes the floor regardless of its centre inflation.
      */
     private static boolean handicappedCandidatePasses(
-            double centreThreshold, double boxFloor,
+            double centreThreshold, double boxFloor, double halfWidth,
             double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
         return distanceToCenter(eyeX, eyeY, eyeZ, x, y, z) <= centreThreshold
-                || distanceToBox(eyeX, eyeY, eyeZ, x, y, z) <= boxFloor;
+                || distanceToBox(halfWidth, eyeX, eyeY, eyeZ, x, y, z) <= boxFloor;
     }
 
     /**
-     * Eye to the closest point of the victim AABB whose feet sit at {@code (x, y, z)}
-     * — the plain shape, identical to the kernel {@code ReachValidator.distanceToBox}.
+     * Eye to the closest point of the native 0.6-wide victim AABB whose feet sit at
+     * {@code (x, y, z)} — the plain shape, identical to the kernel {@code
+     * ReachValidator.distanceToBox}.
      */
     public static double distanceToBox(
             double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
-        double dx = axisDistance(eyeX, x - HALF_WIDTH, x + HALF_WIDTH);
+        return distanceToBox(HALF_WIDTH, eyeX, eyeY, eyeZ, x, y, z);
+    }
+
+    /** Eye to the closest point of a victim AABB of the given half-width whose feet sit at {@code (x, y, z)}. */
+    public static double distanceToBox(
+            double halfWidth, double eyeX, double eyeY, double eyeZ, double x, double y, double z) {
+        double dx = axisDistance(eyeX, x - halfWidth, x + halfWidth);
         double dy = axisDistance(eyeY, y, y + BOX_HEIGHT);
-        double dz = axisDistance(eyeZ, z - HALF_WIDTH, z + HALF_WIDTH);
+        double dz = axisDistance(eyeZ, z - halfWidth, z + halfWidth);
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
