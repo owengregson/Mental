@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import me.vexmc.mental.v5.feature.Feature;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -109,5 +111,31 @@ class OverlayTest {
     void absentOverlayIsEmpty() {
         Overlay overlay = new Overlay(dataFolder.resolve("state").resolve("overrides.yml"));
         assertTrue(overlay.overrides().isEmpty());
+    }
+
+    @Test
+    void setAllWritesTheWholeBatchInOnePersistAndReadsBack() {
+        // The batch write behind Management.applyBundle: a whole ruleset's keys
+        // land in one persist, and a fresh Overlay reads every one back.
+        Overlay overlay = new Overlay(store().overridesFile());
+        Map<String, Object> batch = new LinkedHashMap<>();
+        batch.put("modules.ct8c-damage", true);
+        batch.put("modules.sword-blocking", false);
+        batch.put("knockback.profile", "ct8c");
+        overlay.setAll(batch);
+
+        Overlay reloaded = new Overlay(store().overridesFile());
+        assertEquals(true, reloaded.overrides().get("modules.ct8c-damage"));
+        assertEquals(false, reloaded.overrides().get("modules.sword-blocking"));
+        assertEquals("ct8c", reloaded.overrides().get("knockback.profile"));
+        assertEquals(3, reloaded.overrides().size());
+    }
+
+    @Test
+    void setAllOfAnEmptyBatchIsANoOpAndWritesNothing() {
+        Overlay overlay = new Overlay(store().overridesFile());
+        overlay.setAll(Map.of());
+        assertFalse(Files.isRegularFile(store().overridesFile()),
+                "an empty batch must not create the overlay file");
     }
 }
