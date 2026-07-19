@@ -45,6 +45,22 @@ final class Palette {
         return new Theme(PaneColor.ORANGE, NamedTextColor.GOLD);
     }
 
+    /**
+     * A home category's theme: each family category borrows its lead family's
+     * identity (the colour an admin lands on one click later), SYSTEM the neutral
+     * system theme. Exhaustive with no {@code default} — a new {@link Category}
+     * constant is a compile error here rather than a colourless screen.
+     */
+    static @NotNull Theme category(@NotNull Category category) {
+        return switch (category) {
+            case ENGINE -> of(Family.KNOCKBACK);
+            case RULES -> of(Family.DAMAGE);
+            case SUSTAIN -> of(Family.SUSTAIN);
+            case FEEDBACK -> of(Family.FEEDBACK);
+            case SYSTEM -> system();
+        };
+    }
+
     /** Compatibility + Debug — the neutral system theme. */
     static @NotNull Theme system() {
         return new Theme(PaneColor.LIGHT_GRAY, NamedTextColor.WHITE);

@@ -1,8 +1,12 @@
 package me.vexmc.mental.v5.feature.damage;
 
 import java.lang.reflect.Method;
+import me.vexmc.mental.kernel.delivery.HitTransaction;
 import me.vexmc.mental.kernel.math.Ct8cTables;
 import me.vexmc.mental.kernel.math.DamageTables;
+import me.vexmc.mental.kernel.model.HitSource;
+import me.vexmc.mental.v5.CombatSession;
+import me.vexmc.mental.v5.session.SessionService;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.platform.EffectiveMaterial;
@@ -14,6 +18,7 @@ import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -240,6 +245,31 @@ public final class DamageShaper {
      * riding. Sprinting does NOT exclude a legacy crit (the 1.9 exclusion is
      * post-era). Bukkit-reading; owning-thread only.
      */
+    /**
+     * Whether THIS event's damage was minted by the fast path (a {@link
+     * HitSource.Melee} transaction) — the shared per-hit gate the crit units
+     * yield on (interaction audit C2; one truth, lifted out of {@code
+     * CritFallbackUnit} when {@code Ct8cCritsUnit} needed the identical read).
+     * Player victims: the {@code DamageRouter} (LOWEST, registered before every
+     * feature unit) has already established the event's transaction from the
+     * victim session's {@code activeInbound} bracket — a packetless/NPC melee
+     * arrives as {@code Vanilla(ENTITY_ATTACK)} and reads false. Non-player
+     * victims have no session, so the fast path brackets the ATTACKER's session
+     * around its {@code damage()} call (Paper mob hits are fast-path-composed
+     * too); no bracket ⇒ a genuine vanilla {@code Player#attack} landing.
+     */
+    static boolean fastPathMinted(
+            SessionService sessions, EntityDamageByEntityEvent event, Player attacker) {
+        if (event.getEntity() instanceof Player victim) {
+            CombatSession session = sessions.sessionFor(victim.getUniqueId());
+            HitTransaction tx = session == null ? null : session.currentEventTransaction();
+            return tx != null && tx.context().source() instanceof HitSource.Melee;
+        }
+        CombatSession attackerSession = sessions.sessionFor(attacker.getUniqueId());
+        HitTransaction inbound = attackerSession == null ? null : attackerSession.activeInbound();
+        return inbound != null && inbound.context().source() instanceof HitSource.Melee;
+    }
+
     public static boolean isLegacyCritical(Player attacker) {
         // CritPosture.climbing / .inWater, not Player#isClimbing()/isInWater(): those Bukkit accessors floor
         // at 1.17 and 1.16 respectively (isClimbing absent on EVERY legacy revision), so a direct call

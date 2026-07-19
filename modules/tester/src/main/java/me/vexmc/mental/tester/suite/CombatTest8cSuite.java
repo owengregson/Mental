@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import me.vexmc.mental.kernel.math.DamageTables;
 import me.vexmc.mental.platform.Attributes;
 import me.vexmc.mental.platform.CleavingHandle;
 import me.vexmc.mental.platform.CleavingRegistrar;
@@ -74,6 +75,8 @@ public final class CombatTest8cSuite {
         return List.of(
                 new TestCase("ct8c: charged-attacks denies a sub-charge follow-up hit", context ->
                         runChargeGate(mental, tester, context)),
+                new TestCase("ct8c: the canonical non-sprint jump crit lands the flat 1.5", context ->
+                        runCritComposition(mental, tester, context)),
                 new TestCase("ct8c: weapon damage table composes through the DamageShaper seam", context ->
                         runDamageTable(mental, tester, context)),
                 new TestCase("ct8c: the i-frame window scales with the attacker's weapon speed", context ->
@@ -284,6 +287,82 @@ public final class CombatTest8cSuite {
     }
 
     /* ------------------------------------------------------------------ */
+    /*  2b. ct8c-crits — the canonical non-sprint jump crit lands ×1.5      */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The CT8c flat ×1.5 crit on the canonical NON-sprint jump crit (spec §2.3)
+     * — the exact hit the shipped v2.9.0 guard inverted (it yielded on charged
+     * non-sprint posture on the false premise that vanilla's crit was still in
+     * BASE, after {@code Ct8cDamageUnit} had overwritten BASE crit-free; only
+     * sprint crits ×1.5'd). Both bundle units are enabled together, the attacker
+     * is staged falling in the same tick as the swing (teleport up un-grounds,
+     * {@code setFallDistance} arms the posture — the whole {@code
+     * isLegacyCritical} read), and the BASE the captor reads must be the table
+     * value × the kernel crit multiplier: diamond sword 6 → 9.
+     */
+    private static void runCritComposition(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            setFeature(mental, context, Feature.CT8C_DAMAGE, true);
+            setFeature(mental, context, Feature.CT8C_CRITS, true);
+            context.expect(mental.featureActive(Feature.CT8C_CRITS), "ct8c-crits did not converge active");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+            });
+            context.awaitTicks(5);
+
+            double expected = context.sync(() -> {
+                ItemStack sword = new ItemStack(Material.DIAMOND_SWORD);
+                attacker.player().getInventory().setItemInMainHand(sword);
+                return DamageShaper.ct8cToolBase(sword) * DamageTables.critMultiplier();
+            });
+            context.awaitTicks(2);
+            captors.reset();
+            // Posture-anchored staging (the clientless-fake rule): lift the fake
+            // well off the floor and arm the fall, then swing only once the WHOLE
+            // isLegacyCritical read is OBSERVED true — a same-tick teleport does
+            // not clear onGround on every legacy revision (its entity tick does,
+            // one tick into the fall), so a fixed-tick swing lands grounded there
+            // and the case would fail vacuously. Not sprinting — the very case
+            // the old guard lost. 2.5 blocks buys ~10 falling ticks of margin.
+            context.syncRun(() -> {
+                Player raw = attacker.player();
+                raw.teleport(raw.getLocation().add(0, 2.5, 0));
+                raw.setFallDistance(1.0f);
+            });
+            context.awaitUntil(() -> DamageShaper.isLegacyCritical(attacker.player()), 20,
+                    "the staged fall to be observed as the legacy crit posture");
+            context.syncRun(() -> {
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+            });
+            context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40,
+                    "the jump-crit hit to land");
+            Double base = captors.damageOf(victim.uuid());
+            context.expect(base != null, "the jump-crit hit produced no damage event");
+            context.expectNear(expected, base, DAMAGE_EPSILON,
+                    "the canonical non-sprint jump crit must land the CT8c base × the flat 1.5 "
+                            + "(Ct8cDamageUnit composes crit-free at LOWEST; Ct8cCritsUnit applies at LOW)");
+        } finally {
+            setFeature(mental, context, Feature.CT8C_CRITS, false);
+            setFeature(mental, context, Feature.CT8C_DAMAGE, false);
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  3. ct8c-iframes — the window scales with the attacker's weapon      */
     /* ------------------------------------------------------------------ */
 
@@ -313,6 +392,8 @@ public final class CombatTest8cSuite {
             });
             context.awaitTicks(5);
 
+            int vanillaWindow = context.sync(() -> victim.player().getMaximumNoDamageTicks());
+
             int swordWindow = assertIframeWindow(context, captors, attacker, victim,
                     new ItemStack(Material.DIAMOND_SWORD), Ct8cIframesUnit.iframeTicks(4.5), "diamond sword");
             int axeWindow = assertIframeWindow(context, captors, attacker, victim,
@@ -320,6 +401,17 @@ public final class CombatTest8cSuite {
             context.expect(swordWindow != axeWindow,
                     "the i-frame window must SCALE with weapon speed (sword " + swordWindow
                             + " == axe " + axeWindow + ")");
+
+            // The v2.9.0 leak regression pin: maximumNoDamageTicks is a PERSISTENT
+            // entity field, so the unit must hand the vanilla window back once the
+            // shaped window drains — otherwise one hit leaves the victim taking
+            // fire/cactus/drowning damage on a 7–10 (or, post-projectile, 0) tick
+            // cycle forever. The drain-time restore re-checks while a window is
+            // live, so poll a little past the axe window.
+            context.awaitUntil(() -> victim.player().getMaximumNoDamageTicks() == vanillaWindow,
+                    axeWindow + 20,
+                    "the shaped i-frame window to restore to the vanilla "
+                            + vanillaWindow + " once drained");
         } finally {
             setFeature(mental, context, Feature.CT8C_IFRAMES, false);
             context.syncRun(() -> {
@@ -725,11 +817,13 @@ public final class CombatTest8cSuite {
      * The CT8c Cleaving enchant (spec §2.9/§5). Enabling the feature runs the
      * platform {@link CleavingRegistrar} once. Below its ~1.21.3 registry floor the
      * handle is empty and both consumers fold Cleaving as level 0 — the documented
-     * gap; asserted here as an empty handle. At/above the floor the guarded
-     * best-effort injection is UNVALIDATED against a cached live jar, so the honest
-     * contract is: WHERE a handle is installed, {@link CleavingHandle#levelOf} reads
-     * an enchanted axe (and 0 off a plain one); where the modern shape did not
-     * resolve, a loud {@code note} (spec §5). The feature enables cleanly either way.
+     * gap; asserted here as an empty handle. At/above the floor the registry chain
+     * is javap-pinned against the live 1.21.4 AND 26.1.2 jars (including the
+     * year-scheme {@code Identifier} spelling), so the handle is now a HARD
+     * expectation — an empty handle at the floor is the exact green-but-unproven
+     * soft spot the v2.9.0 gate shipped with, and it fails loudly here instead of
+     * degrading to a note. Where installed, {@link CleavingHandle#levelOf} must
+     * read an enchanted axe (and 0 off a plain one).
      */
     private static void runCleaving(MentalPluginV5 mental, TestContext context) throws Exception {
         try {
@@ -748,10 +842,12 @@ public final class CombatTest8cSuite {
                 return;
             }
 
+            context.expect(handle.isPresent(),
+                    "the Cleaving injection must land at/above the ~1.21.3 floor — the chain is javap-pinned "
+                            + "on 1.21.4 and 26.1.2, so an empty handle here is a real regression ("
+                            + CleavingRegistrar.describe() + ")");
             if (handle.isEmpty()) {
-                context.note("the guarded best-effort Cleaving injection did not land on this modern shape ("
-                        + CleavingRegistrar.describe() + ") — a documented, unvalidated-write gap (spec §5)");
-                return;
+                return; // the expect above already recorded the failure
             }
 
             // Installed: the handle must read a Cleaving-enchanted axe and 0 off a plain one.
@@ -759,10 +855,11 @@ public final class CombatTest8cSuite {
             context.expect(live.levelOf(new ItemStack(Material.DIAMOND_AXE)) == 0,
                     "a plain axe must read Cleaving level 0");
             Enchantment cleaving = resolveCleaving();
+            context.expect(cleaving != null,
+                    "the mental:cleaving Bukkit enchant must resolve via getByKey once the handle is installed — "
+                            + "install() itself resolved it that way (" + CleavingRegistrar.describe() + ")");
             if (cleaving == null) {
-                context.note("the mental:cleaving Bukkit enchant did not resolve for staging — the handle is "
-                        + "installed (" + CleavingRegistrar.describe() + ") but the level read cannot be staged here");
-                return;
+                return; // the expect above already recorded the failure
             }
             int level = context.sync(() -> {
                 ItemStack axe = new ItemStack(Material.DIAMOND_AXE);

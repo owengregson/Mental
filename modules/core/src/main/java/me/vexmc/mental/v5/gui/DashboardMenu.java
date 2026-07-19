@@ -14,32 +14,30 @@ import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * The management home screen and single GUI entry point. A live status plate, one
- * navigation tile per dashboard {@link Family} section, the always-on
- * compatibility and debug screens, and the global actions (reload, close).
+ * The management home screen and single GUI entry point — deliberately five
+ * tiles, no more. A live status plate up top, the five {@link Category} tiles in
+ * the centre (three over two, from {@link DashboardModel#categoryRows()}), and
+ * exactly two flanking buttons beside the lower row: Combat Presets on the left,
+ * Close on the right. Everything else the home used to carry (ten family tiles,
+ * compatibility, debug, reload) moved one level down into the category screens.
  *
- * <p>The section tiles come straight from {@link DashboardModel#sections()} —
- * <em>the catalog is the descriptor registry</em>, so adding a new {@link
- * Feature} (in an existing family) or a new {@code Family} surfaces here with no
- * edit to this class. Each section opens the generic {@link FamilyMenu}; the
- * knockback family's screen additionally carries the global profile picker.</p>
+ * <p>The categories come straight from {@link DashboardModel#categoryRows()} and
+ * each opens its {@link CategoryMenu} — <em>the catalog is the descriptor
+ * registry</em>, so a new {@link Feature} (in an existing family) surfaces with
+ * no edit to any GUI class, and {@code DashboardModelTest} pins that every
+ * {@link Family} stays reachable through exactly one category.</p>
  */
 public final class DashboardMenu extends Menu {
 
     /** The status plate's slot — row 0, centred. */
     private static final int STATUS_SLOT = 4;
 
-    /** The first-slot of each of the three grouped family rows (rows 1–3). */
-    private static final int[] FAMILY_ROW_BASES = {9, 18, 27};
+    /** The two centre category rows' base slots (rows 1 and 2). */
+    private static final int[] CATEGORY_ROW_BASES = {9, 18};
 
-    /** Row-4 nav tiles (combat presets / compatibility / debug), aligned above reload / close. */
-    private static final int PRESETS_SLOT = 37;
-    private static final int COMPAT_SLOT = 39;
-    private static final int DEBUG_SLOT = 41;
-
-    /** Row-5 global actions, mirrored around the centre column. */
-    private static final int RELOAD_SLOT = 48;
-    private static final int CLOSE_SLOT = 50;
+    /** The two flanking buttons — the lower category row's frame edges. */
+    private static final int PRESETS_SLOT = 18;
+    private static final int CLOSE_SLOT = 26;
 
     public DashboardMenu(@NotNull MenuContext ctx) {
         super(ctx);
@@ -52,7 +50,7 @@ public final class DashboardMenu extends Menu {
 
     @Override
     protected int rows() {
-        return 6;
+        return 4;
     }
 
     @Override
@@ -60,45 +58,24 @@ public final class DashboardMenu extends Menu {
         paintChrome(Palette.home().pane());
         set(STATUS_SLOT, statusPlate());
 
-        drawFamilyRows(viewer);
+        List<List<Category>> rows = DashboardModel.categoryRows();
+        for (int r = 0; r < rows.size() && r < CATEGORY_ROW_BASES.length; r++) {
+            List<Category> row = rows.get(r);
+            int[] slots = Layout.contentRow(CATEGORY_ROW_BASES[r], row.size());
+            for (int i = 0; i < slots.length; i++) {
+                Category category = row.get(i);
+                set(slots[i], categoryTile(category),
+                        click -> navigate(viewer, new CategoryMenu(ctx, category)));
+            }
+        }
 
-        set(PRESETS_SLOT, Buttons.nav("CHEST", "Combat Presets",
-                "Apply a whole ruleset at once — CT8c, the classic 1.7 feel, or vanilla."),
+        set(PRESETS_SLOT, presetsButton(),
                 click -> navigate(viewer, new CombatPresetsMenu(ctx)));
-        set(COMPAT_SLOT, Buttons.nav("COMPASS", "Compatibility",
-                "Anticheat posture — how Mental yields to a prediction anticheat."),
-                click -> navigate(viewer, new CompatibilityMenu(ctx)));
-        set(DEBUG_SLOT, Buttons.nav("REPEATER", "Debug",
-                "Verbose logging channels, streamed to console or your own chat."),
-                click -> navigate(viewer, new DebugMenu(ctx)));
-
-        set(RELOAD_SLOT, reloadButton(), click -> apply(viewer, () -> ctx.management().reload()));
         set(CLOSE_SLOT, closeButton(), click -> viewer.closeInventory());
     }
 
     /**
-     * Renders the family tiles grouped into centred rows off
-     * {@link DashboardModel#homeRows()} — the engine, the era rules, then the
-     * cosmetic/loot pair. Every tile opens the generic {@link FamilyMenu} for its
-     * family (the KNOCKBACK and FEEDBACK screens carry their preset-gallery hero
-     * there); adding a family means adding it to a home row (pinned by
-     * {@code DashboardModelTest}).
-     */
-    private void drawFamilyRows(@NotNull Player viewer) {
-        List<List<Family>> rows = DashboardModel.homeRows();
-        for (int r = 0; r < rows.size() && r < FAMILY_ROW_BASES.length; r++) {
-            List<Tile> tiles = new ArrayList<>();
-            for (Family family : rows.get(r)) {
-                tiles.add(Tile.of(
-                        Buttons.nav(family.iconName(), family.displayName(), family.blurb()),
-                        click -> navigate(viewer, new FamilyMenu(ctx, family))));
-            }
-            placeCentered(FAMILY_ROW_BASES[r], tiles);
-        }
-    }
-
-    /**
-     * Boot self-test seam: the dashboard's load-bearing icons rendered to
+     * Boot self-test seam: the home's load-bearing icons rendered to
      * {@link ItemStack}s with no viewer and no scheduler hop. Every one runs the
      * {@link Icon} → {@code TextPort} → {@code setDisplayName}/{@code setLore(String)}
      * sink path, so the tester (which cannot itself reference the relocated
@@ -106,7 +83,40 @@ public final class DashboardMenu extends Menu {
      * a method whose signature is pure Bukkit. Returns only Bukkit types.
      */
     public @NotNull List<ItemStack> selfTestIcons() {
-        return List.of(statusPlate(), reloadButton(), closeButton());
+        List<ItemStack> icons = new ArrayList<>();
+        icons.add(statusPlate());
+        for (Category category : Category.values()) {
+            icons.add(categoryTile(category));
+        }
+        icons.add(presetsButton());
+        icons.add(closeButton());
+        return icons;
+    }
+
+    /** A category's home tile: its blurb, its section list, and the open hint. */
+    private @NotNull ItemStack categoryTile(@NotNull Category category) {
+        Icon tile = Buttons.title(category.iconName(), category.displayName(),
+                Palette.category(category).accent());
+        Buttons.wrap(category.blurb()).forEach(line -> tile.lore(line, Brand.MUTED));
+        tile.blank();
+        tile.lore(Buttons.kv("Sections", sectionList(category), Palette.category(category).accent()));
+        tile.lore(Component.text("▸ Click to open", Brand.SECONDARY));
+        return tile.build();
+    }
+
+    /** The tile's one-line contents preview — family names, or the system trio. */
+    private static @NotNull String sectionList(@NotNull Category category) {
+        if (category == Category.SYSTEM) {
+            return "Compatibility · Debug · Reload";
+        }
+        StringBuilder names = new StringBuilder();
+        for (Family family : category.families()) {
+            if (names.length() > 0) {
+                names.append(" · ");
+            }
+            names.append(family.displayName());
+        }
+        return names.toString();
     }
 
     private @NotNull ItemStack statusPlate() {
@@ -136,13 +146,9 @@ public final class DashboardMenu extends Menu {
         return plate.build();
     }
 
-    private @NotNull ItemStack reloadButton() {
-        return Buttons.title("LIME_DYE", "Reload configuration", Brand.SUCCESS)
-                .lore("Re-read every file and converge modules.", Brand.MUTED)
-                .lore("Applied atomically — no hit reads a half-config.", Brand.MUTED)
-                .blank()
-                .lore(Component.text("▸ Click to reload", Brand.SECONDARY))
-                .build();
+    private @NotNull ItemStack presetsButton() {
+        return Buttons.nav("CHEST", "Combat Presets",
+                "Apply a whole ruleset at once — CT8c, the classic 1.7 feel, or vanilla.");
     }
 
     private @NotNull ItemStack closeButton() {

@@ -169,7 +169,9 @@ The full pipeline, edge cases included: [project/docs/fast-path.md](project/docs
 2.9.0 with a colour-coded screen per feature family, on chrome that renders in full colour
 right down to 1.9.4:
 
-- **Dashboard** — every feature family at a glance, plus Combat Presets, compatibility and debug.
+- **Dashboard** — a five-tile home: Combat Engine, Era Rules, Sustain & Potions, Effects & Loot,
+  and Server & Diagnostics, flanked by Combat Presets and Close. Each tile opens its category's
+  sections, so every family stays two clicks away without the wall of buttons.
 - **Family screens** — flip any module live; right-click a module to open its settings screen and
   tune it in-game (left/right to step a value, Q to reset it to the file default).
 - **Preset Gallery** — browse and apply knockback profiles (legacy/modern tabs) and combat-effects

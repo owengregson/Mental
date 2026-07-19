@@ -2,9 +2,6 @@ package me.vexmc.mental.v5.feature.damage;
 
 import java.util.function.Supplier;
 import me.vexmc.mental.platform.CritPosture;
-import me.vexmc.mental.kernel.delivery.HitTransaction;
-import me.vexmc.mental.kernel.model.HitSource;
-import me.vexmc.mental.v5.CombatSession;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
@@ -63,7 +60,7 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
         // truth is the session transaction slots the fast path brackets its
         // damage() calls with — never the global config knob, whose coverage is
         // per-hit in reality.
-        if (fastPathMinted(event, attacker)) {
+        if (DamageShaper.fastPathMinted(sessions, event, attacker)) {
             return;
         }
         // Era crit posture (shared predicate with the fast path). Sprinting does
@@ -97,25 +94,4 @@ public final class CritFallbackUnit implements FeatureUnit, Listener {
         }
     }
 
-    /**
-     * Whether THIS event's damage was minted by the fast path (a {@link
-     * HitSource.Melee} transaction). Player victims: the {@code DamageRouter}
-     * (LOWEST, registered before every feature unit) has already established the
-     * event's transaction from the victim session's {@code activeInbound} bracket
-     * — a packetless/NPC melee arrives as {@code Vanilla(ENTITY_ATTACK)} and
-     * falls through to the era fold. Non-player victims have no session, so the
-     * fast path brackets the ATTACKER's session around its {@code damage()} call
-     * (Paper mob hits are fast-path-composed too); no bracket ⇒ a genuine
-     * vanilla {@code Player#attack} landing ⇒ the era crit applies.
-     */
-    private boolean fastPathMinted(EntityDamageByEntityEvent event, Player attacker) {
-        if (event.getEntity() instanceof Player victim) {
-            CombatSession session = sessions.sessionFor(victim.getUniqueId());
-            HitTransaction tx = session == null ? null : session.currentEventTransaction();
-            return tx != null && tx.context().source() instanceof HitSource.Melee;
-        }
-        CombatSession attackerSession = sessions.sessionFor(attacker.getUniqueId());
-        HitTransaction inbound = attackerSession == null ? null : attackerSession.activeInbound();
-        return inbound != null && inbound.context().source() instanceof HitSource.Melee;
-    }
 }

@@ -274,8 +274,10 @@ modules:
   # whichever knockback profile is active. Tune it in combo.yml.
   #
   # This is Mental's own novel mechanic (no community precedent), so it is strictly
-  # server-opt-in: it defaults OFF and no bundled config pre-enables it. Field-judge
-  # the feel before trusting it in production. Default OFF (era-exact no-op).
+  # server-opt-in: it defaults OFF, and the only shipped thing that turns it on is
+  # the "signature" rules bundle — an explicit operator-applied macro, never a
+  # default. Field-judge the feel before trusting it in production. Default OFF
+  # (era-exact no-op).
   combo-hold: false
   # combo-reach-handicap: while a victim is held in a combo, scale DOWN their
   # entity-interaction-range attribute so their own client raycast shortens and they

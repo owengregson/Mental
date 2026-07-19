@@ -18,6 +18,33 @@ import org.junit.jupiter.api.Test;
  */
 class CleavingRegistrarTest {
 
+    /**
+     * The four component accessors + canonical constructor of the modern
+     * {@code Enchantment} record shape, mirrored locally — the copy must be a
+     * DISTINCT instance (the registry's {@code byValue}/{@code toId} maps are
+     * identity-keyed and {@code register} throws on a duplicate value) carrying
+     * equal components.
+     */
+    public record EnchantmentShaped(String description, int definition, List<String> exclusiveSet, Object effects) {}
+
+    @Test
+    void copyTemplateBuildsADistinctInstanceWithEqualComponents() {
+        EnchantmentShaped template = new EnchantmentShaped("Cleaving", 3, List.of("mental"), new Object());
+        Object copy = CleavingRegistrar.copyTemplate(template);
+
+        assertTrue(copy instanceof EnchantmentShaped, "the copy re-enters the template's own type, was " + copy);
+        assertTrue(copy != template, "the copy must be a distinct instance — identity-keyed registry maps");
+        assertTrue(template.equals(copy), "the copy carries the template's exact components");
+    }
+
+    @Test
+    void copyTemplateDegradesToNullOffThePreRecordShape() {
+        // Below 1.21 Enchantment is a plain class without the record accessors —
+        // the probe must miss and return null (the floor gate), never throw.
+        assertTrue(CleavingRegistrar.copyTemplate(new Object()) == null,
+                "a shape without the pinned accessors degrades to null");
+    }
+
     @Test
     void degradesLoudAndEmptyWithoutALiveRegistry() {
         List<String> lines = new ArrayList<>();

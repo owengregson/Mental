@@ -110,8 +110,9 @@ public final class FamilyMenu extends Menu {
                     click -> navigate(viewer, new PresetGalleryMenu(ctx, kind)));
         }
         int backRow = 1 + contentRows + (hasHero(family) ? 1 : 0);
-        set(backRow * 9 + 4, Buttons.back("the Dashboard"),
-                click -> navigate(viewer, new DashboardMenu(ctx)));
+        Category parent = Category.of(family);
+        set(backRow * 9 + 4, Buttons.back(parent.displayName()),
+                click -> navigate(viewer, new CategoryMenu(ctx, parent)));
     }
 
     /**
@@ -128,7 +129,7 @@ public final class FamilyMenu extends Menu {
         if (hasHero(family)) {
             icons.add(heroTile(heroKind(), ctx.plugin().snapshot()));
         }
-        icons.add(Buttons.back("the Dashboard"));
+        icons.add(Buttons.back(Category.of(family).displayName()));
         return icons;
     }
 

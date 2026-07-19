@@ -74,6 +74,32 @@ class LayoutTest {
     }
 
     @Test
+    void homeAndCategoryScreensLayOutWithinTheFrame() {
+        // The five-tile home: each category row must be a legal content row, and
+        // the lower row's two tiles (contentRow(18,2) → 21,23) must never collide
+        // with the flanking Presets/Close buttons on the frame edges (18 and 26).
+        for (var row : DashboardModel.categoryRows()) {
+            assertTrue(row.size() <= 7, "a home category row overflows the frame");
+        }
+        int[] lower = Layout.contentRow(18, DashboardModel.categoryRows().get(1).size());
+        for (int slot : lower) {
+            assertTrue(slot != 18 && slot != 26,
+                    "a lower-row category tile lands on a flanking button slot");
+        }
+        // Each CategoryMenu renders its tiles on one content row: at most three
+        // (SYSTEM's fixed trio, or the category's families).
+        for (Category category : Category.values()) {
+            int tiles = category == Category.SYSTEM ? 3 : category.families().size();
+            assertTrue(tiles >= 2 && tiles <= 7,
+                    category + " renders " + tiles + " tiles — outside the one-row screen shape");
+            int base = 9;
+            int count = tiles;
+            assertDoesNotThrow(() -> Layout.contentRow(base, count),
+                    () -> category + " content row overflows with " + count + " tiles");
+        }
+    }
+
+    @Test
     void galleryGridIsTheThreeSevenWideRows() {
         assertArrayEquals(new int[] {
                 10, 11, 12, 13, 14, 15, 16,
