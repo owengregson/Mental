@@ -46,12 +46,13 @@ public final class Ct8cRegen {
     /**
      * Whether an incoming hit interrupts an in-progress eat/drink (spec §2.7,
      * returned in CT8b and ON in 8c). Only a hit <b>by a player or a mob</b>
-     * interrupts — a living damager — and only while the victim is actually using
-     * an item ({@code handRaised}); projectiles, environmental damage and blocks
-     * never interrupt. Both are read at the seam by the caller
-     * ({@code HandStates.isHandRaised}, {@code damager instanceof LivingEntity}).
+     * interrupts — a living damager — and only while the victim is actually
+     * EATING or DRINKING ({@code consuming}); a raised shield, a drawn bow,
+     * projectiles, environmental damage and blocks never interrupt. Both are read
+     * at the seam by the caller (the item-in-use consumable check, {@code damager
+     * instanceof LivingEntity}).
      */
-    public static boolean interruptsConsume(boolean handRaised, boolean damagerIsLiving) {
-        return handRaised && damagerIsLiving;
+    public static boolean interruptsConsume(boolean consuming, boolean damagerIsLiving) {
+        return consuming && damagerIsLiving;
     }
 }
