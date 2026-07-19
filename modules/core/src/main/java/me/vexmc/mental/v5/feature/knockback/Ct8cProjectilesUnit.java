@@ -180,10 +180,16 @@ public final class Ct8cProjectilesUnit implements FeatureUnit, Listener {
     }
 
     /**
-     * A bow shot released after a &gt;3s draw is fatigued: it cannot be a critical
-     * arrow and its launch direction spreads by 0.25 inaccuracy (§2.10). MONITOR
-     * so any cancellation / bow-swap decision has already settled; we only reshape
-     * the projectile that actually launched.
+     * Reshapes a released bow shot to CT8c's ranged accuracy (§2.10, decompile-
+     * confirmed against {@code BowItem.releaseUsing}). CT8c cut vanilla's base
+     * inaccuracy from {@code 1.0} to {@code 0.25 · getFatigueForTime(t)}: even a
+     * fresh full draw carries a small {@code 0.125} spread, and past ~3s (60
+     * ticks) held the fatigue ramps the spread up to {@code 2.625} while stripping
+     * the critical arrow. We rebuild the launch from the shooter's CLEAN look
+     * direction (not the already-spread projectile velocity) so 8c's spread
+     * <em>replaces</em> vanilla's {@code 1.0} rather than compounding on it; the
+     * launch speed is taken from the projectile vanilla already computed
+     * ({@code power · 3}). MONITOR so any cancellation / bow-swap has settled.
      */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onShootBow(EntityShootBowEvent event) {
@@ -195,18 +201,21 @@ public final class Ct8cProjectilesUnit implements FeatureUnit, Listener {
             return; // bows only — a crossbow's fixed load is not the held-draw fatigue mechanic
         }
         Long start = drawStart.remove(shooter.getUniqueId());
-        if (start == null || !Ct8cProjectilePolicy.fatigued(System.nanoTime() - start)) {
-            return;
-        }
+        int drawTicks = start != null
+                ? Ct8cProjectilePolicy.ticksHeld(System.nanoTime() - start)
+                : Ct8cProjectilePolicy.UNKNOWN_DRAW_TICKS;
         Entity projectile = event.getProjectile();
         // Body reference only (never a descriptor): Arrow is 1.9-universal, so this links on every version.
-        if (projectile instanceof Arrow arrow) {
+        // 8c sets crit only at full power within the first 60 ticks; a fatigued draw loses it.
+        if (projectile instanceof Arrow arrow && !Ct8cProjectilePolicy.critAllowed(drawTicks)) {
             arrow.setCritical(false);
         }
-        Vector velocity = projectile.getVelocity();
+        double speed = projectile.getVelocity().length();
+        Vector aim = shooter.getEyeLocation().getDirection();
+        double inaccuracy = Ct8cProjectilePolicy.inaccuracyForTime(drawTicks);
         ThreadLocalRandom random = ThreadLocalRandom.current();
         double[] spread = Ct8cProjectilePolicy.applySpread(
-                velocity.getX(), velocity.getY(), velocity.getZ(),
+                aim.getX(), aim.getY(), aim.getZ(), speed, inaccuracy,
                 random.nextGaussian(), random.nextGaussian(), random.nextGaussian());
         projectile.setVelocity(new Vector(spread[0], spread[1], spread[2]));
     }

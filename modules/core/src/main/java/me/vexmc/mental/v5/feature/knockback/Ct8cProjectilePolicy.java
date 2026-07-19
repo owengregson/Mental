@@ -35,35 +35,84 @@ final class Ct8cProjectilePolicy {
     static final double FULL_KNOCK_STRENGTH = 0.4;
 
     /**
-     * The inaccuracy a fatigued bow shot suffers (§2.10 — "Base/crossbow
-     * inaccuracy 0.25"). A non-fatigued player shot is perfectly accurate; past
-     * the fatigue threshold the shot spreads by this factor.
+     * CT8c's base bow-inaccuracy factor — the {@code 0.25} the snapshot cut
+     * vanilla's ranged spread down to (vanilla bows shoot at inaccuracy 1.0).
+     * The value fed to {@code Projectile.shoot} is {@code BASE_INACCURACY ·
+     * fatigue}, so even a fresh, unfatigued draw carries a small {@code 0.125}
+     * spread — never the perfectly-straight shot vanilla plugins assume.
+     *
+     * <p>Decompile-confirmed against {@code BowItem.releaseUsing}
+     * ({@code arrow.shootFromRotation(…, power·3, 0.25F · getFatigueForTime(t))}).</p>
      */
-    static final double SPREAD_INACCURACY = 0.25;
+    static final double BASE_INACCURACY = 0.25;
 
     /**
-     * The bow-fatigue threshold in nanoseconds (§2.10 — "accuracy decay only
-     * after 3 seconds held"). A draw held strictly longer than this cannot be a
-     * critical arrow and takes the {@link #SPREAD_INACCURACY} spread.
+     * Vanilla {@code Projectile.shoot}'s per-inaccuracy gaussian coefficient —
+     * {@code 0.0075F}, read directly from the {@code 1_16_combat-6} decompile
+     * ({@code .add(random.nextGaussian() * 0.0075F * inaccuracy, …)}). This is
+     * the true coefficient the launch spread multiplies the sampled gaussian by;
+     * the pre-2.9 {@code 0.0172275} constant was wrong.
      */
-    static final long FATIGUE_NANOS = 3_000_000_000L;
+    static final double SHOOT_SPREAD_COEFF = 0.0075;
+
+    /** Nanoseconds per server tick — the bow draw is a tick count in 8c ({@code useDuration − remaining}). */
+    static final long NANOS_PER_TICK = 50_000_000L;
 
     /**
-     * Vanilla's per-inaccuracy-unit spread coefficient (the {@code
-     * 0.0172275·inaccuracy} term of {@code Projectile.shoot}). Multiplied by
-     * {@link #SPREAD_INACCURACY} it gives the per-sample perturbation a fatigued
-     * shot's direction receives before rescaling to the original speed.
+     * The draw length assumed when the right-click stamp is missing (a shot that
+     * reached {@code EntityShootBowEvent} without our interact stamp): a full,
+     * unfatigued draw — {@code fatigue 0.5}, {@code power 1.0} — so we never
+     * strip a legitimate crit nor over-spread a real aimed shot.
      */
-    private static final double INACCURACY_UNIT = 0.0172275;
+    static final int UNKNOWN_DRAW_TICKS = 20;
 
-    /** A horizontal aim below this length is treated as a straight up/down shot (no momentum to project). */
+    /** A vector below this length is treated as degenerate (no aim / no speed). */
     private static final double AIM_EPSILON = 1.0e-8;
 
     private Ct8cProjectilePolicy() {}
 
-    /** Whether a bow draw held for {@code drawNanos} nanoseconds is fatigued (strictly past 3 seconds). */
-    static boolean fatigued(long drawNanos) {
-        return drawNanos > FATIGUE_NANOS;
+    /** The whole-tick draw length a {@code drawNanos}-nanosecond hold represents (8c measures the draw in ticks). */
+    static int ticksHeld(long drawNanos) {
+        return (int) (drawNanos / NANOS_PER_TICK);
+    }
+
+    /**
+     * CT8c {@code BowItem.getPowerForTime}: {@code f = t/20}; {@code f =
+     * (f² + 2f)/3}; clamp to {@code 1.0}. The draw power that scales the launch
+     * speed ({@code power · 3}) and gates the critical arrow.
+     */
+    static float powerForTime(int ticks) {
+        float f = ticks / 20.0f;
+        f = (f * f + f * 2.0f) / 3.0f;
+        return f > 1.0f ? 1.0f : f;
+    }
+
+    /**
+     * CT8c {@code BowItem.getFatigueForTime}: {@code t < 60 → 0.5}; {@code t ≥
+     * 200 → 10.5}; else a linear ramp {@code 0.5 + 10·(t−60)/140}. This is the
+     * multiplier on {@link #BASE_INACCURACY} — a ramp, not the pre-2.9 step
+     * function (which shipped zero spread below 3s and a flat 0.25 above it).
+     */
+    static float fatigueForTime(int ticks) {
+        if (ticks < 60) {
+            return 0.5f;
+        }
+        return ticks >= 200 ? 10.5f : 0.5f + 10.0f * (ticks - 60) / 140.0f;
+    }
+
+    /** The inaccuracy CT8c feeds {@code Projectile.shoot}: {@link #BASE_INACCURACY} · {@link #fatigueForTime}. */
+    static double inaccuracyForTime(int ticks) {
+        return BASE_INACCURACY * fatigueForTime(ticks);
+    }
+
+    /**
+     * Whether the arrow stays critical: CT8c sets the crit flag only for a
+     * full-power, unfatigued draw ({@code power == 1.0F && fatigue <= 0.5F},
+     * i.e. drawn to full within the first 60 ticks). Past 60 ticks the ramp
+     * lifts fatigue above 0.5 and the shot can no longer crit.
+     */
+    static boolean critAllowed(int ticks) {
+        return powerForTime(ticks) >= 1.0f && fatigueForTime(ticks) <= 0.5f;
     }
 
     /**
@@ -101,23 +150,31 @@ final class Ct8cProjectilePolicy {
     }
 
     /**
-     * Perturbs a launch velocity by CT8c's fatigued-shot inaccuracy (§2.10),
-     * mirroring vanilla's {@code Projectile.shoot} spread: normalise, add
-     * {@code INACCURACY_UNIT · SPREAD_INACCURACY · sample} per axis, then rescale
-     * to the original speed. The random samples are passed in so the transform is
-     * deterministic and unit-pinnable (the shell feeds {@code Random#nextGaussian}).
+     * CT8c {@code Projectile.shoot}'s launch spread from a <em>clean</em> aim:
+     * normalise the aim, add {@link #SHOOT_SPREAD_COEFF} {@code · inaccuracy ·
+     * sample} per axis, then scale by the launch speed — exactly
+     * {@code new Vec3(aim).normalize().add(0.0075·inaccuracy·gaussian, …).scale(speed)}.
      *
-     * @return {@code {x, y, z}} — the perturbed launch velocity (zero if the input was zero).
+     * <p>The aim is the shooter's clean look direction (not the already-spread
+     * projectile velocity), so this <em>replaces</em> vanilla's inaccuracy-1.0
+     * spread with 8c's {@code 0.25 · fatigue} rather than compounding on top of
+     * it. The samples are passed in so the transform is deterministic and
+     * unit-pinnable (the shell feeds {@code Random#nextGaussian}). {@code speed}
+     * is the projectile's launch magnitude (vanilla {@code power · 3}).</p>
+     *
+     * @return {@code {x, y, z}} — the spread launch velocity (zero if aim or speed is degenerate).
      */
-    static double[] applySpread(double vx, double vy, double vz, double sampleX, double sampleY, double sampleZ) {
-        double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
-        if (speed < AIM_EPSILON) {
+    static double[] applySpread(
+            double aimX, double aimY, double aimZ, double speed, double inaccuracy,
+            double sampleX, double sampleY, double sampleZ) {
+        double len = Math.sqrt(aimX * aimX + aimY * aimY + aimZ * aimZ);
+        if (len < AIM_EPSILON || speed < AIM_EPSILON) {
             return new double[] {0.0, 0.0, 0.0};
         }
-        double perturb = INACCURACY_UNIT * SPREAD_INACCURACY;
-        double unitX = vx / speed;
-        double unitY = vy / speed;
-        double unitZ = vz / speed;
+        double unitX = aimX / len;
+        double unitY = aimY / len;
+        double unitZ = aimZ / len;
+        double perturb = SHOOT_SPREAD_COEFF * inaccuracy;
         return new double[] {
             (unitX + perturb * sampleX) * speed,
             (unitY + perturb * sampleY) * speed,

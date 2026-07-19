@@ -27,21 +27,51 @@ class Ct8cProjectilePolicyTest {
         // §2.5 / §2.10: snowballs and eggs deal 0 damage but the full 0.4 knock (delivered by the
         // always-on projectile-knockback path under the ct8c profile — this constant documents the policy).
         assertEquals(0.4, Ct8cProjectilePolicy.FULL_KNOCK_STRENGTH, EPS, "the full 0.4 knock (§2.5/§2.10)");
-        // §2.10: base/crossbow inaccuracy is 0.25 — a fatigued shot's spread.
-        assertEquals(0.25, Ct8cProjectilePolicy.SPREAD_INACCURACY, EPS, "fatigued-shot inaccuracy is 0.25 (§2.10)");
-        // §2.10: accuracy decay only after 3 seconds held.
-        assertEquals(3_000_000_000L, Ct8cProjectilePolicy.FATIGUE_NANOS, "bow fatigue after 3s held (§2.10)");
+        // Decompile-confirmed: 8c cut vanilla's base bow inaccuracy 1.0 → 0.25, fed as 0.25·fatigue.
+        assertEquals(0.25, Ct8cProjectilePolicy.BASE_INACCURACY, EPS, "base inaccuracy 0.25 (BowItem)");
+        // Decompile-confirmed: Projectile.shoot's gaussian coefficient is 0.0075F (was wrongly 0.0172275).
+        assertEquals(0.0075, Ct8cProjectilePolicy.SHOOT_SPREAD_COEFF, EPS, "shoot() spread coefficient 0.0075");
+        assertEquals(50_000_000L, Ct8cProjectilePolicy.NANOS_PER_TICK, "50ms per tick");
     }
 
     /* --------------------------------- bow fatigue --------------------------------- */
 
     @Test
-    void fatigueTriggersStrictlyAfterThreeSeconds() {
-        assertFalse(Ct8cProjectilePolicy.fatigued(0L), "an instant release is never fatigued");
-        assertFalse(Ct8cProjectilePolicy.fatigued(2_999_999_999L), "just under 3s is not yet fatigued");
-        assertFalse(Ct8cProjectilePolicy.fatigued(3_000_000_000L), "exactly 3s is the boundary, not past it");
-        assertTrue(Ct8cProjectilePolicy.fatigued(3_000_000_001L), "just past 3s is fatigued");
-        assertTrue(Ct8cProjectilePolicy.fatigued(10_000_000_000L), "a long hold is fatigued");
+    void fatigueIsAStepThenLinearRamp() {
+        // 8c BowItem.getFatigueForTime: 0.5 below 60 ticks, a linear ramp 0.5→10.5 over 60..200,
+        // clamped to 10.5 past 200. NOT the pre-2.9 step (0 spread <3s, flat 0.25 after).
+        assertEquals(0.5f, Ct8cProjectilePolicy.fatigueForTime(0), "t=0 → 0.5");
+        assertEquals(0.5f, Ct8cProjectilePolicy.fatigueForTime(59), "t=59 → still 0.5");
+        assertEquals(0.5f, Ct8cProjectilePolicy.fatigueForTime(60), "t=60 → ramp base 0.5");
+        assertEquals(5.5f, Ct8cProjectilePolicy.fatigueForTime(130), "t=130 → 0.5 + 10·70/140 = 5.5");
+        assertEquals(10.5f, Ct8cProjectilePolicy.fatigueForTime(200), "t=200 → clamp 10.5");
+        assertEquals(10.5f, Ct8cProjectilePolicy.fatigueForTime(400), "long hold clamps at 10.5");
+    }
+
+    @Test
+    void inaccuracyIsQuarterOfFatigue() {
+        // The value fed to Projectile.shoot: 0.25 · fatigue. A fresh full draw is 0.125 (never 0);
+        // a fully-fatigued shot is 2.625 — ~21× the pre-2.9 flat-0.25 model's 0.25·0.0172275 spread.
+        assertEquals(0.125, Ct8cProjectilePolicy.inaccuracyForTime(0), EPS, "fresh draw → 0.125");
+        assertEquals(0.125, Ct8cProjectilePolicy.inaccuracyForTime(60), EPS, "at the ramp base → 0.125");
+        assertEquals(2.625, Ct8cProjectilePolicy.inaccuracyForTime(200), EPS, "fully fatigued → 2.625");
+    }
+
+    @Test
+    void powerFollowsTheDrawCurve() {
+        // 8c BowItem.getPowerForTime: f=t/20; f=(f²+2f)/3; clamp 1.0.
+        assertEquals(0.0f, Ct8cProjectilePolicy.powerForTime(0), "t=0 → 0 power");
+        assertEquals(1.0f, Ct8cProjectilePolicy.powerForTime(20), "t=20 → full power (1.0)");
+        assertEquals(1.0f, Ct8cProjectilePolicy.powerForTime(200), "over-draw clamps at 1.0");
+    }
+
+    @Test
+    void critAllowedOnlyAtFullPowerAndUnfatigued() {
+        // 8c sets the crit flag iff power==1.0 && fatigue<=0.5, i.e. a full draw within the first 60 ticks.
+        assertTrue(Ct8cProjectilePolicy.critAllowed(20), "full draw, unfatigued → crit kept");
+        assertTrue(Ct8cProjectilePolicy.critAllowed(60), "t=60 is the last tick fatigue is still 0.5");
+        assertFalse(Ct8cProjectilePolicy.critAllowed(61), "one tick past → fatigue > 0.5 → crit stripped");
+        assertFalse(Ct8cProjectilePolicy.critAllowed(10), "half draw → power < 1.0 → no crit");
     }
 
     /* ------------------------------ momentum projection ------------------------------ */
@@ -94,22 +124,26 @@ class Ct8cProjectilePolicyTest {
     /* --------------------------------- fatigue spread --------------------------------- */
 
     @Test
-    void spreadWithZeroSampleIsIdentity() {
-        double[] out = Ct8cProjectilePolicy.applySpread(2.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    void spreadWithZeroSampleIsCleanAimScaledToSpeed() {
+        // Aim (3,0,0) normalises to (1,0,0); zero samples ⇒ the launch is exactly speed·unit = (2,0,0),
+        // regardless of inaccuracy. This is why a perfectly-sampled shot flies straight down the look vector.
+        double[] out = Ct8cProjectilePolicy.applySpread(3.0, 0.0, 0.0, 2.0, 2.625, 0.0, 0.0, 0.0);
         assertArrayEquals(new double[] {2.0, 0.0, 0.0}, out, EPS);
     }
 
     @Test
-    void spreadPerturbsPerAxisScaledBySpeed() {
-        // K = 0.0172275 · 0.25 = 0.004306875 per unit sample. Speed 2, unit dir +x, a y-sample of 4:
-        // y-component = (0 + K·4) · 2 = 0.0172275 · 2 = 0.034455; x stays (1)·2 = 2.
-        double[] out = Ct8cProjectilePolicy.applySpread(2.0, 0.0, 0.0, 0.0, 4.0, 0.0);
-        assertArrayEquals(new double[] {2.0, 0.034455, 0.0}, out, EPS);
+    void spreadPerturbsPerAxisWithTheShootCoefficient() {
+        // perturb = 0.0075 · inaccuracy. Fresh-draw inaccuracy 0.125 ⇒ perturb 0.0009375 per unit sample.
+        // Aim +x (unit), speed 2, y-sample 4 ⇒ y = (0 + 0.0009375·4)·2 = 0.0075; x stays (1)·2 = 2.
+        double[] out = Ct8cProjectilePolicy.applySpread(1.0, 0.0, 0.0, 2.0, 0.125, 0.0, 4.0, 0.0);
+        assertArrayEquals(new double[] {2.0, 0.0075, 0.0}, out, EPS);
     }
 
     @Test
-    void spreadOfZeroVelocityIsZero() {
-        double[] out = Ct8cProjectilePolicy.applySpread(0.0, 0.0, 0.0, 5.0, 5.0, 5.0);
-        assertArrayEquals(new double[] {0.0, 0.0, 0.0}, out, EPS);
+    void spreadWithoutAimOrSpeedIsZero() {
+        assertArrayEquals(new double[] {0.0, 0.0, 0.0},
+                Ct8cProjectilePolicy.applySpread(0.0, 0.0, 0.0, 5.0, 0.125, 5.0, 5.0, 5.0), EPS);
+        assertArrayEquals(new double[] {0.0, 0.0, 0.0},
+                Ct8cProjectilePolicy.applySpread(1.0, 0.0, 0.0, 0.0, 0.125, 5.0, 5.0, 5.0), EPS);
     }
 }
