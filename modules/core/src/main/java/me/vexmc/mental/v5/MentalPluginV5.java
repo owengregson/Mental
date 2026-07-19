@@ -918,8 +918,8 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new ChargedAttackUnit());
         reconciler.register(new Ct8cSweepUnit());
         reconciler.register(new Ct8cDamageUnit());
-        reconciler.register(new Ct8cCritsUnit());
-        reconciler.register(new Ct8cIframesUnit());
+        reconciler.register(new Ct8cCritsUnit(this::snapshot, sessions));
+        reconciler.register(new Ct8cIframesUnit(scheduling));
         // Task INT wire 1: feed Task D's platform Cleaving handle into the shield unit
         // so an axe with Cleaving disables the shield the extra +10 ticks/level (Task E
         // shipped the ToIntFunction ctor). A LIVE lookup, not a captured snapshot — the

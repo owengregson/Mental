@@ -1,11 +1,13 @@
 package me.vexmc.mental.v5.feature.damage;
 
+import java.util.function.Supplier;
 import me.vexmc.mental.kernel.math.DamageTables;
 import me.vexmc.mental.platform.CritPosture;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
+import me.vexmc.mental.v5.session.SessionService;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -30,18 +32,30 @@ import org.bukkit.event.entity.EntityDamageEvent.DamageModifier;
  * regardless of listener registration order. Standalone (ct8c-crits without
  * ct8c-damage) it multiplies whatever BASE exists — the vanilla weapon damage.</p>
  *
- * <p><b>Not double-critting vanilla.</b> A fast-path melee never runs {@code
- * Player#attack}, so its BASE carries no vanilla crit; a hit that DID reach
- * vanilla's path already got vanilla's ×1.5 only when fully charged AND not
- * sprinting — so this unit yields exactly there ({@code attackCharge > 0.9 &&
- * !sprinting}) and takes every sprint hit (which vanilla never crits, but CT8c
- * does). Enabling both ct8c-crits and the era {@code crit-fallback}, or the
- * fast-path {@code simulate-crits}, double-crits; the bundles keep them mutually
- * exclusive.</p>
+ * <p><b>Not double-critting vanilla — the v2.9.0 inversion fixed.</b> The only
+ * hit whose BASE can still carry vanilla's ×1.5 by the time this unit runs is a
+ * genuine vanilla {@code Player#attack} landing (fully charged, NOT sprinting)
+ * with {@code ct8c-damage} OFF — so the yield takes all three reads: a fast-path
+ * minted hit never ran {@code Player#attack} (its BASE carries no vanilla crit),
+ * and a {@code ct8c-damage} BASE was overwritten crit-free at {@code LOWEST}
+ * (its write explicitly defers the crit here). The shipped guard checked only
+ * charge + sprint, so on the always-on fast path — and in the whole ct8c bundle
+ * — it yielded on exactly the canonical non-sprint jump crit and applied only
+ * sprint crits: the inverse of the spec. Enabling both ct8c-crits and the era
+ * {@code crit-fallback}, or the fast-path {@code simulate-crits}, double-crits;
+ * the bundles keep them mutually exclusive.</p>
  *
  * <p>Zero-touch: assembled only when enabled; touches only player melee.</p>
  */
 public final class Ct8cCritsUnit implements FeatureUnit, Listener {
+
+    private final Supplier<Snapshot> snapshot;
+    private final SessionService sessions;
+
+    public Ct8cCritsUnit(Supplier<Snapshot> snapshot, SessionService sessions) {
+        this.snapshot = snapshot;
+        this.sessions = sessions;
+    }
 
     @Override
     public Feature descriptor() {
@@ -65,10 +79,17 @@ public final class Ct8cCritsUnit implements FeatureUnit, Listener {
         if (!DamageShaper.isLegacyCritical(attacker)) {
             return;
         }
-        // Do not double-crit a hit vanilla already ×1.5'd: that only happens on a
-        // fully-charged, NON-sprint vanilla landing. CritPosture.attackCharge is
-        // the boot-resolved accessor (fully-charged default on the legacy tier).
-        if (CritPosture.attackCharge(attacker) > 0.9f && !attacker.isSprinting()) {
+        // Yield ONLY where vanilla's ×1.5 can actually still be inside BASE: a
+        // genuine vanilla Player#attack landing (never a fast-path minted hit —
+        // damage() bypasses vanilla's crit entirely) whose BASE ct8c-damage did
+        // NOT overwrite crit-free at LOWEST, on vanilla's own crit terms (fully
+        // charged AND not sprinting). CritPosture.attackCharge is the
+        // boot-resolved accessor (fully-charged default on the legacy tier).
+        Snapshot current = snapshot.get();
+        boolean baseIsCt8cComposed = current != null && current.enabled(Feature.CT8C_DAMAGE);
+        if (!baseIsCt8cComposed
+                && !DamageShaper.fastPathMinted(sessions, event, attacker)
+                && CritPosture.attackCharge(attacker) > 0.9f && !attacker.isSprinting()) {
             return;
         }
         // The flat ×1.5 (spec §2.3), sourced from the kernel so nothing re-derives it.
