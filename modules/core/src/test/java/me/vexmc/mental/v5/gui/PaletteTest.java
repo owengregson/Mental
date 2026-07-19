@@ -54,4 +54,27 @@ class PaletteTest {
         assertEquals(Palette.of(Family.KNOCKBACK), Palette.gallery(PresetKind.KNOCKBACK));
         assertEquals(Palette.of(Family.FEEDBACK), Palette.gallery(PresetKind.EFFECTS));
     }
+
+    @Test
+    void everyCategoryHasATheme() {
+        for (Category category : Category.values()) {
+            Palette.Theme theme = Palette.category(category);
+            assertNotNull(theme.pane(), category + " has no pane colour");
+            assertNotNull(theme.accent(), category + " has no accent colour");
+        }
+    }
+
+    @Test
+    void familyCategoriesBorrowTheirLeadFamilyIdentity() {
+        // The category tile's colour is the colour the admin lands on one click
+        // later — the lead (first-listed) family's theme; SYSTEM stays neutral.
+        for (Category category : Category.values()) {
+            if (category == Category.SYSTEM) {
+                assertEquals(Palette.system(), Palette.category(category));
+                continue;
+            }
+            assertEquals(Palette.of(category.families().get(0)), Palette.category(category),
+                    category + " must carry its lead family's identity");
+        }
+    }
 }

@@ -111,7 +111,8 @@ public final class DebugMenu extends Menu {
             refresh(viewer);
         });
 
-        set(BACK_SLOT, Buttons.back("the Dashboard"), click -> navigate(viewer, new DashboardMenu(ctx)));
+        set(BACK_SLOT, Buttons.back(Category.SYSTEM.displayName()),
+                click -> navigate(viewer, new CategoryMenu(ctx, Category.SYSTEM)));
     }
 
     /**
@@ -130,7 +131,7 @@ public final class DebugMenu extends Menu {
             icons.add(channelTile(category, active.contains(category.key())));
         }
         icons.add(subscribeTile(false));
-        icons.add(Buttons.back("the Dashboard"));
+        icons.add(Buttons.back(Category.SYSTEM.displayName()));
         return icons;
     }
 

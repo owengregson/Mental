@@ -17,6 +17,8 @@ import me.vexmc.mental.v5.feature.Family;
 import me.vexmc.mental.v5.feature.Feature;
 import me.vexmc.mental.v5.feature.damage.DamageShaper;
 import me.vexmc.mental.v5.feature.sustain.GoldenApplesUnit;
+import me.vexmc.mental.v5.gui.Category;
+import me.vexmc.mental.v5.gui.CategoryMenu;
 import me.vexmc.mental.v5.gui.ChatPrompt;
 import me.vexmc.mental.v5.gui.CombatPresetsMenu;
 import me.vexmc.mental.v5.gui.CompatibilityMenu;
@@ -160,10 +162,21 @@ public final class BootSuite {
                         }
 
                         Inventory inventory = dashboard.selfTestInventory();
-                        context.expect(inventory.getSize() == 54,
-                                "dashboard inventory size " + inventory.getSize() + " != 54");
+                        context.expect(inventory.getSize() == 36,
+                                "dashboard inventory size " + inventory.getSize()
+                                        + " != 36 (the four-row five-tile home)");
                         context.expect(inventory.getHolder() == dashboard,
                                 "inventory holder is not the menu — the click-router identity test would break");
+
+                        // The five home categories each render their intermediate screen —
+                        // the layer between the five-tile home and the family screens.
+                        for (Category category : Category.values()) {
+                            CategoryMenu menu = new CategoryMenu(menuContext, category);
+                            assertScreenRenders(context, menu, menu.selfTestIcons(), "category " + category);
+                            int size = menu.selfTestInventory().getSize();
+                            context.expect(size == 27,
+                                    "category (" + category + ") inventory size " + size + " != 27");
+                        }
 
                         // Every family renders on the one FamilyMenu metaphor — a 3+ row chest whose
                         // holder identity the click router still recognizes.

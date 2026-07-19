@@ -94,7 +94,7 @@ public final class CombatPresetsMenu extends Menu {
             }
         }
 
-        set(BACK_SLOT, Buttons.back("the Dashboard"), click -> navigate(viewer, new DashboardMenu(ctx)));
+        set(BACK_SLOT, Buttons.back("the home screen"), click -> navigate(viewer, new DashboardMenu(ctx)));
     }
 
     /** Every loaded bundle name, sorted — any file dropped into bundles/ shows up. */
@@ -172,7 +172,7 @@ public final class CombatPresetsMenu extends Menu {
             RulesBundle bundle = ctx.plugin().bundles().get(name);
             icons.add(bundleTile(bundle, name, bundle != null && matchesCurrent(bundle)));
         }
-        icons.add(Buttons.back("the Dashboard"));
+        icons.add(Buttons.back("the home screen"));
         return icons;
     }
 }

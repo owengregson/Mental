@@ -66,7 +66,8 @@ public final class CompatibilityMenu extends Menu {
                 click -> apply(viewer, () -> ctx.management().setOverlay(ANTICHEAT_KEY, "force-safe")));
         set(OFF_SLOT, radioTile("BARRIER", "off", OFF_BLURB, mode == AnticheatMode.OFF),
                 click -> apply(viewer, () -> ctx.management().setOverlay(ANTICHEAT_KEY, "off")));
-        set(BACK_SLOT, Buttons.back("the Dashboard"), click -> navigate(viewer, new DashboardMenu(ctx)));
+        set(BACK_SLOT, Buttons.back(Category.SYSTEM.displayName()),
+                click -> navigate(viewer, new CategoryMenu(ctx, Category.SYSTEM)));
     }
 
     /** Boot self-test seam: header + three radios + back, as pure Bukkit stacks. */
@@ -77,7 +78,7 @@ public final class CompatibilityMenu extends Menu {
                 radioTile("ENDER_EYE", "auto", AUTO_BLURB, mode == AnticheatMode.AUTO),
                 radioTile("IRON_BARS", "force-safe", FORCE_SAFE_BLURB, mode == AnticheatMode.FORCE_SAFE),
                 radioTile("BARRIER", "off", OFF_BLURB, mode == AnticheatMode.OFF),
-                Buttons.back("the Dashboard"));
+                Buttons.back(Category.SYSTEM.displayName()));
     }
 
     private @NotNull ItemStack headerCard(@NotNull AnticheatMode mode) {

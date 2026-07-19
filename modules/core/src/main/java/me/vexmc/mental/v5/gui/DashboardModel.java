@@ -35,21 +35,18 @@ public final class DashboardModel {
     }
 
     /**
-     * The home screen's family layout, grouped into rows by concern: the engine
-     * (knockback + delivery), the era combat rules, and the cosmetic/loot pair.
-     * The home renders one centred row per group. Every {@link Family} appears in
-     * exactly one row — {@code DashboardModelTest} pins that, so a new family can
-     * never be silently unreachable from the home (the reachability guarantee at
-     * the home layer). Every family tile opens the generic {@link FamilyMenu};
-     * the KNOCKBACK and FEEDBACK screens additionally carry a hero row into their
-     * preset gallery.
+     * The home screen's five category tiles, grouped into its two centre rows
+     * (three then two). The families themselves moved one level down: each
+     * category tile opens a {@link CategoryMenu} listing its families, which open
+     * the unchanged {@link FamilyMenu} screens. Reachability holds layer by
+     * layer — {@code DashboardModelTest} pins that every {@link Category} appears
+     * on exactly one home row AND every {@link Family} in exactly one category,
+     * so neither a new family nor a new category can be silently unreachable.
      */
-    public static List<List<Family>> homeRows() {
+    public static List<List<Category>> categoryRows() {
         return List.of(
-                List.of(Family.KNOCKBACK, Family.DELIVERY),
-                List.of(Family.DAMAGE, Family.CADENCE, Family.SUSTAIN,
-                        Family.LOADOUT, Family.COMBO, Family.POTS),
-                List.of(Family.FEEDBACK, Family.LOOT));
+                List.of(Category.ENGINE, Category.RULES, Category.SUSTAIN),
+                List.of(Category.FEEDBACK, Category.SYSTEM));
     }
 
     /**

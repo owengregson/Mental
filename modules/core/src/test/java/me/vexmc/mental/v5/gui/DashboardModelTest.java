@@ -47,16 +47,57 @@ class DashboardModelTest {
     }
 
     @Test
-    void homeRowsCoverEveryFamilyExactlyOnce() {
-        // The home-layer reachability guarantee: every Family appears in exactly
-        // one home row, so a new family constant forces a home-row edit rather
-        // than silently vanishing from the dashboard.
-        List<Family> flat = DashboardModel.homeRows().stream().flatMap(List::stream).toList();
+    void categoryRowsCoverEveryCategoryExactlyOnce() {
+        // The home-layer reachability guarantee, tier one: every Category appears
+        // on exactly one home row (three then two — the five-tile home shape), so
+        // a new category constant forces a home-row edit rather than silently
+        // vanishing from the dashboard.
+        List<Category> flat = DashboardModel.categoryRows().stream().flatMap(List::stream).toList();
+        assertEquals(EnumSet.allOf(Category.class),
+                EnumSet.copyOf(flat),
+                "every category must appear on a home row");
+        assertEquals(Category.values().length, flat.size(),
+                "no category may appear on two home rows");
+        assertEquals(List.of(3, 2),
+                DashboardModel.categoryRows().stream().map(List::size).toList(),
+                "the home is exactly five tiles — a row of three over a row of two");
+    }
+
+    @Test
+    void categoriesCoverEveryFamilyExactlyOnce() {
+        // Tier two: every Family appears in exactly one category, so a family can
+        // never be silently unreachable from the home through the category layer,
+        // and Category.of(family) — the FamilyMenu back anchor — is total.
+        List<Family> flat = Arrays.stream(Category.values())
+                .flatMap(category -> category.families().stream()).toList();
         assertEquals(EnumSet.allOf(Family.class),
                 EnumSet.copyOf(flat),
-                "every family must appear in a home row");
+                "every family must belong to a category");
         assertEquals(Family.values().length, flat.size(),
-                "no family may appear in two home rows");
+                "no family may appear in two categories");
+        for (Family family : Family.values()) {
+            assertTrue(Category.of(family).families().contains(family),
+                    "Category.of must return the category listing " + family);
+        }
+    }
+
+    @Test
+    void onlySystemIsFamilyless() {
+        // SYSTEM fronts the compatibility/debug/reload trio instead of families —
+        // every other category must actually lead somewhere.
+        for (Category category : Category.values()) {
+            assertEquals(category == Category.SYSTEM, category.families().isEmpty(),
+                    category + " family list shape is wrong");
+        }
+    }
+
+    @Test
+    void everyCategoryCarriesRenderableCopy() {
+        for (Category category : Category.values()) {
+            assertFalse(category.displayName().isBlank(), category + " has no display name");
+            assertFalse(category.blurb().isBlank(), category + " has no blurb");
+            assertFalse(category.iconName().isBlank(), category + " has no icon name");
+        }
     }
 
     @Test
