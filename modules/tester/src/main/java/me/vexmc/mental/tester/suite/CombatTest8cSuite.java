@@ -725,11 +725,13 @@ public final class CombatTest8cSuite {
      * The CT8c Cleaving enchant (spec §2.9/§5). Enabling the feature runs the
      * platform {@link CleavingRegistrar} once. Below its ~1.21.3 registry floor the
      * handle is empty and both consumers fold Cleaving as level 0 — the documented
-     * gap; asserted here as an empty handle. At/above the floor the guarded
-     * best-effort injection is UNVALIDATED against a cached live jar, so the honest
-     * contract is: WHERE a handle is installed, {@link CleavingHandle#levelOf} reads
-     * an enchanted axe (and 0 off a plain one); where the modern shape did not
-     * resolve, a loud {@code note} (spec §5). The feature enables cleanly either way.
+     * gap; asserted here as an empty handle. At/above the floor the registry chain
+     * is javap-pinned against the live 1.21.4 AND 26.1.2 jars (including the
+     * year-scheme {@code Identifier} spelling), so the handle is now a HARD
+     * expectation — an empty handle at the floor is the exact green-but-unproven
+     * soft spot the v2.9.0 gate shipped with, and it fails loudly here instead of
+     * degrading to a note. Where installed, {@link CleavingHandle#levelOf} must
+     * read an enchanted axe (and 0 off a plain one).
      */
     private static void runCleaving(MentalPluginV5 mental, TestContext context) throws Exception {
         try {
@@ -748,10 +750,12 @@ public final class CombatTest8cSuite {
                 return;
             }
 
+            context.expect(handle.isPresent(),
+                    "the Cleaving injection must land at/above the ~1.21.3 floor — the chain is javap-pinned "
+                            + "on 1.21.4 and 26.1.2, so an empty handle here is a real regression ("
+                            + CleavingRegistrar.describe() + ")");
             if (handle.isEmpty()) {
-                context.note("the guarded best-effort Cleaving injection did not land on this modern shape ("
-                        + CleavingRegistrar.describe() + ") — a documented, unvalidated-write gap (spec §5)");
-                return;
+                return; // the expect above already recorded the failure
             }
 
             // Installed: the handle must read a Cleaving-enchanted axe and 0 off a plain one.
@@ -759,10 +763,11 @@ public final class CombatTest8cSuite {
             context.expect(live.levelOf(new ItemStack(Material.DIAMOND_AXE)) == 0,
                     "a plain axe must read Cleaving level 0");
             Enchantment cleaving = resolveCleaving();
+            context.expect(cleaving != null,
+                    "the mental:cleaving Bukkit enchant must resolve via getByKey once the handle is installed — "
+                            + "install() itself resolved it that way (" + CleavingRegistrar.describe() + ")");
             if (cleaving == null) {
-                context.note("the mental:cleaving Bukkit enchant did not resolve for staging — the handle is "
-                        + "installed (" + CleavingRegistrar.describe() + ") but the level read cannot be staged here");
-                return;
+                return; // the expect above already recorded the failure
             }
             int level = context.sync(() -> {
                 ItemStack axe = new ItemStack(Material.DIAMOND_AXE);
