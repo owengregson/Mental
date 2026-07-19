@@ -41,8 +41,20 @@ class Ct8cConsumableAdapterTest {
         assertTrue(Ct8cConsumableAdapter.isDrink(Material.POTION));
         assertTrue(Ct8cConsumableAdapter.isDrink(Material.MILK_BUCKET));
         assertTrue(Ct8cConsumableAdapter.isDrink(Material.HONEY_BOTTLE));
-        // A stew keeps its own eat animation — not on the DRINK-duration path.
+        // A stew is 20-tick too, but on the EAT path (isBowlStew) — not the DRINK path.
         assertFalse(Ct8cConsumableAdapter.isDrink(Material.MUSHROOM_STEW));
         assertFalse(Ct8cConsumableAdapter.isDrink(Material.SNOWBALL));
+    }
+
+    @Test
+    void bowlStewsAreTheEatDurationSetButNotSuspiciousStew() {
+        // 8c BowlFoodItem.getUseDuration = 20 (mushroom/rabbit/beetroot), keeping EAT.
+        assertTrue(Ct8cConsumableAdapter.isBowlStew(Material.MUSHROOM_STEW));
+        assertTrue(Ct8cConsumableAdapter.isBowlStew(Material.RABBIT_STEW));
+        assertTrue(Ct8cConsumableAdapter.isBowlStew(Material.BEETROOT_SOUP));
+        // Suspicious stew extends Item, not BowlFoodItem — 8c leaves it at the 32-tick base.
+        assertFalse(Ct8cConsumableAdapter.isBowlStew(Material.SUSPICIOUS_STEW));
+        assertFalse(Ct8cConsumableAdapter.isBowlStew(Material.POTION));
+        assertFalse(Ct8cConsumableAdapter.isBowlStew(null));
     }
 }
