@@ -586,6 +586,29 @@ public final class CombatTest8cSuite {
                 attacker.attack(victim.player());
                 return before - victim.player().getHealth();
             });
+            // A clientless fake on the LEGACY NMS never has its held-item attack-damage
+            // attribute applied to the entity, and its swing meter reads ~0.1, so the
+            // "full-charge diamond sword" opener lands as a bare-hand tap: 1.0 base ×
+            // (0.2 + 0.1²·0.8) = 0.208, not the sword's 7. The re-hit assertion below
+            // compares against THIS opener, so a tap opener would make it vacuous (a
+            // no-stronger re-hit trivially deals nothing). Skip loudly where the harness
+            // cannot stage the precondition rather than assert a harness fact.
+            //
+            // Deliberately measured, not a blanket version gate: any legacy version that
+            // CAN stage a real opener still runs the full assertion, and the modern tier
+            // can never reach the skip — a genuine regression there still fails loud.
+            // The 2× field mapping is unit-pinned (Ct8cIframesUnitTest) and the written
+            // field is asserted live on EVERY version, 1.9.4 included, by the
+            // weapon-speed scaling case above.
+            if (openerDamage <= 0.5 && !mental.environment().isAtLeast(1, 17, 0)) {
+                context.note("skipped: the clientless fake's held-item attack-damage attribute is not "
+                        + "applied on the legacy NMS (" + mental.environment().describe() + "), so the "
+                        + "full-charge sword opener landed as a " + openerDamage + " bare-hand tap and the "
+                        + "difference-damage re-hit would be vacuous; the 2× window mapping is "
+                        + "unit-pinned in Ct8cIframesUnitTest and the written field is asserted live on "
+                        + "this version by the weapon-speed scaling case");
+                return;
+            }
             context.expect(openerDamage > 0.5, "the opener sword hit must land (dealt " + openerDamage + ")");
 
             // Re-hit exactly 5 ticks in — inside the 8c window (7), past the old
