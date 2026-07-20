@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 import me.vexmc.mental.kernel.fx.IndicatorBallistics;
 import me.vexmc.mental.kernel.port.TickClock;
+import me.vexmc.mental.kernel.model.TickStamp;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.v5.config.Snapshot;
 import me.vexmc.mental.v5.config.settings.DamageIndicatorsSettings;
@@ -60,6 +61,9 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
 
     /** The CURRENT assembly's coordinator (window flush / death / forget seams); null when off. */
     private volatile DamageIndicatorsListener listener;
+
+    /** The CURRENT assembly's mob-side tick (window flush + heal sampling); null when off. */
+    private volatile MobFeedbackTicker mobs;
 
     /** The CURRENT assembly's heal consumer, or null when off / heal-text blank (mirrors {@link #drivers}). */
     private volatile HealIndicators heal;
@@ -115,6 +119,19 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
         DamageIndicatorsListener coordinator = new DamageIndicatorsListener(
                 settings, map, book, scheduling, clock, modernSpawn, bundleSupported, trace, logger, healIndicators);
         this.listener = coordinator;
+
+        // The MOB-side analogue of the session tick below. A mob has no CombatSession,
+        // so without this a mob victim's roll-held window would open and never ship and
+        // its heals would never be sampled. Armed per mob by the listener on a hit, and
+        // self-cancelling once that mob's combat context lapses.
+        MobFeedbackTicker mobTicker = new MobFeedbackTicker(scheduling, clock, (mob, now) -> {
+            coordinator.flush(mob.getUniqueId(), now);
+            if (installedHeal != null) {
+                installedHeal.sampleEntity(mob, new TickStamp((int) now));
+            }
+        });
+        this.mobs = mobTicker;
+        coordinator.useMobTicker(mobTicker);
         scope.listen(coordinator);
 
         // ONE per-victim tick, installed whenever the feature is ON: it flushes the
@@ -138,6 +155,8 @@ public final class DamageIndicatorsUnit implements FeatureUnit {
             this.heal = null;
             this.listener = null;
             book.close();
+            mobTicker.close();
+            this.mobs = null;
             map.values().forEach(IndicatorDriver::close);
             map.clear();
         });

@@ -21,6 +21,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 
 /**
@@ -76,6 +77,9 @@ final class HealIndicators implements SessionService.HealSampler {
     /** Per-victim heal aggregation/pacing — created lazily on the first heal, dropped on forget/respawn. */
     private final ConcurrentHashMap<UUID, HealFold> folds = new ConcurrentHashMap<>();
 
+    /** Last sampled health per MOB — the previous value a player's session tick supplies for free. */
+    private final ConcurrentHashMap<UUID, Double> mobHealth = new ConcurrentHashMap<>();
+
     private final AtomicBoolean noEntityIdWarned = new AtomicBoolean(false);
 
     HealIndicators(
@@ -123,8 +127,32 @@ final class HealIndicators implements SessionService.HealSampler {
         lastHits.remove(victim);
     }
 
+    /**
+     * The MOB sampling entry point, driven by {@link MobFeedbackTicker} on the mob's
+     * own region. Players are sampled by their session tick, which already carries the
+     * previous health; a mob has no session, so the previous value is remembered here
+     * and the same delta machinery below is reused verbatim — including the {@code NaN}
+     * first-sample guard, which the absent map entry produces naturally.
+     */
+    void sampleEntity(LivingEntity mob, TickStamp now) {
+        UUID id = mob.getUniqueId();
+        double current = mob.getHealth();
+        Double previous = mobHealth.put(id, current);
+        sample(id, previous == null ? Double.NaN : previous, current, now, mob);
+    }
+
+    /** Drops a mob's remembered health (death / retire), so a respawned id never reads a stale delta. */
+    void forgetEntity(UUID id) {
+        mobHealth.remove(id);
+    }
+
     @Override
     public void sample(UUID victimId, double previousHealth, double currentHealth, TickStamp now) {
+        sample(victimId, previousHealth, currentHealth, now, null);
+    }
+
+    private void sample(
+            UUID victimId, double previousHealth, double currentHealth, TickStamp now, LivingEntity known) {
         if (Double.isNaN(previousHealth)) {
             return; // the victim's first sampled tick — no delta to read yet
         }
@@ -149,7 +177,7 @@ final class HealIndicators implements SessionService.HealSampler {
         long tick = now.value();
         double shipped = fold.poll(tick);
         if (shipped > 0.0) {
-            shipHeal(victimId, shipped, tick);
+            shipHeal(victimId, shipped, tick, known);
         }
     }
 
@@ -161,7 +189,7 @@ final class HealIndicators implements SessionService.HealSampler {
      * attribution whose attacker is offline / has no PacketEvents user traces
      * {@code HEAL_UNSENDABLE} instead (the matrix-assertable seam).
      */
-    private void shipHeal(UUID victimId, double shippedAmount, long nowTick) {
+    private void shipHeal(UUID victimId, double shippedAmount, long nowTick, LivingEntity known) {
         LastHit lastHit = lastHits.get(victimId);
         if (lastHit == null
                 || lastHit.attackerId().equals(victimId)
@@ -177,9 +205,17 @@ final class HealIndicators implements SessionService.HealSampler {
                     attacker == null ? "attacker offline" : "attacker has no PacketEvents user"));
             return;
         }
-        Player victim = Bukkit.getPlayer(victimId);
-        if (victim == null) {
+        // The healed entity: the mob the ticker handed us, or a player looked up by id.
+        LivingEntity victim = known != null ? known : Bukkit.getPlayer(victimId);
+        if (victim == null || !victim.isValid()) {
             return; // the victim vanished between sample and ship — nothing to place around
+        }
+
+        // Same audience rule as a damage indicator: everyone near the healed entity
+        // EXCEPT the entity itself, plus the attributed attacker wherever they stand.
+        List<UUID> viewers = IndicatorViewers.resolve(victim, attacker);
+        if (viewers.isEmpty()) {
+            return;
         }
 
         String rendered = IndicatorText.render(settings.healText(), shippedAmount);
@@ -222,19 +258,31 @@ final class HealIndicators implements SessionService.HealSampler {
             return;
         }
 
-        List<PacketWrapper<?>> packets = IndicatorStandPackets.spawn(
-                entityId, UUID.randomUUID(), spawn, name, user.getClientVersion(), modernSpawn);
-        DamageIndicatorsListener.ship(user, packets, bundleSupported);
-
-        // The heal rides the attacker's driver exactly like a damage indicator, but
+        // The heal rides each viewer's driver exactly like a damage indicator, but
         // NEVER through merges() — the same-tick damage fold must not fold a heal in.
-        IndicatorDriver driver = drivers.computeIfAbsent(
-                attackerId, id -> new IndicatorDriver(scheduling, attacker, user, params));
-        driver.add(entityId, IndicatorBallistics.launch(spawn, params), groundY, settings.lifetimeTicks());
+        IndicatorBallistics.State launch = IndicatorBallistics.launch(spawn, params);
+        int delivered = 0;
+        for (UUID viewerId : viewers) {
+            Player viewer = Bukkit.getPlayer(viewerId);
+            User viewerUser = viewer == null ? null : playerManager.getUser(viewer);
+            if (viewerUser == null) {
+                continue;
+            }
+            List<PacketWrapper<?>> packets = IndicatorStandPackets.spawn(
+                    entityId, UUID.randomUUID(), spawn, name, viewerUser.getClientVersion(), modernSpawn);
+            DamageIndicatorsListener.ship(viewerUser, packets, bundleSupported);
+            IndicatorDriver driver = drivers.computeIfAbsent(
+                    viewerId, id -> new IndicatorDriver(scheduling, viewer, viewerUser, params));
+            driver.add(entityId, launch, groundY, settings.lifetimeTicks());
+            delivered++;
+        }
+        if (delivered == 0) {
+            return;
+        }
 
         trace.record(new FeedbackTrace.Entry(
                 "damage-indicators", attackerId, victimId, "HEAL",
-                "healed=" + IndicatorText.points(shippedAmount)));
+                "viewers=" + delivered + " healed=" + IndicatorText.points(shippedAmount)));
     }
 
     /** Session forget (quit): drop this player as a heal victim AND as any victim's stamped attacker. */

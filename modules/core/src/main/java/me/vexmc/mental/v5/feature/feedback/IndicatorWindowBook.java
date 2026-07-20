@@ -1,5 +1,7 @@
 package me.vexmc.mental.v5.feature.feedback;
 
+import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import me.vexmc.mental.kernel.fx.IndicatorPlacement;
@@ -50,7 +52,7 @@ final class IndicatorWindowBook {
      * for a first fresh spawn.
      */
     record Ship(
-            UUID victimId, UUID attackerId, IndicatorPlacement.Spawn spawn,
+            UUID victimId, UUID attackerId, List<UUID> viewers, IndicatorPlacement.Spawn spawn,
             double groundY, double total, boolean crit, int priorEntityId) {}
 
     /** What a FRESH hit did to the book. */
@@ -83,7 +85,9 @@ final class IndicatorWindowBook {
 
     /** One victim's live window. Mutated only by that victim's own region thread. */
     private static final class Window {
-        UUID attacker; // last upgrader while held; frozen to the ship-attacker once drawn
+        UUID attacker; // last upgrader while held; frozen to the ship-attacker once drawn (null: no player dealt it)
+        /** Frozen at open, exactly like the geometry — so a later ship performs no world reads. */
+        final List<UUID> viewers;
         final long openedTick;
         final long holdDeadlineTick;
         final long expiryTick;
@@ -95,9 +99,10 @@ final class IndicatorWindowBook {
         int entityId = -1;
 
         Window(
-                UUID attacker, long openedTick, long holdDeadlineTick, long expiryTick,
+                UUID attacker, List<UUID> viewers, long openedTick, long holdDeadlineTick, long expiryTick,
                 double total, boolean crit, IndicatorPlacement.Spawn spawn, double groundY) {
             this.attacker = attacker;
+            this.viewers = viewers;
             this.openedTick = openedTick;
             this.holdDeadlineTick = holdDeadlineTick;
             this.expiryTick = expiryTick;
@@ -121,9 +126,10 @@ final class IndicatorWindowBook {
      */
     FreshResult onFresh(
             UUID victimId, UUID attackerId, long tick, double displayed, boolean crit,
-            int holdTicks, int expiryHorizon, IndicatorPlacement.Spawn spawn, double groundY) {
+            int holdTicks, int expiryHorizon, IndicatorPlacement.Spawn spawn, double groundY,
+            List<UUID> viewers) {
         Window existing = windows.get(victimId);
-        if (existing != null && existing.openedTick == tick && attackerId.equals(existing.attacker)) {
+        if (existing != null && existing.openedTick == tick && Objects.equals(attackerId, existing.attacker)) {
             existing.total += displayed;
             existing.crit |= crit;
             if (existing.shipped && existing.entityId >= 0) {
@@ -133,7 +139,7 @@ final class IndicatorWindowBook {
         }
         Ship priorShip = (existing != null && !existing.shipped) ? fresh(victimId, existing) : null;
         Window opened = new Window(
-                attackerId, tick, tick + holdTicks, tick + expiryHorizon, displayed, crit, spawn, groundY);
+                attackerId, viewers, tick, tick + holdTicks, tick + expiryHorizon, displayed, crit, spawn, groundY);
         windows.put(victimId, opened); // one window per victim — replaces the closed prior
         if (holdTicks <= 0) {
             return new FreshResult(FreshKind.OPEN_SHIP, priorShip, fresh(victimId, opened));
@@ -218,9 +224,10 @@ final class IndicatorWindowBook {
      */
     void rememberUntracked(
             UUID victimId, UUID attackerId, long tick, double total, boolean crit,
-            int expiryHorizon, IndicatorPlacement.Spawn spawn, double groundY, int entityId) {
+            int expiryHorizon, IndicatorPlacement.Spawn spawn, double groundY, int entityId,
+            List<UUID> viewers) {
         Window window = new Window(
-                attackerId, tick, tick, tick + expiryHorizon, total, crit, spawn, groundY);
+                attackerId, viewers, tick, tick, tick + expiryHorizon, total, crit, spawn, groundY);
         window.shipped = true;
         window.entityId = entityId;
         windows.put(victimId, window);
@@ -237,11 +244,14 @@ final class IndicatorWindowBook {
     }
 
     private static Ship fresh(UUID victimId, Window window) {
-        return new Ship(victimId, window.attacker, window.spawn, window.groundY, window.total, window.crit, -1);
+        return new Ship(
+                victimId, window.attacker, window.viewers, window.spawn,
+                window.groundY, window.total, window.crit, -1);
     }
 
     private static Ship bump(UUID victimId, Window window) {
         return new Ship(
-                victimId, window.attacker, window.spawn, window.groundY, window.total, window.crit, window.entityId);
+                victimId, window.attacker, window.viewers, window.spawn,
+                window.groundY, window.total, window.crit, window.entityId);
     }
 }

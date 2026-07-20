@@ -25,7 +25,10 @@ import me.vexmc.mental.v5.config.settings.HitFeedbackSettings.ParticleSpec;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -139,11 +142,17 @@ public final class HitFeedbackListener implements Listener {
         if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) {
             return;
         }
-        if (!(event.getEntity() instanceof Player victim)) {
-            return;
+        if (!(event.getEntity() instanceof LivingEntity victim)) {
+            return; // an armor stand / item frame has no hurt voice to replace
         }
-        if (!(event.getDamager() instanceof Player attacker)) {
-            return;
+        // Any DEALER voices the hit, not just a player: a zombie punching you, a
+        // skeleton's arrow (unwrapped to its shooter for the trace) and a player's
+        // sword all replace the same vanilla hurt sound. The victim may equally be a
+        // mob — hitting a zombie now plays the server's configured hit chord.
+        Entity attacker = event.getDamager();
+        if (attacker instanceof Projectile projectile
+                && projectile.getShooter() instanceof Entity shooter) {
+            attacker = shooter;
         }
         double finalDamage = event.getFinalDamage();
         if (finalDamage < 0.0) {
@@ -280,6 +289,82 @@ public final class HitFeedbackListener implements Listener {
      * can throw inside PacketEvents, and a missed cosmetic beats a surfaced pipeline
      * exception (the {@code BurstSender} posture).</p>
      */
+    /**
+     * The low-health WARNING layer for damage that is not a hit: fall, lava, fire,
+     * drowning, freezing, poison. The combat voice deliberately does NOT extend here —
+     * vanilla's cause-specific hurt sounds ({@code hurt_on_fire}, {@code hurt_drown},
+     * {@code hurt_freeze}) are how a player knows WHY they are dying, and replacing
+     * them with one combat chord would erase that cue (owner ruling: hit sounds are
+     * for combat). The danger heartbeat is different — it is a warning about health,
+     * not about the blow, so it fires on every cause.
+     *
+     * <p>Entity-dealt damage returns immediately: {@link #onHit} already owns it and
+     * layers the same warning itself, so this never double-plays.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEnvironmentalDamage(EntityDamageEvent event) {
+        if (event instanceof EntityDamageByEntityEvent) {
+            return; // the combat path owns it, low-health layer included
+        }
+        if (lowHealthSounds.isEmpty() || !(event.getEntity() instanceof Player victim)) {
+            return; // the cue is a player's; a mob has no client to warn
+        }
+        double finalDamage = event.getFinalDamage();
+        if (finalDamage <= 0.0) {
+            return;
+        }
+        double postHitHealth = victim.getHealth() - finalDamage;
+        @SuppressWarnings("deprecation")
+        double ceiling = victim.getMaxHealth() * lowHealthThresholdPercent / 100.0;
+        if (postHitHealth <= 0.0 || postHitHealth >= ceiling) {
+            return; // death-effects owns the killing moment; above the line, no warning
+        }
+        Location loc = victim.getLocation();
+        emitLowHealthOnly(loc, audienceAround(loc));
+        trace.record(new FeedbackTrace.Entry(
+                "hit-feedback", null, victim.getUniqueId(), "LOW_HP_ENVIRONMENTAL",
+                "cause=" + event.getCause() + " hp=" + postHitHealth + " " + lowHealthSummary));
+    }
+
+    /**
+     * The same radius sweep the combat path performs inline, for the environmental
+     * layer — everyone in range INCLUDING the victim, since the warning is theirs.
+     */
+    private List<Player> audienceAround(Location loc) {
+        double radiusSquared = audienceRadius * audienceRadius;
+        World world = loc.getWorld();
+        List<Player> nearby = new ArrayList<>();
+        for (Player candidate : Bukkit.getOnlinePlayers()) {
+            if (!world.equals(candidate.getWorld())) {
+                continue;
+            }
+            if (candidate.getLocation().distanceSquared(loc) <= radiusSquared) {
+                nearby.add(candidate);
+            }
+        }
+        return nearby;
+    }
+
+    /** Ships ONLY the low-health layer (victim included — the danger cue is theirs). */
+    private void emitLowHealthOnly(Location loc, List<Player> nearby) {
+        Vector3d position = new Vector3d(loc.getX(), loc.getY(), loc.getZ());
+        List<PacketWrapper<?>> packets = soundPacketsFor(lowHealthSounds, position);
+        try {
+            for (Player viewer : nearby) {
+                User user = playerManager.getUser(viewer);
+                if (user == null) {
+                    continue;
+                }
+                for (PacketWrapper<?> packet : packets) {
+                    user.writePacketSilently(packet);
+                }
+                user.flushPackets();
+            }
+        } catch (Throwable reconfiguring) {
+            // A missed cosmetic beats a surfaced exception on the send path.
+        }
+    }
+
     private void emit(Location loc, List<Player> nearby, UUID victimId, boolean lowHealth) {
         Vector3d soundPosition = new Vector3d(loc.getX(), loc.getY(), loc.getZ());
         // The three sinks stay SEPARATE: normal sounds are victim-excluded (the

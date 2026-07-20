@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.UUID;
 import me.vexmc.mental.kernel.fx.IndicatorPlacement;
 import org.junit.jupiter.api.Test;
@@ -31,9 +32,17 @@ class IndicatorWindowBookTest {
     private final UUID attackerY = UUID.fromString("00000000-0000-0000-0000-0000000000dd");
     private final IndicatorPlacement.Spawn spawn = new IndicatorPlacement.Spawn(1.5, 65.2, -3.0, 0.75);
 
+    /**
+     * The frozen viewer set every window carries (2026-07-20). The book is pure — it
+     * only carries the list through to the Ship — so one non-empty stand-in exercises
+     * the plumbing on every path.
+     */
+    private static final List<UUID> VIEWERS =
+            List.of(UUID.fromString("00000000-0000-0000-0000-0000000000ee"));
+
     private IndicatorWindowBook.FreshResult openFresh(
             IndicatorWindowBook book, UUID victim, UUID attacker, long tick, double dmg, boolean crit) {
-        return book.onFresh(victim, attacker, tick, dmg, crit, HOLD, HORIZON, spawn, 64.0);
+        return book.onFresh(victim, attacker, tick, dmg, crit, HOLD, HORIZON, spawn, 64.0, VIEWERS);
     }
 
     /* --------------------------- fresh: open + hold --------------------------- */
@@ -59,7 +68,7 @@ class IndicatorWindowBookTest {
     void zeroHoldShipsTheSameTick() {
         IndicatorWindowBook book = new IndicatorWindowBook();
         IndicatorWindowBook.FreshResult opened =
-                book.onFresh(victimA, attackerX, 100L, 4.0, false, 0, HORIZON, spawn, 64.0);
+                book.onFresh(victimA, attackerX, 100L, 4.0, false, 0, HORIZON, spawn, 64.0, VIEWERS);
         assertEquals(IndicatorWindowBook.FreshKind.OPEN_SHIP, opened.kind());
         assertNotNull(opened.action());
         assertEquals(-1, opened.action().priorEntityId());
@@ -136,10 +145,10 @@ class IndicatorWindowBookTest {
     @Test
     void sameTickFoldBumpsAnAlreadyShippedWindow() {
         IndicatorWindowBook book = new IndicatorWindowBook();
-        book.onFresh(victimA, attackerX, 100L, 3.0, false, 0, HORIZON, spawn, 64.0); // hold 0 → ships now
+        book.onFresh(victimA, attackerX, 100L, 3.0, false, 0, HORIZON, spawn, 64.0, VIEWERS); // hold 0 → ships now
         book.shipped(victimA, 42);
         IndicatorWindowBook.FreshResult second =
-                book.onFresh(victimA, attackerX, 100L, 2.0, false, 0, HORIZON, spawn, 64.0);
+                book.onFresh(victimA, attackerX, 100L, 2.0, false, 0, HORIZON, spawn, 64.0, VIEWERS);
         assertEquals(IndicatorWindowBook.FreshKind.FOLD_BUMP, second.kind());
         assertEquals(42, second.action().priorEntityId());
         assertEquals(5.0, second.action().total(), 1.0e-9);
@@ -181,7 +190,7 @@ class IndicatorWindowBookTest {
     @Test
     void untrackedRememberedThenABumpFolds() {
         IndicatorWindowBook book = new IndicatorWindowBook();
-        book.rememberUntracked(victimA, attackerX, 100L, 3.0, false, HORIZON, spawn, 64.0, 99);
+        book.rememberUntracked(victimA, attackerX, 100L, 3.0, false, HORIZON, spawn, 64.0, 99, VIEWERS);
         IndicatorWindowBook.DeltaResult delta = book.onDelta(victimA, attackerX, 101L, 2.0, false);
         assertEquals(IndicatorWindowBook.DeltaKind.BUMP, delta.kind());
         assertEquals(99, delta.action().priorEntityId());
@@ -218,7 +227,7 @@ class IndicatorWindowBookTest {
     @Test
     void deathOfAnAlreadyShippedWindowIsSilent() {
         IndicatorWindowBook book = new IndicatorWindowBook();
-        book.onFresh(victimA, attackerX, 100L, 6.0, false, 0, HORIZON, spawn, 64.0);
+        book.onFresh(victimA, attackerX, 100L, 6.0, false, 0, HORIZON, spawn, 64.0, VIEWERS);
         book.shipped(victimA, 42);
         assertNull(book.onDeath(victimA), "already on screen — nothing new to draw");
     }
