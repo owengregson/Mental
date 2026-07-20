@@ -291,8 +291,10 @@ Modules: `api` (public surface) · `kernel` (pure-JDK combat model) · `platform
 · `core` (the plugin) · `compat-folia` · `tester` (live-server harness).
 
 **Public API** — `me.vexmc:mental-api` (generation 3): combo lifecycle events, an
-authoritative combat-state query service, capability discovery, and knockback outcome
-control. The jar ships with every release; the contract lives in
+authoritative combat-state query service, capability discovery, knockback outcome
+control, and temporary per-(victim, attacker) hit-timing overrides (a companion plugin
+re-prices a victim's hurt window for one attacker inside Mental's own timing — see
+[project/docs/api-timing-overrides.md](project/docs/api-timing-overrides.md)). The jar ships with every release; the contract lives in
 [project/docs/api-gen3-integration-surface.md](project/docs/api-gen3-integration-surface.md) with rulings in
 [project/docs/api-gen3-rulings.md](project/docs/api-gen3-rulings.md).
 

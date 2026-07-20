@@ -31,6 +31,7 @@ import me.vexmc.mental.platform.SweepCauses;
 import me.vexmc.mental.platform.Scheduling;
 import me.vexmc.mental.platform.TaskHandle;
 import me.vexmc.mental.kernel.port.TickClock;
+import me.vexmc.mental.kernel.timing.OverrideTable;
 import me.vexmc.mental.kernel.wire.LatencyModel;
 import me.vexmc.mental.kernel.wire.PositionRing;
 import me.vexmc.mental.platform.SchedulingFactory;
@@ -38,6 +39,8 @@ import me.vexmc.mental.platform.debug.DebugCategory;
 import me.vexmc.mental.platform.debug.DebugLog;
 import me.vexmc.mental.api.Mental;
 import me.vexmc.mental.api.MentalCombat;
+import me.vexmc.mental.api.timing.HitTimingOverrides;
+import me.vexmc.mental.v5.api.HitTimingService;
 import me.vexmc.mental.v5.api.MentalCombatService;
 import me.vexmc.mental.v5.api.MentalFacade;
 import me.vexmc.mental.v5.coexist.AnticheatPolicy;
@@ -197,6 +200,12 @@ public final class MentalPluginV5 extends JavaPlugin {
     private ComboEvents comboEvents;
     /** The gen-3 combat-state query service, backing the facade's {@code combat()}. */
     private MentalCombatService combatService;
+    /** The per-(victim, attacker) timing-override registry the admission seams read (gen-3 §timing). */
+    private OverrideTable overrideTable;
+    /** The always-on {@code HitTimingOverrides} service: API impl, death/quit hygiene, plain-profile window writer. */
+    private HitTimingService hitTimingService;
+    /** The periodic sweep of lapsed override pairs (S3). */
+    private TaskHandle overrideSweepTask;
     private LatencyModel latency;
     private LatencyCompensationUnit latencyCompensation;
     /** The effective latency-probe transport for this server version, resolved at parse. */
@@ -304,6 +313,12 @@ public final class MentalPluginV5 extends JavaPlugin {
             this.clock = new PaperTickClock(Bukkit::getCurrentTick);
         }
 
+        // The public timing-override registry (gen-3 HitTimingOverrides): the pair
+        // table both the CT8c per-hit window write and the plain-profile fallback
+        // read to price a victim's hurt window per attacker. Created before the
+        // session/units so the always-on service and the CT8c unit share one table.
+        this.overrideTable = new OverrideTable();
+
         // The packet rim's connection domains (spec §6): per-player sprint + ground
         // FSMs fed by the rim's movement taps. Created before the session service so
         // the session's tick-sampler can gate its ledger ground feed to packetless
@@ -389,6 +404,14 @@ public final class MentalPluginV5 extends JavaPlugin {
         if (capabilities.knockbackEvent()) {
             new MirrorListener(sessions).register(this);
         }
+        // The always-on timing-override service (gen-3 HitTimingOverrides): its
+        // listener carries victim death/quit hygiene and, on a profile that does
+        // not already shrink the window, the per-hit window write. Zero-touch until
+        // a consumer registers an override (the map is empty; the fallback handler
+        // early-returns at factor 1.0). The ServicesManager registration — the
+        // capability signal — lands with the facade below.
+        this.hitTimingService = new HitTimingService(overrideTable, clock, scheduling, this::snapshot);
+        getServer().getPluginManager().registerEvents(hitTimingService, this);
 
         // The feature reconciler. The delivery + knockback families register here
         // (4A2); the damage/cadence/sustain/loadout families follow in 4B–4D. A
@@ -414,6 +437,12 @@ public final class MentalPluginV5 extends JavaPlugin {
         // it appears never misses a balanced opening (§4).
         Mental.register(facade);
         getServer().getServicesManager().register(Mental.MentalApi.class, facade, this, ServicePriority.Normal);
+        // The gen-3 timing-override service, published on the ServicesManager — the
+        // registration IS the capability a consumer probes. Zero-touch until used;
+        // a global sweep evicts lapsed pairs (S3) alongside the combo-state cadence.
+        getServer().getServicesManager().register(
+                HitTimingOverrides.class, hitTimingService, this, ServicePriority.Normal);
+        this.overrideSweepTask = scheduling.repeatGlobal(20L, 20L, hitTimingService::sweep);
 
         // The descriptor-driven management GUI (Phase 6). Always-on infrastructure
         // (like the command system it fronts): the click router is registered for
@@ -503,6 +532,19 @@ public final class MentalPluginV5 extends JavaPlugin {
             Mental.register(null);
             if (facade != null) {
                 getServer().getServicesManager().unregister(Mental.MentalApi.class, facade);
+            }
+        });
+        // The timing-override service: stop the sweep, drop the ServicesManager
+        // registration (the capability signal goes away), and flush every window
+        // the plain-profile fallback still holds — zero residue on disable.
+        isolate("timing-override shutdown", () -> {
+            if (overrideSweepTask != null) {
+                overrideSweepTask.cancel();
+                overrideSweepTask = null;
+            }
+            if (hitTimingService != null) {
+                getServer().getServicesManager().unregister(HitTimingOverrides.class, hitTimingService);
+                hitTimingService.shutdown();
             }
         });
         isolate("sessions.shutdown", () -> {
@@ -919,7 +961,7 @@ public final class MentalPluginV5 extends JavaPlugin {
         reconciler.register(new Ct8cSweepUnit());
         reconciler.register(new Ct8cDamageUnit());
         reconciler.register(new Ct8cCritsUnit(this::snapshot, sessions));
-        reconciler.register(new Ct8cIframesUnit(scheduling));
+        reconciler.register(new Ct8cIframesUnit(scheduling, overrideTable, clock));
         // Task INT wire 1: feed Task D's platform Cleaving handle into the shield unit
         // so an axe with Cleaving disables the shield the extra +10 ticks/level (Task E
         // shipped the ToIntFunction ctor). A LIVE lookup, not a captured snapshot — the

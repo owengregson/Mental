@@ -25,6 +25,7 @@ import me.vexmc.mental.tester.suite.ProfileSuite;
 import me.vexmc.mental.tester.suite.ProjectileSuite;
 import me.vexmc.mental.tester.suite.ReloadSuite;
 import me.vexmc.mental.tester.suite.RulesBundleSuite;
+import me.vexmc.mental.tester.suite.TimingOverrideSuite;
 import me.vexmc.mental.tester.suite.ZeroTouchSuite;
 import me.vexmc.mental.v5.MentalPluginV5;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -110,6 +111,9 @@ public final class MentalTesterPlugin extends JavaPlugin {
                 // delivery engine off), each self-restoring — kept last so the
                 // established suites run first on the known-good default state.
                 suite.addAll(CombatTest8cSuite.tests(mental, this));
+                // The public timing-override service (gen-3 HitTimingOverrides):
+                // enable/assert/teardown its own ct8c cases, so kept beside CT8c.
+                suite.addAll(TimingOverrideSuite.tests(mental, this));
                 suite.addAll(RulesBundleSuite.tests(mental, this));
             }
             new TestHarness(this, scheduling, nonce).run(suite);
