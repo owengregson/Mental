@@ -6,6 +6,12 @@ import me.vexmc.mental.tester.Arena;
 import java.util.concurrent.atomic.AtomicReference;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.bukkit.event.HandlerList;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
@@ -436,6 +442,24 @@ public final class FeedbackSuite {
             });
             context.awaitTicks(5);
 
+            // Staging precondition. A clientless fake's damage() applies health loss on
+            // SOME servers without firing EntityDamageEvent at all (measured: on the
+            // 1.9.4 NMS health drops 6.0 -> 4.0 with no event reaching any listener).
+            // Nothing downstream can then be asserted, and — worse — the "no combat
+            // voice" half would pass VACUOUSLY on an event that never happened. So the
+            // probe decides: no event, loud skip; event, the full assertions below run.
+            // Measured rather than version-gated, so any server that CAN stage it does.
+            AtomicBoolean staged = new AtomicBoolean();
+            Listener probe = new Listener() {
+                @EventHandler(priority = EventPriority.MONITOR)
+                public void onAnyDamage(EntityDamageEvent event) {
+                    if (event.getEntity().getUniqueId().equals(victim.uuid())) {
+                        staged.set(true);
+                    }
+                }
+            };
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(probe, tester));
+
             trace.clear();
             // Drop to a sliver, then deal source-less damage that leaves them alive and
             // under the low-health ceiling: the warning must fire, the voice must not.
@@ -444,6 +468,17 @@ public final class FeedbackSuite {
                 victim.player().setNoDamageTicks(0);
                 victim.player().damage(2.0);
             });
+            context.awaitTicks(3);
+            context.syncRun(() -> HandlerList.unregisterAll(probe));
+
+            if (!staged.get()) {
+                context.note("skipped: a clientless fake's damage() fires no EntityDamageEvent on "
+                        + mental.environment().describe() + " (the health loss lands, but no listener "
+                        + "ever sees it), so environmental feedback cannot be staged here and the "
+                        + "no-combat-voice half would pass vacuously; the audience rule is unit-pinned "
+                        + "in IndicatorViewersTest and the split is asserted live on modern servers");
+                return;
+            }
 
             context.awaitUntil(
                     () -> entriesFor(trace, "hit-feedback").stream()
