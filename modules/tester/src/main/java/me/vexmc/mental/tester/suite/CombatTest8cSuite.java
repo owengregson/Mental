@@ -81,6 +81,8 @@ public final class CombatTest8cSuite {
                         runDamageTable(mental, tester, context)),
                 new TestCase("ct8c: the i-frame window scales with the attacker's weapon speed", context ->
                         runIframeScaling(mental, tester, context)),
+                new TestCase("ct8c: the shrunken i-frame window restores under continuous environmental damage", context ->
+                        runIframeEnvironmentalCadence(mental, tester, context)),
                 new TestCase("ct8c: shields — 148 arc, the 5-damage cap passthrough, and axe disable", context ->
                         runShields(mental, tester, context)),
                 new TestCase("ct8c: regen heals on the 40-tick cadence above the food gate", context ->
@@ -439,6 +441,89 @@ public final class CombatTest8cSuite {
         context.expect(window == expected,
                 "CT8c " + label + " i-frame window " + window + " != expected " + expected);
         return window;
+    }
+
+    /**
+     * The shrunken i-frame window must NEVER bleed into environmental damage — the
+     * report: "falling in lava/berries spam-hurts the player every tick." {@code
+     * maximumNoDamageTicks} is a PERSISTENT, all-causes entity field; the CT8c unit
+     * shrinks it for a melee/projectile hit and schedules a drain-time restore. The
+     * v2.9.0-era restore keyed the drain off the LIVE hurt counter — but a victim
+     * standing in a hazard (lava, sweet-berry bush, fire, cactus) has that counter
+     * re-armed to the shrunken window every few ticks, so the "counter still live"
+     * reschedule NEVER drained and the shrunken window (with its 2–3× faster
+     * environmental cadence) persisted for as long as the hazard did.
+     *
+     * <p>This drives exactly that: shrink the window with a real sword hit, then
+     * feed continuous environmental damage — a source-less {@code damage(1.0)}, the
+     * lava/berry proxy (cause CUSTOM, NOT a by-entity hit, so it never re-enters the
+     * CT8c unit to re-shrink) — and assert the window STILL restores to the vanilla
+     * default. A starved (counter-keyed) restore leaves it pinned at the shrunken
+     * value and this times out; the generation-keyed restore returns it on schedule
+     * because only a genuine CT8c re-hit — never a hazard tick — defers it.</p>
+     */
+    private static void runIframeEnvironmentalCadence(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            setFeature(mental, context, Feature.CT8C_IFRAMES, true);
+            context.expect(mental.featureActive(Feature.CT8C_IFRAMES), "ct8c-iframes did not converge active");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+                attacker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+            });
+            context.awaitTicks(5);
+
+            int vanillaWindow = context.sync(() -> victim.player().getMaximumNoDamageTicks());
+
+            // Shrink the window with a real melee hit (diamond sword ⇒ a 7-tick window).
+            captors.reset();
+            int shrunk = context.sync(() -> {
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+                return victim.player().getMaximumNoDamageTicks();
+            });
+            context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40, "the shrinking melee hit to land");
+            context.expect(shrunk < vanillaWindow,
+                    "the melee hit must shrink the window below the vanilla " + vanillaWindow + " (got " + shrunk + ")");
+
+            // Feed continuous environmental damage at a hazard's cadence, keeping the
+            // hurt counter alive. The window must still restore within a few ticks of
+            // its own duration; a counter-starved restore never will. Health is topped
+            // each tick so the victim survives the whole hazard window.
+            int budget = shrunk + 15;
+            boolean restored = false;
+            for (int i = 0; i < budget; i++) {
+                int window = context.sync(() -> {
+                    Player p = victim.player();
+                    p.setHealth(p.getMaxHealth());
+                    p.damage(1.0); // the lava/berry proxy — source-less, so never a CT8c re-shrink
+                    return p.getMaximumNoDamageTicks();
+                });
+                if (window == vanillaWindow) {
+                    restored = true;
+                    break;
+                }
+                context.awaitTicks(1);
+            }
+            context.expect(restored,
+                    "under continuous environmental damage the CT8c i-frame window must still restore to the vanilla "
+                            + vanillaWindow + " — it stayed pinned at " + shrunk + ", so a hazard tick kept re-arming "
+                            + "the shrunken window (the lava/berry spam the report describes)");
+        } finally {
+            setFeature(mental, context, Feature.CT8C_IFRAMES, false);
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
     }
 
     /* ------------------------------------------------------------------ */
