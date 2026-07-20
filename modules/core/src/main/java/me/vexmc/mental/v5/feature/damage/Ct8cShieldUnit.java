@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.feature.damage;
 
+import java.lang.reflect.Method;
 import java.util.function.ToIntFunction;
 import me.vexmc.mental.kernel.math.Ct8cShieldMath;
 import me.vexmc.mental.platform.Cooldowns;
@@ -10,6 +11,7 @@ import me.vexmc.mental.v5.feature.Scope;
 import org.bukkit.Material;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -53,10 +55,16 @@ import org.jetbrains.annotations.NotNull;
  * </ul>
  *
  * <p>Banner shields are intentionally NOT implemented (spec §5, owner decision).
- * Projectile/explosion blocking stays vanilla's 100% (only melee is capped); the
- * crouch-to-shield model is the CT8c-canonical blocking gesture the resistance
- * lever tracks. This unit assumes classic {@code sword-blocking} is off (the
- * bundles arbitrate the two — spec §3.3).</p>
+ * <b>Projectiles</b> are blocked through the SAME 148° arc as melee and absorbed
+ * IN FULL (8c's {@code isDamageSourceBlocked} gates every blockable source with
+ * one cone, and a blocked projectile takes {@code blocked = amount}, not the
+ * melee 5-cap — {@code LivingEntity.hurt} lines 969–978); a piercing arrow
+ * bypasses the shield. Explosions are the one blockable source still left to
+ * vanilla's 180°/100% here (their source position is not cleanly reachable from a
+ * plain damage event). The crouch-to-shield model is the CT8c-canonical blocking
+ * gesture the resistance lever tracks, and it now protects against projectiles
+ * too. This unit assumes classic {@code sword-blocking} is off (the bundles
+ * arbitrate the two — spec §3.3).</p>
  *
  * <p><b>Cleaving.</b> The shield-disable scaling reads the axe's Cleaving level
  * through the injected {@code cleavingLevelOf} lookup (Task D's platform
@@ -116,7 +124,7 @@ public final class Ct8cShieldUnit implements FeatureUnit, Listener {
         if (event.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK
                 || !(event.getEntity() instanceof Player victim)
                 || !(event.getDamager() instanceof LivingEntity attacker)) {
-            return; // melee, player victim only — projectiles/explosions keep vanilla's 100% block
+            return; // melee, player victim only — projectiles route through onProjectileDamage
         }
         boolean nativeBlock = vanillaBlocking(event);
         boolean crouchShield = crouchToShieldBlocking(victim);
@@ -138,6 +146,42 @@ public final class Ct8cShieldUnit implements FeatureUnit, Listener {
         applyMeleeCap(event);
         resistance.apply(victim); // belt: ensure the 0.5 KB-resist lever is present for this blocked hit
         disableOnAxe(victim, attacker);
+    }
+
+    /**
+     * Reshapes a projectile hit against a blocking CT8c shield (spec §2.6,
+     * decompile-confirmed against {@code LivingEntity.hurt} lines 969–978). 8c
+     * gates EVERY blockable source through the same {@link #blocksHit 148° arc},
+     * and a blocked projectile is absorbed IN FULL ({@code blocked = amount}) —
+     * not the melee 5-cap. A piercing arrow ({@code pierceLevel > 0}) is never
+     * blocked. HIGH like the melee handler, so the composed damage is settled.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onProjectileDamage(@NotNull EntityDamageByEntityEvent event) {
+        if (event.getCause() != EntityDamageEvent.DamageCause.PROJECTILE
+                || !(event.getEntity() instanceof Player victim)
+                || !(event.getDamager() instanceof Projectile projectile)) {
+            return; // projectiles, player victim only
+        }
+        boolean nativeBlock = vanillaBlocking(event);
+        boolean crouchShield = crouchToShieldBlocking(victim);
+        if (!nativeBlock && !crouchShield) {
+            return; // not blocking — leave the hit untouched (zero-touch)
+        }
+        if (piercing(projectile)) {
+            // 8c: a piercing arrow bypasses the shield entirely — withdraw vanilla's block.
+            withdrawVanillaBlock(event);
+            return;
+        }
+        boolean withinArc = blocksHit(
+                victim.getEyeLocation().getDirection(),
+                victim.getLocation().toVector().subtract(projectile.getLocation().toVector()));
+        if (!withinArc) {
+            withdrawVanillaBlock(event); // outside the 148° cone — the shot lands
+            return;
+        }
+        fullyBlock(event);
+        resistance.apply(victim); // parity with the melee path's KB-resist lever
     }
 
     /**
@@ -241,6 +285,23 @@ public final class Ct8cShieldUnit implements FeatureUnit, Listener {
         return blocked;
     }
 
+    /**
+     * Absorbs a projectile hit in full (8c blocks projectiles 100%, unlike melee's
+     * 5-cap). Written to the granular BLOCKING modifier where vanilla already
+     * carries one (so nothing else in the pipeline is disturbed), else zeroes the
+     * final damage. Returns the absorbed amount.
+     */
+    @SuppressWarnings("deprecation") // the granular BLOCKING modifier is Bukkit's only shield-absorption lever
+    static double fullyBlock(@NotNull EntityDamageByEntityEvent event) {
+        double incoming = event.getDamage();
+        if (event.isApplicable(EntityDamageEvent.DamageModifier.BLOCKING)) {
+            event.setDamage(EntityDamageEvent.DamageModifier.BLOCKING, -incoming);
+        } else {
+            event.setDamage(0.0);
+        }
+        return incoming;
+    }
+
     /** The axe-hit shield-disable duration for a Cleaving level: {@code 32 + 10·level} ticks (spec §2.6/§2.9). */
     static int shieldDisableTicks(int cleavingLevel) {
         return Ct8cShieldMath.axeDisableTicks(Math.max(0, cleavingLevel));
@@ -249,6 +310,34 @@ public final class Ct8cShieldUnit implements FeatureUnit, Listener {
     /** Whether a material is an axe (a {@code _AXE} item — never a {@code _PICKAXE}, which does not end {@code _AXE}). */
     static boolean isAxe(@NotNull Material material) {
         return material.name().endsWith("_AXE");
+    }
+
+    /**
+     * {@code AbstractArrow#getPierceLevel} resolved reflectively — pierce is 1.14+,
+     * so it is never named in a descriptor or {@code instanceof} (the 1.9.4-safe
+     * discipline the arrow classifiers here already use). {@code null} below 1.14,
+     * where no arrow pierces.
+     */
+    private static final Method PIERCE_LEVEL = resolvePierceLevel();
+
+    private static Method resolvePierceLevel() {
+        try {
+            return Class.forName("org.bukkit.entity.AbstractArrow").getMethod("getPierceLevel");
+        } catch (ReflectiveOperationException absent) {
+            return null; // pre-1.14 — no piercing arrows exist
+        }
+    }
+
+    /** Whether a projectile is a piercing arrow ({@code pierceLevel > 0}); always false where pierce is absent. */
+    private static boolean piercing(@NotNull Projectile projectile) {
+        if (PIERCE_LEVEL == null || !PIERCE_LEVEL.getDeclaringClass().isInstance(projectile)) {
+            return false;
+        }
+        try {
+            return (Integer) PIERCE_LEVEL.invoke(projectile) > 0;
+        } catch (ReflectiveOperationException | ClassCastException failed) {
+            return false;
+        }
     }
 
     /* ------------------------------------------------------------------ */

@@ -45,6 +45,17 @@ class Ct8cChargeMathTest {
         assertTrue(Ct8cChargeMath.attackAllowed(0.5, true, 4.5), "past 4 ticks the recovery lane opens");
     }
 
+    @Test
+    void theMissRecoveryGateIsConfigurable() {
+        // The 4-arg overload honors a caller-supplied gate (the missRecoveryTicks knob), where the
+        // 3-arg form uses the 4.0 default. A gate of 6 keeps a 5-tick air-swing recovery closed.
+        assertFalse(Ct8cChargeMath.attackAllowed(0.5, true, 5.0, 6.0), "gate 6 → 5 ticks not yet past");
+        assertTrue(Ct8cChargeMath.attackAllowed(0.5, true, 6.5, 6.0), "gate 6 → 6.5 ticks opens the lane");
+        // A gate of 0 makes any air swing re-attack immediately; full charge is still always allowed.
+        assertTrue(Ct8cChargeMath.attackAllowed(0.5, true, 0.5, 0.0), "gate 0 → any air swing recovers");
+        assertTrue(Ct8cChargeMath.attackAllowed(1.0, false, 0.0, 99.0), "full charge ignores the gate");
+    }
+
     /* ------------------------------- charged gates ------------------------------------- */
 
     @Test

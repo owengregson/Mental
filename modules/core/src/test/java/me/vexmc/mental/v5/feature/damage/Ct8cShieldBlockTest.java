@@ -126,6 +126,32 @@ class Ct8cShieldBlockTest {
     }
 
     /* ------------------------------------------------------------------ */
+    /*  Projectile full-block (no 5-cap — 8c blocks projectiles 100%)      */
+    /* ------------------------------------------------------------------ */
+
+    @Test
+    void projectileBlockAbsorbsInFullPastTheMeleeCap() {
+        // A 7-damage projectile is absorbed IN FULL (blocked = amount), where a melee
+        // hit of the same size would leave 2 through the 5-cap (spec §2.6, hurt 969–978).
+        EntityDamageByEntityEvent event = event(7.0, -7.0);
+        double blocked = Ct8cShieldUnit.fullyBlock(event);
+
+        assertEquals(7.0, blocked, 1.0e-9, "the whole 7 is absorbed, not min(5,7)");
+        assertEquals(0.0, event.getFinalDamage(), 1.0e-9, "a blocked projectile deals nothing");
+    }
+
+    @Test
+    void projectileCrouchBlockZeroesDamageWithNoVanillaModifier() {
+        // Crouch-to-shield against a projectile: vanilla applied no BLOCKING modifier,
+        // so the full block zeroes the final damage directly.
+        EntityDamageByEntityEvent event = eventWithoutBlocking(7.0);
+        double blocked = Ct8cShieldUnit.fullyBlock(event);
+
+        assertEquals(7.0, blocked, 1.0e-9, "the whole 7 is absorbed");
+        assertEquals(0.0, event.getFinalDamage(), 1.0e-9, "crouch-shielding fully stops the projectile");
+    }
+
+    /* ------------------------------------------------------------------ */
     /*  Axe disable ticks (32 + 10·Cleaving)                               */
     /* ------------------------------------------------------------------ */
 

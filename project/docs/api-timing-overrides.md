@@ -21,12 +21,14 @@ MONITOR (`victim.setNoDamageTicks(max − W/2)` one tick after the hit, to survi
 post-dispatch `invulnerableTime = max` reset). Audited consequences on Mental servers:
 
 - **The ct8c inversion.** SE's window model was frozen against `WindowJudge` (gate = max/2,
-  max intact at 20). `Ct8cIframesUnit` rewrites `maximumNoDamageTicks = min(attackDelay, 10)`
-  per hit with a full-window gate — SE's derived write then equals the naturally-decayed
-  counter (a no-op steal) while SE's 1/3 damage tax still lands: the ability degrades to a
-  pure self-nerf on exactly the profile the flagship deployment runs. SE now heuristically
-  treats an observed `max <= 10` as the ct8c profile — a fingerprint of Mental internals
-  that this API deletes.
+  max intact at 20). `Ct8cIframesUnit` rewrites the per-hit `maximumNoDamageTicks` to
+  `2 × min(attackDelay, 10)` — the doubled transport that makes CraftBukkit's half-window
+  gate span 8c's full window — so SE's derived write equals the naturally-decayed counter
+  (a no-op steal) while SE's 1/3 damage tax still lands: the ability degrades to a pure
+  self-nerf on exactly the profile the flagship deployment runs. SE heuristically treated an
+  observed `max <= 10` as the ct8c profile — a fingerprint of Mental internals that this API
+  deletes, and one that the 2× transport (field 14–20, not 7–10) would silently invert
+  anyway: exactly the reason an integrator must never fingerprint the field.
 - **The spawn-invulnerability trap.** On 1.16.5–1.20.6 the Bukkit setter also arms
   `ServerPlayer.spawnInvulnerableTime`, whose gate silently voids EVERY hit — Mental ships
   `SpawnInvulnerability.disarm` for its own writes; SE had to copy the recipe. A foreign
@@ -123,8 +125,9 @@ At Berry Overdrive's MONITOR commit for a LANDED holder hit, SE probes the servi
 
 1. Default profile: override(0.5) admits a full hit at gate/2 ticks; a third attacker still
    waits the full gate; expiry restores the pair.
-2. ct8c profile: sword max 7 → admitted at ~4 ticks under override(0.5); no vanilla-counter
-   interaction (the counter may still read 6 — the GATE admitted early).
+2. ct8c profile: sword logical window 7 (field 14) → priced to 4 (field 8) under
+   override(0.5), admitting at ~4 ticks; no vanilla-counter interaction (the counter may
+   still read 6 — the GATE admitted early).
 3. Fast path on: pre-sent knock and damage agree for an accelerated admitted hit (S6).
 4. Refresh-not-stack: two registrations at t and t+20 admit against ONE clock ending at
    t+20+duration.

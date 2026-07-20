@@ -157,6 +157,11 @@ public final class TimingOverrideSuite {
      * third attacker's own sword hit still writes the un-scaled 7 — the pricing is
      * per-hit-attacker, nothing global erased. (The vanilla COUNTER is untouched;
      * this asserts the GATE — the window field — not the counter.)
+     *
+     * <p>The assertions read the {@code maximumNoDamageTicks} FIELD, which ct8c
+     * writes as {@link Ct8cIframesUnit#windowField} (2×) of the logical window so
+     * CraftBukkit's half-gate spans 8c's full window — so each expectation is the
+     * doubled transport of the priced logical window (control 14, override(0.5) 8).
      */
     private static void runCt8cComposition(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -183,25 +188,30 @@ public final class TimingOverrideSuite {
 
             int swordWindow = Ct8cIframesUnit.iframeTicks(4.5); // diamond sword delay = 7
 
-            // Control: with no override, ct8c writes the plain window (7).
+            // Control: with no override, ct8c writes the plain window (7 → field 14).
+            int controlField = Ct8cIframesUnit.windowField(swordWindow);
             int control = windowAfterAttack(context, attacker, victim, 0);
-            context.expect(control == swordWindow,
-                    "plain ct8c must write the sword window " + swordWindow + ", saw " + control);
+            context.expect(control == controlField,
+                    "plain ct8c must write the sword window " + swordWindow + " as field "
+                            + controlField + ", saw " + control);
 
-            // Override 0.5 → round(7 * 0.5) = 4 (the counter may still read ~6; the
-            // GATE admitted early).
+            // Override 0.5 → round(7 * 0.5) = 4 → field 8 (the counter may still read
+            // ~6; the GATE admitted early).
             context.syncRun(() -> service.overrideWindow(victim.uuid(), attacker.uuid(), 0.5, 200));
             int accelerated = windowAfterAttack(context, attacker, victim, 0);
-            int expected = WindowPricing.price(swordWindow, 0.5);
+            int expected = Ct8cIframesUnit.windowField(WindowPricing.price(swordWindow, 0.5));
             context.expect(accelerated == expected,
-                    "the ct8c window must compose to round(" + swordWindow + " * 0.5) = " + expected
-                            + ", saw " + accelerated);
+                    "the ct8c window must compose to round(" + swordWindow + " * 0.5) as field "
+                            + expected + ", saw " + accelerated);
+            context.expect(accelerated < control,
+                    "the override must actually ACCELERATE the ct8c window (" + accelerated
+                            + " must be under the un-priced " + control + ")");
 
             // The third attacker's own sword hit writes the un-scaled 7 (per-hit-attacker pricing).
             int thirdWindow = windowAfterAttack(context, third, victim, 0);
-            context.expect(thirdWindow == swordWindow,
-                    "a third attacker's hit must write the un-scaled ct8c window " + swordWindow
-                            + ", saw " + thirdWindow);
+            context.expect(thirdWindow == controlField,
+                    "a third attacker's hit must write the un-scaled ct8c window as field "
+                            + controlField + ", saw " + thirdWindow);
         } finally {
             context.syncRun(() -> {
                 service.clearVictim(victim.uuid());
@@ -308,10 +318,11 @@ public final class TimingOverrideSuite {
 
             int swordWindow = Ct8cIframesUnit.iframeTicks(4.5); // 7
             int refreshed = windowAfterAttack(context, attacker, victim, 0);
-            int expected = WindowPricing.price(swordWindow, 0.25); // round(7 * 0.25) = 2
+            // round(7 * 0.25) = 2, written through the 2× half-gate transport → field 4.
+            int expected = Ct8cIframesUnit.windowField(WindowPricing.price(swordWindow, 0.25));
             context.expect(refreshed == expected,
-                    "the refresh must price at the NEW 0.25 factor: round(" + swordWindow + " * 0.25) = "
-                            + expected + ", saw " + refreshed);
+                    "the refresh must price at the NEW 0.25 factor: round(" + swordWindow
+                            + " * 0.25) as field " + expected + ", saw " + refreshed);
         } finally {
             context.syncRun(() -> {
                 service.clearVictim(victim.uuid());

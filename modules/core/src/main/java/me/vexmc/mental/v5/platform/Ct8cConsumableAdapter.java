@@ -36,10 +36,13 @@ import org.jetbrains.annotations.Nullable;
  * <p>This stamps per stack (the {@code AttackRangeAdapter} model the plan
  * specifies), not the item prototype, so two like potions merge into a 16-stack
  * only once both carry the component; a freshly brewed, not-yet-stamped potion
- * merges after it is next handled. The drink-duration override rebuilds the
- * {@code CONSUMABLE} with the {@code DRINK} animation, so a stew keeps its own
- * eat animation/sound rather than being reshaped — the 20-tick duration is the
- * mechanic, the animation is cosmetic.</p>
+ * merges after it is next handled. The 20-tick override rebuilds the {@code
+ * CONSUMABLE} in the item's OWN animation — {@code DRINK} for potions/milk/honey,
+ * {@code EAT} for the bowl stews (mushroom/rabbit/beetroot) — so 8c's actual
+ * {@code getUseDuration} overrides are matched: {@code BowlFoodItem} shipped
+ * {@code getUseDuration = 20} while keeping the eat animation. Suspicious stew is
+ * deliberately excluded — it extends {@code Item}, not {@code BowlFoodItem}, so
+ * 8c leaves it at the 32-tick base (decompile-confirmed).</p>
  */
 public final class Ct8cConsumableAdapter {
 
@@ -53,6 +56,7 @@ public final class Ct8cConsumableAdapter {
     private final @Nullable Object maxStackType;
     private final @Nullable Object consumableType;
     private final @Nullable Object drinkConsumable;
+    private final @Nullable Object eatConsumable;
     private final @Nullable Method nmsItemStackSet;
     private final @Nullable Method nmsItemStackRemove;
     private final @Nullable Method nmsItemStackHas;
@@ -85,6 +89,7 @@ public final class Ct8cConsumableAdapter {
         Object maxStack = null;
         Object consumable = null;
         Object drink = null;
+        Object eat = null;
         Method set = null;
         Method remove = null;
         Method has = null;
@@ -100,7 +105,10 @@ public final class Ct8cConsumableAdapter {
 
                 maxStack = nmsDataComponents.getField("MAX_STACK_SIZE").get(null);
                 consumable = nmsDataComponents.getField("CONSUMABLE").get(null);
-                drink = buildDrinkConsumable();
+                drink = buildConsumable("DRINK");
+                // Bowl stews eat (not drink) in 20 ticks — build a matching EAT consumable
+                // independently, so a stew-only build failure never disables drinks/stacks.
+                eat = buildConsumable("EAT");
 
                 resolved = set != null && remove != null && has != null
                         && maxStack != null && consumable != null && drink != null;
@@ -113,6 +121,7 @@ public final class Ct8cConsumableAdapter {
             maxStack = null;
             consumable = null;
             drink = null;
+            eat = null;
             set = null;
             remove = null;
             has = null;
@@ -122,6 +131,7 @@ public final class Ct8cConsumableAdapter {
         this.maxStackType = maxStack;
         this.consumableType = consumable;
         this.drinkConsumable = drink;
+        this.eatConsumable = eat;
         this.nmsItemStackSet = set;
         this.nmsItemStackRemove = remove;
         this.nmsItemStackHas = has;
@@ -148,13 +158,26 @@ public final class Ct8cConsumableAdapter {
         return nmsSet(stack, maxStackType, Integer.valueOf(size));
     }
 
-    /** Sets the 20-tick drink duration on {@code stack}; true when the stack was modified. */
+    /** Sets the 20-tick drink duration ({@code DRINK} animation) on {@code stack}; true when modified. */
     public boolean stampDrinkDuration(@Nullable ItemStack stack) {
         if (!supported || stack == null || stack.getType() == Material.AIR
                 || consumableType == null || drinkConsumable == null) {
             return false;
         }
         return nmsSet(stack, consumableType, drinkConsumable);
+    }
+
+    /**
+     * Sets the 20-tick eat duration ({@code EAT} animation, for the bowl stews) on
+     * {@code stack}; true when modified. Distinct from {@link #stampDrinkDuration}
+     * only in the animation, so a stew keeps eating rather than drinking.
+     */
+    public boolean stampEatDuration(@Nullable ItemStack stack) {
+        if (!supported || stack == null || stack.getType() == Material.AIR
+                || consumableType == null || eatConsumable == null) {
+            return false;
+        }
+        return nmsSet(stack, consumableType, eatConsumable);
     }
 
     /** Removes any CT8c components this driver may have applied; true when the stack was modified. */
@@ -187,9 +210,9 @@ public final class Ct8cConsumableAdapter {
     }
 
     /**
-     * A "drink" for the 20-tick duration (spec §2.7): potions, milk, honey. Stews
-     * keep their own eat animation (see the class note); the duration mechanic is
-     * scoped to the genuine drinks the {@code DRINK} animation fits.
+     * A {@code DRINK}-animation 20-tick consumable (spec §2.7): potions, milk,
+     * honey — the three drink items 8c overrode to {@code getUseDuration = 20}.
+     * The bowl stews are 20-tick too but eat, not drink — see {@link #isBowlStew}.
      */
     public static boolean isDrink(@Nullable Material material) {
         if (material == null) {
@@ -199,23 +222,38 @@ public final class Ct8cConsumableAdapter {
         return name.equals("POTION") || name.equals("MILK_BUCKET") || name.equals("HONEY_BOTTLE");
     }
 
+    /**
+     * A bowl stew — mushroom stew, rabbit stew, beetroot soup — which 8c ships as
+     * {@code BowlFoodItem} with {@code getUseDuration = 20}, EATEN (not drunk).
+     * Suspicious stew is NOT here: it extends {@code Item}, keeping 8c's 32-tick
+     * base (decompile-confirmed), so including it would over-speed it.
+     */
+    public static boolean isBowlStew(@Nullable Material material) {
+        if (material == null) {
+            return false;
+        }
+        String name = material.name();
+        return name.equals("MUSHROOM_STEW") || name.equals("RABBIT_STEW") || name.equals("BEETROOT_SOUP");
+    }
+
     /* ------------------------------------------------------------------ */
     /*  NMS component construction (verified pattern)                      */
     /* ------------------------------------------------------------------ */
 
     /**
      * Builds a {@code Consumable} with {@code consume_seconds = 1.0} (20 ticks)
-     * and the {@code DRINK} animation via the same builder path
-     * {@code SwordBlockAdapter} uses for its BLOCK consumable.
+     * and the named {@code ItemUseAnimation} ({@code DRINK} for drinks, {@code
+     * EAT} for bowl stews), via the same builder path {@code SwordBlockAdapter}
+     * uses for its BLOCK consumable.
      */
-    private static @Nullable Object buildDrinkConsumable() {
+    private static @Nullable Object buildConsumable(@NotNull String animationName) {
         try {
             Class<?> nmsUseAnim = Class.forName("net.minecraft.world.item.ItemUseAnimation");
-            Object drink = nmsUseAnim.getField("DRINK").get(null);
+            Object animation = nmsUseAnim.getField(animationName).get(null);
             Class<?> nmsConsumable = Class.forName("net.minecraft.world.item.component.Consumable");
             Object builder = nmsConsumable.getMethod("builder").invoke(null);
             builder = builder.getClass().getMethod("consumeSeconds", float.class).invoke(builder, 1.0f);
-            builder = builder.getClass().getMethod("animation", nmsUseAnim).invoke(builder, drink);
+            builder = builder.getClass().getMethod("animation", nmsUseAnim).invoke(builder, animation);
             return builder.getClass().getMethod("build").invoke(builder);
         } catch (Throwable ignored) {
             return null;

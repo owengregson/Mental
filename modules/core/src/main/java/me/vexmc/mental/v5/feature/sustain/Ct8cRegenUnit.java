@@ -1,5 +1,6 @@
 package me.vexmc.mental.v5.feature.sustain;
 
+import java.lang.reflect.Method;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
@@ -17,9 +18,11 @@ import me.vexmc.mental.v5.feature.FeatureUnit;
 import me.vexmc.mental.v5.feature.Scope;
 import me.vexmc.mental.v5.feature.sustain.Ct8cRegenDriver.Outcome;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -128,9 +131,53 @@ public final class Ct8cRegenUnit implements FeatureUnit, Listener {
             return;
         }
         boolean damagerLiving = event.getDamager() instanceof LivingEntity;
-        if (Ct8cRegen.interruptsConsume(HandStates.isHandRaised(victim), damagerLiving)) {
+        if (Ct8cRegen.interruptsConsume(isConsuming(victim), damagerLiving)) {
             interrupt.interrupt(victim);
         }
+    }
+
+    /** {@code LivingEntity#getItemInUse()} — Paper 1.20.5+, resolved once; {@code null} where absent. */
+    private static final Method ITEM_IN_USE = resolveItemInUse();
+
+    private static Method resolveItemInUse() {
+        try {
+            return Class.forName("org.bukkit.entity.LivingEntity").getMethod("getItemInUse");
+        } catch (ReflectiveOperationException absent) {
+            return null; // pre-1.20.5 / non-Paper — the interrupt seam is a no-op there anyway
+        }
+    }
+
+    /**
+     * Whether the victim is actively EATING or DRINKING — <em>not</em> raising a
+     * shield, drawing a bow, using a spyglass or charging a trident. 8c interrupts
+     * only the consume animations ({@code LivingEntity.hurt}:
+     * {@code getUseItem().getUseAnimation() ∈ {EAT, DRINK}}); the pre-2.10 gate
+     * read the bare {@code isHandRaised()} and so wrongly dropped a raised shield
+     * or a drawn bow on any hit. The item in use is read through Paper's
+     * {@code getItemInUse()} (the same 1.20.5+ band the interrupt seam needs);
+     * where absent it degrades to the coarse hand-raised read — moot, since the
+     * interrupt itself is a no-op there.
+     */
+    private static boolean isConsuming(@NotNull Player victim) {
+        if (ITEM_IN_USE == null) {
+            return HandStates.isHandRaised(victim);
+        }
+        try {
+            Object using = ITEM_IN_USE.invoke(victim);
+            return using instanceof ItemStack stack && isConsumable(stack.getType());
+        } catch (ReflectiveOperationException failed) {
+            return HandStates.isHandRaised(victim);
+        }
+    }
+
+    /**
+     * Whether a material is eaten or drunk (the EAT/DRINK animations): any edible
+     * item (foods, stews, honey), or the two drink-only items ({@code POTION},
+     * {@code MILK_BUCKET}) that {@code Material#isEdible()} does not cover. Shields,
+     * bows, spyglasses and tridents are none of these.
+     */
+    private static boolean isConsumable(@NotNull Material material) {
+        return material.isEdible() || material == Material.POTION || material == Material.MILK_BUCKET;
     }
 
     /* ------------------------------ lifecycle ----------------------------- */

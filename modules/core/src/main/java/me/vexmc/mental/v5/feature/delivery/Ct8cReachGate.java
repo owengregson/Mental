@@ -27,7 +27,7 @@ import me.vexmc.mental.v5.feature.loadout.Ct8cReachTable;
  */
 public final class Ct8cReachGate {
 
-    /** The reach a ≥195% charged hit adds (spec §2.1) — {@code Ct8cChargeView} publishes the flag. */
+    /** The DEFAULT reach a ≥195% charged hit adds (spec §2.1); the live value is the {@code chargedReachBonus} knob. */
     public static final double CHARGED_REACH_BONUS = 1.0;
 
     private Ct8cReachGate() {}
@@ -42,14 +42,24 @@ public final class Ct8cReachGate {
     }
 
     /**
-     * The reach the gate enforces this hit: the CT8c reach for {@code heldMaterialName}
-     * (or the {@link #weaponCeiling()} when it is {@code null} — the weapon-blind netty
-     * path), plus {@link #CHARGED_REACH_BONUS} when {@code chargedReach} is set.
+     * The reach the gate enforces this hit with the DEFAULT charged bonus: adds
+     * {@link #CHARGED_REACH_BONUS} when {@code chargedReach} is set. The {@link
+     * #gateReach(String, double) bonus overload} takes the configured value.
      */
     public static double gateReach(String heldMaterialName, boolean chargedReach) {
+        return gateReach(heldMaterialName, chargedReach ? CHARGED_REACH_BONUS : 0.0);
+    }
+
+    /**
+     * The reach the gate enforces this hit: the CT8c reach for {@code heldMaterialName}
+     * (or the {@link #weaponCeiling()} when it is {@code null} — the weapon-blind netty
+     * path), plus {@code chargedBonus} (the {@code chargedReachBonus} knob, {@code 0}
+     * for an uncharged hit).
+     */
+    public static double gateReach(String heldMaterialName, double chargedBonus) {
         double base = heldMaterialName == null
                 ? weaponCeiling()
                 : Ct8cReachTable.reachFor(heldMaterialName);
-        return base + (chargedReach ? CHARGED_REACH_BONUS : 0.0);
+        return base + chargedBonus;
     }
 }

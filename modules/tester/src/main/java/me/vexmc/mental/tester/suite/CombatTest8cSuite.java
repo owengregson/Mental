@@ -81,6 +81,10 @@ public final class CombatTest8cSuite {
                         runDamageTable(mental, tester, context)),
                 new TestCase("ct8c: the i-frame window scales with the attacker's weapon speed", context ->
                         runIframeScaling(mental, tester, context)),
+                new TestCase("ct8c: the shrunken i-frame window restores under continuous environmental damage", context ->
+                        runIframeEnvironmentalCadence(mental, tester, context)),
+                new TestCase("ct8c: the whole i-frame window is difference-damage (a mid-window re-hit deals nothing)", context ->
+                        runIframeFullWindowDiffDamage(mental, tester, context)),
                 new TestCase("ct8c: shields — 148 arc, the 5-damage cap passthrough, and axe disable", context ->
                         runShields(mental, tester, context)),
                 new TestCase("ct8c: regen heals on the 40-tick cadence above the food gate", context ->
@@ -367,13 +371,17 @@ public final class CombatTest8cSuite {
     /* ------------------------------------------------------------------ */
 
     /**
-     * The CT8c melee i-frame window (spec §2.4): {@code
-     * setMaximumNoDamageTicks(min(attackerAttackDelay, 10))}, the delay read from
-     * the CT8c weapon speed table (never a raw positive {@code setNoDamageTicks} —
-     * the window field sidesteps the 1.16.5–1.20.6 total-invuln trap). A diamond
-     * sword (attr 4.5 → delay 7) pins the window at 7; a diamond axe (attr 3.5 →
-     * delay 10) at the 10-tick ceiling — distinct per weapon and both distinct from
-     * the vanilla 20-tick default, so the scaling is unambiguous.
+     * The CT8c melee i-frame window (spec §2.4). 8c makes the WHOLE
+     * {@code min(attackerAttackDelay, 10)}-tick window difference-damage
+     * ({@code invulnerableTime > 0}); Mental writes {@link Ct8cIframesUnit#windowField}
+     * — {@code 2 ×} that — into {@code maximumNoDamageTicks} so CraftBukkit's
+     * half-window gate reproduces the full 8c window (never a raw positive
+     * {@code setNoDamageTicks} — the field write sidesteps the 1.16.5–1.20.6
+     * total-invuln trap). A diamond sword (attr 4.5 → 8c window 7) writes 14; a
+     * diamond axe (attr 3.5 → window 10) writes 20 — which equals the vanilla default,
+     * faithfully so: 8c's slowest weapon's 10-tick full window IS vanilla's half of 20.
+     * The scaling shows in sword 14 ≠ axe 20; the sword (last hit) then restores to
+     * the vanilla 20 once drained.
      */
     private static void runIframeScaling(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
@@ -394,22 +402,30 @@ public final class CombatTest8cSuite {
 
             int vanillaWindow = context.sync(() -> victim.player().getMaximumNoDamageTicks());
 
-            int swordWindow = assertIframeWindow(context, captors, attacker, victim,
-                    new ItemStack(Material.DIAMOND_SWORD), Ct8cIframesUnit.iframeTicks(4.5), "diamond sword");
+            // The written field is 2× the 8c logical window (full-window diff-damage via
+            // the half-gate). Axe (window 10 → field 20) equals the vanilla default —
+            // faithful; the sword (window 7 → field 14) is distinct. Sword is landed
+            // LAST so the restore pin below watches a field that differs from vanilla.
             int axeWindow = assertIframeWindow(context, captors, attacker, victim,
-                    new ItemStack(Material.DIAMOND_AXE), Ct8cIframesUnit.iframeTicks(3.5), "diamond axe");
+                    new ItemStack(Material.DIAMOND_AXE),
+                    Ct8cIframesUnit.windowField(Ct8cIframesUnit.iframeTicks(3.5)), "diamond axe");
+            int swordWindow = assertIframeWindow(context, captors, attacker, victim,
+                    new ItemStack(Material.DIAMOND_SWORD),
+                    Ct8cIframesUnit.windowField(Ct8cIframesUnit.iframeTicks(4.5)), "diamond sword");
             context.expect(swordWindow != axeWindow,
                     "the i-frame window must SCALE with weapon speed (sword " + swordWindow
                             + " == axe " + axeWindow + ")");
+            context.expect(swordWindow != vanillaWindow,
+                    "the sword's shaped window " + swordWindow + " must differ from the vanilla "
+                            + vanillaWindow + " for the restore pin to mean anything");
 
-            // The v2.9.0 leak regression pin: maximumNoDamageTicks is a PERSISTENT
-            // entity field, so the unit must hand the vanilla window back once the
-            // shaped window drains — otherwise one hit leaves the victim taking
-            // fire/cactus/drowning damage on a 7–10 (or, post-projectile, 0) tick
-            // cycle forever. The drain-time restore re-checks while a window is
-            // live, so poll a little past the axe window.
+            // The leak regression pin: maximumNoDamageTicks is a PERSISTENT entity
+            // field, so the unit must hand the vanilla window back once the shaped
+            // window drains — otherwise fire/cactus/drowning re-apply on the shrunken
+            // cycle. The generation-keyed hand-back re-checks past the field's own
+            // drain, so poll a little past it. (The sword was the last hit — its 14.)
             context.awaitUntil(() -> victim.player().getMaximumNoDamageTicks() == vanillaWindow,
-                    axeWindow + 20,
+                    swordWindow + 20,
                     "the shaped i-frame window to restore to the vanilla "
                             + vanillaWindow + " once drained");
         } finally {
@@ -439,6 +455,182 @@ public final class CombatTest8cSuite {
         context.expect(window == expected,
                 "CT8c " + label + " i-frame window " + window + " != expected " + expected);
         return window;
+    }
+
+    /**
+     * The shrunken i-frame window must NEVER bleed into environmental damage — the
+     * report: "falling in lava/berries spam-hurts the player every tick." {@code
+     * maximumNoDamageTicks} is a PERSISTENT, all-causes entity field; the CT8c unit
+     * shrinks it for a melee/projectile hit and schedules a drain-time restore. The
+     * v2.9.0-era restore keyed the drain off the LIVE hurt counter — but a victim
+     * standing in a hazard (lava, sweet-berry bush, fire, cactus) has that counter
+     * re-armed to the shrunken window every few ticks, so the "counter still live"
+     * reschedule NEVER drained and the shrunken window (with its 2–3× faster
+     * environmental cadence) persisted for as long as the hazard did.
+     *
+     * <p>This drives exactly that: shrink the window with a real sword hit, then
+     * feed continuous environmental damage — a source-less {@code damage(1.0)}, the
+     * lava/berry proxy (cause CUSTOM, NOT a by-entity hit, so it never re-enters the
+     * CT8c unit to re-shrink) — and assert the window STILL restores to the vanilla
+     * default. A starved (counter-keyed) restore leaves it pinned at the shrunken
+     * value and this times out; the generation-keyed restore returns it on schedule
+     * because only a genuine CT8c re-hit — never a hazard tick — defers it.</p>
+     */
+    private static void runIframeEnvironmentalCadence(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            setFeature(mental, context, Feature.CT8C_IFRAMES, true);
+            context.expect(mental.featureActive(Feature.CT8C_IFRAMES), "ct8c-iframes did not converge active");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+                attacker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+            });
+            context.awaitTicks(5);
+
+            int vanillaWindow = context.sync(() -> victim.player().getMaximumNoDamageTicks());
+
+            // Shrink the window with a real melee hit (diamond sword ⇒ a 7-tick window).
+            captors.reset();
+            int shrunk = context.sync(() -> {
+                victim.player().setNoDamageTicks(0);
+                attacker.attack(victim.player());
+                return victim.player().getMaximumNoDamageTicks();
+            });
+            context.awaitUntil(() -> captors.damageOf(victim.uuid()) != null, 40, "the shrinking melee hit to land");
+            context.expect(shrunk < vanillaWindow,
+                    "the melee hit must shrink the window below the vanilla " + vanillaWindow + " (got " + shrunk + ")");
+
+            // Feed continuous environmental damage at a hazard's cadence, keeping the
+            // hurt counter alive. The window must still restore within a few ticks of
+            // its own duration; a counter-starved restore never will. Health is topped
+            // each tick so the victim survives the whole hazard window.
+            int budget = shrunk + 15;
+            boolean restored = false;
+            for (int i = 0; i < budget; i++) {
+                int window = context.sync(() -> {
+                    Player p = victim.player();
+                    p.setHealth(p.getMaxHealth());
+                    p.damage(1.0); // the lava/berry proxy — source-less, so never a CT8c re-shrink
+                    return p.getMaximumNoDamageTicks();
+                });
+                if (window == vanillaWindow) {
+                    restored = true;
+                    break;
+                }
+                context.awaitTicks(1);
+            }
+            context.expect(restored,
+                    "under continuous environmental damage the CT8c i-frame window must still restore to the vanilla "
+                            + vanillaWindow + " — it stayed pinned at " + shrunk + ", so a hazard tick kept re-arming "
+                            + "the shrunken window (the lava/berry spam the report describes)");
+        } finally {
+            setFeature(mental, context, Feature.CT8C_IFRAMES, false);
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
+    }
+
+    /**
+     * The 8c FULL-window difference-damage (spec §2.4; hurt() gate {@code
+     * invulnerableTime > 0}). 8c makes the WHOLE {@code min(delay,10)}-tick window
+     * difference-damage: a stronger re-hit deals only the difference, a same-or-weaker
+     * one deals NOTHING, and a fresh full hit is allowed only AFTER the window fully
+     * elapses. CraftBukkit's own gate is the HALF-window ({@code noDamageTicks >
+     * max/2}), so a re-hit past the half-point but still inside the 8c window would
+     * wrongly land as fresh. Mental writes {@code 2 ×} the window ({@link
+     * Ct8cIframesUnit#windowField}) so the half-gate spans the full window.
+     *
+     * <p>Land a full-charge diamond-sword opener (8c window 7 ⇒ field 14), then re-hit
+     * with the SAME sword exactly 5 ticks later — inside the 8c window (7) but past the
+     * pre-fix half-window (~3.5). Under 8c's full window that re-hit is difference-damage
+     * and, being no stronger than the opener, deals NOTHING; under the old half-window
+     * it landed fresh and dealt damage. So the re-hit must leave the victim's health
+     * unchanged. The re-hit's damage is measured in a single tick, so natural regen
+     * never enters the reading.</p>
+     */
+    private static void runIframeFullWindowDiffDamage(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        Captors captors = Captors.register(tester);
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+
+        try {
+            setFeature(mental, context, Feature.CT8C_IFRAMES, true);
+            context.expect(mental.featureActive(Feature.CT8C_IFRAMES), "ct8c-iframes did not converge active");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 0, -2));
+                victim.spawn(Arena.offset(centre, 0, 2));
+                attacker.player().getInventory().setItemInMainHand(new ItemStack(Material.DIAMOND_SWORD));
+            });
+            context.awaitTicks(6); // let the attacker's swing timer recover to full charge
+
+            // The opener: a fresh, full-charge sword hit. It sets lastDamage high and
+            // arms the 14-tick field (8c window 7). Measured in-tick.
+            captors.reset();
+            double openerDamage = context.sync(() -> {
+                victim.player().setHealth(victim.player().getMaxHealth());
+                victim.player().setNoDamageTicks(0);
+                double before = victim.player().getHealth();
+                attacker.attack(victim.player());
+                return before - victim.player().getHealth();
+            });
+            // A clientless fake on the LEGACY NMS never has its held-item attack-damage
+            // attribute applied to the entity, and its swing meter reads ~0.1, so the
+            // "full-charge diamond sword" opener lands as a bare-hand tap: 1.0 base ×
+            // (0.2 + 0.1²·0.8) = 0.208, not the sword's 7. The re-hit assertion below
+            // compares against THIS opener, so a tap opener would make it vacuous (a
+            // no-stronger re-hit trivially deals nothing). Skip loudly where the harness
+            // cannot stage the precondition rather than assert a harness fact.
+            //
+            // Deliberately measured, not a blanket version gate: any legacy version that
+            // CAN stage a real opener still runs the full assertion, and the modern tier
+            // can never reach the skip — a genuine regression there still fails loud.
+            // The 2× field mapping is unit-pinned (Ct8cIframesUnitTest) and the written
+            // field is asserted live on EVERY version, 1.9.4 included, by the
+            // weapon-speed scaling case above.
+            if (openerDamage <= 0.5 && !mental.environment().isAtLeast(1, 17, 0)) {
+                context.note("skipped: the clientless fake's held-item attack-damage attribute is not "
+                        + "applied on the legacy NMS (" + mental.environment().describe() + "), so the "
+                        + "full-charge sword opener landed as a " + openerDamage + " bare-hand tap and the "
+                        + "difference-damage re-hit would be vacuous; the 2× window mapping is "
+                        + "unit-pinned in Ct8cIframesUnitTest and the written field is asserted live on "
+                        + "this version by the weapon-speed scaling case");
+                return;
+            }
+            context.expect(openerDamage > 0.5, "the opener sword hit must land (dealt " + openerDamage + ")");
+
+            // Re-hit exactly 5 ticks in — inside the 8c window (7), past the old
+            // half-window. NO setNoDamageTicks(0): the hurt counter is still live.
+            context.awaitTicks(5);
+            double reHitDamage = context.sync(() -> {
+                double before = victim.player().getHealth();
+                attacker.attack(victim.player());
+                return before - victim.player().getHealth();
+            });
+            context.expect(reHitDamage < 1.0,
+                    "a same-weapon re-hit 5 ticks in — inside the 8c min(delay,10) window but past the old "
+                            + "half-window — must deal NOTHING under 8c full-window difference-damage; it dealt "
+                            + reHitDamage + ", so the window is only the vanilla half");
+        } finally {
+            setFeature(mental, context, Feature.CT8C_IFRAMES, false);
+            context.syncRun(() -> {
+                attacker.remove();
+                victim.remove();
+            });
+            captors.unregister();
+        }
     }
 
     /* ------------------------------------------------------------------ */

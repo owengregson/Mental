@@ -43,17 +43,29 @@ public final class Ct8cChargeLedger {
     public record Decision(boolean allowed, double scale) {}
 
     /**
+     * Evaluates a landed swing at the default four-tick miss-recovery gate. The
+     * {@link #onAttack(UUID, long, double, boolean, double) five-arg overload}
+     * takes the configured {@code missRecoveryTicks}.
+     */
+    public Decision onAttack(UUID id, long nowTick, double attackSpeed, boolean requireFullCharge) {
+        return onAttack(id, nowTick, attackSpeed, requireFullCharge, Ct8cChargeMath.MISS_RECOVERY_TICKS);
+    }
+
+    /**
      * Evaluates a landed swing at an entity for {@code id} at {@code nowTick} with
      * the attacker's effective {@code attackSpeed} attribute. Returns whether the
      * hit may land (always so when {@code requireFullCharge} is off) and the charge
-     * scale. Resets the timer and clears miss-recovery iff the hit lands.
+     * scale. The miss-recovery lane opens once more than {@code missRecoveryTicks}
+     * ticks have elapsed. Resets the timer and clears miss-recovery iff the hit lands.
      */
-    public Decision onAttack(UUID id, long nowTick, double attackSpeed, boolean requireFullCharge) {
+    public Decision onAttack(
+            UUID id, long nowTick, double attackSpeed, boolean requireFullCharge, double missRecoveryTicks) {
         double fullDelay = fullDelayTicks(attackSpeed);
         double ticks = ticksSinceReset(id, nowTick);
         double scale = Ct8cChargeMath.scale(ticks, fullDelay);
         boolean miss = missRecovery.getOrDefault(id, Boolean.FALSE);
-        boolean allowed = !requireFullCharge || Ct8cChargeMath.attackAllowed(scale, miss, ticks);
+        boolean allowed = !requireFullCharge
+                || Ct8cChargeMath.attackAllowed(scale, miss, ticks, missRecoveryTicks);
         if (allowed) {
             resetTick.put(id, nowTick);
             missRecovery.put(id, Boolean.FALSE);

@@ -45,6 +45,7 @@ import me.vexmc.mental.v5.coexist.AnticheatPolicy;
 import me.vexmc.mental.v5.feature.cadence.Ct8cChargeView;
 import me.vexmc.mental.v5.feature.combo.ComboPredictor;
 import me.vexmc.mental.v5.feature.combo.ComboReachHandicap;
+import me.vexmc.mental.v5.config.settings.ChargedAttackSettings;
 import me.vexmc.mental.v5.config.settings.ComboSettings;
 import me.vexmc.mental.v5.config.settings.CompensationSettings;
 import me.vexmc.mental.v5.config.settings.HitRegSettings;
@@ -174,6 +175,12 @@ public final class HitRegistrationUnit implements FeatureUnit {
     private HitRegSettings settings() {
         return snapshot.get().settings(
                 (me.vexmc.mental.v5.feature.SettingsKey<HitRegSettings>) Feature.HIT_REGISTRATION.settingsKey());
+    }
+
+    /** The CT8c charged-attack settings off {@code current} (netty-safe — atomic snapshot). */
+    @SuppressWarnings("unchecked")
+    private static ChargedAttackSettings chargedAttackSettings(Snapshot current) {
+        return current.settings((SettingsKey<ChargedAttackSettings>) Feature.CHARGED_ATTACKS.settingsKey());
     }
 
     /**
@@ -822,7 +829,10 @@ public final class HitRegistrationUnit implements FeatureUnit {
         boolean chargedReach = ct8cReach
                 && current.enabled(Feature.CHARGED_ATTACKS)
                 && Ct8cChargeView.INSTANCE.chargedReach(attackerId);
-        double maxReach = ct8cReach ? Ct8cReachGate.gateReach(null, chargedReach) : reach.maxReach();
+        // The +reach a ≥195% hit earns is the CONFIGURED chargedReachBonus (was a baked 1.0);
+        // read netty-safe off the atomic snapshot, 0 when this hit is not charged.
+        double chargedBonus = chargedReach ? chargedAttackSettings(current).chargedReachBonus() : 0.0;
+        double maxReach = ct8cReach ? Ct8cReachGate.gateReach(null, chargedBonus) : reach.maxReach();
         // (c) The 0.9 victim-AABB targeting inflation (spec §2.11); (d) through-non-solid is
         // a no-op — this rewound validator has no line-of-sight/occluder test to relax.
         double minVictimWidth = ct8cReach ? CT8C_TARGETING_WIDTH : 0.0;

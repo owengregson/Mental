@@ -120,8 +120,8 @@ public final class ChargedAttackUnit implements FeatureUnit, Listener {
         }
         UUID id = attacker.getUniqueId();
         double attackSpeed = Attributes.valueOr(attacker, Attributes.attackSpeed(), 4.0);
-        Ct8cChargeLedger.Decision decision =
-                ledger.onAttack(id, now, attackSpeed, settings.requireFullCharge());
+        Ct8cChargeLedger.Decision decision = ledger.onAttack(
+                id, now, attackSpeed, settings.requireFullCharge(), settings.missRecoveryTicks());
 
         boolean charged = decision.scale() > settings.chargedThreshold()
                 && !(settings.denyBonusWhileCrouching() && attacker.isSneaking());

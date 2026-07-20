@@ -140,6 +140,9 @@ public final class Ct8cConsumablesUnit implements FeatureUnit, Listener {
         if (Ct8cConsumableAdapter.isDrink(material)) {
             return adapter.stampDrinkDuration(stack);
         }
+        if (Ct8cConsumableAdapter.isBowlStew(material)) {
+            return adapter.stampEatDuration(stack); // 20-tick, EAT animation kept
+        }
         return false;
     }
 }
