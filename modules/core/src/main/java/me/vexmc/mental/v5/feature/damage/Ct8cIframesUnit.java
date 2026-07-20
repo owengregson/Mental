@@ -20,22 +20,37 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 
 /**
- * Combat Test 8c invulnerability frames (spec §2.4). Melee shrinks the vanilla
- * hurt window to {@code min(attackerAttackDelay, 10)} ticks — a fast sword (delay
- * 7) re-hits far sooner than vanilla's 20 — while every projectile source drops
- * to a {@code 0}-tick window so snowballs and eggs re-hit freely.
+ * Combat Test 8c invulnerability frames (spec §2.4). 8c's {@code hurt} makes the
+ * WHOLE i-frame window difference-damage — its gate is {@code invulnerableTime > 0}
+ * over a window of {@code min(attackerAttackDelay, 10)} ticks (0 for every
+ * projectile, so snowballs and eggs re-hit freely). A stronger re-hit inside the
+ * window deals only the difference with no knockback and no flinch; a fresh full
+ * hit is allowed only once the window has entirely elapsed.
  *
- * <h2>Why {@code setMaximumNoDamageTicks}, not {@code setNoDamageTicks}</h2>
- * <p>The i-frame WINDOW is the {@code maximumNoDamageTicks} field: after a hit
- * registers, the server assigns the current counter from it
- * ({@code noDamageTicks = maximumNoDamageTicks}), and the {@code >max/2} entry
- * guard divides it. Writing the window in this pre-apply event handler makes the
- * server land THIS hit's resulting window on the CT8c value — no counter write is
- * needed. That deliberately sidesteps the 1.16.5–1.20.6 total-invuln trap
- * entirely (the {@code SpawnInvulnerability} companion arms only off a POSITIVE
- * {@code setNoDamageTicks}, the counter setter — never touched here), which is
- * exactly the "NEVER a raw positive {@code setNoDamageTicks}" mandate satisfied by
- * construction. Writing the counter positive here would instead read as
+ * <h2>Why {@code 2×} the window is written, and the field not the counter</h2>
+ * <p>The window lives in the {@code maximumNoDamageTicks} field: after a hit the
+ * server assigns {@code noDamageTicks = maximumNoDamageTicks}, and CraftBukkit's
+ * re-hit gate is the HALF-window {@code noDamageTicks > maximumNoDamageTicks/2} —
+ * difference-damage only in the FIRST half of the window, a fresh full hit in the
+ * second. 8c's gate is the WHOLE window. Writing {@code 2 ×} the 8c window makes
+ * that half-window gate reproduce 8c's full window EXACTLY — {@code W} ticks of
+ * difference-damage, then a fresh hit — with no reimplementation of the server's
+ * own gate (verified tick-for-tick against the {@code hurt} binary). And every
+ * OTHER consumer of the field reads it through the same {@code /2} (the fast-path
+ * adopt/reject, the three knockback immunity gates, {@code WindowJudge}, the
+ * feedback windows, the published {@code PlayerView}), so the doubled field lands
+ * the 8c window {@code W} uniformly across all of them for free — no consumer is
+ * touched. The doubling only ever applies to a CT8c-shrunken victim, so nothing
+ * outside this feature moves (legacy 1.7/1.8, which correctly want {@code /2},
+ * never have it on). A slow weapon (delay 10 → {@code 2 × 10 = 20}) writes exactly
+ * the vanilla default — 8c's own {@code min(10,10)=10} window equals vanilla's
+ * half of 20, so that is faithful, not a no-op accident.</p>
+ *
+ * <p>The field (never a positive {@code setNoDamageTicks}, the counter setter) is
+ * written so the server lands THIS hit's window on the CT8c value with no counter
+ * write, sidestepping the 1.16.5–1.20.6 total-invuln trap by construction — the
+ * {@code SpawnInvulnerability} companion arms only off a POSITIVE counter write,
+ * never touched here. Writing the counter positive would instead read as
  * already-invulnerable and drop the very hit we are shaping.</p>
  *
  * <h2>The window is handed back on a generation deadline, not a live-counter drain</h2>
@@ -108,12 +123,28 @@ public final class Ct8cIframesUnit implements FeatureUnit, Listener {
     }
 
     /**
-     * The melee i-frame window for an attacker of {@code attackSpeed}: {@code
-     * min(attackDelayTicks(attackSpeed), 10)} (spec §2.4). Pure and unit-pinned
-     * (sword 4.5 → 7; axe/hoe 3.5 → 10; a slow weapon clamps to 10).
+     * The 8c LOGICAL melee i-frame window for an attacker of {@code attackSpeed}:
+     * {@code min(attackDelayTicks(attackSpeed), 10)} (spec §2.4). Pure and
+     * unit-pinned (sword 4.5 → 7; axe/hoe 3.5 → 10; a slow weapon clamps to 10).
+     * This is 8c's {@code invulnerableTime} value — the number of ticks a re-hit is
+     * difference-damage. The {@code maximumNoDamageTicks} field actually written is
+     * {@link #windowField} of this (2×), which reproduces the full 8c window through
+     * CraftBukkit's half-window gate.
      */
     public static int iframeTicks(double attackSpeed) {
         return Math.min(Ct8cTables.attackDelayTicks(attackSpeed), MELEE_IFRAME_CAP);
+    }
+
+    /**
+     * The {@code maximumNoDamageTicks} field value for an 8c logical window of
+     * {@code logicalWindow} ticks: {@code 2 × logicalWindow}. CraftBukkit's re-hit
+     * gate (and every Mental consumer of the field) reads the window through
+     * {@code /2}, so the doubled field makes them all reproduce 8c's full window
+     * {@code logicalWindow} — {@code W} ticks of difference-damage, then a fresh hit.
+     * A projectile's {@code 0} stays {@code 0} (no i-frames).
+     */
+    public static int windowField(int logicalWindow) {
+        return 2 * logicalWindow;
     }
 
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
@@ -139,21 +170,25 @@ public final class Ct8cIframesUnit implements FeatureUnit, Listener {
     }
 
     /**
-     * Writes the CT8c window pre-apply and arms the generation-keyed hand-back. The
-     * prior window is captured once per shrink episode (the {@code existing == null}
-     * branch — a re-hit while still shrunken must never capture our own value as
-     * "vanilla"), and every shrink advances the {@link #shrinkClock} so the LATEST
-     * hit owns the restore. Shrinks for a given victim run on that victim's owning
-     * region thread, so the read-window-then-store is serialized per victim.
+     * Writes the CT8c window pre-apply ({@link #windowField}, i.e. {@code 2 ×} the 8c
+     * logical window so the server's half-window gate reproduces 8c's full window)
+     * and arms the generation-keyed hand-back. The prior window is captured once per
+     * shrink episode (the {@code existing == null} branch — a re-hit while still
+     * shrunken must never capture our own value as "vanilla"), and every shrink
+     * advances the {@link #shrinkClock} so the LATEST hit owns the restore. Shrinks
+     * for a given victim run on that victim's owning region thread, so the
+     * read-window-then-store is serialized per victim. The restore fires once the
+     * written field has drained ({@code field + 1} ticks).
      */
-    private void shrink(LivingEntity victim, int window) {
+    private void shrink(LivingEntity victim, int logicalWindow) {
+        int field = windowField(logicalWindow);
         UUID id = victim.getUniqueId();
         long generation = shrinkClock.incrementAndGet();
         priors.compute(id, (key, existing) -> new Prior(
                 existing == null ? victim.getMaximumNoDamageTicks() : existing.window(),
                 new WeakReference<>(victim), generation));
-        victim.setMaximumNoDamageTicks(window);
-        scheduleRestore(victim, window + 1L, generation);
+        victim.setMaximumNoDamageTicks(field);
+        scheduleRestore(victim, field + 1L, generation);
     }
 
     /**

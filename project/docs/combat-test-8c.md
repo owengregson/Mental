@@ -34,8 +34,12 @@ never rewritten.
   the flat ×1.5.
 - **Sweep** — requires Sweeping Edge (axes eligible via book+anvil), ≥195%
   charge, halved ratios (25/33.3/37.5%).
-- **I-frames** — fast weapons grant shorter immunity (`min(weapon delay, 10)`
-  ticks); projectiles grant none, so snowball/egg/arrow spam all connects.
+- **I-frames** — fast weapons grant a shorter immunity window (`min(weapon delay,
+  10)` ticks), and the *whole* window is difference-damage (a stronger hit
+  mid-window deals only the extra and no knockback; a same-or-weaker one deals
+  nothing; a fresh full hit lands only once the window elapses) — 8c's
+  `invulnerableTime > 0`, not vanilla's half-window; projectiles grant none, so
+  snowball/egg/arrow spam all connects.
 - **Shields** — instant, a 148° protection cone, cap 5 damage per melee hit
   with the excess passing through, **projectiles blocked in full through that
   same 148° cone** (a piercing arrow bypasses it), crouching blocks (damage-math,
