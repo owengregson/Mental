@@ -55,16 +55,30 @@ final class IndicatorViewers {
      * mob-dealt damage have none) is always included when it is not the victim.
      */
     static List<UUID> resolve(LivingEntity victim, Player attacker) {
-        UUID victimId = victim.getUniqueId();
-        List<UUID> viewers = new ArrayList<>(4);
-        if (attacker != null && !attacker.getUniqueId().equals(victimId)) {
-            viewers.add(attacker.getUniqueId());
-        }
-        for (Entity nearby : victim.getNearbyEntities(VIEW_RADIUS, VIEW_RADIUS, VIEW_RADIUS)) {
-            if (!(nearby instanceof Player player)) {
-                continue;
+        List<UUID> nearby = new ArrayList<>(4);
+        for (Entity candidate : victim.getNearbyEntities(VIEW_RADIUS, VIEW_RADIUS, VIEW_RADIUS)) {
+            if (candidate instanceof Player player) {
+                nearby.add(player.getUniqueId());
             }
-            UUID id = player.getUniqueId();
+        }
+        return select(victim.getUniqueId(), attacker == null ? null : attacker.getUniqueId(), nearby);
+    }
+
+    /**
+     * The rule itself, over plain ids — pure, so it is unit-pinned exhaustively
+     * without a live server while {@link #resolve} stays a thin gathering shell.
+     *
+     * <p>{@code attackerId} is included FIRST and unconditionally (it is the one
+     * viewer whose distance does not matter — a bow sniper), the victim is always
+     * excluded even when nearby or when they damaged themselves, and duplicates
+     * collapse so an attacker who is also in the nearby sweep is drawn once.
+     */
+    static List<UUID> select(UUID victimId, UUID attackerId, List<UUID> nearbyPlayers) {
+        List<UUID> viewers = new ArrayList<>(4);
+        if (attackerId != null && !attackerId.equals(victimId)) {
+            viewers.add(attackerId);
+        }
+        for (UUID id : nearbyPlayers) {
             if (id.equals(victimId) || viewers.contains(id)) {
                 continue; // never the victim; never the attacker twice
             }
