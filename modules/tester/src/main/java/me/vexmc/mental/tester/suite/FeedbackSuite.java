@@ -3,6 +3,15 @@ package me.vexmc.mental.tester.suite;
 import java.util.ArrayList;
 import java.util.List;
 import me.vexmc.mental.tester.Arena;
+import java.util.concurrent.atomic.AtomicReference;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.LivingEntity;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.bukkit.event.HandlerList;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
 import me.vexmc.mental.tester.Captors;
 import me.vexmc.mental.tester.MentalTesterPlugin;
 import me.vexmc.mental.tester.TestCase;
@@ -53,6 +62,10 @@ public final class FeedbackSuite {
                         context -> runLowHealthPercentSemantics(mental, tester, context)),
                 new TestCase("damage-indicators records UNSENDABLE for a clientless attacker", context ->
                         runIndicatorsUnsendable(mental, tester, context)),
+                new TestCase("damage-indicators reach a MOB victim and the mob tick ships the held window",
+                        context -> runIndicatorsOnMobVictim(mental, tester, context)),
+                new TestCase("environmental damage draws an indicator and the low-HP cue but no combat voice",
+                        context -> runEnvironmentalFeedback(mental, tester, context)),
                 new TestCase("damage-indicators disable is clean mid-flight", context ->
                         runIndicatorsDisableMidFlight(mental, tester, context)),
                 new TestCase("death-effects zero-touch: disabled writes no trace on a real death", context ->
@@ -307,6 +320,192 @@ public final class FeedbackSuite {
      * sendable path's spawn/metadata encode is unit-pinned
      * (IndicatorStandPacketsTest), out of a clientless suite's reach.
      */
+    /**
+     * Indicators cover a NON-PLAYER victim (2026-07-20). Before this the listener
+     * required {@code victim instanceof Player}, so hitting a mob drew nothing at all.
+     *
+     * <p>The ship entry is the load-bearing assertion, not the held one. A player
+     * victim's roll-hold flush comes from their CombatSession tick — a mob has no
+     * session, so a mob's held window can ONLY be shipped by {@link
+     * MobFeedbackTicker}. Seeing WINDOW_HELD followed by a ship decision for a COW
+     * therefore proves both halves at once: the routing now admits mob victims, AND
+     * the mob-side tick exists and flushes. Without that tick the hold would simply
+     * never elapse and every mob hit would be silently swallowed.
+     *
+     * <p>The ship decides UNSENDABLE because the only viewer is a clientless fake
+     * (no PacketEvents user) — the same reason {@link #runIndicatorsUnsendable}
+     * pins UNSENDABLE. The decision is the seam; the encode is unit-pinned.
+     */
+    private static void runIndicatorsOnMobVictim(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer attacker = new FakePlayer(tester, mental.scheduling());
+        FeedbackTrace trace = mental.feedbackTrace();
+        AtomicReference<LivingEntity> spawned = new AtomicReference<>();
+
+        try {
+            toggleModule(context, "damage-indicators", true);
+            context.expect(moduleActive(mental, "damage-indicators"),
+                    "damage-indicators module failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                attacker.spawn(Arena.offset(centre, 9, -2));
+                // Spawned AFTER Arena.prepare: prepare purges nearby Monsters, and a
+                // passive cow with AI off never retaliates or wanders, so the only
+                // damage event in the trace is the one this case stages.
+                Location at = Arena.offset(centre, 9, 1);
+                LivingEntity cow = (LivingEntity) at.getWorld().spawnEntity(at, EntityType.COW);
+                try {
+                    cow.setAI(false);
+                } catch (Throwable noAiApi) {
+                    // pre-1.11 servers: a stationary cow is good enough for one staged hit
+                }
+                spawned.set(cow);
+            });
+            context.awaitTicks(5);
+
+            LivingEntity cow = spawned.get();
+            context.expect(cow != null && cow.isValid(), "the cow victim failed to spawn");
+            if (cow == null || !cow.isValid()) {
+                return;
+            }
+
+            trace.clear();
+            context.syncRun(() -> {
+                cow.setNoDamageTicks(0);
+                attacker.attack(cow);
+            });
+
+            context.awaitUntil(
+                    () -> entriesFor(trace, "damage-indicators").stream()
+                            .anyMatch(entry -> cow.getUniqueId().equals(entry.victim())
+                                    && !"WINDOW_HELD".equals(entry.decision())), 60,
+                    () -> "the MOB victim's held window to ship through the mob tick (trace="
+                            + trace.entries() + ")");
+
+            List<FeedbackTrace.Entry> entries = entriesFor(trace, "damage-indicators").stream()
+                    .filter(entry -> cow.getUniqueId().equals(entry.victim()))
+                    .toList();
+            context.expect(entries.size() >= 2,
+                    "expected the mob hit to OPEN a window and then SHIP it, got " + entries.size()
+                            + " decision(s) (trace=" + trace.entries() + ")");
+            context.expect("WINDOW_HELD".equals(entries.get(0).decision()),
+                    "the mob hit must open and hold a window first, got '"
+                            + entries.get(0).decision() + "'");
+            context.expect("UNSENDABLE".equals(entries.get(1).decision()),
+                    "the mob window must SHIP past its roll hold — only MobFeedbackTicker can flush a "
+                            + "session-less victim, so any other decision means the mob tick never ran; got '"
+                            + entries.get(1).decision() + "' (" + entries.get(1).detail() + ")");
+        } finally {
+            context.syncRun(() -> {
+                LivingEntity cow = spawned.get();
+                if (cow != null) {
+                    cow.remove();
+                }
+                attacker.remove();
+            });
+            toggleModule(context, "damage-indicators", false);
+        }
+    }
+
+    /**
+     * Environmental damage (2026-07-20): the INDICATOR shows, the combat voice does
+     * NOT, and the low-health warning still fires.
+     *
+     * <p>The split is the owner ruling — hit sounds are for combat, so fall/lava/
+     * drowning keep vanilla's cause-specific hurt sounds ({@code hurt_on_fire},
+     * {@code hurt_drown}) and a player can still hear WHY they are dying; but the
+     * low-health cue is a warning about HEALTH, not about the blow, so it rides every
+     * cause. A source-less {@code damage()} is the lava/berry proxy (cause CUSTOM,
+     * never an EntityDamageByEntityEvent), the same proxy the CT8c i-frame suite uses.
+     */
+    private static void runEnvironmentalFeedback(
+            MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
+        FakePlayer victim = new FakePlayer(tester, mental.scheduling());
+        FakePlayer bystander = new FakePlayer(tester, mental.scheduling());
+        FeedbackTrace trace = mental.feedbackTrace();
+
+        try {
+            setEffectsPreset(context, "signature");
+            toggleModule(context, "hit-feedback", true);
+            toggleModule(context, "damage-indicators", true);
+            context.expect(moduleActive(mental, "hit-feedback"), "hit-feedback module failed to enable");
+            context.expect(moduleActive(mental, "damage-indicators"),
+                    "damage-indicators module failed to enable");
+
+            context.syncRun(() -> {
+                Location centre = Arena.prepare(Bukkit.getWorlds().get(0));
+                victim.spawn(Arena.offset(centre, -6, 2));
+                // A bystander keeps the viewer set non-empty: the victim never sees
+                // their OWN number, so with nobody else around there is nothing to draw.
+                bystander.spawn(Arena.offset(centre, -6, 0));
+            });
+            context.awaitTicks(5);
+
+            // Staging precondition. A clientless fake's damage() applies health loss on
+            // SOME servers without firing EntityDamageEvent at all (measured: on the
+            // 1.9.4 NMS health drops 6.0 -> 4.0 with no event reaching any listener).
+            // Nothing downstream can then be asserted, and — worse — the "no combat
+            // voice" half would pass VACUOUSLY on an event that never happened. So the
+            // probe decides: no event, loud skip; event, the full assertions below run.
+            // Measured rather than version-gated, so any server that CAN stage it does.
+            AtomicBoolean staged = new AtomicBoolean();
+            Listener probe = new Listener() {
+                @EventHandler(priority = EventPriority.MONITOR)
+                public void onAnyDamage(EntityDamageEvent event) {
+                    if (event.getEntity().getUniqueId().equals(victim.uuid())) {
+                        staged.set(true);
+                    }
+                }
+            };
+            context.syncRun(() -> Bukkit.getPluginManager().registerEvents(probe, tester));
+
+            trace.clear();
+            // Drop to a sliver, then deal source-less damage that leaves them alive and
+            // under the low-health ceiling: the warning must fire, the voice must not.
+            context.syncRun(() -> {
+                victim.player().setHealth(6.0);
+                victim.player().setNoDamageTicks(0);
+                victim.player().damage(2.0);
+            });
+            context.awaitTicks(3);
+            context.syncRun(() -> HandlerList.unregisterAll(probe));
+
+            if (!staged.get()) {
+                context.note("skipped: a clientless fake's damage() fires no EntityDamageEvent on "
+                        + mental.environment().describe() + " (the health loss lands, but no listener "
+                        + "ever sees it), so environmental feedback cannot be staged here and the "
+                        + "no-combat-voice half would pass vacuously; the audience rule is unit-pinned "
+                        + "in IndicatorViewersTest and the split is asserted live on modern servers");
+                return;
+            }
+
+            context.awaitUntil(
+                    () -> entriesFor(trace, "hit-feedback").stream()
+                            .anyMatch(entry -> "LOW_HP_ENVIRONMENTAL".equals(entry.decision())), 60,
+                    () -> "the environmental low-health cue to fire (trace=" + trace.entries() + ")");
+
+            List<FeedbackTrace.Entry> voice = entriesFor(trace, "hit-feedback").stream()
+                    .filter(entry -> entry.decision() != null && entry.decision().startsWith("EMITTED"))
+                    .toList();
+            context.expect(voice.isEmpty(),
+                    "environmental damage must NOT play the combat voice — vanilla's cause-specific "
+                            + "hurt sound is how a player hears WHY they are dying; got " + voice);
+
+            context.awaitUntil(
+                    () -> entriesFor(trace, "damage-indicators").stream()
+                            .anyMatch(entry -> victim.uuid().equals(entry.victim())), 60,
+                    () -> "an indicator window for the environmental damage (trace=" + trace.entries() + ")");
+        } finally {
+            context.syncRun(() -> {
+                victim.remove();
+                bystander.remove();
+            });
+            toggleModule(context, "damage-indicators", false);
+            toggleModule(context, "hit-feedback", false);
+        }
+    }
+
     private static void runIndicatorsUnsendable(
             MentalPluginV5 mental, MentalTesterPlugin tester, TestContext context) throws Exception {
         Captors captors = Captors.register(tester);
