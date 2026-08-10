@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The BUILD JDK = the newest JDK the matrix targets (jq max), same rule
       # as build.yml/release.yml — project/support-matrix.json is the only home for
@@ -52,13 +52,13 @@ jobs:
         run: echo "build_jdk=$(jq '[.entries[].jdk] | max' project/support-matrix.json)" >> "$GITHUB_OUTPUT"
 
       - name: Set up the build JDK (Temurin)
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           java-version: ${{ steps.facts.outputs.build_jdk }}
           distribution: 'temurin'
 
       - name: Resolve and submit the runtime dependency graph
-        uses: gradle/actions/dependency-submission@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/dependency-submission@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         env:
           # Full-match regex on configuration names: each subproject's
           # runtimeClasspath IS the shipped surface (shadow folds it into the
