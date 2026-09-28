@@ -12,7 +12,7 @@ paper-modern = "1.20.6-R0.1-SNAPSHOT"
 # referrer-scoped exception in scripts/tools/jdk8-api-gate.allow — the proof
 # lives there. A future packetevents bump that widens those references beyond
 # the shaded util/logger package will fail the gate again by design.
-packetevents = "2.13.0"
+packetevents = "2.14.0"
 # Shaded + relocated into the Mental jar (me.vexmc.mental.lib.adventure) so a
 # self-contained Adventure — the legacy-string serializer in particular — is
 # present below Paper 1.16.5, where net.kyori is absent from the server. Pinned to
@@ -21,14 +21,14 @@ packetevents = "2.13.0"
 # to what core compiles against.
 adventure = "4.9.3"
 annotations = "26.1.0"
-junit = "6.1.2"
+junit = "6.1.3"
 reflection-remapper = "0.1.3"
-shadow = "9.6.0"
-run-paper = "3.0.2"
+shadow = "9.6.1"
+run-paper = "3.1.0"
 bstats = "3.2.1"
 # testRuntimeOnly in core only — unit-test packet construction needs a real
 # netty allocator on the classpath; the SERVER provides netty at runtime.
-netty = "4.2.16.Final"
+netty = "4.2.18.Final"
 # The :api japicmp binary-compatibility gate's CLI (self-contained fat jar).
 japicmp = "0.26.1"
 # ASM for the verifyJdk8Api gate tool (scripts/tools/Jdk8ApiGate.java).
